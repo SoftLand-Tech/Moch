@@ -199,7 +199,11 @@ export default function Connectors() {
         </View>
 
         {tab === 'yours' ? (
+          // Distinct keys: without them React reconciles the two lists into
+          // one instance across the tab switch, and numColumns can't change
+          // on the fly (RN throws).
           <FlatList
+            key="yours"
             data={serverList}
             keyExtractor={(x) => x.name}
             keyboardShouldPersistTaps="handled"
@@ -231,6 +235,7 @@ export default function Connectors() {
           />
         ) : (
           <FlatList
+            key="browse"
             data={catalogList}
             keyExtractor={(x) => x.name}
             numColumns={2}
