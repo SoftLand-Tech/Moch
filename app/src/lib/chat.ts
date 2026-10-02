@@ -1955,12 +1955,24 @@ export function hookChatEvents() {
   // Server->client requests. Handled separately from events.
   onServerRequest(onServerRequestMessage)
 
-  // Reconnect: every idle session with queued messages gets another chance.
-  // (nanostores `subscribe` fires immediately with the current value — false
-  // on hook-up, so nothing happens until the connection actually opens.)
+  // Reconnect: every idle session with queued messages gets another chance,
+  // and the session ON SCREEN re-syncs. Why the resync: a background freeze
+  // kills the socket mid-turn; the turn usually FINISHES server-side while
+  // the process is frozen, and those final events never arrive — the screen
+  // sits busy and silent until the user switches chats and back (which heals
+  // purely because switching resumes). Do that resume here instead: the
+  // shared dedupe collapses overlaps and runResume's re-point is guarded, so
+  // for an already-healthy screen this is one cheap RPC that changes nothing.
+  // (Still-running turns keep their old live id; this covers the dominant
+  // finished-while-frozen case — the same one switching healed.)
   isConnected.subscribe((online) => {
     if (!online) return
     for (const id of Object.keys(sessionsById.get())) maybeFlushQueue(id)
+    const live = activeSession.get()
+    const stored = live ? sessionsById.get()[live]?.storedId : undefined
+    if (stored && !isPseudoStoredId(stored)) {
+      void resumeShared(stored).catch((e) => log('warn', 'chat', `reconnect resync failed: ${String(e)}`))
+    }
   })
 
   onEvent((e) => {
