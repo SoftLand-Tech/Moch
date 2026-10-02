@@ -31,7 +31,6 @@ import {
   tools,
   agentBusy,
   pendingRequest,
-  usage,
   todos,
   outbox,
   activeTitle,
@@ -98,7 +97,6 @@ export default function Chat() {
   const tls = useStore(tools)
   const busy = useStore(agentBusy)
   const req = useStore(pendingRequest)
-  const use = useStore(usage)
   const td = useStore(todos)
   const qb = useStore(outbox)
   const title = useStore(activeTitle)
@@ -959,7 +957,6 @@ export default function Chat() {
                   ))}
                 </View>
               ) : null}
-              {use ? <Text style={s.usage}>{use}</Text> : null}
             </View>
           ) : null}
 
@@ -1464,7 +1461,6 @@ const makeS = () => StyleSheet.create({
   toolsOpenList: { maxHeight: 170 },
   todos: { paddingHorizontal: 16, paddingVertical: 2 },
   todo: { color: C.textDim, fontSize: 12.5, lineHeight: 18 },
-  usage: { color: C.textFaint, fontSize: 11, paddingHorizontal: 16, paddingBottom: 2 },
   fab: {
     position: 'absolute',
     right: 16,

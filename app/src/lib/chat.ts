@@ -27,7 +27,7 @@ export interface ChatSegment {
   startedAt?: number
   /** thinking only — raw chars received (text is capped; this isn't). */
   chars?: number
-  /** thinking only — frozen "8s · ~52 tok/s" once the segment ends. */
+  /** thinking only — frozen "8s" elapsed once the segment ends. */
   meta?: string
   // ── media only ──
   mediaType?: 'image' | 'video' | 'audio' | 'file'
@@ -445,7 +445,7 @@ function flushStreams() {
   }
 }
 
-/** Freeze elapsed/tok-s meta on thinking segments that never got text after them. */
+/** Freeze the elapsed meta on thinking segments that never got text after them. */
 function freezeThoughts(m: ChatMessage): ChatMessage {
   if (!m.segments?.some((seg) => seg.kind === 'thinking' && !seg.meta)) return m
   return {
@@ -457,13 +457,14 @@ function freezeThoughts(m: ChatMessage): ChatMessage {
   }
 }
 
-/** "8s · ~52 tok/s" style progress. ~4 chars ≈ 1 token. `now` is injectable
- *  so the live block can tick its elapsed counter on its own heartbeat. */
+/** "8s" elapsed timer for the thinking header — just the time, no token
+ *  estimates (user call: speed readouts next to thinking read as noise).
+ *  `now` is injectable so the live block can tick its elapsed counter on
+ *  its own heartbeat. */
 export function formatThinkMeta(startedAt: number, chars: number, now: number = Date.now()): string {
   if (!startedAt || !chars) return ''
   const secs = Math.max(1, Math.round((now - startedAt) / 1000))
-  const tps = Math.round(chars / 4 / secs)
-  return chars > 240 && tps > 0 ? `${secs}s · ~${tps} tok/s` : `${secs}s`
+  return `${secs}s`
 }
 
 // ── Transcript persistence (per session) ───────────────────────────────────
