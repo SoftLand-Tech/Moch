@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" width="1254" height="1254">
+  <defs>
+    <linearGradient id="sproutGrad" x1="790" y1="380" x2="950" y2="265" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#E76437"/><stop offset="55%" stop-color="#F89236"/><stop offset="100%" stop-color="#FA9F3C"/></linearGradient>
+    <linearGradient id="bodyGrad" x1="627" y1="330" x2="627" y2="990" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#F8EFE5"/><stop offset="68%" stop-color="#F6ECE1"/><stop offset="78%" stop-color="#ECE0D2"/><stop offset="88%" stop-color="#DECFC0"/><stop offset="96%" stop-color="#C7B3A1"/><stop offset="100%" stop-color="#BCA594"/></linearGradient>
+    <linearGradient id="visorGrad" x1="627" y1="420" x2="627" y2="812" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#2B283B"/><stop offset="100%" stop-color="#211F2D"/></linearGradient>
+  </defs>
+  <rect id="background" width="1254" height="1254" fill="#000000"/>
+  <g id="mochi" transform="rotate(3 627 880) translate(0, -4)">
+    <path id="sprout" d="M 780 375 C 820 410, 835 365, 890 350 C 945 350, 972 310, 960 286 C 958 264, 940 260, 910 255 C 872 255, 832 275, 806 310 C 770 348, 772 370, 780 375 Z" fill="url(#sproutGrad)" transform="rotate(4.5 810 375)"/>
+    <path id="body" d="M 627 335 C 730 335, 835 375, 905 440 C 960 495, 974 570, 974 645 C 974 770, 930 870, 835 940 C 775 985, 700 985, 627 985 C 554 985, 479 985, 419 940 C 324 870, 280 770, 280 645 C 280 570, 294 495, 349 440 C 419 375, 524 335, 627 335 Z" fill="url(#bodyGrad)"/>
+    <path id="visor" d="M 627 420 C 725 420, 815 440, 858 480 C 892 515, 897 565, 897 615 C 897 670, 890 720, 855 758 C 812 795, 725 812, 627 812 C 529 812, 442 795, 399 758 C 364 720, 357 670, 357 615 C 357 565, 362 515, 396 480 C 439 440, 529 420, 627 420 Z" fill="url(#visorGrad)"/>
+    <g id="face-group">
+      <path id="left-eye" d="M 457 655 C 446 655, 439 646, 439 634 C 439 598, 468 572, 505 572 C 542 572, 571 598, 571 634 C 571 646, 564 655, 553 655 C 543 655, 537 646, 536 635 C 533 618, 521 608, 505 608 C 489 608, 477 618, 474 635 C 473 646, 467 655, 457 655 Z" fill="#FAF1E7"/>
+      <path id="right-eye" d="M 694 614 C 720 638, 775 638, 798 616 C 804 610, 810 606, 814 604" fill="none" stroke="#FAF1E7" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+      <g id="blush" fill="#FA9B6A">
+        <ellipse id="blush-left-1" cx="442" cy="695" rx="24" ry="12" transform="rotate(35 442 695)"/>
+        <ellipse id="blush-left-2" cx="482" cy="705" rx="22" ry="12" transform="rotate(22 482 705)"/>
+        <ellipse id="blush-right-1" cx="810" cy="684" rx="26" ry="14" transform="rotate(-30 810 684)"/>
+        <ellipse id="blush-right-2" cx="770" cy="694" rx="24" ry="14" transform="rotate(-18 770 694)"/>
+      </g>
+    </g>
+  </g>
+</svg>

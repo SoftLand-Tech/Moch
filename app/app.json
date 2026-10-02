@@ -1,0 +1,115 @@
+{
+  "expo": {
+    "name": "Moch",
+    "slug": "hermes-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.hermes.pocket",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Scan the pairing QR shown by your Hermes server and take photos to attach to your messages.",
+        "NSMicrophoneUsageDescription": "Record voice messages for your agent.",
+        "NSPhotoLibraryUsageDescription": "Attach photos and videos to your messages.",
+        "NSFaceIDUsageDescription": "Unlock your saved server token."
+      },
+      "config": {
+        "usesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.hermes.pocket",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#000000",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "./plugins/with-android-release.js",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true,
+            "enableProguardInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "extraProguardRules": "-keep class expo.modules.updates.** { *; }\n-keep class expo.modules.updates-interface.** { *; }"
+          }
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#000000",
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "backgroundColor": "#000000"
+          },
+          "android": {
+            "image": "./assets/splash-icon-android.png",
+            "imageWidth": 200
+          }
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Scan the pairing QR shown by your Hermes server and take photos to attach to your messages.",
+          "microphonePermission": "Record voice messages for your agent.",
+          "recordAudioAndroid": true,
+          "barcodeScannerEnabled": true
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#F79236",
+          "defaultChannel": "hermes-alerts"
+        }
+      ],
+      "expo-audio",
+      "expo-image",
+      "expo-video",
+      "expo-sharing"
+    ],
+    "scheme": "hermes",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "038818db-3744-42ab-9bf0-4426c1895084"
+      }
+    },
+    "owner": "vibelabs0s-team",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/038818db-3744-42ab-9bf0-4426c1895084",
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      }
+    }
+  }
+}

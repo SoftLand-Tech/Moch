@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Setup guide — Moch</title>
+  <meta name="description" content="Already running hermes? moch-link is one command. Starting fresh? The full backend installs everything. Either way, Moch pairs with one QR code. A beginner-friendly walkthrough." />
+  <link rel="icon" href="assets/favicon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;600;700&display=swap" />
+  <link rel="stylesheet" href="moch.css?v=3" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="./">
+      <img src="assets/logo.png" alt="" />
+      <span class="word">Moch</span>
+    </a>
+    <nav class="topnav">
+      <a class="link" href="index.html">Home</a>
+      <a class="link" href="https://github.com/SoftLand-Tech/Moch#readme">README</a>
+      <a class="btn" href="https://github.com/SoftLand-Tech/Moch">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        GitHub
+      </a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="section" style="border-top: none;">
+  <div class="wrap guide">
+    <div class="section-head">
+      <h2>From zero to chatting</h2>
+    </div>
+    <p class="lede">
+      By the end of this page you'll have an AI agent running on your own
+      computer and the Moch app on your phone, paired and talking. Two doors
+      lead there: <strong>already running hermes?</strong> moch-link is one
+      command. <strong>Starting fresh?</strong> The full backend installs
+      everything. No accounts anywhere, and everything you install belongs to
+      you.
+    </p>
+    <p class="lede">
+      You need: a computer you can leave on (a laptop is fine to start), a
+      phone, and five minutes if hermes is already running — about half an
+      hour from scratch.
+    </p>
+
+    <h2>Already running hermes? One command.</h2>
+    <p>
+      <strong>moch-link</strong> connects your <strong>existing</strong>
+      hermes install to the Moch app — it doesn't install, configure or
+      modify hermes in any way. On your Linux machine:
+    </p>
+    <div class="term">
+      <button class="copy" type="button">Copy</button>
+      <pre><code>curl -fsSL https://moch.softland.tech/install.sh | bash</code></pre>
+    </div>
+    <p>
+      It links your <code>hermes serve</code> to the official
+      <strong>Moch relay</strong> (api.moch.softland.tech) and prints a QR
+      pairing code. The tunnel dials the relay <em>outbound</em>, so it works
+      from any network, behind any NAT: no router changes, no VPN, no domain.
+      The relay just passes the call along — it stores nothing but a token
+      hash. Your sessions, providers and skills are already there; this is
+      the same hermes, one more door for your phone.
+    </p>
+    <div class="aside">
+      <b>Good to know.</b> You need <code>node</code> and <code>npm</code> on
+      PATH (the tunnel needs them). If <code>hermes serve</code> isn't
+      running, moch-link starts it for you as a background service. Lost the
+      QR? <code>bash install.sh qr</code> reprints it;
+      <code>bash install.sh status</code> checks the link.
+    </div>
+    <p>
+      Then it's the same last two steps as everyone else: put Moch on your
+      phone (step 2 below) and scan the QR (step 3). Your hermes already has
+      its keys, so you can skip step 4.
+    </p>
+
+    <h2><span class="n">1</span>Starting fresh — put the whole backend on your computer</h2>
+    <p>
+      No hermes yet? Install <strong>Hermes</strong> itself — a free,
+      open-source agent that runs on your own machine (Linux, macOS, WSL2,
+      Termux). One line, straight from the hermes project:
+    </p>
+    <div class="term">
+      <button class="copy" type="button">Copy</button>
+      <pre><code>curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash</code></pre>
+    </div>
+    <p>
+      Then run <code>hermes</code> once to set it up (provider key, tools),
+      and link it to your phone with the same moch-link command from the
+      step above:
+    </p>
+    <div class="term">
+      <button class="copy" type="button">Copy</button>
+      <pre><code>curl -fsSL https://moch.softland.tech/install.sh | bash</code></pre>
+    </div>
+    <p>
+      <strong>moch-link</strong> never installs, configures or modifies
+      hermes — it finds your install, connects it to the relay and prints a
+      QR code. Leave that terminal open; you'll scan the code in step 3.
+    </p>
+
+    <h2><span class="n">2</span>Put Moch on your phone</h2>
+    <p>
+      <strong>Android:</strong> download the app from the
+      <a href="https://github.com/SoftLand-Tech/Moch/releases/latest">releases
+      page</a> — under <em>Assets</em>, grab the <code>.apk</code>, open it, and
+      let Android install it. It will point out that the app doesn't come from
+      the Play Store; that's expected for an open-source app that skips the
+      stores.
+    </p>
+    <p>
+      <a class="btn" href="/Moch.apk" download>Download Moch for Android</a>
+    </p>
+    <p>
+      <strong>iPhone, or the developer way:</strong> there's no iOS build to
+      download yet, so tonight we run Moch through Expo Go. It takes three
+      minutes and needs no coding:
+    </p>
+    <ul class="checklist">
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>On your phone, install <strong>Expo Go</strong> from the App Store or Play Store (a free helper app for running projects like this).</span></li>
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>On the computer, download Moch and start it:</span></li>
+    </ul>
+    <div class="term">
+      <button class="copy" type="button">Copy</button>
+      <pre><code>git clone https://github.com/SoftLand-Tech/Moch.git
+cd Moch/app
+npm install
+npm start</code></pre>
+    </div>
+    <p>
+      A QR code appears in the terminal. Scan it with <strong>Expo Go</strong>
+      and Moch opens on your phone.
+    </p>
+
+    <h2><span class="n">3</span>Pair the two</h2>
+    <p>
+      Point Moch's camera at the QR code your terminal printed, and that's
+      it. moch-link already brought up <strong>hermes serve</strong> — the
+      part that lets your phone reach the agent — as a background service,
+      so nothing has to stay open on the screen. The app remembers this
+      computer and reconnects to it on its own from now on. Lost the code?
+      <code>bash install.sh qr</code> reprints it.
+    </p>
+    <p>
+      No camera handy? Tap <em>More options</em> in Moch and paste the
+      <code>hermes://connect…</code> line the installer printed — or type the
+      address and token it listed by hand.
+    </p>
+    <p>
+      That QR works from anywhere, not just home: your machine dials the
+      relay out, so Moch reaches it from any network with nothing extra on
+      the phone.
+    </p>
+
+    <h2><span class="n">4</span>Give it a brain</h2>
+    <p>
+      One last command on the computer. The agent needs an API key from an AI
+      provider (the companies behind the models) before it can think — hermes'
+      own setup wizard collects it and everything else it needs:
+    </p>
+    <div class="term">
+      <button class="copy" type="button">Copy</button>
+      <pre><code>hermes setup</code></pre>
+    </div>
+    <p>
+      Already ran it when you installed hermes in step 1? Then you're done —
+      skip ahead.
+    </p>
+    <div class="aside">
+      <b>New to this?</b> An API key is a long password a model company gives
+      you. You paste it in once and pay them directly for what you use. The
+      usual providers are listed for you.
+    </div>
+
+    <h2><span class="n">5</span>Use it away from home</h2>
+    <p>
+      There's nothing extra to do: moch-link <em>is</em> the from-anywhere
+      route. Your machine dials the official relay outbound, so Moch reaches
+      it from any network — home Wi-Fi, mobile data, another continent. No
+      router changes, nothing to install on the phone. On your own Wi-Fi it
+      works through the same door; there is no weaker mode to upgrade from.
+    </p>
+
+    <h2>The manual way (advanced)</h2>
+    <p>
+      Prefer raw hermes with no relay in the middle? It pairs with Moch too —
+      this is the same-network, no-relay path:
+    </p>
+    <div class="term">
+      <button class="copy" type="button">Copy</button>
+      <pre><code>hermes gateway setup
+hermes gateway start</code></pre>
+    </div>
+    <p>
+      Then pair from inside the agent's clone, with the address of the
+      computer on your home network and the port your gateway mentioned when
+      it started:
+    </p>
+    <div class="term">
+      <button class="copy" type="button">Copy</button>
+      <pre><code>./scripts/hermes-pair.sh --host 192.168.1.20 --port 8080</code></pre>
+    </div>
+    <p>
+      If it asks for a token, that's the gateway's <em>dashboard session
+      token</em>, the long key <code>hermes gateway setup</code> handed out.
+    </p>
+
+    <h2>If something doesn't work</h2>
+    <ul>
+      <li><strong>Moch says it can't reach the computer</strong>: run <code>bash install.sh status</code> on the machine — it shows the link's state. The tunnel needs the machine on (or asleep-but-connected); it reconnects on its own after sleeps and reboots.</li>
+      <li><strong>The QR scan does nothing</strong>: use the printed link: in Moch tap <em>More options</em> and paste the <code>hermes://connect…</code> line.</li>
+      <li><strong>It chats but won't think</strong>: the agent needs its API key first — that's step 4, <code>hermes setup</code>.</li>
+    </ul>
+    <p>
+      The <a href="https://github.com/SoftLand-Tech/Moch#readme">README</a> has
+      the full manual: every screen, every command, and the phone-app side of
+      push notifications, voice and automations.
+    </p>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Moch</span>
+    <span class="sep">·</span>
+    <a href="index.html">Home</a>
+    <span class="sep">·</span>
+    <a href="https://github.com/SoftLand-Tech/Moch">GitHub</a>
+    <span class="sep">·</span>
+    <span>Agent by the open-source <a href="https://github.com/NousResearch/hermes-agent">Hermes project</a> · MIT</span>
+  </div>
+</footer>
+
+<script>
+  document.querySelectorAll(".term .copy").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var code = btn.parentElement.querySelector("code").innerText;
+      navigator.clipboard.writeText(code).then(function () {
+        btn.textContent = "Copied";
+        setTimeout(function () { btn.textContent = "Copy"; }, 1600);
+      });
+    });
+  });
+</script>
+
+</body>
+</html>

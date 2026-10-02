@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Moch — your own AI agent, in your pocket</title>
+  <meta name="description" content="Moch is a free, open-source phone app for your own hermes AI agent. One command links your machine, one QR pairs your phone — your data stays on your hardware." />
+  <link rel="icon" href="assets/favicon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;600;700&display=swap" />
+  <link rel="stylesheet" href="moch.css?v=3" />
+</head>
+<body>
+<!--
+  THESIS: a self-hosted agent deserves a phone app that talks straight to it —
+  this landing refuses the SaaS-landing habit of stock hero + feature card grid,
+  and proves the product with miniature copies of its own UI.
+  OWN-WORLD: the Mocheme theme the app ships today — near-black indigo
+  (#0A0813), the single saturated accent is Moch's antenna orange #F79236,
+  cream #F6ECE1 carries the user's own words (the app's user bubble), and Moch
+  the mascot is the friendly face at five moments: riding the hero phone,
+  avataring the agent, thinking, asking permission, waving goodbye (the hero
+  phone needs no overlay — the capture's own mascot is Moch). Bricolage
+  Grotesque display voice; authored 1.6px-stroke SVG icons; CSS miniatures of
+  the real chat UI (cream bubbles, dashed thinking pill, gradient send) as
+  illustrations.
+  STORY: the visitor gets what Moch is in one line (your own hermes agent, in
+  your pocket), sees the one-command moch-link install right in the hero,
+  believes the direct-connection story (the relay just passes the call and
+  stores nothing but a token hash), meets the two ways in — moch-link if
+  hermes is already running, the full backend if it isn't — and lands on a
+  setup guide that walks either door to a QR code.
+  FIRST VIEWPORT: left column carries a six-word headline with one orange word,
+  a two-sentence plain-language lede, two pills (Get started, GitHub); right
+  column a floating phone showing the real streaming screen with Moch sitting
+  on top of it. Primary action is the gradient Get started pill.
+  FORM: user-pinned direction (warm consumer voice inside the app's brand
+  world; no emojis, no terminal aesthetic, no screenshot gallery) — pinned by
+  the owner's brief, no seed roll.
+  FINISH: unreviewed and undocumented is unfinished; every shipping raster
+  carries its provenance.
+-->
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="./">
+      <img src="assets/logo.png" alt="" />
+      <span class="word">Moch</span>
+    </a>
+    <nav class="topnav">
+      <a class="link" href="setup.html">How to set it up</a>
+      <a class="link" href="https://github.com/SoftLand-Tech/Moch#readme">README</a>
+      <a class="btn" href="https://github.com/SoftLand-Tech/Moch">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        GitHub
+      </a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <h1>Your own AI. <em>In your pocket.</em></h1>
+      <p class="lede">
+        Moch is a free, open-source phone app for your <a href="https://github.com/NousResearch/hermes-agent">hermes</a>
+        agent — the AI agent running on your own computer. One command links
+        it, one QR pairs your phone: no accounts, no monthly fee.
+      </p>
+      <div class="hero-cta">
+        <a class="btn" href="setup.html">Set it up tonight</a>
+        <a class="btn ghost" href="/Moch.apk" download>Download for Android</a>
+      </div>
+      <div class="term">
+        <button class="copy" type="button">Copy</button>
+        <pre><code>curl -fsSL https://<wbr>moch.softland.tech/<wbr>install.sh | bash</code></pre>
+      </div>
+      <p class="cap">Already running hermes on your Linux machine? That's the whole setup.</p>
+      <div class="hero-foot">
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Open source, MIT — even the relay</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Works from any network</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Your data stays on your machine</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Official relay free while Moch is new</span>
+      </div>
+    </div>
+    <div class="phone">
+      <img src="screenshots/03-streaming.png" alt="Moch streaming an answer with its thinking visible" width="286" />
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="section-head">
+      <h2>Two ways in</h2>
+      <p>Pick the line that matches your machine — both end with a QR on your screen.</p>
+    </div>
+    <div class="paths">
+      <article class="path primary">
+        <span class="chip">Recommended</span>
+        <div class="path-head">
+          <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
+          <h3>Already running hermes</h3>
+        </div>
+        <p class="lead">One command on your Linux machine. <strong>moch-link</strong> never installs, configures or modifies hermes — it connects your install to the official relay and prints the QR.</p>
+        <div class="term">
+          <button class="copy" type="button">Copy</button>
+          <pre><code>curl -fsSL https://<wbr>moch.softland.tech/<wbr>install.sh | bash</code></pre>
+        </div>
+        <ul class="ticks">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Sessions, providers and skills are already there</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Works from any network — outbound-only, the relay stores token hashes</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Your data never leaves your machine</li>
+        </ul>
+      </article>
+
+      <article class="path">
+        <div class="path-head">
+          <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/></svg></span>
+          <h3>Starting fresh</h3>
+        </div>
+        <p class="lead">No hermes yet? Install the agent itself (one command, from the hermes project) — then link it with the same line as above.</p>
+        <div class="term">
+          <button class="copy" type="button">Copy</button>
+          <pre><code>curl -fsSL https://<wbr>hermes-agent.nousresearch.com/<wbr>install.sh | bash</code></pre>
+        </div>
+        <ul class="ticks">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Then: <code>curl -fsSL https://moch.softland.tech/install.sh | bash</code></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>The real hermes — the same agent upstream, nothing forked or wrapped</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Works on Linux, macOS, WSL2 and Termux</li>
+        </ul>
+      </article>
+
+      <p class="paths-foot">Both end the same way: <b>a QR on your screen, a scan, and your agent in your pocket.</b></p>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="opensource">
+  <div class="wrap">
+    <div class="section-head">
+      <h2>Open source, end to end</h2>
+      <p>Moch is three MIT pieces — the app, the link, and the relay that connects them. Every one of them can run on hardware you own.</p>
+    </div>
+    <div class="paths">
+      <article class="path">
+        <div class="path-head">
+          <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 4v10l-7 4-7-4V7z"/><path d="M12 12l7-4M12 12v8M12 12L5 8"/></svg></span>
+          <h3>Run the whole stack yourself</h3>
+        </div>
+        <p class="lead">The app is open source, moch-link is one script, and the relay is a single Node file you can host anywhere. Self-host the relay and there is no third party in the loop at all — not even us.</p>
+        <ul class="ticks">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><a href="https://github.com/SoftLand-Tech/Moch/tree/main/relay">The relay's source and deploy guide</a> — same code ours runs</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Point moch-link at it with <code>MOCH_LINK_RELAY=wss://your-relay …</code></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Your machines, your keys, your rules — MIT, forever</li>
+        </ul>
+      </article>
+
+      <article class="path">
+        <div class="path-head">
+          <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></span>
+          <h3>Or use ours — free while Moch is new</h3>
+        </div>
+        <p class="lead">Don't want to host anything? The official relay at <code>api.moch.softland.tech</code> is the default, and it's <strong>free for everyone right now</strong>, so you can just try Moch.</p>
+        <ul class="ticks">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>No account, no signup, nothing to configure — it's already in the QR</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>It routes by token hash and stores no traffic</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Self-hosting stays free forever — that's the point of open source</li>
+        </ul>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="section-head">
+      <h2>Why not just message a bot on Telegram?</h2>
+      <p>Honest question. The Hermes gateway even ships a Telegram bot, and it's a fine way to start. Here's what changes when the phone gets an app of its own.</p>
+    </div>
+    <div class="diff">
+      <div class="diff-col them">
+        <p class="who">A bot inside a chat app</p>
+        <p class="who-sub">Your messages ride a platform on the way home.</p>
+        <div class="diff-row"><span class="q">WHERE MESSAGES GO</span>Phone, then the chat platform's servers, then your agent.</div>
+        <div class="diff-row"><span class="q">WHAT AN ANSWER LOOKS LIKE</span>Plain text in a bubble.</div>
+        <div class="diff-row"><span class="q">WHEN IT NEEDS PERMISSION</span>You answer in a plain text reply.</div>
+        <div class="diff-row"><span class="q">CHANGING A SCHEDULED JOB</span>Type the right slash command, syntax and all.</div>
+        <div class="diff-row"><span class="q">WHAT IT COSTS YOU</span>An account and a bot token on someone else's platform.</div>
+      </div>
+      <div class="diff-col us">
+        <p class="who">Moch</p>
+        <p class="who-sub">A direct line to your own machine.</p>
+        <div class="diff-row"><span class="q">WHERE MESSAGES GO</span>From your phone to your computer. The relay, if you use one, just passes the call along — it stores nothing but a token hash.</div>
+        <div class="diff-row"><span class="q">WHAT AN ANSWER LOOKS LIKE</span>Thinking you can open, code that's formatted, lists that are lists.</div>
+        <div class="diff-row"><span class="q">WHEN IT NEEDS PERMISSION</span>A card arrives. Tap Allow or Deny.</div>
+        <div class="diff-row"><span class="q">CHANGING A SCHEDULED JOB</span>An Automations screen with switches, not syntax.</div>
+        <div class="diff-row"><span class="q">WHAT IT COSTS YOU</span>Nothing. Your device, your server, that's the whole relationship.</div>
+      </div>
+    </div>
+    <p class="diff-note">Both are front doors to the same agent, and you can happily run them side by side. Moch is for when your phone deserves better than a text box.</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="section-head">
+      <h2>What it feels like to use</h2>
+      <p>Not promises: the actual things the app puts on your screen.</p>
+    </div>
+
+    <div class="feature">
+      <div class="feature-copy">
+        <h3>You watch it think</h3>
+        <p>Answers stream in word by word. When the agent reasons first, the thinking sits in a little chip you can open, with how long it took and how fast it read. Nothing is hidden, nothing is noisy.</p>
+      </div>
+      <div class="feature-fig">
+        <div class="fig">
+          <img class="moch-mini" src="assets/moch/mochi-deep-thinking.svg" alt="Moch deep in thought" />
+          <span class="chip-live"><span class="pulse"></span>Thinking <b>· 14s · 23 tok/s</b></span>
+          <p class="cap">A live reply, mid-thought</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <div class="feature-copy">
+        <h3>Permission is a tap, not a reply</h3>
+        <p>When your agent wants to install something, spend something, or touch something sensitive, a card comes to your phone. Approve it from the kitchen. The question waits politely if you're in another chat.</p>
+      </div>
+      <div class="feature-fig">
+        <div class="fig">
+          <img class="moch-mini" src="assets/moch/mochi-approval.svg" alt="Moch asking for your approval" />
+          <div class="ask-card">
+            <div class="t">Install 2 packages?</div>
+            <div class="d">Your agent wants to add requests and rich to its Python environment.</div>
+            <div class="row"><span class="mini-btn go">Allow</span><span class="mini-btn no">Deny</span></div>
+          </div>
+          <p class="cap">An approval, as it actually arrives</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <div class="feature-copy">
+        <h3>Chores it runs while you sleep</h3>
+        <p>Set a job once ("every evening at six, summarize what changed in my repo") and the agent runs it on your computer even with the app closed. Pause it, edit it, run it now: switches, not commands.</p>
+      </div>
+      <div class="feature-fig">
+        <div class="fig">
+          <div class="cron-row">
+            <div class="meta"><b>Evening repo digest</b><span>every day · 18:00</span></div>
+            <div class="toggle" role="img" aria-label="enabled"></div>
+          </div>
+          <p class="cap">One automation, on duty</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <div class="feature-copy">
+        <h3>Two computers, one app</h3>
+        <p>Pair your desk and your laptop, even the same machine twice, once for home and once for the road. Moch remembers them all and reconnects to the last one on its own.</p>
+      </div>
+      <div class="feature-fig">
+        <div class="fig">
+          <div class="pair-fig">
+            <div class="pair-line"><span>Desk</span><span class="ok">CONNECTED</span></div>
+            <div class="pair-line"><span>Laptop</span><span class="ok">PAIRED</span></div>
+            <div class="pair-line"><span>Desk (relay)</span><span class="ok">PAIRED</span></div>
+          </div>
+          <p class="cap">Settings, your computers list</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <div class="feature-copy">
+        <h3>Every skill your agent has</h3>
+        <p>Type a slash and Moch asks your agent what it can do (commands, skills, models), straight from the source. Your agent learns a new trick tonight, your phone knows it tonight. No app update needed.</p>
+      </div>
+      <div class="feature-fig">
+        <div class="fig">
+          <div class="slash-fig">
+            <div class="c"><b>/model</b> glm-5.3-flash</div>
+            <div class="c"><b>/reasoning</b> low · medium · high</div>
+            <div class="c"><b>/cron</b> add · list · pause</div>
+          </div>
+          <p class="cap">The catalog, served by your agent</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="close">
+  <div class="wrap">
+    <img class="moch-sendoff" src="assets/moch/mochi-celebration.svg" alt="Moch celebrating" />
+    <h2>An evening project. Yours forever.</h2>
+    <p>Already running hermes? moch-link is one command. Starting fresh? The full backend installs everything. The setup guide walks either door: put Moch on your phone, scan one code.</p>
+    <a class="btn" href="setup.html">Start the setup guide</a>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Moch</span>
+    <span class="sep">·</span>
+    <a href="setup.html">Setup guide</a>
+    <span class="sep">·</span>
+    <a href="https://github.com/SoftLand-Tech/Moch">GitHub</a>
+    <span class="sep">·</span>
+    <span>A companion for the open-source <a href="https://github.com/NousResearch/hermes-agent">Hermes agent</a> · MIT</span>
+  </div>
+</footer>
+
+<script>
+  document.querySelectorAll(".term .copy").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var code = btn.parentElement.querySelector("code").innerText;
+      navigator.clipboard.writeText(code).then(function () {
+        btn.textContent = "Copied";
+        setTimeout(function () { btn.textContent = "Copy"; }, 1600);
+      });
+    });
+  });
+</script>
+
+</body>
+</html>
