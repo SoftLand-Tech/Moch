@@ -299,7 +299,15 @@ function reconstructHead(req) {
 function phoneEntry(req, socket, head) {
   let url
   try { url = new URL(req.url, 'http://x') } catch { return httpErr(socket, 400, 'bad request') }
-  const token = url.searchParams.get('token') || ''
+  // The phone's REST calls (media download/stream, file fetches, apiFetch)
+  // carry the token in the X-Hermes-Session-Token header (or Bearer); the
+  // WebSocket dial carries it in the query. Both route by the same hash.
+  const hdr = req.headers['x-hermes-session-token']
+  const bearer = typeof req.headers['authorization'] === 'string'
+    ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : ''
+  const token = url.searchParams.get('token')
+    || (typeof hdr === 'string' && hdr ? hdr : '')
+    || bearer
   if (!token) return httpErr(socket, 401, 'missing token')
   const machine = onlineMachineByHash(sha256hex(token))
   if (!machine) return httpErr(socket, 401, 'unknown token or machine offline')
@@ -427,6 +435,29 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({ ok: true, machines: onlineCount(), connections: conns.size }))
   }
   if (url.pathname === '/api/ws') { res.writeHead(426, { 'Content-Type': 'text/plain' }); return res.end('websocket upgrade required') }
+  // Plain-HTTP /api/* rides the SAME token-routed splice as the WebSocket:
+  // media downloads, file streams and the app's REST calls would otherwise
+  // 404 at the relay while chat works — the "image shows but the viewer is
+  // blank / audio won't play" failure. Node's parser consumes the request
+  // (and any body) off the socket before we hijack it, so the head is
+  // rebuilt and the body buffered, then the whole thing rides the tunnel
+  // leg; the backend's response flows back as raw bytes on the same socket.
+  if (url.pathname.startsWith('/api/')) {
+    const socket = res.socket
+    const chunks = []
+    let bodyLen = 0
+    req.on('data', (c) => {
+      bodyLen += c.length
+      if (bodyLen > MAX_TUNNEL_PAYLOAD) { try { socket.destroy() } catch {} ; return }
+      chunks.push(c)
+    })
+    req.on('end', () => {
+      try { res.detachSocket(socket) } catch { /* nothing to detach */ }
+      phoneEntry(req, socket, Buffer.concat(chunks))
+    })
+    req.on('error', () => { try { socket.destroy() } catch {} })
+    return
+  }
   res.writeHead(404, { 'Content-Type': 'text/plain' })
   res.end('not found')
 })
