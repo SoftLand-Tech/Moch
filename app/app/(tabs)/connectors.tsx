@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { View, Text, FlatList, StyleSheet, Pressable, TextInput, ActivityIndicator, Modal, ScrollView } from 'react-native'
+import { Ionicons } from '@expo/vector-icons'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useStore } from '@nanostores/react'
@@ -35,6 +36,37 @@ function statusLine(srv: McpServer, rt?: { status?: string; error?: string; tool
     case 'lazy': return { text: `idle · starts on first use${rt.tools ? ` · ${rt.tools} tools` : ''}`, color: C.textDim }
     default: return { text: 'not running yet', color: C.textFaint }
   }
+}
+
+/**
+ * App-icon-style letter tile — the catalog RPC carries no brand art (and the
+ * app talks only to your machine, never to a favicon service), so each
+ * service gets a stable hue from its name: same tile everywhere, every run.
+ */
+const TILE_COLORS = ['#E8720C', '#1FA7C4', '#10A37F', '#8B5CF6', '#DB2777', '#D97706', '#3B6FE0', '#0D9488', '#E23838', '#6D5AE0']
+
+function tileColor(name: string): string {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
+  return TILE_COLORS[h % TILE_COLORS.length]
+}
+
+function TileAvatar({ name, size = 48, installed }: { name: string; size?: number; installed?: boolean }) {
+  const s = useStyles(makeS)
+  const letter = name.replace(/[^a-z0-9]/gi, '').charAt(0).toUpperCase() || '?'
+  return (
+    <View
+      style={[s.tile, { width: size, height: size, borderRadius: size * 0.28, backgroundColor: tileColor(name) }]}
+      accessibilityLabel={name}
+    >
+      <Text style={[s.tileText, { fontSize: size * 0.44 }]}>{letter}</Text>
+      {installed ? (
+        <View style={[s.tileCheck, { top: -4, right: -4 }]}>
+          <Ionicons name="checkmark-circle" size={16} color={C.greenSoft} />
+        </View>
+      ) : null}
+    </View>
+  )
 }
 
 export default function Connectors() {
@@ -183,13 +215,16 @@ export default function Connectors() {
               const st = statusLine(item, runtime[item.name])
               return (
                 <Pressable style={({ pressed }) => [s.row, pressed && s.rowPressed]} onPress={() => setOpen(item)} accessibilityLabel={item.name}>
-                  <View style={s.rowHead}>
-                    <Text style={s.rowName} numberOfLines={1}>{item.name}</Text>
-                    <Text style={s.badge}>{item.transport}</Text>
+                  <TileAvatar name={item.name} size={42} />
+                  <View style={{ flex: 1 }}>
+                    <View style={s.rowHead}>
+                      <Text style={s.rowName} numberOfLines={1}>{item.name}</Text>
+                      <Text style={s.badge}>{item.transport}</Text>
+                    </View>
+                    <Text style={[s.rowDesc, { color: st.color }]} numberOfLines={2}>{st.text}</Text>
+                    {item.url ? <Text style={s.rowSub} numberOfLines={1}>{item.url}</Text> : null}
+                    {item.command ? <Text style={s.rowSub} numberOfLines={1}>{[item.command, ...(item.args ?? [])].join(' ')}</Text> : null}
                   </View>
-                  <Text style={[s.rowDesc, { color: st.color }]} numberOfLines={2}>{st.text}</Text>
-                  {item.url ? <Text style={s.rowSub} numberOfLines={1}>{item.url}</Text> : null}
-                  {item.command ? <Text style={s.rowSub} numberOfLines={1}>{[item.command, ...(item.args ?? [])].join(' ')}</Text> : null}
                 </Pressable>
               )
             }}
@@ -198,25 +233,26 @@ export default function Connectors() {
           <FlatList
             data={catalogList}
             keyExtractor={(x) => x.name}
+            numColumns={2}
+            columnWrapperStyle={{ gap: 10, paddingHorizontal: 8 }}
+            contentContainerStyle={{ gap: 10, paddingBottom: 32 }}
             keyboardShouldPersistTaps="handled"
             refreshing={catLoading && online}
             onRefresh={refresh}
-            contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 32 }}
             ListEmptyComponent={<Text style={s.empty}>{catLoading ? '' : online ? (query ? 'No matches' : 'Catalog is empty') : 'Offline'}</Text>}
             renderItem={({ item }) => (
-              <View style={s.row}>
-                <View style={{ flex: 1 }}>
-                  <View style={s.rowHead}>
-                    <Text style={s.rowName} numberOfLines={1}>{item.name}</Text>
-                    <Text style={s.badge}>{item.transport || 'stdio'}</Text>
+              <View style={s.gridCard}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <TileAvatar name={item.name} size={44} installed={item.installed} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.rowName} numberOfLines={2}>{item.name}</Text>
+                    {item.requires.length > 0 ? (
+                      <Text style={s.keyChip} numberOfLines={1}>API key</Text>
+                    ) : null}
                   </View>
-                  {item.description ? <Text style={s.rowDesc} numberOfLines={2}>{item.description}</Text> : null}
-                  {item.requires.length > 0 ? (
-                    <Text style={s.rowSub} numberOfLines={1}>needs key: {item.requires.join(', ')}</Text>
-                  ) : null}
                 </View>
                 <Pressable
-                  style={({ pressed }) => [s.installBtn, (item.installed || busy === item.name) && s.installOff, pressed && s.pressed]}
+                  style={({ pressed }) => [s.installBtn, item.installed && s.installOff, pressed && s.pressed]}
                   disabled={item.installed || busy === item.name}
                   onPress={() => void install(item.name, item.requires)}
                   accessibilityLabel={item.installed ? 'Installed' : `Install ${item.name}`}
@@ -328,6 +364,7 @@ function ServerSheet({
         <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Close" onPress={onClose} />
         <View style={s.sheetCard}>
           <View style={s.sheetHead}>
+            <TileAvatar name={server.name} size={44} />
             <View style={{ flex: 1 }}>
               <Text style={s.sheetTitle} numberOfLines={1}>{server.name}</Text>
               <Text style={[s.rowDesc, { color: st.color }]}>{st.text}</Text>
@@ -601,12 +638,20 @@ const makeS = () => StyleSheet.create({
   tabTextOn: { color: C.onAccent },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 10, paddingVertical: 11, borderRadius: 10, minHeight: 48 },
   rowPressed: { backgroundColor: C.bgCard },
-  rowHead: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
+  rowHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   rowName: { color: C.text, fontSize: 15, fontWeight: '600', flexShrink: 1 },
   rowDesc: { color: C.textFaint, fontSize: 12.5, marginTop: 2, lineHeight: 17 },
   rowSub: { color: C.textFaint, fontSize: 11.5, marginTop: 1, opacity: 0.8 },
   badge: { color: C.textFaint, fontSize: 10.5, fontWeight: '700', textTransform: 'uppercase' },
-  installBtn: { minWidth: 74, height: 34, borderRadius: 17, paddingHorizontal: 12, backgroundColor: C.accentSoft, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
+  gridCard: {
+    flex: 1, backgroundColor: C.bgCard, borderRadius: 16, borderWidth: 1, borderColor: C.borderSoft,
+    padding: 12, gap: 10,
+  },
+  keyChip: { color: C.amber, fontSize: 10.5, fontWeight: '700', textTransform: 'uppercase', marginTop: 2 },
+  tile: { alignItems: 'center', justifyContent: 'center' },
+  tileText: { color: '#FFFFFF', fontWeight: '800' },
+  tileCheck: { position: 'absolute' },
+  installBtn: { minHeight: 34, borderRadius: 17, paddingHorizontal: 12, backgroundColor: C.accentSoft, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
   installOff: { backgroundColor: C.bgCard },
   installText: { color: C.accent, fontSize: 12.5, fontWeight: '700' },
   empty: { color: C.textFaint, textAlign: 'center', marginTop: 48, fontSize: 14 },
