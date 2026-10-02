@@ -12,6 +12,7 @@
  */
 import { atom } from 'nanostores'
 import { isConnected, rpc } from './gateway'
+import { apiFetch } from './http'
 import { JsonRpcGatewayError, JSON_RPC_METHOD_NOT_FOUND } from '../protocol/json-rpc-gateway'
 import { log } from './log'
 
@@ -45,7 +46,7 @@ export interface McpRuntime {
   error?: string
 }
 
-/** A curated catalog entry — `mcp.catalog` (one-tap install via `preset`). */
+/** A curated catalog entry — dashboard `/api/mcp/catalog` (falls back to the RPC). */
 export interface McpCatalogEntry {
   name: string
   description: string
@@ -54,6 +55,12 @@ export interface McpCatalogEntry {
   /** Env keys the server needs before it can work (API keys etc.). */
   requires: string[]
   transport: string
+  /** Transport details — non-git entries install as a plain config via these. */
+  url?: string | null
+  command?: string | null
+  args?: string[]
+  /** True when the entry needs a git bootstrap (installed as a background action). */
+  needsInstall?: boolean
 }
 
 /** `mcp.servers.test` outcome — a real connect + tools/list, so it's slow. */
@@ -115,23 +122,69 @@ export async function loadMcpCatalog(): Promise<void> {
   if (!isConnected.get()) return
   catalogLoading.set(true)
   try {
-    const res = await rpc<{ servers?: McpCatalogEntry[] }>('mcp.catalog', {})
-    mcpCatalog.set(res?.servers ?? [])
+    mcpCatalog.set(await fetchCatalog())
     mcpUnsupported.set(false)
   } catch (err) {
     if (isMethodNotFound(err)) mcpUnsupported.set(true)
-    else log('warn', 'mcp', `mcp.catalog failed: ${String(err)}`)
+    else log('warn', 'mcp', `catalog load failed: ${String(err)}`)
   } finally {
     catalogLoading.set(false)
   }
 }
 
+interface RestCatalogEntry {
+  name: string
+  description: string
+  transport: string
+  url: string | null
+  command: string | null
+  args: string[]
+  required_env: { name: string }[]
+  needs_install: boolean
+  installed: boolean
+  enabled: boolean
+}
+
 /**
- * Install a catalog entry (`hermes mcp install <name>`'s RPC twin). The
- * catalog id doubles as the preset id; the server keeps its own name.
+ * Catalog with transport details. The dashboard REST surface carries the
+ * url/command the install needs; the older RPC `mcp.catalog` is the
+ * fallback (its entries install via REST too — the server resolves the
+ * entry by name, the app never needs the transport itself).
+ */
+async function fetchCatalog(): Promise<McpCatalogEntry[]> {
+  try {
+    const rest = await apiFetch<{ entries?: RestCatalogEntry[] }>('/api/mcp/catalog', { timeoutMs: 20_000 })
+    return (rest?.entries ?? []).map((e) => ({
+      name: e.name,
+      description: e.description ?? '',
+      installed: !!e.installed,
+      enabled: !!e.enabled,
+      requires: (e.required_env ?? []).map((r) => r.name),
+      transport: e.transport ?? 'stdio',
+      url: e.url,
+      command: e.command,
+      args: e.args ?? [],
+      needsInstall: !!e.needs_install,
+    }))
+  } catch (err) {
+    log('warn', 'mcp', `REST catalog failed, falling back to RPC: ${String(err)}`)
+    const res = await rpc<{ servers?: McpCatalogEntry[] }>('mcp.catalog', {})
+    return res?.servers ?? []
+  }
+}
+
+/**
+ * Install a catalog entry — the dashboard's official install endpoint (the
+ * same one the web dashboard's Install button calls). URL/command entries
+ * install synchronously; git-bootstrap entries return `background: true`
+ * and land in config a little later.
  */
 export async function installCatalogServer(name: string): Promise<void> {
-  await rpc('mcp.servers.add', { name, preset: name })
+  await apiFetch<{ ok: boolean; background?: boolean }>('/api/mcp/catalog/install', {
+    method: 'POST',
+    body: { name, enable: true, env: {} },
+    timeoutMs: 120_000,
+  })
 }
 
 export interface CustomServerInput {
