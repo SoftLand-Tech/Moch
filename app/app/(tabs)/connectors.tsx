@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { View, Text, FlatList, StyleSheet, Pressable, TextInput, ActivityIndicator, Modal, ScrollView } from 'react-native'
+import { View, Text, FlatList, StyleSheet, Pressable, TextInput, ActivityIndicator, Modal, ScrollView, Image } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
+import { MCP_LOGOS } from '../../src/lib/mcpLogos'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useStore } from '@nanostores/react'
@@ -53,13 +54,22 @@ function tileColor(name: string): string {
 
 function TileAvatar({ name, size = 48, installed }: { name: string; size?: number; installed?: boolean }) {
   const s = useStyles(makeS)
+  const logo = MCP_LOGOS[name]
   const letter = name.replace(/[^a-z0-9]/gi, '').charAt(0).toUpperCase() || '?'
   return (
     <View
-      style={[s.tile, { width: size, height: size, borderRadius: size * 0.28, backgroundColor: tileColor(name) }]}
+      style={[s.tile, { width: size, height: size, borderRadius: size * 0.28, backgroundColor: logo ? 'transparent' : tileColor(name) }]}
       accessibilityLabel={name}
     >
-      <Text style={[s.tileText, { fontSize: size * 0.44 }]}>{letter}</Text>
+      {logo ? (
+        // Favicons assume a light background — dark logos (Square, Vercel…)
+        // vanish on the app's dark cards, so every logo sits on a white chip.
+        <View style={[s.tileLogoChip, { width: size, height: size, borderRadius: size * 0.28 }]}>
+          <Image source={logo} style={{ width: size * 0.78, height: size * 0.78 }} resizeMode="contain" />
+        </View>
+      ) : (
+        <Text style={[s.tileText, { fontSize: size * 0.44 }]}>{letter}</Text>
+      )}
       {installed ? (
         <View style={[s.tileCheck, { top: -4, right: -4 }]}>
           <Ionicons name="checkmark-circle" size={16} color={C.greenSoft} />
@@ -654,6 +664,7 @@ const makeS = () => StyleSheet.create({
   },
   keyChip: { color: C.amber, fontSize: 10.5, fontWeight: '700', textTransform: 'uppercase', marginTop: 2 },
   tile: { alignItems: 'center', justifyContent: 'center' },
+  tileLogoChip: { backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
   tileText: { color: '#FFFFFF', fontWeight: '800' },
   tileCheck: { position: 'absolute' },
   installBtn: { minHeight: 34, borderRadius: 17, paddingHorizontal: 12, backgroundColor: C.accentSoft, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
