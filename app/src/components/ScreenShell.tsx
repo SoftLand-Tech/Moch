@@ -173,6 +173,7 @@ export function ScreenShell({
     { key: 'chat', label: 'Chat', icon: 'chatbubble-outline' },
     { key: 'automations', label: 'Automations', icon: 'timer-outline', mochis: runningAuto },
     { key: 'skills', label: 'Skills', icon: 'sparkles-outline' },
+    { key: 'connectors', label: 'Connectors', icon: 'extension-puzzle-outline' },
     { key: 'agent', label: 'Models', icon: 'cube-outline' },
     { key: 'settings', label: 'Settings', icon: 'settings-outline' },
   ], [runningAuto])
@@ -219,9 +220,11 @@ export function ScreenShell({
             ? '/(tabs)/automations'
             : key === 'skills'
               ? '/(tabs)/skills'
-              : key === 'agent'
-                ? '/(tabs)/agent'
-                : '/(tabs)/settings'
+              : key === 'connectors'
+                ? '/(tabs)/connectors'
+                : key === 'agent'
+                  ? '/(tabs)/agent'
+                  : '/(tabs)/settings'
       // navigate, never push: `/(tabs)` is a single route on the root stack,
       // so push mounts a whole fresh copy of every tab screen each tap —
       // navigate just switches the tab inside the instance we already have.
