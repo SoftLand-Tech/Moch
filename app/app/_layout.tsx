@@ -6,7 +6,8 @@ import { View, Text, Pressable, StyleSheet, AppState, Modal } from 'react-native
 import { useStore } from '@nanostores/react'
 import * as Linking from 'expo-linking'
 import * as SplashScreen from 'expo-splash-screen'
-import { initPush, lastNotificationResponse, onNotificationResponse, clearLastNotificationResponse, type NotificationTarget } from '../src/lib/push'
+import { initPush, fetchPushToken, dismissMochNotifications, lastNotificationResponse, onNotificationResponse, clearLastNotificationResponse, type NotificationTarget } from '../src/lib/push'
+import { log } from '../src/lib/log'
 import { AnimatedSplash } from '../src/components/AnimatedSplash'
 import { AlertDialogHost } from '../src/components/AlertDialog'
 import { SessionToasts } from '../src/components/SessionToasts'
@@ -73,6 +74,24 @@ export default function RootLayout() {
     void loadTheme()
     void initPush()
     void refreshServers()
+    // Remote push: acquire the Expo token ONCE, after the first successful
+    // connect (non-fatal — chat works without it). It rides every subsequent
+    // dial's URL (gateway.ts wsUrl), so the backend can knock while our
+    // socket is down.
+    let tokenKicked = false
+    // No self-unsubscribe inside: nanostores fires the listener synchronously
+    // on subscribe, and a remount while already connected (Fast Refresh)
+    // would call `offToken` before the const is initialized. The flag makes
+    // later firings no-ops instead.
+    const offToken = isConnectedAtom.subscribe((online) => {
+      if (!online || tokenKicked) return
+      tokenKicked = true
+      fetchPushToken()
+        .catch((e) => log('info', 'push', `push token unavailable: ${e instanceof Error ? e.message : String(e)}`))
+    })
+    // The app starts in hand — knocks still sitting in the tray from the last
+    // session are stale (push.ts sweeps only ours).
+    void dismissMochNotifications()
     // Cold-start relay-media prune (>7 days, then oldest-first past 200 MB) —
     // background, one-shot, and images are expo-image's cache's business.
     void pruneRelayMedia()
@@ -114,7 +133,12 @@ export default function RootLayout() {
     const sub = Linking.addEventListener('url', (ev) => { void handleUrl(ev.url) })
 
     const appSub = AppState.addEventListener('change', (s) => {
-      if (s === 'active') onForeground()
+      if (s === 'active') {
+        onForeground()
+        // Back in hand — tray knocks we sent while the user was away are
+        // stale now that the chat surface is reachable again.
+        void dismissMochNotifications()
+      }
     })
 
     // Notification tap → the chat it is about (covers killed-state launch
@@ -135,6 +159,7 @@ export default function RootLayout() {
     return () => {
       cancelled = true
       offDial()
+      offToken()
       sub.remove()
       appSub.remove()
       removeNotifSub?.()

@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Device from 'expo-device'
 import Constants from 'expo-constants'
 import { isRunningInExpoGo } from 'expo'
-import { Platform } from 'react-native'
+import { AppState, Platform } from 'react-native'
 import { log } from './log'
 
 type NotificationsModule = typeof import('expo-notifications')
@@ -76,12 +76,24 @@ function ensureHandler(): boolean {
   if (!n) return false
   try {
     n.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowBanner: true,
-        shouldShowList: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-      }),
+      // Remote pushes are muted while the app is ACTIVE: in-app toasts
+      // (SessionToasts) already surface attention events, so a tray banner
+      // on top of them is a double knock. Delivery while backgrounded or
+      // killed never runs this handler — that's the OS's job. Local
+      // notifications keep the always-show behavior (their senders already
+      // gate on backgrounding; the reclaimed-session note posts
+      // deliberately while foregrounded).
+      handleNotification: async (notification) => {
+        // The trigger union is not fully discriminated (a channel trigger is
+        // just `{ channelId }`), so read `type` defensively: only a remote
+        // push carries `{ type: 'push' }`.
+        const trigger = notification?.request?.trigger as { type?: string } | null | undefined
+        const push = trigger?.type === 'push'
+        if (push && AppState.currentState === 'active') {
+          return { shouldShowBanner: false, shouldShowList: false, shouldPlaySound: false, shouldSetBadge: false }
+        }
+        return { shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: true }
+      },
     })
     return true
   } catch (err) {
@@ -94,9 +106,25 @@ const ENABLED_KEY = 'hermes.notifications.enabled.v1'
 const TOKEN_KEY = 'hermes.expo_push_token.v1'
 const CHANNEL_ID = 'hermes-alerts'
 
+/**
+ * Android channels for REMOTE pushes. The ids are the contract the push
+ * sender cites (`channelId` in the Expo push payload) — they must exist
+ * BEFORE the first push arrives: Android silently drops notifications that
+ * name an unknown channel, so a missing channel here means no knock at all.
+ */
+const CHANNEL_APPROVALS = 'approvals' // HIGH + sound + vibrate — Mochi needs you
+const CHANNEL_REPLIES = 'replies' // DEFAULT — a finished turn can wait a beat
+const CHANNEL_MISC = 'misc' // quiet fallback for anything untagged
+
 export const notificationsEnabled = atom(true)
 export const expoPushToken = atom<string | null>(null)
 export const notificationPermission = atom<string>('unknown')
+
+/** Current Expo push token, or null until one is acquired. Sync and cheap —
+ *  gateway.ts reads this on every dial to advertise the token on the URL. */
+export function currentPushToken(): string | null {
+  return expoPushToken.get()
+}
 
 export async function initPush(): Promise<void> {
   try {
@@ -114,16 +142,24 @@ export async function initPush(): Promise<void> {
     return
   }
   ensureHandler()
+  trackOurNotifications()
 
   if (Platform.OS === 'android') {
-    try {
-      await n.setNotificationChannelAsync(CHANNEL_ID, {
-        name: 'Hermes alerts',
-        importance: n.AndroidImportance.HIGH,
-        vibrationPattern: [0, 250, 250, 250],
-      })
-    } catch (err) {
-      log('warn', 'push', `channel failed: ${String(err)}`)
+    // One channel per knock loudness. Importance/sound are only settable at
+    // CREATE — later calls update mutable fields only, which is fine: these
+    // values are the ones we want on first create and never change after.
+    const channels: Array<[string, Parameters<typeof n.setNotificationChannelAsync>[1]]> = [
+      [CHANNEL_ID, { name: 'Hermes alerts', importance: n.AndroidImportance.HIGH, vibrationPattern: [0, 250, 250, 250] }],
+      [CHANNEL_APPROVALS, { name: 'Approvals', importance: n.AndroidImportance.HIGH, sound: 'default', enableVibrate: true, vibrationPattern: [0, 250, 250, 250] }],
+      [CHANNEL_REPLIES, { name: 'Replies', importance: n.AndroidImportance.DEFAULT }],
+      [CHANNEL_MISC, { name: 'Misc', importance: n.AndroidImportance.LOW }],
+    ]
+    for (const [id, cfg] of channels) {
+      try {
+        await n.setNotificationChannelAsync(id, cfg)
+      } catch (err) {
+        log('warn', 'push', `channel ${id} failed: ${String(err)}`)
+      }
     }
   }
   try {
@@ -193,6 +229,64 @@ export async function setBadge(count: number) {
 
 export async function clearBadge() {
   await setBadge(0)
+}
+
+// ── Tray hygiene ────────────────────────────────────────────────────────────
+
+/** Identifiers of our notifications seen arriving (foreground deliveries). */
+const ourNotificationIds = new Set<string>()
+
+/**
+ * True when a delivered notification is one of OUR knocks. Both halves of
+ * the product mark them the same way — local (chat.ts) and the remote push
+ * sender put `{ screen: 'chat', ... }` in the data payload — so that is the
+ * stable ownership marker. Anything else in our tray (nothing today) stays.
+ */
+function isMochNotification(request: { content?: { data?: unknown } } | undefined | null): boolean {
+  const data = request?.content?.data as Record<string, unknown> | null | undefined
+  return !!data && typeof data === 'object' && data.screen === 'chat'
+}
+
+let receivedTracked = false
+/** Record our notifications as they arrive, so their ids can be dismissed. */
+function trackOurNotifications(): void {
+  if (receivedTracked) return
+  receivedTracked = true
+  const n = N()
+  if (!n) return
+  try {
+    n.addNotificationReceivedListener((notification) => {
+      const id = notification?.request?.identifier
+      if (id && isMochNotification(notification.request)) ourNotificationIds.add(id)
+    })
+  } catch (err) {
+    log('warn', 'push', `received-listener failed: ${String(err)}`)
+  }
+}
+
+/**
+ * Dismiss every delivered Mochi notification still in the tray. Called when
+ * the app is open — our knocks are stale the moment the chat surface itself
+ * is reachable. Two sources are swept, because tracking alone is not enough:
+ *  - ids recorded as the notifications arrived (foreground deliveries), and
+ *  - the tray filtered to ours — notifications delivered while we were
+ *    backgrounded or killed never ran JS, so they left no tracked id, and
+ *    they are exactly the stale ones this exists for.
+ */
+export async function dismissMochNotifications(): Promise<void> {
+  const n = N()
+  if (!n) return
+  const ids = new Set(ourNotificationIds)
+  ourNotificationIds.clear()
+  try {
+    for (const presented of await n.getPresentedNotificationsAsync()) {
+      const id = presented?.request?.identifier
+      if (id && isMochNotification(presented.request)) ids.add(id)
+    }
+  } catch {}
+  for (const id of ids) {
+    try { await n.dismissNotificationAsync(id) } catch {}
+  }
 }
 
 /** What a notification tap wants opened. `storedId` targets a specific chat. */

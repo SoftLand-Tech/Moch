@@ -140,7 +140,18 @@ export function validateConfig(c: ConnConfig): ConnConfig {
 }
 
 function wsUrl(c: ConnConfig): string {
-  return `${c.tls ? 'wss' : 'ws'}://${c.host}/api/ws?token=${encodeURIComponent(c.token)}`
+  const base = `${c.tls ? 'wss' : 'ws'}://${c.host}/api/ws?token=${encodeURIComponent(c.token)}`
+  // Advertise the Expo push token on the dial URL so the backend can knock
+  // while the socket is down. `./push` is required LAZILY, never imported:
+  // plain-node suites import this module, and push.ts drags in
+  // expo/react-native modules that cannot load outside the app runtime.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const push = require('./push') as typeof import('./push') | undefined
+    const pushToken = push?.currentPushToken?.()
+    if (pushToken) return `${base}&push=${encodeURIComponent(pushToken)}`
+  } catch {}
+  return base
 }
 
 /** Scrubbed URL safe for logs/UI — never prints the token. */
