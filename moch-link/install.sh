@@ -501,11 +501,14 @@ const TOKEN_FILE = path.join(LINK_HOME, 'push-token')
 let pushToken = ''
 try { pushToken = fs.readFileSync(TOKEN_FILE, 'utf8').trim() } catch {}
 
-/** Remember the phone's Expo push token (rotation is normal — just overwrite). */
+/** Remember the phone's Expo push token. Single-phone-per-machine by design:
+ *  the pairing token routes ONE machine, and the app registers on every dial
+ *  (last dial wins). The token is a standing push capability — 0600, like the
+ *  sibling secrets in this directory. Rotation is normal — just overwrite. */
 function registerPushToken(tok) {
   if (!tok || tok === pushToken) return
   pushToken = tok
-  try { fs.writeFileSync(TOKEN_FILE, tok + '\n') } catch (e) { console.error('moch-link-proxy: cannot write push-token:', e.message) }
+  try { fs.writeFileSync(TOKEN_FILE, tok + '\n', { mode: 0o600 }) } catch (e) { console.error('moch-link-proxy: cannot write push-token:', e.message) }
 }
 
 // ---- push sender ------------------------------------------------------------
@@ -561,8 +564,19 @@ function makeTextFrameReader(onText) {
   let pending = Buffer.alloc(0) // bytes not yet parsed into a complete frame
   let frags = []                // payload fragments of an unfinished text message
   let inText = false
+  // The upstream's FIRST bytes are the HTTP/1.1 101 Switching Protocols
+  // response (headers + \r\n\r\n), not a frame: parsing them as frame headers
+  // desyncs the reader from byte 0 and no notification is ever matched. Skip
+  // the response head once per connection, then parse frames.
+  let preamble = true
   return function feed(chunk) {
     pending = pending.length ? Buffer.concat([pending, chunk]) : chunk
+    if (preamble) {
+      const at = pending.indexOf('\r\n\r\n')
+      if (at < 0) return // head still arriving
+      pending = pending.subarray(at + 4)
+      preamble = false
+    }
     for (;;) {
       if (pending.length < 2) return
       const fin = (pending[0] & 0x80) !== 0
@@ -640,10 +654,16 @@ net.createServer((sock) => {
     if (first) {
       first = false
       let s = d.toString('latin1')
-      // push registration: the phone's WS upgrade request line carries ?push=<Expo token>
+      // push registration: the phone's WS upgrade request line carries
+      // ?push=<Expo token>, URL-ENCODED by the app ('ExponentPushToken%5B…%5D')
+      // — the capture class must accept %, and the value is decoded before use.
       const line = s.slice(0, s.indexOf('\n'))
-      const m = line && line.match(/[?&]push=([A-Za-z0-9_:-]+)/)
-      if (m) registerPushToken(m[1])
+      const m = line && line.match(/[?&]push=([A-Za-z0-9_%:-]+)/)
+      if (m) {
+        let tok = m[1]
+        try { tok = decodeURIComponent(tok) } catch {}
+        registerPushToken(tok)
+      }
       s = s.replace(/^(Host:)[^\r\n]*/im, `$1 ${UP_HOST}:${UP_PORT}`)
       s = s.replace(/^(Origin:)[^\r\n]*/im, `$1 http://${UP_HOST}:${UP_PORT}`)
       up.write(Buffer.from(s, 'latin1'))
