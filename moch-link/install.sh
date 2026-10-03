@@ -618,6 +618,11 @@ const ASK_METHODS = new Set(['approval', 'clarify', 'sudo', 'secret'])
 function onGatewayText(payloadBuf) {
   let text = ''
   try { text = payloadBuf.toString('utf8') } catch { return }
+  // Last-ACTIVE session bookkeeping for the v2 watcher: every resume/create
+  // response and session.info event carries the durable stored id. The
+  // watcher mirrors THIS session while no phone is attached (see below).
+  const mSid = text.match(/"stored_session_id"\s*:\s*"([^"]+)"/)
+  if (mSid) lastStoredId = mSid[1]
   let f = null
   try { f = JSON.parse(text) } catch { f = null }
   if (f && typeof f === 'object' && !Array.isArray(f)) {
@@ -646,7 +651,114 @@ function onGatewayText(payloadBuf) {
   else if (text.includes('"type": "message.complete"')) sendPush(NOTIFS.replied, sid)
 }
 
+// ---- v2 watcher: mirror the last-active session while no phone is attached --
+// The gateway fans session events out by MEMBERSHIP (a session's transport
+// slot), not broadcast: a bare listener sees nothing. But any client may
+// MIRROR a session via session.resume — that is how the desktop dashboard
+// watches alongside the phone. So while zero phone legs are attached, the
+// proxy holds its own tiny mirror of the LAST-ACTIVE session: approvals and
+// turn-ends still knock on a fully-swiped/rebooted phone. When a phone leg
+// arrives, the mirror is dropped entirely (the phone's own wire is the
+// watcher then) — at most ONE session is ever held, only while it is the
+// session the user was last in, and any watcher failure is logged and
+// retried with backoff: it must never disturb the byte pipe.
+const GATEWAY_TOKEN = process.env.TOKEN || ''
+let phoneLegs = 0
+let lastStoredId = ''
+let watcherWantAttach = false
+let watcherSock = null
+let watcherUp = false
+let watcherAttached = false
+let watcherBackoffMs = 1000
+let watcherTimer = null
+
+/** One MASKED text frame (clients MUST mask; the gateway enforces it). */
+function sendMaskedText(sock, str) {
+  const payload = Buffer.from(str, 'utf8')
+  let header
+  if (payload.length < 126) header = Buffer.from([0x81, 0x80 | payload.length])
+  else if (payload.length < 65536) { header = Buffer.alloc(4); header[0] = 0x81; header[1] = 0x80 | 126; header.writeUInt16BE(payload.length, 2) }
+  else { header = Buffer.alloc(10); header[0] = 0x81; header[1] = 0x80 | 127; header.writeBigUInt64BE(BigInt(payload.length), 2) }
+  let mask
+  try { mask = require('crypto').randomBytes(4) } catch { mask = Buffer.from([Date.now() & 255, (Date.now() >> 8) & 255, 170, 85]) }
+  const masked = Buffer.allocUnsafe(payload.length)
+  for (let i = 0; i < payload.length; i++) masked[i] = payload[i] ^ mask[i % 4]
+  try { sock.write(Buffer.concat([header, mask, masked])) } catch {}
+}
+
+function watcherDetach() {
+  watcherWantAttach = false
+  watcherAttached = false
+  watcherUp = false
+  if (watcherTimer) { clearTimeout(watcherTimer); watcherTimer = null }
+  if (watcherSock) {
+    console.log('moch-link-proxy: watcher dropped (a phone is attached)')
+    try { watcherSock.destroy() } catch {}
+    watcherSock = null
+  }
+}
+
+function watcherAttach() {
+  if (!watcherUp || watcherAttached || !lastStoredId || !GATEWAY_TOKEN) return
+  watcherAttached = true
+  sendMaskedText(watcherSock, JSON.stringify({ jsonrpc: '2.0', id: 'moch-watch-1', method: 'session.resume', params: { session_id: lastStoredId } }))
+  console.log(`moch-link-proxy: watcher mirroring ${lastStoredId.slice(0, 12)} (no phone attached)`)
+}
+
+function watcherConnect() {
+  if (watcherSock || !GATEWAY_TOKEN) return
+  let key = ''
+  try { key = require('crypto').randomBytes(16).toString('base64') } catch { key = 'moch-link-watch-key' }
+  const sock = net.connect(UP_PORT, UP_HOST)
+  watcherSock = sock
+  const feed = makeTextFrameReader(onGatewayText) // skips the 101 head, same matcher
+  const hsTimer = setTimeout(() => { try { sock.destroy() } catch {} }, 5000)
+  sock.on('connect', () => {
+    sock.write(
+      `GET /api/ws?token=${encodeURIComponent(GATEWAY_TOKEN)} HTTP/1.1\r\n` +
+      `Host: ${UP_HOST}:${UP_PORT}\r\n` +
+      'Upgrade: websocket\r\nConnection: Upgrade\r\n' +
+      `Sec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`,
+    )
+  })
+  sock.on('data', (d) => {
+    if (!watcherUp) { watcherUp = true; clearTimeout(hsTimer); watcherBackoffMs = 1000; watcherAttach() }
+    try { feed(d) } catch {}
+  })
+  const gone = () => {
+    if (watcherSock !== sock) return
+    watcherSock = null
+    const wasUp = watcherUp
+    watcherUp = false
+    watcherAttached = false
+    if (watcherWantAttach && wasUp) {
+      watcherTimer = setTimeout(watcherConnect, watcherBackoffMs)
+      watcherBackoffMs = Math.min(watcherBackoffMs * 2, 30000)
+    }
+  }
+  sock.on('close', gone)
+  sock.on('error', gone)
+}
+
+/** Phone legs all gone → mirror the last-active session (debounced: phone
+ *  legs flap on reconnects, and the mirror must not bounce with them). */
+function watcherMaybeAttachSoon() {
+  if (!pushToken || !GATEWAY_TOKEN || !lastStoredId) return // nothing to knock, no way in
+  watcherWantAttach = true
+  if (watcherTimer) { clearTimeout(watcherTimer); watcherTimer = null }
+  watcherTimer = setTimeout(() => {
+    watcherTimer = null
+    if (!watcherWantAttach || phoneLegs > 0) return
+    if (watcherUp) watcherAttach()
+    else watcherConnect()
+  }, 1200)
+}
+
 net.createServer((sock) => {
+  phoneLegs++
+  // A phone's own wire IS the watcher while it is attached: drop the mirror
+  // (one held session max, and only ever while nobody is looking).
+  if (phoneLegs === 1) watcherDetach()
   const up = net.connect(UP_PORT, UP_HOST)
   const feed = makeTextFrameReader(onGatewayText)
   let first = true
@@ -672,7 +784,12 @@ net.createServer((sock) => {
   up.on('data', (d) => { try { feed(d) } catch {} ; sock.write(d) }) // watch, then pipe on untouched
   const kill = () => { try { sock.destroy(); up.destroy() } catch {} }
   sock.on('error', kill); up.on('error', kill)
-  sock.on('close', () => up.destroy()); up.on('close', () => sock.destroy())
+  sock.on('close', () => {
+    up.destroy()
+    phoneLegs = Math.max(0, phoneLegs - 1)
+    if (phoneLegs === 0) watcherMaybeAttachSoon() // nobody looking: mirror the last session
+  })
+  up.on('close', () => sock.destroy())
 }).listen(LISTEN, '127.0.0.1', () => console.log(`moch-link-proxy ${LISTEN} -> ${UP_HOST}:${UP_PORT} (host-rewrite, push-watch)`))
 MOCH_LINK_PROXY_EOF
 

@@ -6,7 +6,7 @@ import { View, Text, Pressable, StyleSheet, AppState, Modal } from 'react-native
 import { useStore } from '@nanostores/react'
 import * as Linking from 'expo-linking'
 import * as SplashScreen from 'expo-splash-screen'
-import { initPush, fetchPushToken, dismissMochNotifications, lastNotificationResponse, onNotificationResponse, clearLastNotificationResponse, type NotificationTarget } from '../src/lib/push'
+import { initPush, registerPushIfGranted, dismissMochNotifications, lastNotificationResponse, onNotificationResponse, clearLastNotificationResponse, type NotificationTarget } from '../src/lib/push'
 import { log } from '../src/lib/log'
 import { AnimatedSplash } from '../src/components/AnimatedSplash'
 import { AlertDialogHost } from '../src/components/AlertDialog'
@@ -74,10 +74,10 @@ export default function RootLayout() {
     void loadTheme()
     void initPush()
     void refreshServers()
-    // Remote push: acquire the Expo token ONCE, after the first successful
-    // connect (non-fatal — chat works without it). It rides every subsequent
-    // dial's URL (gateway.ts wsUrl), so the backend can knock while our
-    // socket is down.
+    // Remote push, SILENT at boot: returning users (permission already
+    // granted) re-register their token on the next dial; fresh installs are
+    // asked on their FIRST MESSAGE instead (armPushOnFirstSend in chat.ts) —
+    // never a cold-app permission demand.
     let tokenKicked = false
     // No self-unsubscribe inside: nanostores fires the listener synchronously
     // on subscribe, and a remount while already connected (Fast Refresh)
@@ -86,8 +86,7 @@ export default function RootLayout() {
     const offToken = isConnectedAtom.subscribe((online) => {
       if (!online || tokenKicked) return
       tokenKicked = true
-      fetchPushToken()
-        .catch((e) => log('info', 'push', `push token unavailable: ${e instanceof Error ? e.message : String(e)}`))
+      void registerPushIfGranted()
     })
     // The app starts in hand — knocks still sitting in the tray from the last
     // session are stale (push.ts sweeps only ours).

@@ -1437,6 +1437,9 @@ let sending = false
 // One in-flight submit per chat: a send to chat B while chat A's ack is still
 // pending must not be queued behind (or delivered to) A.
 const sendingSessions = new Set<string>()
+// The first-send push arm runs at most once per app run (push.ts's own
+// armed-key makes it once per install).
+let pushArmed = false
 
 // Hermes answers session-scoped RPCs with this when the live handle died
 // server-side (serve restart / reinstall mints fresh live ids) or the stored
@@ -1479,6 +1482,14 @@ export async function sendPrompt(
   }
   sendingSessions.add(lockKey)
   sending = true
+  // First message of a fresh install is the one honest moment to offer push
+  // ("buzz me when the reply lands") — one ask per install, fire-and-forget,
+  // and never on a cold app open. Lazy require: chat.ts must stay loadable in
+  // plain node (suites) and push.ts drags expo modules.
+  if (!pushArmed) {
+    pushArmed = true
+    try { void require('./push').armPushOnFirstSend() } catch {}
+  }
 
   let sid = ''
   let rowId = ''
