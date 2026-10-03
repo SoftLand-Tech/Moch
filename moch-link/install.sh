@@ -471,32 +471,193 @@ EOF
     done
     cat > "$LINK_HOME/moch-link-proxy.js" <<'MOCH_LINK_PROXY_EOF'
 #!/usr/bin/env node
-// raw TCP to hermes serve with the Host/Origin rewritten to look local
+// raw TCP to hermes serve with the Host/Origin rewritten to look local.
+//
+// Also watches the server->client byte stream PASSIVELY (it is piped on
+// untouched) for the two moments the phone must hear about even with the
+// app killed: the backend asking a question (approval / clarify / sudo /
+// secret server->client requests) and a turn ending (the message.complete
+// event), then fires an Expo push at the token the phone registered on its
+// upgrade request line (?push=<token>). Wire shapes this matches are the
+// gateway's own: a request is {"jsonrpc": "2.0", "id": "srq-…", "method":
+// "approval"|"clarify"|"sudo"|"secret", "params": {"session_id": …, …}};
+// an event is {"jsonrpc": "2.0", "method": "event", "params": {"type":
+// "message.complete", "session_id": …, "payload": …, "seq": …}}.
 const net = require('node:net')
+const http = require('node:http')
+const https = require('node:https')
+const fs = require('node:fs')
+const path = require('node:path')
 const UP_HOST = process.env.UP_HOST || '127.0.0.1'
 const UP_PORT = parseInt(process.env.UP_PORT || '9119', 10)
 const LISTEN = parseInt(process.env.LISTEN || '9120', 10)
+// the unit runs us with WorkingDirectory=$LINK_HOME and LINK_HOME in the
+// env file; cwd is the fallback for by-hand runs
+const LINK_HOME = process.env.LINK_HOME || process.cwd()
+const PUSH_URL = process.env.EXPUSH_URL || 'https://exp.host/--/api/v2/push/send'
+
+// ---- push registration ------------------------------------------------------
+const TOKEN_FILE = path.join(LINK_HOME, 'push-token')
+let pushToken = ''
+try { pushToken = fs.readFileSync(TOKEN_FILE, 'utf8').trim() } catch {}
+
+/** Remember the phone's Expo push token (rotation is normal — just overwrite). */
+function registerPushToken(tok) {
+  if (!tok || tok === pushToken) return
+  pushToken = tok
+  try { fs.writeFileSync(TOKEN_FILE, tok + '\n') } catch (e) { console.error('moch-link-proxy: cannot write push-token:', e.message) }
+}
+
+// ---- push sender ------------------------------------------------------------
+const NOTIFS = {
+  waiting: { title: 'Mochi needs you', body: 'Mochi is waiting for your approval.', channelId: 'approvals', collapseKey: 'approvals' },
+  clarify: { title: 'Mochi asked something', body: 'Mochi is waiting for your answer.', channelId: 'approvals', collapseKey: 'approvals' },
+  replied: { title: 'Mochi replied', body: 'Mochi finished your request.', channelId: 'replies', collapseKey: 'replies' },
+}
+const THROTTLE_MS = 30000 // one POST per collapseKey per window: a single turn can match several times
+const lastSentBy = new Map() // collapseKey -> ms of the last POST
+
+function sendPush(kind, sessionId) {
+  if (!pushToken) return
+  const now = Date.now()
+  if (now - (lastSentBy.get(kind.collapseKey) || 0) < THROTTLE_MS) return
+  lastSentBy.set(kind.collapseKey, now)
+  const data = { screen: 'chat' }
+  if (sessionId) data.storedId = sessionId // deep-link target; the app swallows unknown ids
+  const body = JSON.stringify({ to: pushToken, title: kind.title, body: kind.body, channelId: kind.channelId, data, ttl: 604800, collapseKey: kind.collapseKey })
+  const fail = (e) => console.error('moch-link-proxy: push send failed:', (e && e.message) || e)
+  if (typeof fetch === 'function') { // node >= 18: global fetch, fire-and-forget
+    const ac = typeof AbortController === 'function' ? new AbortController() : null
+    const timer = ac ? setTimeout(() => ac.abort(), 5000) : null
+    fetch(PUSH_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body, ...(ac ? { signal: ac.signal } : {}) })
+      .then((r) => { if (!r.ok) console.error('moch-link-proxy: push endpoint answered', r.status) })
+      .catch(fail)
+      .finally(() => { if (timer) clearTimeout(timer) })
+    return
+  }
+  try { // older node: plain http/https module
+    const u = new URL(PUSH_URL)
+    const mod = u.protocol === 'http:' ? http : https
+    const req = mod.request({
+      hostname: u.hostname, port: u.port || (u.protocol === 'http:' ? 80 : 443),
+      path: u.pathname + u.search, method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
+    }, (res) => { res.resume(); if (res.statusCode >= 300) console.error('moch-link-proxy: push endpoint answered', res.statusCode) })
+    req.setTimeout(5000, () => req.destroy(new Error('push send timed out')))
+    req.on('error', fail)
+    req.end(body)
+  } catch (e) { fail(e) }
+}
+
+// ---- server->client WS frame watcher ----------------------------------------
+// Server frames are UNMASKED (RFC 6455: a server must not mask), so a minimal
+// header parse recovers whole text messages: 2-14 byte header (7-bit length,
+// 126 -> uint16, 127 -> uint64), opcode 0x1 text / 0x0 continuation; ping /
+// pong / binary / close are skipped; frames split across TCP chunks are
+// reassembled by buffering until a complete frame is in hand.
+const MAX_MSG = 16 * 1024 * 1024
+
+function makeTextFrameReader(onText) {
+  let pending = Buffer.alloc(0) // bytes not yet parsed into a complete frame
+  let frags = []                // payload fragments of an unfinished text message
+  let inText = false
+  return function feed(chunk) {
+    pending = pending.length ? Buffer.concat([pending, chunk]) : chunk
+    for (;;) {
+      if (pending.length < 2) return
+      const fin = (pending[0] & 0x80) !== 0
+      const op = pending[0] & 0x0f
+      let len = pending[1] & 0x7f
+      let off = 2
+      if (len === 126) {
+        if (pending.length < 4) return
+        len = pending.readUInt16BE(2); off = 4
+      } else if (len === 127) {
+        if (pending.length < 10) return
+        const big = pending.readBigUInt64BE(2)
+        if (big > BigInt(MAX_MSG)) { pending = Buffer.alloc(0); frags = []; inText = false; return } // absurd: drop parse state, never mis-split the pipe
+        len = Number(big); off = 10
+      }
+      if (pending[1] & 0x80) { pending = Buffer.alloc(0); frags = []; inText = false; return } // masked: servers never mask — resync is hopeless, drop state
+      if (pending.length < off + len) return // frame split across chunks: wait for the rest
+      const payload = pending.subarray(off, off + len)
+      pending = pending.subarray(off + len)
+      if (op === 0x1) {
+        frags = [payload]; inText = true
+        if (fin) { const whole = Buffer.concat(frags); frags = []; inText = false; try { onText(whole) } catch {} }
+      } else if (op === 0x0 && inText) {
+        frags.push(payload)
+        if (fin) { const whole = Buffer.concat(frags); frags = []; inText = false; try { onText(whole) } catch {} }
+      }
+      // 0x2 binary, 0x8 close, 0x9 ping, 0xA pong: ignored
+    }
+  }
+}
+
+// Structural match, exactly like the phone's own decoder: a frame with a
+// string id + a method that isn't "event" is a server->client request; a
+// notification with method "event" carries the event name in params.type.
+// NOT a substring match: request.cancel embeds the withdrawn request's
+// "method": "approval" inside its event payload, and that must not buzz.
+const ASK_METHODS = new Set(['approval', 'clarify', 'sudo', 'secret'])
+
+function onGatewayText(payloadBuf) {
+  let text = ''
+  try { text = payloadBuf.toString('utf8') } catch { return }
+  let f = null
+  try { f = JSON.parse(text) } catch { f = null }
+  if (f && typeof f === 'object' && !Array.isArray(f)) {
+    if (typeof f.id === 'string' && typeof f.method === 'string' && f.method !== 'event') {
+      if (ASK_METHODS.has(f.method)) {
+        const p = (f.params && typeof f.params === 'object') ? f.params : {}
+        sendPush(f.method === 'clarify' ? NOTIFS.clarify : NOTIFS.waiting, typeof p.session_id === 'string' ? p.session_id : undefined)
+      }
+      return
+    }
+    if (f.method === 'event') {
+      const p = f.params
+      if (p && typeof p === 'object' && p.type === 'message.complete') {
+        sendPush(NOTIFS.replied, typeof p.session_id === 'string' ? p.session_id : undefined)
+      }
+    }
+    return
+  }
+  // Not valid JSON (not a gateway frame): conservative substring fallback.
+  // The gateway serializes with json.dumps defaults, so '"method": "approval"'
+  // (space after the colon) is the on-wire shape; request.cancel is excluded.
+  if (text.includes('"type": "request.cancel"')) return
+  const sid = (text.match(/"session_id": "([^"]+)"/) || [])[1]
+  if (text.includes('"method": "approval"') || text.includes('"method": "sudo"') || text.includes('"method": "secret"')) sendPush(NOTIFS.waiting, sid)
+  else if (text.includes('"method": "clarify"')) sendPush(NOTIFS.clarify, sid)
+  else if (text.includes('"type": "message.complete"')) sendPush(NOTIFS.replied, sid)
+}
+
 net.createServer((sock) => {
   const up = net.connect(UP_PORT, UP_HOST)
+  const feed = makeTextFrameReader(onGatewayText)
   let first = true
   sock.on('data', (d) => {
     if (first) {
       first = false
       let s = d.toString('latin1')
+      // push registration: the phone's WS upgrade request line carries ?push=<Expo token>
+      const line = s.slice(0, s.indexOf('\n'))
+      const m = line && line.match(/[?&]push=([A-Za-z0-9_:-]+)/)
+      if (m) registerPushToken(m[1])
       s = s.replace(/^(Host:)[^\r\n]*/im, `$1 ${UP_HOST}:${UP_PORT}`)
       s = s.replace(/^(Origin:)[^\r\n]*/im, `$1 http://${UP_HOST}:${UP_PORT}`)
       up.write(Buffer.from(s, 'latin1'))
     } else up.write(d)
   })
-  up.on('data', (d) => sock.write(d))
+  up.on('data', (d) => { try { feed(d) } catch {} ; sock.write(d) }) // watch, then pipe on untouched
   const kill = () => { try { sock.destroy(); up.destroy() } catch {} }
   sock.on('error', kill); up.on('error', kill)
   sock.on('close', () => up.destroy()); up.on('close', () => sock.destroy())
-}).listen(LISTEN, '127.0.0.1', () => console.log(`moch-link-proxy ${LISTEN} -> ${UP_HOST}:${UP_PORT} (host-rewrite)`))
+}).listen(LISTEN, '127.0.0.1', () => console.log(`moch-link-proxy ${LISTEN} -> ${UP_HOST}:${UP_PORT} (host-rewrite, push-watch)`))
 MOCH_LINK_PROXY_EOF
 
-    printf 'TOKEN=%s\nTARGET=127.0.0.1:%s\nRELAY=%s\nUP_PORT=%s\nLISTEN=%s\n' \
-        "$TOKEN" "$PROXY_PORT" "$RELAY" "$SERVE_PORT" "$PROXY_PORT" > "$LINK_HOME/env"
+    printf 'TOKEN=%s\nTARGET=127.0.0.1:%s\nRELAY=%s\nUP_PORT=%s\nLISTEN=%s\nLINK_HOME=%s\n' \
+        "$TOKEN" "$PROXY_PORT" "$RELAY" "$SERVE_PORT" "$PROXY_PORT" "$LINK_HOME" > "$LINK_HOME/env"
     chmod 600 "$LINK_HOME/env"
 
     mkdir -p "$UNIT_DIR"
@@ -555,8 +716,8 @@ EOF
             info "token already in use elsewhere (cloned machine?) — minting a fresh identity for this machine"
             TOKEN="$(mint_token)"
             printf 'HERMES_DASHBOARD_SESSION_TOKEN=%s\nPORT=%s\n' "$TOKEN" "$SERVE_PORT" > "$LINK_HOME/hermes-serve.env"
-            printf 'TOKEN=%s\nTARGET=%s\nRELAY=%s\nUP_PORT=%s\nLISTEN=%s\n' \
-                "$TOKEN" "127.0.0.1:$PROXY_PORT" "$RELAY" "$SERVE_PORT" "$PROXY_PORT" > "$LINK_HOME/env"
+            printf 'TOKEN=%s\nTARGET=%s\nRELAY=%s\nUP_PORT=%s\nLISTEN=%s\nLINK_HOME=%s\n' \
+                "$TOKEN" "127.0.0.1:$PROXY_PORT" "$RELAY" "$SERVE_PORT" "$PROXY_PORT" "$LINK_HOME" > "$LINK_HOME/env"
             chmod 600 "$LINK_HOME/env" "$LINK_HOME/hermes-serve.env"
             systemctl --user restart ${UNITP}-hermes-serve.service ${UNITP}.service
             for i in $(seq 1 20); do
