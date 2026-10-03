@@ -104,6 +104,9 @@ function ensureHandler(): boolean {
 
 const ENABLED_KEY = 'hermes.notifications.enabled.v1'
 const TOKEN_KEY = 'hermes.expo_push_token.v1'
+/** Asked-once latch for the first-message permission prompt: a denial (or a
+ *  grant) must never re-prompt on later sends — one ask per install. */
+const PUSH_ARMED_KEY = 'hermes.push.armed.v1'
 const CHANNEL_ID = 'hermes-alerts'
 
 /**
@@ -201,6 +204,44 @@ export async function ensureNotificationPermission(): Promise<boolean> {
   } catch (err) {
     log('warn', 'push', `permission failed: ${String(err)}`)
     return false
+  }
+}
+
+/** Boot-time, SILENT registration: never prompts. Returning users whose
+ *  permission is already granted get their token re-registered on the next
+ *  dial; fresh installs (or denied) are left for the first-message prompt
+ *  below — the user asked for the ask to ride the first send, not boot. */
+export async function registerPushIfGranted(): Promise<void> {
+  if (!remotePushSupported) return
+  const n = N()
+  if (!n) return
+  try {
+    const p = await n.getPermissionsAsync()
+    if (!p.granted) return
+    if (expoPushToken.get()) return // initPush already restored it
+    await fetchPushToken()
+  } catch (e) {
+    log('info', 'push', `silent push register skipped: ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
+/** ONE ask per install, fired on the first message send: this is the moment
+ *  notifications become obviously useful ("buzz me when the reply is done"),
+ *  so the system prompt lands as a service offer, not a cold-app demand. A
+ *  denial is remembered — later sends never re-prompt. */
+export async function armPushOnFirstSend(): Promise<void> {
+  if (!remotePushSupported) return
+  const n = N()
+  if (!n) return
+  try {
+    if (expoPushToken.get()) return
+    const armed = await AsyncStorage.getItem(PUSH_ARMED_KEY)
+    if (armed !== null) return // already asked once — never nag
+    await AsyncStorage.setItem(PUSH_ARMED_KEY, '1')
+    const ok = await ensureNotificationPermission()
+    if (ok) await fetchPushToken()
+  } catch (e) {
+    log('info', 'push', `first-send push arm skipped: ${e instanceof Error ? e.message : String(e)}`)
   }
 }
 
