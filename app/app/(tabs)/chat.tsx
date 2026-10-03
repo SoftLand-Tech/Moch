@@ -206,6 +206,15 @@ export default function Chat() {
     // out over several frames, and each content-size event re-anchors to
     // the end until the first scroll reading confirms we're there.
     parkAtBottomRef.current = true
+    // …and until that arrival the list stays INVISIBLE: a long transcript
+    // mounts at offset 0 (top) and the eye sees the top-then-jump even with
+    // non-animated scrolls. Gating the reveal hides the parking entirely;
+    // the timer is the safety net — a transcript that never reports arrival
+    // (or a very long one still laying out) reveals at 700ms rather than
+    // leaving a blank chat, which is no worse than the old behavior.
+    setListRevealed(false)
+    const t = setTimeout(() => setListRevealed(true), 700)
+    return () => clearTimeout(t)
   }, [storedId])
 
   const updateInput = useCallback((t: string) => {
@@ -276,6 +285,11 @@ export default function Chat() {
   // offset (which read as "scrolled up" and threw the jump button on a
   // freshly opened chat — with the follow killed, it stuck until pressed).
   const parkAtBottomRef = useRef(true)
+  // The open-chat reveal gate: false while the list is still parking at the
+  // bottom (see the storedId effect) — the FlatList renders opacity 0 so the
+  // top-then-scroll of a long transcript is never on screen. Flips true the
+  // moment parking confirms arrival, or at the 700ms fallback.
+  const [listRevealed, setListRevealed] = useState(true)
   // Exact end-of-content scroll. FlatList's scrollToEnd undershoots by the
   // contentContainer's bottom reserve (the mascot clearance): on web it
   // estimates the target from cell metrics, which never see container
@@ -320,6 +334,7 @@ export default function Chat() {
     const { y, contentH, viewH } = scrollMetrics.current
     if (parkAtBottomRef.current && viewH > 0 && Math.max(0, contentH - viewH - y) < 120) {
       parkAtBottomRef.current = false
+      setListRevealed(true)
     }
   }, [evalBottom])
 
@@ -832,6 +847,10 @@ export default function Chat() {
             // rotation (boot placeholder→real, background reattach) keeps
             // the list and the user's scroll position intact.
             key={storedId ?? 'boot'}
+            // Invisible until the open-chat parking ARRIVES at the bottom —
+            // a long transcript mounts at the top and the re-anchor scroll
+            // would otherwise flash by (see listRevealed).
+            style={{ flex: 1, opacity: listRevealed ? 1 : 0 }}
             data={msgs}
             keyExtractor={(m) => m.id}
             renderItem={renderMsg}
@@ -851,6 +870,14 @@ export default function Chat() {
             onMomentumScrollEnd={readScroll}
             onContentSizeChange={(_w, h) => {
               scrollMetrics.current.contentH = h
+              // Content fits the viewport → there IS no parking to do (empty
+              // and short chats never scroll, so readScroll's arrival flip
+              // would never fire and the reveal would ride the 700ms
+              // fallback). Arrive immediately.
+              if (parkAtBottomRef.current && scrollMetrics.current.viewH > 0 && h <= scrollMetrics.current.viewH) {
+                parkAtBottomRef.current = false
+                setListRevealed(true)
+              }
               if (stick) {
                 // Content grew while following (or while parking at the
                 // latest on open): re-anchor to the end using THIS event's
