@@ -165,18 +165,18 @@ android {
 chaquopy {
     defaultConfig {
         version = "3.11"
-        // Prefer python3.11 from PATH (EAS build images provide it); fall
-        // back to this machine's uv-managed 3.11. Override always wins:
-        // -PchaquopyBuildPython=<path>
+        // buildPython: -PchaquopyBuildPython always wins; otherwise the
+        // newest uv-managed cpython 3.11 (~/.local/share/uv/python —
+        // installed by the EAS pre-install hook on build servers), else
+        // python3.11 from PATH (local dev machines).
         def buildPythonDefault = "python3.11"
-        try {
-            def probe = ["bash", "-c", "command -v python3.11"].execute(null, rootDir)
-            probe.waitFor()
-            if (probe.exitValue() != 0) {
-                buildPythonDefault = "/home/mamoun/.local/share/uv/python/cpython-3.11.16-linux-x86_64-gnu/bin/python3.11"
+        def uvPythonRoot = new File(System.getProperty("user.home"), ".local/share/uv/python")
+        if (uvPythonRoot.isDirectory()) {
+            def cands = uvPythonRoot.listFiles()?.findAll { it.name.startsWith("cpython-3.11") }?.sort { it.name }
+            if (cands) {
+                def bin31 = new File(cands.last(), "bin/python3.11")
+                if (bin31.exists()) buildPythonDefault = bin31.absolutePath
             }
-        } catch (Exception ignored) {
-            buildPythonDefault = "/home/mamoun/.local/share/uv/python/cpython-3.11.16-linux-x86_64-gnu/bin/python3.11"
         }
         buildPython(findProperty("chaquopyBuildPython") ?: buildPythonDefault)
         pip {
