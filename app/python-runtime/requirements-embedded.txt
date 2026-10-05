@@ -46,8 +46,18 @@ websockets==15.0.1
 # deliberately WITHOUT the [standard] extras. pydantic/openai (+ transitives):
 # first LLM round trip; pydantic-core and jiter ship as locally built
 # aarch64-android wheels (see build-android-wheels.sh + --find-links).
-distro==1.9.0
-fastapi==0.133.1
+
+# ---- Runtime-path additions (lazily imported by config/chat code) ----
+# ruamel.yaml: config WRITING (model prefs, thinking, save_key) — hermes
+# core dep, imported lazily so the M2 import-census missed it.
+# tenacity: provider retry; jinja2: prompt/skill rendering; packaging:
+# version gates on three production paths; snowballstemmer: tool_search
+# BM25 stemming (runs during agent turns).
+ruamel.yaml==0.18.17
+tenacity==9.1.4
+Jinja2==3.1.6
+packaging==26.0
+snowballstemmer==3.1.1
 jiter==0.13.0
 openai==2.24.0
 pydantic==2.13.4
