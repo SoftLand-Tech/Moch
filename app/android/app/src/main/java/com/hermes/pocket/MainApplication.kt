@@ -32,6 +32,22 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    // Crash telemetry for the embedded runtime process: last crash lands in
+    // files/Moch/logs/crash-last.txt (the agent itself can read it back).
+    // Recovery is START_STICKY on HermesService — the system restarts the
+    // service, and with it the process and the Python runtime.
+    val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+    Thread.setDefaultUncaughtExceptionHandler { t, e ->
+      try {
+        android.util.Log.e("MochHermes", "uncaught exception on ${t.name}", e)
+        java.io.File(filesDir, "Moch/logs/crash-last.txt").apply {
+          parentFile?.mkdirs()
+          writeText("${java.util.Date()} thread=${t.name}\n${android.util.Log.getStackTraceString(e)}")
+        }
+      } catch (_: Exception) {
+      }
+      previousHandler?.uncaughtException(t, e)
+    }
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())
     } catch (e: IllegalArgumentException) {
@@ -42,6 +58,10 @@ class MainApplication : Application(), ReactApplication {
     // Boot the embedded Hermes runtime (Chaquopy CPython) off the main thread;
     // MochHermes logcat tag is the on-device proof.
     HermesRuntime.start(this)
+    // Keep the embedded runtime alive in the background (M6): automations
+    // and long turns survive swipe-away/screen-off via the foreground
+    // service; its Stop action is the user-controlled teardown.
+    com.hermes.pocket.hermes.HermesService.start(this)
   }
 
   override fun onConfigurationChanged(newConfig: Configuration) {

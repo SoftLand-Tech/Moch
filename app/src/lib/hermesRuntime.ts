@@ -27,9 +27,16 @@ export interface EmbeddedGatewayInfo {
 interface HermesBridgeModule {
   status(): Promise<HermesRuntimeStatus>
   getGateway(): Promise<EmbeddedGatewayInfo | null>
+  stop(): Promise<boolean>
 }
 
 const bridge = NativeModules.HermesBridge as HermesBridgeModule | undefined
+
+/** Stop the background agent runtime (foreground service teardown). */
+export function stopEmbeddedRuntime(): Promise<void> {
+  if (!bridge) return Promise.resolve()
+  return bridge.stop().then(() => undefined)
+}
 
 export function hermesRuntimeStatus(): Promise<HermesRuntimeStatus> {
   if (!bridge) return Promise.resolve({ running: false, pythonVersion: null, hermesVersion: null })

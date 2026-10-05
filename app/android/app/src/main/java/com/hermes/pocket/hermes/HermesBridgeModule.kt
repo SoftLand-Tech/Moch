@@ -52,4 +52,15 @@ class HermesBridgeModule(reactContext: ReactApplicationContext) :
       promise.reject("gateway_info", "bad gateway json", e)
     }
   }
+
+  /** User-controlled teardown of the background runtime (M6). */
+  @ReactMethod
+  fun stop(promise: Promise) {
+    try {
+      HermesService.stop(reactApplicationContext)
+      promise.resolve(true)
+    } catch (e: RuntimeException) {
+      promise.reject("hermes_stop", e)
+    }
+  }
 }
