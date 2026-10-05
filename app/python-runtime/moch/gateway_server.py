@@ -85,6 +85,12 @@ def _run_server(port: int) -> None:
         from moch.slash_worker_bridge import InProcessSlashWorker
 
         _tg_server._SlashWorker = InProcessSlashWorker
+        # hermes' in-process cron ticker (scheduled automations) only arms
+        # under HERMES_DESKTOP=1 — the embedded serve process is exactly the
+        # desktop-shell situation (a serve backend with no external
+        # gateway to tick the store). Verified: without it, jobs.json is
+        # never touched and scheduled jobs never fire.
+        os.environ.setdefault("HERMES_DESKTOP", "1")
         from hermes_cli.web_server import start_server
 
         start_server(host="127.0.0.1", port=port, open_browser=False, headless=True)
