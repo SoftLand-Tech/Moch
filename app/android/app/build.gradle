@@ -2,6 +2,7 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 apply plugin: "com.google.gms.google-services"
+apply plugin: "com.chaquo.python"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
@@ -146,6 +147,39 @@ android {
     }
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
+    }
+}
+
+// Embedded Hermes runtime (Chaquopy 17.0).
+//
+// - Python 3.11: matches the hermes-agent runtime (~/.hermes/hermes-agent runs
+//   3.11.16); Chaquopy 17.0's python builds for arm64-v8a.
+// - buildPython must be a real 3.11 interpreter for builds (pip features need
+//   matching major.minor). System python3 here is 3.14, so we pin uv's
+//   cpython 3.11; override with -PchaquopyBuildPython=<path>.
+// - ABIs: no explicit abiFilters here — the RN gradle plugin already sets them
+//   from reactNativeArchitectures (arm64-v8a only) at DSL finalize, and
+//   Chaquopy packages python only for the variant's abiFilters.
+// - Python sources live in app/python-runtime (outside android/, which is
+//   expo-prebuild output and would be regenerated away).
+chaquopy {
+    defaultConfig {
+        version = "3.11"
+        buildPython(findProperty("chaquopyBuildPython") ?: "/home/mamoun/.local/share/uv/python/cpython-3.11.16-linux-x86_64-gnu/bin/python3.11")
+        pip {
+            // Exact import closure of the vendored hermes runtime (M2);
+            // psutil is the only native build. jiter deferred to M3.
+            install("-r", "../../python-runtime/requirements-embedded.txt")
+        }
+    }
+    sourceSets {
+        getByName("main") {
+            srcDir("../../python-runtime")
+            // Vendored hermes-agent tree (flat layout, synced by
+            // embedded/vendor-hermes.sh). Own source root so it stays a
+            // pristine, diffable copy of upstream.
+            srcDir("../../hermes-src")
+        }
     }
 }
 

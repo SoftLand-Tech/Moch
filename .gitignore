@@ -4,3 +4,4 @@ node_modules/
 *.local
 PROJECT.md
 firebase-service-account.json
+app/.venv-embedcheck/

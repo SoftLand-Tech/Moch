@@ -7,6 +7,9 @@ buildscript {
   }
   dependencies {
         classpath("com.google.gms:google-services:4.4.2")
+    // Embedded Hermes runtime: CPython on Android (MIT). Compatible with the
+    // AGP version this project resolves (8.12, Chaquopy 17.0 supports 7.3-9.2).
+    classpath("com.chaquo.python:gradle:17.0.0")
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
     classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')

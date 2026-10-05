@@ -1,0 +1,40 @@
+# Embedded Hermes runtime — Milestone 2 dependency set.
+#
+# This is the exact import closure of `import run_agent` (hermes-agent
+# 0.21.3), verified by census against the reference install
+# (~/.hermes/hermes-agent). Versions are hermes' own venv pins.
+#
+# Native notes:
+# - psutil is the ONLY native (C) package here; Chaquopy builds it from
+#   sdist with the NDK. If that fails, Milestone 2 is blocked on it.
+# - jiter (Rust, openai SDK streaming parser) is deliberately ABSENT:
+#   hermes' agent.jiter_preload guards the import and degrades cleanly.
+#   It becomes a hard requirement in Milestone 3 (first LLM round trip)
+#   and needs an aarch64-android wheel then.
+# - pydantic / openai / cryptography never import at run_agent import
+#   time (verified: absent from sys.modules after import).
+#
+# Regenerate: see embedded/vendor-hermes.sh (census documented in
+# embedded/MILESTONE-2.md).
+
+PyYAML==6.0.3
+Pygments==2.20.0
+anyio==4.12.1
+attrs==25.4.0
+certifi==2026.5.20
+charset-normalizer==3.4.4
+click==8.4.2
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.18
+markdown-it-py==4.0.0
+mdurl==0.1.2
+psutil==7.2.2
+python-dotenv==1.2.2
+requests==2.33.0
+rich==14.3.3
+sniffio==1.3.1
+socksio==1.0.0
+urllib3==2.7.0
+websockets==15.0.1

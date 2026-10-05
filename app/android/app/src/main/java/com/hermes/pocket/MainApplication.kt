@@ -10,8 +10,9 @@ import com.facebook.react.ReactPackage
 import com.facebook.react.ReactHost
 import com.facebook.react.common.ReleaseLevel
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint
+import com.hermes.pocket.hermes.HermesBridgePackage
+import com.hermes.pocket.hermes.HermesRuntime
 
-import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ExpoReactHostFactory
 
 class MainApplication : Application(), ReactApplication {
@@ -23,6 +24,7 @@ class MainApplication : Application(), ReactApplication {
         PackageList(this).packages.apply {
           // Packages that cannot be autolinked yet can be added manually here, for example:
           // add(MyReactNativePackage())
+          add(HermesBridgePackage())
         }
     )
   }
@@ -36,6 +38,9 @@ class MainApplication : Application(), ReactApplication {
     }
     loadReactNative(this)
     ApplicationLifecycleDispatcher.onApplicationCreate(this)
+    // Boot the embedded Hermes runtime (Chaquopy CPython) off the main thread;
+    // MochHermes logcat tag is the on-device proof.
+    HermesRuntime.start(this)
   }
 
   override fun onConfigurationChanged(newConfig: Configuration) {
