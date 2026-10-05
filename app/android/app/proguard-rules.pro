@@ -17,3 +17,7 @@
 -keep class expo.modules.updates.** { *; }
 -keep class expo.modules.updates-interface.** { *; }
 # @generated end expo-build-properties
+# Chaquopy Python->Java interop: methods called from Python must survive
+# R8 renaming (the release build renamed knock() and broke automations
+# knocks silently — (R8 renamed knock(); Python lookup failed)).
+-keep class com.hermes.pocket.hermes.CronKnockNotifier { public *; }

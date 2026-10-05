@@ -38,20 +38,26 @@ def _vendor_stamp() -> dict:
 
 
 def _hermes_home() -> Path:
-    """App-private hermes home: ``$HERMES_HOME`` or ``<HOME>/Moch``.
+    """The home hermes itself uses: ``$HERMES_HOME`` or ``<HOME>/.hermes``.
 
-    On Android, Chaquopy sets ``HOME`` to the app's internal files dir
-    (/data/data/<pkg>/files), so the default keeps everything hermes writes
-    inside app-private storage — no scoped-storage permissions needed.
+    On Android, Chaquopy sets ``HOME`` to the app's internal files dir, so
+    hermes' platform default is ``files/.hermes`` (no scoped-storage
+    permissions needed). M5 shipped with a ``<HOME>/Moch`` default that
+    diverged from what hermes actually used — cron/state/sessions landed in
+    ``.hermes`` while our watchers looked at ``Moch/`` (the silent
+    automation-knock bug). Mirror hermes' own resolution exactly.
     """
     override = os.environ.get("HERMES_HOME")
     if override:
         return Path(override)
-    return Path(os.environ.get("HOME", ".")) / "Moch"
+    return Path(os.environ.get("HOME", ".")) / ".hermes"
 
 
 def _prepare_home(home: Path) -> None:
     home.mkdir(parents=True, exist_ok=True)
+    # Pin hermes to the resolved home explicitly (idempotent; equals its own
+    # platform default — belt and braces against env drift on Android).
+    os.environ.setdefault("HERMES_HOME", str(home))
     # Workspace (M5): new sessions' default cwd. Rooting happens app-side —
     # the client passes cwd=<workspace> on session.create (hermes treats an
     # explicit existing dir as a persistent session workspace).

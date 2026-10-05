@@ -33,6 +33,7 @@ def start(notifier) -> None:
         if _state["started"]:
             return
         _state["started"] = True
+    print(f"[cron-knocks] arming watcher (notifiers={len(_notifiers)})", file=sys.stderr, flush=True)
     threading.Thread(target=_loop, name="moch-cron-knocks", daemon=True).start()
 
 
@@ -40,7 +41,7 @@ def _jobs_by_id(home: Path) -> dict[str, str]:
     try:
         data = json.loads((home / "cron" / "jobs.json").read_text(encoding="utf-8"))
         return {
-            str(j.get("job_id")): str(j.get("name") or j.get("job_id") or "automation")
+            str(j.get("id") or j.get("job_id")): str(j.get("name") or j.get("id") or "automation")
             for j in data.get("jobs", [])
         }
     except Exception:  # noqa: BLE001 — best effort naming
@@ -68,13 +69,23 @@ def _loop() -> None:
     # when the DB does not exist yet: a fresh install's FIRST-ever execution
     # must still knock. (Priming on first successful read swallowed it.)
     primed = False
+    ticks = 0
     while True:
         rows: list = []
+        err = None
         try:
             if db.exists():
                 rows = _read_finished(db)
-        except Exception:  # noqa: BLE001 — polling must never die
+            else:
+                err = "db-missing"
+        except Exception as exc:  # noqa: BLE001 — polling must never die
             rows = []
+            err = f"{type(exc).__name__}: {exc}"
+        ticks += 1
+        if err and ticks % 40 == 1:
+            print(f"[cron-knocks] read issue: {err} db={db}", file=sys.stderr, flush=True)
+        if ticks % 40 == 0:
+            print(f"[cron-knocks] alive: ticks={ticks} rows={len(rows)} seen={len(_seen)}", file=sys.stderr, flush=True)
         if not primed:
             _seen.update(str(r[0]) for r in rows)
             primed = True

@@ -40,6 +40,7 @@ object HermesRuntime {
             Python.getInstance()
                 .getModule("moch.cron_knocks")
                 .callAttr("start", CronKnockNotifier(appContext))
+            Log.i(TAG, "cron knocks armed")
 
           } catch (e: PyException) {
             Log.e(TAG, "python boot failed", e)
