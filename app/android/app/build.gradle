@@ -103,7 +103,11 @@ android {
     defaultConfig {
         applicationId 'com.hermes.pocket'
         minSdkVersion rootProject.ext.minSdkVersion
-        targetSdkVersion rootProject.ext.targetSdkVersion
+        // targetSdk 28 = legacy SELinux domain: allows execve() of guest
+        // binaries from app data, which proot (Moch Linux) requires.
+        // Android 10+ blocks exec-from-app-data for targetSdk >= 29 — the
+        // same reason Termux ships 28. compileSdk stays 36.
+        targetSdkVersion 28
         versionCode 3
         versionName "1.0.0"
 
@@ -147,6 +151,11 @@ android {
     }
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
+    }
+    lint {
+        // Sideloaded experimental fork: targetSdk 28 is deliberate (legacy
+        // SELinux domain for proot). Play policy checks don't apply.
+        disable += ['ExpiredTargetSdkVersion']
     }
 }
 

@@ -28,6 +28,12 @@ from pathlib import Path
 TERMUX_BASE = "https://packages.termux.dev/apt/termux-main/pool/main"
 PROOT_URL = f"{TERMUX_BASE}/p/proot/proot_5.1.107.96_aarch64.deb"
 LIBTALLOC_URL = f"{TERMUX_BASE}/libt/libtalloc/libtalloc_2.5.0_aarch64.deb"
+SHMEM_URL = f"{TERMUX_BASE}/liba/libandroid-shmem/libandroid-shmem_0.7_aarch64.deb"
+
+# Android 10+ (targetSdk 29+) forbids execve() of files in app-private data
+# (the reason Termux pins targetSdk 28). mmap PROT_EXEC is still allowed, so
+# the guest is launched through the system linker: ``linker64 <proot>``.
+LINKER64 = "/system/bin/linker64"
 
 ROOTFS_URLS = {
     "ubuntu-24.04": "https://cdimage.ubuntu.com/ubuntu-base/releases/noble/release/ubuntu-base-24.04.4-base-arm64.tar.gz",
@@ -97,7 +103,7 @@ def bootstrap(distro: str = "ubuntu-24.04") -> dict:
             report["steps"].append(f"{name}: FAILED {type(exc).__name__}: {exc}")
             raise
 
-    if not (bin_dir / "proot").exists():
+    if not (bin_dir / "proot").exists() or not (linux_dir / "libexec" / "proot" / "loader").exists():
         def _proot():
             with tempfile.TemporaryDirectory(dir=linux_dir) as td:
                 td = Path(td)
@@ -109,16 +115,18 @@ def bootstrap(distro: str = "ubuntu-24.04") -> dict:
                 with tarfile.open(data_tar, "r:xz") as tf:
                     for member in tf.getmembers():
                         parts = Path(member.name).parts
-                        if not parts:
+                        if not parts or "usr" not in parts:
                             continue
-                        # bin/proot, libexec/proot/loader
-                        rel = "/".join(parts[parts.index("usr") + 1 :]) if "usr" in parts else member.name
+                        rel = "/".join(parts[parts.index("usr") + 1:])
                         if rel in ("bin/proot", "libexec/proot/loader", "libexec/proot/loader32"):
-                            tf.extract(member, td)
-                            src = td / member.name
-                            dst = bin_dir / Path(rel).name if rel == "bin/proot" else bin_dir / rel
+                            f = tf.extractfile(member)
+                            if f is None:
+                                raise FileNotFoundError(f"cannot read {member.name} from tar")
+                            # loader must sit at <linux>/libexec/proot/ (proot's
+                            # ../libexec lookup) while proot lives in bin/
+                            dst = linux_dir / rel
                             dst.parent.mkdir(parents=True, exist_ok=True)
-                            shutil.copy2(src, dst)
+                            dst.write_bytes(f.read())
                             os.chmod(dst, 0o755)
                 if not (bin_dir / "proot").exists():
                     raise FileNotFoundError("proot binary not found in deb")
@@ -135,11 +143,37 @@ def bootstrap(distro: str = "ubuntu-24.04") -> dict:
                 with tarfile.open(data_tar, "r:xz") as tf:
                     for member in tf.getmembers():
                         if member.name.endswith("lib/libtalloc.so.2"):
-                            tf.extract(member, td)
-                            src = td / member.name
+                            f = tf.extractfile(member)
+                            if f is None:
+                                raise FileNotFoundError(f"cannot read {member.name} from tar")
                             (bin_dir / "lib").mkdir(exist_ok=True)
-                            shutil.copy2(src, bin_dir / "lib" / "libtalloc.so.2")
+                            (bin_dir / "lib" / "libtalloc.so.2").write_bytes(f.read())
         step("libtalloc", _talloc)
+
+    if not (bin_dir / "lib" / "libandroid-shmem.so").exists():
+        def _shmem():
+            with tempfile.TemporaryDirectory(dir=linux_dir) as td:
+                td = Path(td)
+                deb = td / "shmem.deb"
+                _download(SHMEM_URL, deb)
+                data_tar = td / "data.tar.xz"
+                _ar_extract_member(deb, "data.tar.xz", data_tar)
+                with tarfile.open(data_tar, "r:xz") as tf:
+                    for member in tf.getmembers():
+                        if member.name.endswith("lib/libandroid-shmem.so"):
+                            f = tf.extractfile(member)
+                            if f is None:
+                                raise FileNotFoundError(f"cannot read {member.name} from tar")
+                            (bin_dir / "lib").mkdir(exist_ok=True)
+                            (bin_dir / "lib" / "libandroid-shmem.so").write_bytes(f.read())
+        step("libandroid-shmem", _shmem)
+
+    # Permissions pass: earlier partial runs could leave files non-executable
+    # (Python's write_bytes defaults to 0600) — force exec bits on every
+    # binary the guest launch needs.
+    for candidate in [bin_dir / "proot", linux_dir / "libexec" / "proot" / "loader", linux_dir / "libexec" / "proot" / "loader32"]:
+        if candidate.exists():
+            os.chmod(candidate, 0o755)
 
     if not rootfs.exists():
         def _rootfs():
@@ -168,9 +202,14 @@ def exec_in_guest(command: str, timeout_s: int = 30) -> dict:
     from moch import hermes_boot
 
     workspace = hermes_boot._hermes_home() / "workspace"
+    tmp_dir = linux_dir / "tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env["LD_LIBRARY_PATH"] = str(linux_dir / "bin" / "lib")
+    env["PROOT_LOADER"] = str(linux_dir / "libexec" / "proot" / "loader")
+    env["PROOT_TMP_DIR"] = str(tmp_dir)
     argv = [
+        LINKER64,
         str(proot),
         "-r", str(rootfs),
         "-b", f"{workspace}:/workspace",
