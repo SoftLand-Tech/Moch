@@ -78,6 +78,13 @@ def _load_or_mint_token() -> str:
 
 def _run_server(port: int) -> None:
     try:
+        # Automations/slash commands: hermes spawns a child interpreter for
+        # these; on Android that VM cannot boot (dalvik-cache permission),
+        # so run the same worker logic in-process instead.
+        from tui_gateway import server as _tg_server
+        from moch.slash_worker_bridge import InProcessSlashWorker
+
+        _tg_server._SlashWorker = InProcessSlashWorker
         from hermes_cli.web_server import start_server
 
         start_server(host="127.0.0.1", port=port, open_browser=False, headless=True)

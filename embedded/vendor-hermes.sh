@@ -17,7 +17,7 @@ DST="$ROOT/app/hermes-src"
 [[ -f "$SRC/run_agent.py" ]] || { echo "error: $SRC is not a hermes-agent checkout (no run_agent.py)" >&2; exit 1; }
 PKGS=(agent cron gateway hermes_cli plugins providers tui_gateway tools)
 
-MODS=(hermes_bootstrap.py hermes_constants.py hermes_logging.py hermes_startup_watchdog.py hermes_state.py hermes_time.py model_tools.py registration_lifecycle.py run_agent.py toolsets.py utils.py)
+MODS=(cli.py hermes_bootstrap.py hermes_constants.py hermes_logging.py hermes_startup_watchdog.py hermes_state.py hermes_time.py model_tools.py registration_lifecycle.py run_agent.py toolsets.py utils.py)
 
 rm -rf "$DST"
 mkdir -p "$DST"

@@ -77,4 +77,4 @@ jsonschema==4.26.0
 pathspec==1.1.1
 ptyprocess==0.7.0
 rpds-py==0.30.0
-wcwidth==0.6.0
+prompt_toolkit==3.0.52
