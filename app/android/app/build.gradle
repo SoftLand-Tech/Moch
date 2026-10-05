@@ -175,6 +175,7 @@ chaquopy {
             // psutil is the only native build. jiter deferred to M3.
             install("-r", "../../python-runtime/requirements-embedded.txt")
         }
+    }
     sourceSets {
         getByName("main") {
             srcDir("../../python-runtime")
