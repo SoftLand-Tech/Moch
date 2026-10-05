@@ -79,3 +79,46 @@ fix: saved pairing now skips onboarding straight into chat.
 
 **Not yet device-verified:** a knock actually appearing on the phone —
 that's the one open item, pending your install + 2-minute job test.
+
+---
+
+# ADDENDUM — live device diagnosis (phone plugged in, root causes found)
+
+Your persistence paid off. Two **real** root causes were found by running the
+instrumented build on the device (`6782b0d`):
+
+## Root cause A — split home (why the watcher saw nothing)
+
+hermes resolves its home to **`$HOME/.hermes`** (its platform default), while
+`moch/hermes_boot.py` assumed **`$HOME/Moch`**. Result: hermes wrote
+config/state/**cron** under `files/.hermes/`, the watcher polled the empty
+`files/Moch/cron/` — `db-missing`, forever. The app *looked* fine because
+everything else (workspace, token, gateway) used the Moch home consistently.
+
+Fix: `_hermes_home()` now mirrors hermes' own resolution (`HERMES_HOME` env,
+else `$HOME/.hermes`) and `HERMES_HOME` is pinned explicitly at boot.
+Side effect: the gateway token file moves to `.hermes/` (new token) — handled
+automatically by the live-token refresh added earlier.
+
+## Root cause B — R8 renamed the interop method (why the call then failed)
+
+With the DB finally found, the watcher logged:
+
+    [cron-knocks] firing knock: Awesome finished
+    [cron-knocks] notify failed: AttributeError: 'a' object has no attribute 'knock'
+
+The release build's R8 **renamed `CronKnockNotifier.knock()`** (class showed
+as `'a'`), so Chaquopy's reflective lookup failed. This never appears in debug
+builds. Fix: keep rule `-keep class …CronKnockNotifier { public *; }`.
+
+Also fixed: job names read `id` from `jobs.json` (the file uses `id`, not
+`job_id` — titles showed raw ids).
+
+## Device evidence (19:01)
+
+    [cron-knocks] arming watcher (notifiers=1)
+    [cron-knocks] firing knock: Awesome finished
+    dumpsys notification: android.title=String (Awesome finished)
+
+**Knocks now land on the phone.** Report closed.
+
