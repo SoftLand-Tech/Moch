@@ -16,6 +16,7 @@ import { diagLog, logText } from '../../src/lib/log'
 import {
   notificationsEnabled, setNotificationsEnabled, ensureNotificationPermission,
 } from '../../src/lib/push'
+import { getEmbeddedGateway, hermesRuntimeStatus, restartEmbeddedRuntime, stopEmbeddedRuntime, requestBatteryExemption } from '../../src/lib/hermesRuntime'
 import { C, useStyles, setTheme, THEME_OPTIONS, themeId, type ThemeId } from '../../src/lib/theme'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
@@ -30,6 +31,57 @@ export default function Settings() {
 }
 
 // ── Small building blocks ───────────────────────────────────────────────────
+
+function RuntimeSectionRows() {
+  const [gw, setGw] = React.useState<{ ready: boolean; port: number | null; hermesVersion?: string | null } | null>(null)
+  const [battery, setBattery] = React.useState<'idle' | 'already' | 'requested'>('idle')
+
+  React.useEffect(() => {
+    let alive = true
+    const tick = () => {
+      getEmbeddedGateway().then((g) => { if (alive) setGw(g) }).catch(() => {})
+      hermesRuntimeStatus().then((st) => {
+        if (alive) setGw((prev) => prev ? { ...prev, hermesVersion: st.hermesVersion } : { ready: false, port: null, hermesVersion: st.hermesVersion })
+      }).catch(() => {})
+    }
+    tick()
+    const timer = setInterval(tick, 5000)
+    return () => { alive = false; clearInterval(timer) }
+  }, [])
+
+  const running = !!gw?.ready
+  return (
+    <>
+      <Row
+        icon="hardware-chip-outline"
+        label={running ? 'Embedded agent — running' : gw ? 'Embedded agent — starting…' : 'Embedded agent — unavailable'}
+        sub={gw?.port ? `hermes ${gw.hermesVersion ?? '—'} · 127.0.0.1:${gw.port}` : 'Bundled Python + hermes runtime on this phone'}
+      />
+      <Row
+        icon="refresh-outline"
+        label="Restart runtime"
+        sub="Fresh Python process (relaunches the app)"
+        onPress={() => { void restartEmbeddedRuntime().catch(() => {}) }}
+      />
+      <Row
+        icon="battery-charging-outline"
+        label={battery === 'already' ? 'Battery optimization — exempted' : 'Battery optimization — exempt this app'}
+        sub="Helps the runtime survive aggressive ROMs (MIUI etc.)"
+        disabled={battery === 'already'}
+        onPress={() => {
+          void requestBatteryExemption().then((r) => { if (r) setBattery(r) }).catch(() => {})
+        }}
+      />
+      <Row
+        icon="stop-circle-outline"
+        label="Stop runtime"
+        sub="Ends the background service and exits the app"
+        danger
+        onPress={() => { void stopEmbeddedRuntime().then(() => { /* process exits shortly */ }).catch(() => {}) }}
+      />
+    </>
+  )
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   const s = useStyles(makeS)
@@ -214,6 +266,9 @@ function SettingsInner() {
           </View>
         </View>
 
+        <Section title="ON-PHONE RUNTIME">
+          <RuntimeSectionRows />
+        </Section>
         <Section title="APPEARANCE">
           <View style={s.themeRow}>
             {THEME_OPTIONS.map((t) => (

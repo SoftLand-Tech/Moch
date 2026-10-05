@@ -37,6 +37,10 @@ object HermesRuntime {
             Log.i(TAG, "hermes boot: $boot")
             val gateway = Python.getInstance().getModule("moch.gateway_server").callAttr("start")
             Log.i(TAG, "hermes gateway: $gateway")
+            Python.getInstance()
+                .getModule("moch.cron_knocks")
+                .callAttr("start", CronKnockNotifier(appContext))
+
           } catch (e: PyException) {
             Log.e(TAG, "python boot failed", e)
           } catch (e: RuntimeException) {
