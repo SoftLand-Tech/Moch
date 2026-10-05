@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" width="1254" height="1254">
+  <defs>
+    <!-- Sprout linear gradient -->
+    <linearGradient id="sproutGrad" x1="790" y1="380" x2="950" y2="265" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#E76437"/>
+      <stop offset="55%" stop-color="#F89236"/>
+      <stop offset="100%" stop-color="#FA9F3C"/>
+    </linearGradient>
+
+    <!-- Body soft 3D gradient -->
+    <linearGradient id="bodyGrad" x1="627" y1="330" x2="627" y2="990" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F8EFE5"/>
+      <stop offset="68%" stop-color="#F6ECE1"/>
+      <stop offset="78%" stop-color="#ECE0D2"/>
+      <stop offset="88%" stop-color="#DECFC0"/>
+      <stop offset="96%" stop-color="#C7B3A1"/>
+      <stop offset="100%" stop-color="#BCA594"/>
+    </linearGradient>
+
+    <!-- Visor faceplate gradient -->
+    <linearGradient id="visorGrad" x1="627" y1="420" x2="627" y2="812" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2B283B"/>
+      <stop offset="100%" stop-color="#211F2D"/>
+    </linearGradient>
+
+    <!-- Paws Gradient -->
+    <linearGradient id="handGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFDFB"/>
+      <stop offset="50%" stop-color="#FAF1E7"/>
+      <stop offset="100%" stop-color="#D5C1AF"/>
+    </linearGradient>
+
+    <!-- Terminal Glow Filter -->
+    <filter id="terminalGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect id="background" width="1254" height="1254" fill="#000000"/>
+
+  <g id="mochi">
+    <path id="sprout" d="M 780 375 C 820 410, 835 365, 890 350 C 945 350, 972 310, 960 286 C 958 264, 940 260, 910 255 C 872 255, 832 275, 806 310 C 770 348, 772 370, 780 375 Z" fill="url(#sproutGrad)"/>
+    <path id="body" d="M 627 335 C 730 335, 835 375, 905 440 C 960 495, 974 570, 974 645 C 974 770, 930 870, 835 940 C 775 985, 700 985, 627 985 C 554 985, 479 985, 419 940 C 324 870, 280 770, 280 645 C 280 570, 294 495, 349 440 C 419 375, 524 335, 627 335 Z" fill="url(#bodyGrad)"/>
+    <path id="visor" d="M 627 420 C 725 420, 815 440, 858 480 C 892 515, 897 565, 897 615 C 897 670, 890 720, 855 758 C 812 795, 725 812, 627 812 C 529 812, 442 795, 399 758 C 364 720, 357 670, 357 615 C 357 565, 362 515, 396 480 C 439 440, 529 420, 627 420 Z" fill="url(#visorGrad)"/>
+    <g id="face-group">
+      <g id="eyes" fill="#FAF1E7">
+        <path id="left-eye" class="eye" d="M 444 638 C 444 650, 470 686, 505 686 C 540 686, 566 650, 566 638 C 566 626, 554 624, 544 634 C 534 646, 520 654, 505 654 C 490 654, 476 646, 466 634 C 456 624, 444 626, 444 638 Z"/>
+            <path id="right-eye" class="eye" d="M 810 638 C 810 650, 784 686, 749 686 C 714 686, 688 650, 688 638 C 688 626, 700 624, 710 634 C 720 646, 734 654, 749 654 C 764 654, 778 646, 788 634 C 798 624, 810 626, 810 638 Z"/>
+      </g>
+      <g id="blush" fill="#FA9B6A">
+        <ellipse id="blush-left-1" cx="442" cy="710" rx="24" ry="12" transform="rotate(35 442 710)"/>
+            <ellipse id="blush-left-2" cx="482" cy="720" rx="22" ry="12" transform="rotate(22 482 720)"/>
+            <ellipse id="blush-right-1" cx="812" cy="710" rx="24" ry="12" transform="rotate(-35 812 710)"/>
+            <ellipse id="blush-right-2" cx="772" cy="720" rx="22" ry="12" transform="rotate(-22 772 720)"/>
+      </g>
+    </g>
+    
+  </g>
+</svg>

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "969127032348",
+    "project_id": "moch-941e7",
+    "storage_bucket": "moch-941e7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:969127032348:android:5fee9ebc7ac6926d0191d9",
+        "android_client_info": {
+          "package_name": "com.hermes.pocket"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAEI53YY4KUC_uuz7MjiyG0S2ME2eOxVko"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

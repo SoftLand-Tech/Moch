@@ -1,0 +1,57 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files
+.env
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# generated native folders
+/ios
+
+# local agent tooling state
+.video_agent/
+
+# promo video working files
+videos/
+
+# local capture/verification output — contains paired-session screenshots and
+# capture scripts holding a dev gateway pairing token; never commit
+out/
+
+# EAS signing credentials — never commit
+credentials.json
+
+# local-only project map (machine paths, deploy runbooks) — see PROJECT.md
+PROJECT.md

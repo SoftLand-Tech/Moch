@@ -1,0 +1,39 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+
+buildscript {
+  repositories {
+    google()
+    mavenCentral()
+  }
+  dependencies {
+        classpath("com.google.gms:google-services:4.4.2")
+    classpath('com.android.tools.build:gradle')
+    classpath('com.facebook.react:react-native-gradle-plugin')
+    classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
+  }
+}
+
+allprojects {
+  repositories {
+    google()
+    mavenCentral()
+    maven { url 'https://www.jitpack.io' }
+  }
+}
+
+apply plugin: "expo-root-project"
+apply plugin: "com.facebook.react.rootproject"
+
+// Managed by plugins/with-android-release.js. expo-updates never sets
+// ndkVersion, so AGP falls back to its compiled-in default (27.0.12077973) —
+// which can exist as a broken stub on dev machines. Set it at plugin-apply
+// time (before its build.gradle and CMake config run) to the NDK the rest of
+// the project already resolves to.
+subprojects { sp ->
+  sp.plugins.withId('com.android.library') {
+    if (sp.path == ':expo-updates') {
+      sp.extensions.findByName('android').ndkVersion =
+        rootProject.ext.has('ndkVersion') ? rootProject.ext.ndkVersion : '27.1.12297006'
+    }
+  }
+}

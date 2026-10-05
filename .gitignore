@@ -1,0 +1,6 @@
+.DS_Store
+node_modules/
+.env*
+*.local
+PROJECT.md
+firebase-service-account.json
