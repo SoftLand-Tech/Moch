@@ -96,4 +96,56 @@ class HermesBridgeModule(reactContext: ReactApplicationContext) :
       promise.reject("hermes_battery", e)
     }
   }
+
+  /** Moch Linux (M7.5): bootstrap, exec, status. */
+  @ReactMethod
+  fun linuxBootstrap(distro: String, promise: Promise) {
+    Thread {
+      try {
+        val py = com.chaquo.python.Python.getInstance()
+        val result = py.getModule("moch.linux_env").callAttr("bootstrap", distro).toString()
+        val obj = org.json.JSONObject(result)
+        val map = Arguments.createMap()
+        map.putBoolean("ok", obj.optBoolean("ok", false))
+        map.putString("steps", obj.optJSONArray("steps")?.toString() ?: "[]")
+        promise.resolve(map)
+      } catch (e: Exception) {
+        promise.reject("linux_bootstrap", e.message, e)
+      }
+    }.start()
+  }
+
+  @ReactMethod
+  fun linuxExec(command: String, promise: Promise) {
+    Thread {
+      try {
+        val py = com.chaquo.python.Python.getInstance()
+        val result = py.getModule("moch.linux_env").callAttr("exec_in_guest", command).toString()
+        val obj = org.json.JSONObject(result)
+        val map = Arguments.createMap()
+        map.putBoolean("ok", obj.optBoolean("ok", false))
+        map.putString("stdout", obj.optString("stdout", ""))
+        map.putString("stderr", obj.optString("stderr", ""))
+        map.putString("error", obj.optString("error", ""))
+        promise.resolve(map)
+      } catch (e: Exception) {
+        promise.reject("linux_exec", e.message, e)
+      }
+    }.start()
+  }
+
+  @ReactMethod
+  fun linuxStatus(promise: Promise) {
+    try {
+      val py = com.chaquo.python.Python.getInstance()
+      val result = py.getModule("moch.linux_env").callAttr("status").toString()
+      val obj = org.json.JSONObject(result)
+      val map = Arguments.createMap()
+      map.putBoolean("bootstrapped", obj.optBoolean("bootstrapped", false))
+      map.putDouble("sizeMb", obj.optDouble("size_mb", 0.0))
+      promise.resolve(map)
+    } catch (e: Exception) {
+      promise.reject("linux_status", e.message, e)
+    }
+  }
 }

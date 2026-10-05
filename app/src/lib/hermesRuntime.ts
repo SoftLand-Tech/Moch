@@ -30,7 +30,11 @@ interface HermesBridgeModule {
   stop(): Promise<boolean>
   restart(): Promise<boolean>
   requestBatteryExemption(): Promise<'already' | 'requested'>
+  linuxBootstrap(distro: string): Promise<{ ok: boolean; steps: string }>
+  linuxExec(command: string): Promise<{ ok: boolean; stdout: string; stderr: string; error: string }>
+  linuxStatus(): Promise<{ bootstrapped: boolean; sizeMb: number }>
 }
+
 
 const bridge = NativeModules.HermesBridge as HermesBridgeModule | undefined
 
@@ -61,4 +65,27 @@ export function restartEmbeddedRuntime(): Promise<void> {
 export function requestBatteryExemption(): Promise<'already' | 'requested' | null> {
   if (!bridge) return Promise.resolve(null)
   return bridge.requestBatteryExemption()
+}
+
+
+// ---- Moch Linux (M7.5) ----
+
+export interface LinuxGuestStatus {
+  bootstrapped: boolean
+  sizeMb: number
+}
+
+export function linuxBootstrap(distro: string): Promise<{ ok: boolean; steps: string } | null> {
+  if (!bridge) return Promise.resolve(null)
+  return bridge.linuxBootstrap(distro)
+}
+
+export function linuxExec(command: string): Promise<{ ok: boolean; stdout: string; stderr: string; error: string } | null> {
+  if (!bridge) return Promise.resolve(null)
+  return bridge.linuxExec(command)
+}
+
+export function linuxStatus(): Promise<LinuxGuestStatus | null> {
+  if (!bridge) return Promise.resolve(null)
+  return bridge.linuxStatus()
 }

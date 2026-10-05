@@ -34,6 +34,7 @@ class HermesService : Service() {
     private const val CHANNEL_ID = "hermes_runtime"
     private const val NOTIFICATION_ID = 0x4D48 // "MH"
     private const val ACTION_STOP = "com.hermes.pocket.hermes.STOP"
+    private const val ACTION_LINUX_TEST = "com.hermes.pocket.hermes.LINUX_TEST"
     private var running = false
 
     fun isRunning(): Boolean = running
@@ -100,6 +101,20 @@ class HermesService : Service() {
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    if (intent?.action == ACTION_LINUX_TEST) {
+      Thread {
+        try {
+          val py = com.chaquo.python.Python.getInstance()
+          val report = py.getModule("moch.linux_env").callAttr("bootstrap").toString()
+          Log.i(TAG, "linux bootstrap: $report")
+          val result = py.getModule("moch.linux_env").callAttr("exec_in_guest", "uname -a && head -2 /etc/os-release").toString()
+          Log.i(TAG, "linux exec: $result")
+        } catch (e: Exception) {
+          Log.e(TAG, "linux test failed", e)
+        }
+      }.start()
+      return START_NOT_STICKY
+    }
     if (intent?.action == ACTION_STOP) {
       stopForeground(STOP_FOREGROUND_REMOVE)
       shutdownProcess(this)
