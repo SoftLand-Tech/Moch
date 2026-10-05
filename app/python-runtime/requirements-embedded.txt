@@ -48,12 +48,15 @@ websockets==15.0.1
 # aarch64-android wheels (see build-android-wheels.sh + --find-links).
 
 # ---- Runtime-path additions (lazily imported by config/chat code) ----
-# ruamel.yaml: config WRITING (model prefs, thinking, save_key) — hermes
+# ruamel.yaml: config WRITING (model prefs, thinking, save_key). 0.19.1
+# (hermes pins 0.18.17): 0.18 hard-depends on the C accelerator
+# ruamel.yaml.clib (no android build); 0.19 gates clib behind extras —
+# pure python, API-compatible for hermes' round-trip use. hermes
 # core dep, imported lazily so the M2 import-census missed it.
 # tenacity: provider retry; jinja2: prompt/skill rendering; packaging:
 # version gates on three production paths; snowballstemmer: tool_search
 # BM25 stemming (runs during agent turns).
-ruamel.yaml==0.18.17
+ruamel.yaml==0.19.1
 tenacity==9.1.4
 Jinja2==3.1.6
 packaging==26.0
