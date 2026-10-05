@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { Icon } from './Icon'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { connect, normalizeHost } from '../lib/gateway'
+import { getEmbeddedGateway } from '../lib/hermesRuntime'
 import { parseConnectUrl } from '../lib/pairing'
 import { C, useStyles } from '../lib/theme'
 
@@ -46,6 +47,24 @@ export function PairForm({ onPaired }: { onPaired: () => void }) {
       onPaired()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Check host and token')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const useThisPhone = async () => {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      const gw = await getEmbeddedGateway()
+      if (!gw || !gw.running || !gw.port || !gw.token) {
+        throw new Error(gw?.error || 'Embedded runtime not ready — give it a few seconds and try again.')
+      }
+      await connect({ host: `127.0.0.1:${gw.port}`, token: gw.token, tls: false, name: 'This phone' })
+      onPaired()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Embedded runtime unavailable')
     } finally {
       setBusy(false)
     }
@@ -99,6 +118,18 @@ export function PairForm({ onPaired }: { onPaired: () => void }) {
         <Text style={s.scanText}>Scan QR code</Text>
       </Pressable>
       <Text style={s.scanHint}>On your computer run scripts/hermes-pair.sh —{'\n'}it prints the QR to scan.</Text>
+
+      <Pressable
+        style={({ pressed }) => [s.localBtn, pressed && s.pressed]}
+        onPress={() => void useThisPhone()}
+        disabled={busy}
+        accessibilityRole="button"
+        accessibilityLabel="Use this phone as the agent host"
+      >
+        <Icon name="phone-portrait-outline" size={22} color={C.text} />
+        <Text style={s.localText}>Use this phone</Text>
+      </Pressable>
+      <Text style={s.scanHint}>No computer? Run Hermes right here — embedded on this phone.</Text>
 
       <Pressable
         style={({ pressed }) => [s.moreToggle, pressed && s.pressed]}
@@ -224,5 +255,11 @@ const makeS = () => StyleSheet.create({
   scannerRoot: { flex: 1, backgroundColor: '#000' },
   scanner: { flex: 1 },
   scannerFooter: { padding: 20, backgroundColor: '#000', gap: 10 },
+  localBtn: {
+    backgroundColor: C.bgCard, borderRadius: 14, paddingVertical: 15, paddingHorizontal: 18,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, minHeight: 56,
+    borderWidth: 1, borderColor: C.border, marginTop: 16,
+  },
+  localText: { color: C.text, fontSize: 16, fontWeight: '800' },
   scannerHint: { color: '#fff', textAlign: 'center', fontSize: 14 },
 })

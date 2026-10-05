@@ -5,3 +5,6 @@ node_modules/
 PROJECT.md
 firebase-service-account.json
 app/.venv-embedcheck/
+embedded/.wheelbuild/
+__pycache__/
+*.pyc

@@ -167,11 +167,14 @@ chaquopy {
         version = "3.11"
         buildPython(findProperty("chaquopyBuildPython") ?: "/home/mamoun/.local/share/uv/python/cpython-3.11.16-linux-x86_64-gnu/bin/python3.11")
         pip {
+            // Locally built aarch64-android wheels (pydantic-core, jiter)
+            // plus the Chaquopy-prebuilt psutil land here — see
+            // embedded/build-android-wheels.sh.
+            options("--find-links", "../../wheels-android")
             // Exact import closure of the vendored hermes runtime (M2);
             // psutil is the only native build. jiter deferred to M3.
             install("-r", "../../python-runtime/requirements-embedded.txt")
         }
-    }
     sourceSets {
         getByName("main") {
             srcDir("../../python-runtime")

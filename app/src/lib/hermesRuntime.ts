@@ -15,8 +15,17 @@ export interface HermesRuntimeStatus {
   hermesVersion: string | null
 }
 
+export interface EmbeddedGatewayInfo {
+  running: boolean
+  ready: boolean
+  port: number | null
+  token: string | null
+  error: string | null
+}
+
 interface HermesBridgeModule {
   status(): Promise<HermesRuntimeStatus>
+  getGateway(): Promise<EmbeddedGatewayInfo | null>
 }
 
 const bridge = NativeModules.HermesBridge as HermesBridgeModule | undefined
@@ -24,4 +33,10 @@ const bridge = NativeModules.HermesBridge as HermesBridgeModule | undefined
 export function hermesRuntimeStatus(): Promise<HermesRuntimeStatus> {
   if (!bridge) return Promise.resolve({ running: false, pythonVersion: null, hermesVersion: null })
   return bridge.status()
+}
+
+/** Embedded gateway connection info; null when running under Expo Go / no native build. */
+export function getEmbeddedGateway(): Promise<EmbeddedGatewayInfo | null> {
+  if (!bridge) return Promise.resolve(null)
+  return bridge.getGateway()
 }

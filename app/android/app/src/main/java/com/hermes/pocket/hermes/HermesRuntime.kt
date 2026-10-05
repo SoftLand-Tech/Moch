@@ -35,6 +35,8 @@ object HermesRuntime {
             Log.i(TAG, "python alive: $info")
             val boot = Python.getInstance().getModule("moch.hermes_boot").callAttr("boot")
             Log.i(TAG, "hermes boot: $boot")
+            val gateway = Python.getInstance().getModule("moch.gateway_server").callAttr("start")
+            Log.i(TAG, "hermes gateway: $gateway")
           } catch (e: PyException) {
             Log.e(TAG, "python boot failed", e)
           } catch (e: RuntimeException) {
@@ -61,5 +63,16 @@ object HermesRuntime {
       }
     }
     return mapOf("running" to running, "pythonVersion" to version, "hermesVersion" to hermesVersion)
+  }
+
+  /** JSON snapshot of the embedded gateway (port/token/state) for the bridge. */
+  fun gatewayInfoJson(): String? {
+    if (!isRunning) return null
+    return try {
+      Python.getInstance().getModule("moch.gateway_server").callAttr("info_json").toString()
+    } catch (e: PyException) {
+      Log.w(TAG, "gateway probe failed", e)
+      null
+    }
   }
 }

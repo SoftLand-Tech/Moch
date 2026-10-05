@@ -1,36 +1,30 @@
-# Embedded Hermes runtime — Milestone 2 dependency set.
+# Embedded Hermes runtime — dependency set (Milestones 2+3).
 #
-# This is the exact import closure of `import run_agent` (hermes-agent
-# 0.21.3), verified by census against the reference install
+# The M2 block is the exact import closure of `import run_agent`
+# (hermes-agent 0.21.3); the M3 block adds the gateway serve path and the
+# first model call. Census-verified against the reference install
 # (~/.hermes/hermes-agent). Versions are hermes' own venv pins.
 #
 # Native notes:
-# - psutil is the ONLY native (C) package here; Chaquopy builds it from
-#   sdist with the NDK. If that fails, Milestone 2 is blocked on it.
-# - jiter (Rust, openai SDK streaming parser) is deliberately ABSENT:
-#   hermes' agent.jiter_preload guards the import and degrades cleanly.
-#   It becomes a hard requirement in Milestone 3 (first LLM round trip)
-#   and needs an aarch64-android wheel then.
-# - pydantic / openai / cryptography never import at run_agent import
-#   time (verified: absent from sys.modules after import).
-#
-# Regenerate: see embedded/vendor-hermes.sh (census documented in
-# embedded/MILESTONE-2.md).
-
-PyYAML==6.0.3
-Pygments==2.20.0
-anyio==4.12.1
-attrs==25.4.0
+# - psutil is the only C package of the M2 closure; pinned to 7.1.3 because
+#   that is the newest version with a Chaquopy prebuilt android wheel
+#   (hermes' own pin is 7.2.2 — API surface used is identical).
+# - pydantic-core (Rust, via pydantic) and jiter (Rust, via openai) have no
+#   PyPI/Chaquopy android wheels: embedded/build-android-wheels.sh builds
+#   them into app/wheels-android/, consumed via pip --find-links.
+# - pydantic / openai / cryptography never import at run_agent import time
+#   (verified by census); they load at gateway serve / first model call.
+# - uvicorn ships WITHOUT [standard] extras (uvloop/httptools/watchfiles
+#   have no Android builds; hermes runs plain asyncio then).
 certifi==2026.5.20
 charset-normalizer==3.4.4
 click==8.4.2
 h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
-idna==3.18
+psutil==7.1.3
 markdown-it-py==4.0.0
 mdurl==0.1.2
-psutil==7.2.2
 python-dotenv==1.2.2
 requests==2.33.0
 rich==14.3.3
@@ -38,3 +32,22 @@ sniffio==1.3.1
 socksio==1.0.0
 urllib3==2.7.0
 websockets==15.0.1
+
+
+# ---- Milestone 3 additions (serve path + first model call) ----
+# fastapi/uvicorn/starlette: the gateway server (hermes' serve). uvicorn is
+# deliberately WITHOUT the [standard] extras (uvloop/httptools/watchfiles:
+# no Android builds; plain-asyncio loop is what hermes uses then).
+# pydantic/openai (+ transitives): first LLM round trip. pydantic-core and
+# jiter ship as locally built aarch64-android wheels via
+# embedded/build-android-wheels.sh (gradle finds them via --find-links).
+fastapi==0.133.1
+uvicorn==0.41.0
+starlette==1.3.1
+python-multipart==0.0.32
+pydantic==2.13.4
+openai==2.24.0
+distro==1.9.0
+tqdm==4.67.3
+typing_extensions==4.15.0
+jiter==0.13.0

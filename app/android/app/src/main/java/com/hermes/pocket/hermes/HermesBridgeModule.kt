@@ -28,4 +28,28 @@ class HermesBridgeModule(reactContext: ReactApplicationContext) :
     result.putString("hermesVersion", status["hermesVersion"] as String?)
     promise.resolve(result)
   }
+
+  @ReactMethod
+  fun getGateway(promise: Promise) {
+    val raw = HermesRuntime.gatewayInfoJson()
+    if (raw == null) {
+      promise.resolve(null)
+      return
+    }
+    try {
+      val obj = org.json.JSONObject(raw)
+      val result = Arguments.createMap()
+      for (key in obj.keys()) {
+        when (val v = obj.get(key)) {
+          is Boolean -> result.putBoolean(key, v)
+          is Int -> result.putInt(key, v)
+          is String -> result.putString(key, v)
+          else -> result.putString(key, if (v == org.json.JSONObject.NULL) null else String.valueOf(v))
+        }
+      }
+      promise.resolve(result)
+    } catch (e: org.json.JSONException) {
+      promise.reject("gateway_info", "bad gateway json", e)
+    }
+  }
 }
