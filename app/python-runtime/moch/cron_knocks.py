@@ -93,8 +93,11 @@ def _notify(name: str, status: str, error) -> None:
     failed = status != "completed"
     title = f"{name} {'failed' if failed else 'finished'}"
     text = (str(error)[:180] if error else "Automation ran on this phone.")
+    print(f"[cron-knocks] firing knock: {title}", file=sys.stderr, flush=True)
     for n in list(_notifiers):
         try:
-            n.notify(title, text)
+            # `knock`, never `notify`: java.lang.Object.notify() is final and
+            # Chaquopy's overload dispatch on that name is unreliable.
+            n.knock(title, text)
         except Exception as exc:  # noqa: BLE001 — one bad sink must not kill the rest
-            print(f"[cron-knocks] notify failed: {exc}", file=sys.stderr, flush=True)
+            print(f"[cron-knocks] notify failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)

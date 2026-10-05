@@ -16,12 +16,16 @@ import com.hermes.pocket.R
  * or fails. Called from Python (moch/cron_knocks.py) via Chaquopy interop —
  * the method name and signature are the cross-language contract.
  *
+ * The method is deliberately named `knock`, NOT `notify`: `notify` collides
+ * with the final java.lang.Object.notify() threading primitive, and
+ * Chaquopy's overload dispatch on that name is unreliable.
+ *
  * Uses the existing `hermes-alerts` channel (the app's knock channel); it is
  * created here if notifications haven't initialized yet.
  */
 class CronKnockNotifier(private val context: Context) {
 
-  fun notify(title: String, text: String) {
+  fun knock(title: String, text: String) {
     try {
       val app = context.applicationContext
       val nm = app.getSystemService(NotificationManager::class.java)
