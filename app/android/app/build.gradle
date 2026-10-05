@@ -165,7 +165,20 @@ android {
 chaquopy {
     defaultConfig {
         version = "3.11"
-        buildPython(findProperty("chaquopyBuildPython") ?: "/home/mamoun/.local/share/uv/python/cpython-3.11.16-linux-x86_64-gnu/bin/python3.11")
+        // Prefer python3.11 from PATH (EAS build images provide it); fall
+        // back to this machine's uv-managed 3.11. Override always wins:
+        // -PchaquopyBuildPython=<path>
+        def buildPythonDefault = "python3.11"
+        try {
+            def probe = ["bash", "-c", "command -v python3.11"].execute(null, rootDir)
+            probe.waitFor()
+            if (probe.exitValue() != 0) {
+                buildPythonDefault = "/home/mamoun/.local/share/uv/python/cpython-3.11.16-linux-x86_64-gnu/bin/python3.11"
+            }
+        } catch (Exception ignored) {
+            buildPythonDefault = "/home/mamoun/.local/share/uv/python/cpython-3.11.16-linux-x86_64-gnu/bin/python3.11"
+        }
+        buildPython(findProperty("chaquopyBuildPython") ?: buildPythonDefault)
         pip {
             // Locally built aarch64-android wheels (pydantic-core, jiter)
             // plus the Chaquopy-prebuilt psutil land here — see
