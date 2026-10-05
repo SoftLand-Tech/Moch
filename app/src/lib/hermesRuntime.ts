@@ -28,6 +28,8 @@ interface HermesBridgeModule {
   status(): Promise<HermesRuntimeStatus>
   getGateway(): Promise<EmbeddedGatewayInfo | null>
   stop(): Promise<boolean>
+  restart(): Promise<boolean>
+  requestBatteryExemption(): Promise<'already' | 'requested'>
 }
 
 const bridge = NativeModules.HermesBridge as HermesBridgeModule | undefined
@@ -47,4 +49,16 @@ export function hermesRuntimeStatus(): Promise<HermesRuntimeStatus> {
 export function getEmbeddedGateway(): Promise<EmbeddedGatewayInfo | null> {
   if (!bridge) return Promise.resolve(null)
   return bridge.getGateway()
+}
+
+/** True runtime restart: the process relaunches itself with a fresh Python. */
+export function restartEmbeddedRuntime(): Promise<void> {
+  if (!bridge) return Promise.resolve()
+  return bridge.restart().then(() => undefined)
+}
+
+/** Show the system's battery-optimization exemption dialog (user consent). */
+export function requestBatteryExemption(): Promise<'already' | 'requested' | null> {
+  if (!bridge) return Promise.resolve(null)
+  return bridge.requestBatteryExemption()
 }

@@ -37,7 +37,6 @@ class HermesService : Service() {
     private var running = false
 
     fun isRunning(): Boolean = running
-
     fun start(context: Context) {
       val appContext = context.applicationContext
       try {
@@ -51,6 +50,39 @@ class HermesService : Service() {
 
     fun stop(context: Context) {
       context.applicationContext.stopService(Intent(context, HermesService::class.java))
+    }
+
+    /** Full runtime teardown: stop the service, then end the process.
+     *  Chaquopy cannot unload Python in-process, so "stopped" only becomes
+     *  true (memory freed, sockets gone) when the process dies. Called from
+     *  the notification's Stop action — the user is not looking at the app. */
+    fun shutdownProcess(context: Context) {
+      val app = context.applicationContext
+      app.stopService(Intent(app, HermesService::class.java))
+      android.os.Handler(android.os.Looper.getMainLooper())
+          .postDelayed(
+              {
+                Log.i(TAG, "runtime stopped by user — exiting process")
+                Runtime.getRuntime().exit(0)
+              },
+              600)
+    }
+
+    /** True runtime restart: schedule the app's own relaunch, then exit.
+     *  Fresh process = fresh CPython + gateway (START_STICKY would also
+     *  restart, but only on the SYSTEM'S schedule and only after a kill). */
+    fun restartApp(context: Context) {
+      val app = context.applicationContext
+      val intent =
+          Intent(app, MainActivity::class.java)
+              .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+      val pending =
+          PendingIntent.getActivity(
+              app, 2, intent, PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+      val am = app.getSystemService(android.app.AlarmManager::class.java)
+      am.set(android.app.AlarmManager.ELAPSED_REALTIME, android.os.SystemClock.elapsedRealtime() + 800, pending)
+      Log.i(TAG, "runtime restart requested — exiting process")
+      Runtime.getRuntime().exit(0)
     }
   }
 
@@ -69,7 +101,8 @@ class HermesService : Service() {
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     if (intent?.action == ACTION_STOP) {
-      stopSelf()
+      stopForeground(STOP_FOREGROUND_REMOVE)
+      shutdownProcess(this)
       return START_NOT_STICKY
     }
     val notification = buildNotification()

@@ -63,4 +63,37 @@ class HermesBridgeModule(reactContext: ReactApplicationContext) :
       promise.reject("hermes_stop", e)
     }
   }
+
+  /** True runtime restart (M6): fresh process = fresh CPython + gateway. */
+  @ReactMethod
+  fun restart(promise: Promise) {
+    try {
+      HermesService.restartApp(reactApplicationContext)
+      promise.resolve(true)
+    } catch (e: RuntimeException) {
+      promise.reject("hermes_restart", e)
+    }
+  }
+
+  /** Opt-in battery-optimization exemption dialog (sanctioned system flow). */
+  @ReactMethod
+  fun requestBatteryExemption(promise: Promise) {
+    try {
+      val ctx = reactApplicationContext
+      val pm = ctx.getSystemService(android.os.PowerManager::class.java)
+      if (pm.isIgnoringBatteryOptimizations(ctx.packageName)) {
+        promise.resolve("already")
+        return
+      }
+      val intent =
+          android.content.Intent(
+              android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+              android.net.Uri.parse("package:${ctx.packageName}"))
+      intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+      ctx.startActivity(intent)
+      promise.resolve("requested")
+    } catch (e: RuntimeException) {
+      promise.reject("hermes_battery", e)
+    }
+  }
 }
