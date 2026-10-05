@@ -486,6 +486,19 @@ async function dial(c: ConnConfig, opts?: { isRetry?: boolean }): Promise<void> 
   if (isLocalHost(c.host)) {
     const gw = await getEmbeddedGateway().catch(() => null)
     if (gw?.token) c = { ...c, token: gw.token }
+    // Wait out the runtime boot (first launch extracts assets for tens of
+    // seconds) instead of burning reconnect attempts; surface a runtime boot
+    // failure as the connection error so the UI names the real cause.
+    const deadline = Date.now() + 75_000
+    while (Date.now() < deadline) {
+      const g = await getEmbeddedGateway().catch(() => null)
+      if (g?.error) throw new Error(`embedded runtime failed: ${String(g.error).slice(0, 400)}`)
+      if (g?.ready) { if (g.token) c = { ...c, token: g.token }; break }
+      if (gen !== connectGen) return // superseded by a newer dial
+      const { promise, resolve } = Promise.withResolvers<void>()
+      setTimeout(resolve, 1000)
+      await promise
+    }
   }
   const v = validateConfig(c)
   wantConnection = true

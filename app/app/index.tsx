@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Pressable } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
@@ -7,15 +7,26 @@ import { Ionicons } from '@expo/vector-icons'
 import { Icon } from '../src/components/Icon'
 import { PairForm } from '../src/components/PairForm'
 import { MochiStage } from '../src/components/Mascot'
-import { servers as serversStore, switchToServer } from '../src/lib/gateway'
+import { servers as serversStore, switchToServer, connConfig } from '../src/lib/gateway'
 import { C, useStyles } from '../src/lib/theme'
 
 export default function Onboarding() {
   const s = useStyles(makeS)
   const saved = useStore(serversStore)
+  const active = useStore(connConfig)
   const [switchingId, setSwitchingId] = useState<string | null>(null)
   const [switchErr, setSwitchErr] = useState<string | null>(null)
 
+  // A returning user (saved pairing) goes straight to chat — the tabs render
+  // the connecting state and the global overlay reports progress. Onboarding
+  // is only for first pairings.
+  const redirected = useRef(false)
+  useEffect(() => {
+    if (!redirected.current && active) {
+      redirected.current = true
+      router.replace('/(tabs)/chat')
+    }
+  }, [active])
   const pick = async (id: string) => {
     setSwitchingId(id)
     setSwitchErr(null)
