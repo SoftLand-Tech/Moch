@@ -6,6 +6,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera'
 import { connect, normalizeHost } from '../lib/gateway'
 import { getEmbeddedGateway } from '../lib/hermesRuntime'
 import { parseConnectUrl } from '../lib/pairing'
+import { ensureNotificationPermission } from '../lib/push'
 import { C, useStyles } from '../lib/theme'
 
 /**
@@ -62,7 +63,13 @@ export function PairForm({ onPaired }: { onPaired: () => void }) {
         throw new Error(gw?.error || 'Embedded runtime not ready — give it a few seconds and try again.')
       }
       await connect({ host: `127.0.0.1:${gw.port}`, token: gw.token, tls: false, name: 'This phone' })
+      // Automation knocks are regular notifications — on 13+ they need the
+      // POST_NOTIFICATIONS runtime grant (the FGS notice is exempt, so a
+      // fresh install looks "allowed" while knocks are silently dropped).
+      // Ask at pairing: the embedded flow's natural permission moment.
+      void ensureNotificationPermission().catch(() => {})
       onPaired()
+      setBusy(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Embedded runtime unavailable')
     } finally {
