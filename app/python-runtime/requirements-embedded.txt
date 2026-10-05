@@ -2,19 +2,21 @@
 #
 # The M2 block is the exact import closure of `import run_agent`
 # (hermes-agent 0.21.3); the M3 block adds the gateway serve path and the
-# first model call. Census-verified against the reference install
-# (~/.hermes/hermes-agent). Versions are hermes' own venv pins.
+# first model call; the runtime block holds deps imported lazily by
+# config/chat code (missed by the import-time census). Census-verified
+# against the reference install (~/.hermes/hermes-agent); versions are
+# hermes' own venv pins.
 #
 # Native notes:
-# - psutil is the only C package of the M2 closure; pinned to 7.1.3 because
-#   that is the newest version with a Chaquopy prebuilt android wheel
-#   (hermes' own pin is 7.2.2 — API surface used is identical). Chaquopy
-#   builds it from sdist with the NDK.
+# - psutil is the only C package of the M2 closure; pinned to 7.1.3 (newest
+#   with a Chaquopy-compatible android build path; hermes' own pin is 7.2.2
+#   — API surface used is identical). Chaquopy builds it from sdist (NDK).
 # - pydantic-core (Rust, via pydantic) and jiter (Rust, via openai) have no
 #   PyPI/Chaquopy android wheels: embedded/build-android-wheels.sh builds
 #   them into app/wheels-android/, consumed via pip --find-links.
-# - pydantic / openai / cryptography never import at run_agent import time
-#   (verified by census); they load at gateway serve / first model call.
+# - ruamel.yaml 0.19.1 (hermes pins 0.18.17): 0.18 hard-depends on the C
+#   accelerator ruamel.yaml.clib (no android build); 0.19 gates clib behind
+#   extras — pure python, API-compatible for hermes' round-trip use.
 # - uvicorn ships WITHOUT [standard] extras (uvloop/httptools/watchfiles
 #   have no Android builds; hermes runs plain asyncio then).
 
@@ -42,25 +44,8 @@ urllib3==2.7.0
 websockets==15.0.1
 
 # ---- M3: serve path + first model call ----
-# fastapi/uvicorn/starlette: the gateway server (hermes' serve). uvicorn is
-# deliberately WITHOUT the [standard] extras. pydantic/openai (+ transitives):
-# first LLM round trip; pydantic-core and jiter ship as locally built
-# aarch64-android wheels (see build-android-wheels.sh + --find-links).
-
-# ---- Runtime-path additions (lazily imported by config/chat code) ----
-# ruamel.yaml: config WRITING (model prefs, thinking, save_key). 0.19.1
-# (hermes pins 0.18.17): 0.18 hard-depends on the C accelerator
-# ruamel.yaml.clib (no android build); 0.19 gates clib behind extras —
-# pure python, API-compatible for hermes' round-trip use. hermes
-# core dep, imported lazily so the M2 import-census missed it.
-# tenacity: provider retry; jinja2: prompt/skill rendering; packaging:
-# version gates on three production paths; snowballstemmer: tool_search
-# BM25 stemming (runs during agent turns).
-ruamel.yaml==0.19.1
-tenacity==9.1.4
-Jinja2==3.1.6
-packaging==26.0
-snowballstemmer==3.1.1
+distro==1.9.0
+fastapi==0.133.1
 jiter==0.13.0
 openai==2.24.0
 pydantic==2.13.4
@@ -69,3 +54,10 @@ starlette==1.3.1
 tqdm==4.67.3
 typing_extensions==4.15.0
 uvicorn==0.41.0
+
+# ---- Runtime path: lazily imported by config/chat code ----
+Jinja2==3.1.6
+packaging==26.0
+ruamel.yaml==0.19.1
+snowballstemmer==3.1.1
+tenacity==9.1.4
