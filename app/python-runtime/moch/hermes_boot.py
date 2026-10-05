@@ -69,7 +69,9 @@ def _prepare_home(home: Path) -> None:
     # ownership: Permission denied". Point ANDROID_DATA at app storage.
     android_data = home / "cache" / "android-data"
     (android_data / "dalvik-cache").mkdir(parents=True, exist_ok=True)
-    os.environ.setdefault("ANDROID_DATA", str(android_data))
+    # Unconditional: the app process inherits ANDROID_DATA=/data from zygote,
+    # and setdefault kept the unwritable root path (first hotfix miss).
+    os.environ["ANDROID_DATA"] = str(android_data)
     # before importing run_agent and reset tempfile's cache so it takes hold.
     scratch = home / "cache" / "scratch"
     scratch.mkdir(parents=True, exist_ok=True)

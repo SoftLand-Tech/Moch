@@ -4,6 +4,7 @@ import * as SecureStore from 'expo-secure-store'
 import { JsonRpcGatewayClient, type GatewayEvent, type ConnectionState, type ServerRequest } from '../protocol/json-rpc-gateway'
 import { RnWebSocketAdapter } from '../protocol/rn-socket'
 import { log } from './log'
+import { getEmbeddedGateway } from './hermesRuntime'
 
 export interface ConnConfig {
   host: string // "127.0.0.1:9119" or "myserver.tailnet.ts.net:443"
@@ -478,8 +479,15 @@ function ensureTokenReadvertise(): void {
 async function dial(c: ConnConfig, opts?: { isRetry?: boolean }): Promise<void> {
   ensureTokenReadvertise() // idempotent: arms the mid-session token re-advertise once
   const gen = ++connectGen
+  // Embedded gateway: always use the LIVE token from the runtime. A stored
+  // token can go stale (e.g. app uninstall regenerated the token file while
+  // SecureStore kept the old pairing) — that presented as "must forget and
+  // re-pair after reinstall".
+  if (isLocalHost(c.host)) {
+    const gw = await getEmbeddedGateway().catch(() => null)
+    if (gw?.token) c = { ...c, token: gw.token }
+  }
   const v = validateConfig(c)
-  lastConfig = v
   wantConnection = true
   manualClose = false
   gatewayError.set(null)
