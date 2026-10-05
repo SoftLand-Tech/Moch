@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 import threading
 import time
 from pathlib import Path
@@ -46,49 +47,54 @@ def _jobs_by_id(home: Path) -> dict[str, str]:
         return {}
 
 
+def _read_finished(db: Path) -> list:
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
+    try:
+        return con.execute(
+            "SELECT id, job_id, status, error, finished_at FROM executions"
+            " WHERE status IN ('completed','failed')"
+            " ORDER BY claimed_at DESC LIMIT 20"
+        ).fetchall()
+    finally:
+        con.close()
+
+
 def _loop() -> None:
     from moch import hermes_boot
 
     home = hermes_boot._hermes_home()
     db = home / "cron" / "executions.db"
+    # Prime EXACTLY once, on the first loop iteration (~watcher start), even
+    # when the DB does not exist yet: a fresh install's FIRST-ever execution
+    # must still knock. (Priming on first successful read swallowed it.)
     primed = False
     while True:
+        rows: list = []
         try:
             if db.exists():
-                con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
-                try:
-                    rows = con.execute(
-                        "SELECT id, job_id, status, error, finished_at FROM executions"
-                        " WHERE status IN ('completed','failed')"
-                        " ORDER BY claimed_at DESC LIMIT 20"
-                    ).fetchall()
-                finally:
-                    con.close()
-                if not primed:
-                    # Never knock for history that predates this boot.
-                    _seen.update(str(r[0]) for r in rows)
-                    primed = True
-                else:
-                    names = _jobs_by_id(home)
-                    for rid, job_id, status, error, _finished in reversed(rows):
-                        rid = str(rid)
-                        if rid in _seen:
-                            continue
-                        _seen.add(rid)
-                        _notify(names.get(str(job_id), str(job_id or "automation")), str(status), error)
+                rows = _read_finished(db)
         except Exception:  # noqa: BLE001 — polling must never die
-            pass
+            rows = []
+        if not primed:
+            _seen.update(str(r[0]) for r in rows)
+            primed = True
+        else:
+            names = _jobs_by_id(home)
+            for rid, job_id, status, error, _finished in reversed(rows):
+                rid = str(rid)
+                if rid in _seen:
+                    continue
+                _seen.add(rid)
+                _notify(names.get(str(job_id), str(job_id or "automation")), str(status), error)
         time.sleep(POLL_S)
 
 
 def _notify(name: str, status: str, error) -> None:
     failed = status != "completed"
     title = f"{name} {'failed' if failed else 'finished'}"
-    text = (str(error)[:180] if error else "Automation ran on this phone.") + (
-        " (on this phone)" if not error else ""
-    )
+    text = (str(error)[:180] if error else "Automation ran on this phone.")
     for n in list(_notifiers):
         try:
             n.notify(title, text)
-        except Exception:  # noqa: BLE001 — one bad sink must not kill the rest
-            pass
+        except Exception as exc:  # noqa: BLE001 — one bad sink must not kill the rest
+            print(f"[cron-knocks] notify failed: {exc}", file=sys.stderr, flush=True)
