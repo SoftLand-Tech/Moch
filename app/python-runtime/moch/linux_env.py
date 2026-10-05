@@ -68,6 +68,14 @@ exec /system/bin/linker64 "$LD/bin/proot" -r "$LD/rootfs" \\
         shim = bin_dir / name
         shim.write_text(body, encoding="utf-8")
         os.chmod(shim, 0o755)
+    # Guest /bin/sh is dash by default (Ubuntu); hermes' command wrapper
+    # uses bash-only `builtin`. Point /bin/sh at bash so every invocation
+    # is bash-compatible — fixes the foreground-mode "builtin: not found".
+    guest_sh = linux_dir / "rootfs" / "bin" / "sh"
+    guest_bash = linux_dir / "rootfs" / "usr" / "bin" / "bash"
+    if guest_bash.exists() and (guest_sh.is_symlink() and "dash" in str(guest_sh.resolve())):
+        guest_sh.unlink()
+        guest_sh.symlink_to("/usr/bin/bash")
 
 
 def _log(msg: str) -> None:

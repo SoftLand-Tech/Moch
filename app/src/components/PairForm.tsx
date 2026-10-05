@@ -70,7 +70,6 @@ export function PairForm({ onPaired }: { onPaired: () => void }) {
       // Ask at pairing: the embedded flow's natural permission moment.
       void ensureNotificationPermission().catch(() => {})
       router.push('/setup')
-      onPaired()
       setBusy(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Embedded runtime unavailable')
