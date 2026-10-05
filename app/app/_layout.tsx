@@ -125,6 +125,15 @@ export default function RootLayout() {
 
     const handleUrl = async (url: string | null) => {
       if (!url || !url.startsWith('hermes://')) return
+      // In-app routes (knock taps land here — see CronKnockNotifier).
+      if (url.startsWith('hermes://automations')) {
+        router.push('/(tabs)/automations')
+        return
+      }
+      if (url.startsWith('hermes://chat')) {
+        router.push('/(tabs)/chat')
+        return
+      }
       try {
         const p = parseConnectUrl(url)
         await connect({ host: p.host, token: p.token, tls: p.tls, name: p.name })

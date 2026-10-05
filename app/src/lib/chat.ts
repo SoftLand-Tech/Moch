@@ -1968,13 +1968,18 @@ function flagAttention(
 ) {
   const s = sessionsById.get()[liveId]
   if (!s?.storedId) return
-  if (kind === 'done' && isShowing(liveId)) {
+  // "Showing" must mean the user can actually see it: the chat route stays
+  // focused while the app is backgrounded, so route-focus alone suppressed
+  // every completion notification (the turn-done knock never fired from the
+  // app's own UI).
+  const watching = isShowing(liveId) && !isBackgrounded()
+  if (kind === 'done' && watching) {
     // The user watched the turn land — nothing to draw attention to.
     clearAttention(s.storedId)
   } else {
     markAttention(s.storedId, kind)
   }
-  if (opts?.suppress || isShowing(liveId)) return
+  if (opts?.suppress || watching) return
   const body = notify.body.replace(/\s+/g, ' ').trim().slice(0, 180)
   if (isBackgrounded()) {
     void notifyLocal(notify.title, body, { screen: 'chat', storedId: s.storedId, kind })

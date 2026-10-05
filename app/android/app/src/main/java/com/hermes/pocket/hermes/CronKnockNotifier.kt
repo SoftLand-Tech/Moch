@@ -39,7 +39,8 @@ class CronKnockNotifier(private val context: Context) {
           PendingIntent.getActivity(
               app,
               0,
-              Intent(app, MainActivity::class.java),
+              Intent(Intent.ACTION_VIEW, android.net.Uri.parse("hermes://automations"), app, MainActivity::class.java)
+                  .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
               PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
       val notification =
           NotificationCompat.Builder(app, KNOCK_CHANNEL)
