@@ -44,7 +44,7 @@ class HermesBridgeModule(reactContext: ReactApplicationContext) :
           is Boolean -> result.putBoolean(key, v)
           is Int -> result.putInt(key, v)
           is String -> result.putString(key, v)
-          else -> result.putString(key, if (v == org.json.JSONObject.NULL) null else String.valueOf(v))
+          else -> result.putString(key, if (v == org.json.JSONObject.NULL) null else v.toString())
         }
       }
       promise.resolve(result)

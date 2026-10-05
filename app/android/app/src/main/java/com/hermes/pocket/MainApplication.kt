@@ -13,6 +13,7 @@ import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint
 import com.hermes.pocket.hermes.HermesBridgePackage
 import com.hermes.pocket.hermes.HermesRuntime
 
+import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ExpoReactHostFactory
 
 class MainApplication : Application(), ReactApplication {
