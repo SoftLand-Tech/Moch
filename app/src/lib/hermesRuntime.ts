@@ -32,7 +32,8 @@ interface HermesBridgeModule {
   requestBatteryExemption(): Promise<'already' | 'requested'>
   linuxBootstrap(distro: string): Promise<{ ok: boolean; steps: string }>
   linuxExec(command: string): Promise<{ ok: boolean; stdout: string; stderr: string; error: string }>
-  linuxStatus(): Promise<{ bootstrapped: boolean; sizeMb: number }>
+  linuxStatus(): Promise<{ bootstrapped: boolean; sizeMb: number; distro: string }>
+  linuxReset(): Promise<boolean>
 }
 
 
@@ -73,6 +74,12 @@ export function requestBatteryExemption(): Promise<'already' | 'requested' | nul
 export interface LinuxGuestStatus {
   bootstrapped: boolean
   sizeMb: number
+  distro: string
+}
+
+export function linuxReset(): Promise<boolean> {
+  if (!bridge) return Promise.resolve(false)
+  return bridge.linuxReset()
 }
 
 export function linuxBootstrap(distro: string): Promise<{ ok: boolean; steps: string } | null> {

@@ -143,9 +143,22 @@ class HermesBridgeModule(reactContext: ReactApplicationContext) :
       val map = Arguments.createMap()
       map.putBoolean("bootstrapped", obj.optBoolean("bootstrapped", false))
       map.putDouble("sizeMb", obj.optDouble("size_mb", 0.0))
+      map.putString("distro", obj.optString("distro", ""))
       promise.resolve(map)
     } catch (e: Exception) {
       promise.reject("linux_status", e.message, e)
+    }
+  }
+
+  @ReactMethod
+  fun linuxReset(promise: Promise) {
+    try {
+      val py = com.chaquo.python.Python.getInstance()
+      val result = py.getModule("moch.linux_env").callAttr("reset").toString()
+      val obj = org.json.JSONObject(result)
+      promise.resolve(obj.optBoolean("ok", false))
+    } catch (e: Exception) {
+      promise.reject("linux_reset", e.message, e)
     }
   }
 }

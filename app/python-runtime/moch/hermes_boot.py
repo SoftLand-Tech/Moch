@@ -67,6 +67,23 @@ def _prepare_home(home: Path) -> None:
     workspace = home / "workspace"
     workspace.mkdir(parents=True, exist_ok=True)
     os.environ["MOCH_WORKSPACE"] = str(workspace)
+    # Moch Linux: if the guest is installed, its shim dir goes AHEAD of the
+    # system paths so every `sh`/`bash` resolution lands in the guest. Before
+    # install the dir doesn't exist and the entry is inert.
+    linux_bin = home / "linux" / "bin"
+    if (home / "linux" / "rootfs").exists() and not (linux_bin / "sh").exists():
+        # Guest installed but shims missing (installed by an older build):
+        # tiny idempotent files — created here so routing works from the
+        # next command without any download or UI interaction.
+        try:
+            from moch.linux_env import ensure_shims
+
+            ensure_shims()
+        except Exception:  # noqa: BLE001 — routing falls back to native sh
+            pass
+    linux_bin_str = str(linux_bin)
+    if linux_bin_str not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = linux_bin_str + ":" + os.environ.get("PATH", "")
     # Android child-VM shim (M5 hotfix): hermes spawns child interpreters
     # (slash worker = automations "Run now", cron jobs, one-shots) via
     # sys.executable, which under Chaquopy is an app_process64 launcher. The
@@ -91,7 +108,6 @@ def boot() -> dict:
     global _BOOT_REPORT
     if _BOOT_REPORT is not None:
         return _BOOT_REPORT
-
     stamp = _vendor_stamp()
     report: dict = {
         "ok": False,

@@ -225,6 +225,7 @@ export default function RootLayout() {
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="add-computer" options={{ headerShown: false, presentation: 'modal' }} />
+        <Stack.Screen name="setup" options={{ headerShown: false, presentation: 'modal' }} />
       </Stack>
       {!online && state !== 'idle' ? (
         <View style={s.overlay}>

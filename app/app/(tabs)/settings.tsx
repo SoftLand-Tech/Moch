@@ -16,7 +16,7 @@ import { diagLog, logText } from '../../src/lib/log'
 import {
   notificationsEnabled, setNotificationsEnabled, ensureNotificationPermission,
 } from '../../src/lib/push'
-import { getEmbeddedGateway, hermesRuntimeStatus, restartEmbeddedRuntime, stopEmbeddedRuntime, requestBatteryExemption } from '../../src/lib/hermesRuntime'
+import { getEmbeddedGateway, hermesRuntimeStatus, restartEmbeddedRuntime, stopEmbeddedRuntime, requestBatteryExemption, linuxStatus, linuxReset, linuxBootstrap, type LinuxGuestStatus } from '../../src/lib/hermesRuntime'
 import { C, useStyles, setTheme, THEME_OPTIONS, themeId, type ThemeId } from '../../src/lib/theme'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
@@ -31,6 +31,52 @@ export default function Settings() {
 }
 
 // ── Small building blocks ───────────────────────────────────────────────────
+
+function LinuxSectionRows() {
+  const [st, setSt] = React.useState<LinuxGuestStatus | null>(null)
+  const [busy, setBusy] = React.useState(false)
+  React.useEffect(() => {
+    let alive = true
+    const tick = () => { linuxStatus().then((x) => { if (alive) setSt(x) }).catch(() => {}) }
+    tick()
+    const t = setInterval(tick, 5000)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
+  const installed = !!st?.bootstrapped
+  return (
+    <>
+      <Row
+        icon="logo-tux"
+        label={installed ? `Linux ready — ${st?.distro ?? 'guest'}` : st?.sizeMb ? 'Linux — setting up…' : 'No Linux environment'}
+        sub={installed ? `${st?.sizeMb ?? 0} MB on disk · agent shell runs inside it` : st?.sizeMb ? `${st?.sizeMb} MB so far…` : 'Ubuntu/Debian userspace for the agent (apt, any language, browser)'}
+      />
+      <Row
+        icon="download-outline"
+        label={installed ? 'Update / reinstall environment' : 'Install Linux environment'}
+        sub="Downloads the base system (needs network, few minutes)"
+        onPress={() => {
+          if (busy) return
+          setBusy(true)
+          void linuxBootstrap('ubuntu-24.04').finally(() => setBusy(false))
+        }}
+      />
+      {installed ? (
+        <Row
+          icon="trash-outline"
+          label="Reset Linux environment"
+          sub="Deletes the guest and everything installed inside it"
+          danger
+          onPress={() => {
+            showAlert('Reset Linux environment?', 'Deletes the guest rootfs and all packages inside it.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Reset', style: 'destructive', onPress: () => { void linuxReset() } },
+            ])
+          }}
+        />
+      ) : null}
+    </>
+  )
+}
 
 function RuntimeSectionRows() {
   const [gw, setGw] = React.useState<{ ready: boolean; port: number | null; hermesVersion?: string | null } | null>(null)
@@ -268,6 +314,10 @@ function SettingsInner() {
 
         <Section title="ON-PHONE RUNTIME">
           <RuntimeSectionRows />
+        </Section>
+
+        <Section title="LINUX ENVIRONMENT">
+          <LinuxSectionRows />
         </Section>
         <Section title="APPEARANCE">
           <View style={s.themeRow}>

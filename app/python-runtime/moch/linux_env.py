@@ -47,6 +47,29 @@ def _linux_dir() -> Path:
     return hermes_boot._hermes_home() / "linux"
 
 
+def ensure_shims() -> None:
+    """PATH shims: hermes resolves `sh`/`bash` through PATH, so thin wrappers
+    ahead of the system paths route every terminal command into the guest
+    with zero hermes internals patched. Idempotent."""
+    linux_dir = _linux_dir()
+    bin_dir = linux_dir / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    body = f"""#!/system/bin/sh
+# Moch Linux shim — routes shell commands into the distro guest.
+LD="{linux_dir}"
+export LD_LIBRARY_PATH="$LD/bin/lib"
+export PROOT_LOADER="$LD/libexec/proot/loader"
+export PROOT_TMP_DIR="$LD/tmp"
+exec /system/bin/linker64 "$LD/bin/proot" -r "$LD/rootfs" \\
+  -b "${{MOCH_WORKSPACE:-$LD/../workspace}}:/workspace" -b /dev -b /proc -0 -w /root \\
+  /bin/bash "$@"
+"""
+    for name in ("sh", "bash"):
+        shim = bin_dir / name
+        shim.write_text(body, encoding="utf-8")
+        os.chmod(shim, 0o755)
+
+
 def _log(msg: str) -> None:
     print(f"[moch-linux] {msg}", file=sys.stderr, flush=True)
 
@@ -175,6 +198,8 @@ def bootstrap(distro: str = "ubuntu-24.04") -> dict:
         if candidate.exists():
             os.chmod(candidate, 0o755)
 
+    step("shims", ensure_shims)
+
     if not rootfs.exists():
         def _rootfs():
             url = ROOTFS_URLS[distro]
@@ -233,8 +258,30 @@ def status() -> dict:
     linux_dir = _linux_dir()
     proot = linux_dir / "bin" / "proot"
     rootfs = linux_dir / "rootfs"
+    distro = None
+    os_release = rootfs / "etc" / "os-release"
+    if os_release.exists():
+        try:
+            for line in os_release.read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.startswith("PRETTY_NAME="):
+                    distro = line.split("=", 1)[1].strip().strip('"')
+                    break
+        except OSError:
+            pass
     return {
         "bootstrapped": proot.exists() and rootfs.exists(),
         "rootfs_exists": rootfs.exists(),
+        "distro": distro,
         "size_mb": round(sum(f.stat().st_size for f in rootfs.rglob("*") if f.is_file()) / 1e6, 1) if rootfs.exists() else 0,
     }
+
+
+def reset() -> dict:
+    """Remove the whole guest tree (Settings → Reset)."""
+    linux_dir = _linux_dir()
+    try:
+        if linux_dir.exists():
+            shutil.rmtree(linux_dir, ignore_errors=False)
+        return {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}

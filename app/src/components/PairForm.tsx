@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react'
 import { View, Text, TextInput, Pressable, StyleSheet, ActivityIndicator, Modal } from 'react-native'
+import { router } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import { Icon } from './Icon'
 import { CameraView, useCameraPermissions } from 'expo-camera'
@@ -68,6 +69,7 @@ export function PairForm({ onPaired }: { onPaired: () => void }) {
       // fresh install looks "allowed" while knocks are silently dropped).
       // Ask at pairing: the embedded flow's natural permission moment.
       void ensureNotificationPermission().catch(() => {})
+      router.push('/setup')
       onPaired()
       setBusy(false)
     } catch (e) {
