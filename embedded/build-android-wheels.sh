@@ -104,6 +104,7 @@ build_rust () {  # build_rust <dist> <version>
 
 build_rust pydantic-core 2.46.4
 build_rust jiter 0.13.0
+build_rust rpds-py 0.30.0
 
 # ---- Normalize tags to the Chaquopy android platform tag -----------------------
 # maturin emits linux_aarch64 wheels for android targets; Chaquopy's pip

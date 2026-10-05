@@ -61,3 +61,20 @@ packaging==26.0
 ruamel.yaml==0.19.1
 snowballstemmer==3.1.1
 tenacity==9.1.4
+
+
+# ---- M5: tool / cron / skills runtime paths ----
+# ptyprocess: terminal tool + process registry (PTY availability is decided
+# on-device at runtime; without the module hermes can't even try).
+# croniter: automations scheduler; pathspec: gitignore-aware matching;
+# jsonschema (+rpds-py android wheel): tool_search/delegation schema
+# validation; PyJWT (no [crypto] extra): dashboard auth base; Markdown:
+# send_message HTML path; wcwidth: markdown table rendering.
+PyJWT==2.13.0
+Markdown==3.10.2
+croniter==6.0.0
+jsonschema==4.26.0
+pathspec==1.1.1
+ptyprocess==0.7.0
+rpds-py==0.30.0
+wcwidth==0.6.0

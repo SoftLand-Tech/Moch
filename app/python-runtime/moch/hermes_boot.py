@@ -52,6 +52,15 @@ def _hermes_home() -> Path:
 
 def _prepare_home(home: Path) -> None:
     home.mkdir(parents=True, exist_ok=True)
+    # Workspace (M5): new sessions' default cwd. Rooting happens app-side —
+    # the client passes cwd=<workspace> on session.create (hermes treats an
+    # explicit existing dir as a persistent session workspace).
+    # NOTE: os.chdir(workspace) and TERMINAL_CWD both deadlocked
+    # session.create in the embedded gateway (verified via thread dump);
+    # the explicit-cwd path is exercised instead.
+    workspace = home / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    os.environ["MOCH_WORKSPACE"] = str(workspace)
     # hermes' scratch contract: TMPDIR on real storage, not tmpfs. Set it
     # before importing run_agent and reset tempfile's cache so it takes hold.
     scratch = home / "cache" / "scratch"

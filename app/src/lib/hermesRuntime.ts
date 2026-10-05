@@ -20,6 +20,7 @@ export interface EmbeddedGatewayInfo {
   ready: boolean
   port: number | null
   token: string | null
+  workspace: string | null
   error: string | null
 }
 

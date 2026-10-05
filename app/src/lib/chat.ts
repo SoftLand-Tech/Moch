@@ -1,7 +1,8 @@
 import { atom, computed } from 'nanostores'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { AppState } from 'react-native'
-import { rpc, onEvent, onServerRequest, getClient, isConnected } from './gateway'
+import { rpc, onEvent, onServerRequest, getClient, isConnected, connConfig } from './gateway'
+import { getEmbeddedGateway } from './hermesRuntime'
 import { log } from './log'
 import { notifyLocal, setBadge } from './push'
 import { bindLiveId, liveIdFor, sessionRows, toMs, upsertOptimisticRow, patchRowTitle } from './sessionList'
@@ -855,14 +856,46 @@ const CREATE_COLS = 120
  * unknown key (the old `rows`) is rejected with 4000 and the call fails, so
  * only ever send keys listed in SessionCreateParams.
  */
+
+/** cwd override when the active connection is the on-phone embedded gateway. */
+async function embeddedSessionCwd(): Promise<{ cwd?: string }> {
+  try {
+    const gw = await getEmbeddedGateway()
+    const host = connConfig.get()?.host ?? ''
+    if (!gw?.running || !gw.workspace || !host.startsWith('127.0.0.1')) return {}
+    return { cwd: gw.workspace }
+  } catch {
+    return {}
+  }
+}
+
+/** session.create with an embedded-only retry: an intermittent in-process
+ * dispatch race can leave the first call unanswered (hermes 0.21.3
+ * embedded; see embedded/MILESTONE-5.md). The abandoned attempt stays a
+ * server-side draft and is reaped. Remote machines get a single call. */
+async function createSessionRpc<T>(params: Record<string, unknown>): Promise<T> {
+  const gw = await getEmbeddedGateway().catch(() => null)
+  const embedded = !!gw?.running && (connConfig.get()?.host ?? '').startsWith('127.0.0.1')
+  const timeoutMs = embedded ? 8000 : undefined
+  try {
+    return await rpc<T>('session.create', params, timeoutMs)
+  } catch (e) {
+    if (!embedded || !(e instanceof Error) || !/timeout/i.test(e.message)) throw e
+    log('warn', 'chat', 'embedded session.create timed out once; retrying')
+    return await rpc<T>('session.create', params, timeoutMs)
+  }
+}
+
 export async function createSession(title?: string): Promise<ResumeResult> {
-  const res = await rpc<{ session_id?: string; stored_session_id?: string; messages?: Array<Record<string, unknown>>; info?: { model?: string; provider?: string; reasoning_effort?: string } }>(
-    'session.create',
+  const res = await createSessionRpc<{ session_id?: string; stored_session_id?: string; messages?: Array<Record<string, unknown>>; info?: { model?: string; provider?: string; reasoning_effort?: string } }>(
     // A create-time title is MANUAL authority server-side: it is applied at
     // the end of turn 1, clobbering the auto-title and permanently blocking
     // its upgrades. Only send one when the caller explicitly has a name;
     // "New chat" stays a client-side placeholder.
-    { ...(title ? { title } : {}), cols: CREATE_COLS, source: 'mobile' },
+    // Embedded runtime: root the session in the on-phone workspace
+    // (files/Moch/workspace) so file tools operate there (M5). Remote
+    // machines keep their own cwd semantics.
+    { ...(title ? { title } : {}), cols: CREATE_COLS, source: 'mobile', ...(await embeddedSessionCwd()) },
   )
   const id = res?.session_id
   if (!id) throw new Error('session.create returned no id')

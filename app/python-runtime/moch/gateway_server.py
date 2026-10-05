@@ -142,9 +142,9 @@ def info() -> dict:
         "ready": started and port is not None and _port_accepts(port),
         "port": port,
         "token": _STATE["token"],
+        "workspace": os.environ.get("MOCH_WORKSPACE"),
         "error": _STATE["error"],
     }
-
 
 
 def info_json() -> str:
