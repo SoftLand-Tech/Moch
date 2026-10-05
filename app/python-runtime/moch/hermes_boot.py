@@ -61,7 +61,15 @@ def _prepare_home(home: Path) -> None:
     workspace = home / "workspace"
     workspace.mkdir(parents=True, exist_ok=True)
     os.environ["MOCH_WORKSPACE"] = str(workspace)
-    # hermes' scratch contract: TMPDIR on real storage, not tmpfs. Set it
+    # Android child-VM shim (M5 hotfix): hermes spawns child interpreters
+    # (slash worker = automations "Run now", cron jobs, one-shots) via
+    # sys.executable, which under Chaquopy is an app_process64 launcher. The
+    # child VM needs a writable dalvik-cache; default $ANDROID_DATA (/data)
+    # is root-only and the spawn died with "Error changing dalvik-cache
+    # ownership: Permission denied". Point ANDROID_DATA at app storage.
+    android_data = home / "cache" / "android-data"
+    (android_data / "dalvik-cache").mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("ANDROID_DATA", str(android_data))
     # before importing run_agent and reset tempfile's cache so it takes hold.
     scratch = home / "cache" / "scratch"
     scratch.mkdir(parents=True, exist_ok=True)
