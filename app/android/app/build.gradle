@@ -103,12 +103,15 @@ android {
     defaultConfig {
         applicationId 'com.hermes.pocket'
         minSdkVersion rootProject.ext.minSdkVersion
-        // targetSdk 28 = legacy SELinux domain: allows execve() of guest
-        // binaries from app data, which proot (Moch Linux) requires.
-        // Android 10+ blocks exec-from-app-data for targetSdk >= 29 — the
-        // same reason Termux ships 28. compileSdk stays 36.
-        targetSdkVersion 28
-        versionCode 3
+        // targetSdk 36 (M8): guest exec no longer rests on the legacy
+        // SELinux domain. proot's loader — the one file the kernel must
+        // execve per guest exec — ships as an APK native library
+        // (apk_data_file, execve-legal for every appdomain); everything
+        // else in the guest chain is mmap PROT_EXEC, which stays allowed.
+        // See embedded/EXEC-DESIGN.md §1/§4.2. The raise and the loader
+        // fix ship together in this versionCode.
+        targetSdkVersion 36
+        versionCode 4
         versionName "1.0.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
@@ -145,17 +148,19 @@ android {
     }
     packagingOptions {
         jniLibs {
-            def enableLegacyPackaging = findProperty('expo.useLegacyPackaging') ?: 'false'
-            useLegacyPackaging enableLegacyPackaging.toBoolean()
+            // M8: native libs must be EXTRACTED to nativeLibraryDir — the
+            // proot loader is execve'd from there (apk_data_file); an
+            // uncompressed in-APK lib is mmap-only and cannot be exec'd.
+            // Unconditional (not derived from expo.useLegacyPackaging,
+            // which defaults false). Same mechanism as Play Termux.
+            useLegacyPackaging true
         }
+        // The loader is a static ELF EXEC, not a shared object — keep the
+        // NDK strip task away from it.
+        doNotStrip '**/libproot-loader.so'
     }
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
-    }
-    lint {
-        // Sideloaded experimental fork: targetSdk 28 is deliberate (legacy
-        // SELinux domain for proot). Play policy checks don't apply.
-        disable += ['ExpiredTargetSdkVersion']
     }
 }
 
