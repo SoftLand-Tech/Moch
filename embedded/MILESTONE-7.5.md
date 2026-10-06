@@ -38,6 +38,12 @@ deny ptrace to apps**, others allow it (Termux proves it works on stock).
 
 The test (phone must be plugged in via USB):
 
+> **Superseded by `embedded/MILESTONE-8.md`** (targetSdk 36): the bare
+> `am startservice` below relies on adb's shell-uid service-start
+> privileges; the M8 procedure launches the activity first and keeps the
+> plain service start. The command form here no longer matches the shipped
+> target — use the M8 procedure.
+
 ```bash
 adb install -r app-release.apk
 adb shell am startservice -n com.hermes.pocket/.hermes.HermesService \
