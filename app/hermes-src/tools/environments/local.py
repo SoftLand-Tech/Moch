@@ -545,6 +545,24 @@ def _find_shell() -> str:
     return _find_bash()
 
 
+def _apply_exec_trampoline(argv: list[str]) -> list[str]:
+    """Moch Linux on Android (targetSdk 29+): app-data files cannot be execve'd
+    (untrusted_app SELinux domain), so an exec of the resolved shell — Moch's PATH
+    shim, an app-data script — must go through a system trampoline instead:
+    ``/system/bin/sh <shim> …`` READS the script; the kernel never executes it.
+    ``HERMES_EXEC_TRAMPOLINE`` is the opt-in contract (set by Moch's boot); unset —
+    every desktop and non-Moch install — argv comes back byte-identical. Wrap
+    guard: a resolved shell already under /system is execve-legal and must not be
+    re-wrapped (``/system/bin/sh /system/bin/sh -c …`` would make the shell parse
+    its own binary as a script)."""
+    trampoline = os.environ.get("HERMES_EXEC_TRAMPOLINE")
+    if not trampoline or not argv:
+        return argv
+    if argv[0].startswith("/system/"):
+        return argv
+    return [trampoline, *argv]
+
+
 # --- PATH completion for the terminal subshell ---
 
 # Standard PATH entries for environments with minimal PATH.
@@ -894,6 +912,7 @@ class LocalEnvironment(BaseEnvironment):
         if login:
             cmd_string = _prepend_shell_init(cmd_string, _resolve_shell_init_files())
         args = [bash, *(["-l"] if login else []), "-c", cmd_string]
+        args = _apply_exec_trampoline(args)
         self._recover_cwd()
         proc = subprocess.Popen(
             args, text=True, env=_make_run_env(self.env), encoding="utf-8", errors="replace",

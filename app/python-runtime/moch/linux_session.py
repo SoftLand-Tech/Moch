@@ -9,6 +9,9 @@ setup per command — just a pipe write + read.
 Lifecycle: started by ``start()`` after the guest is bootstrapped; dies with
 the process (daemon thread). If the shell dies (OOM, crash), the next
 ``run()`` transparently restarts it.
+
+M8: launched through ``linux_env.build_guest_launch`` like every other guest
+entry (linker64 + native-lib PROOT_LOADER — EXEC-DESIGN.md §4.4).
 """
 
 from __future__ import annotations
@@ -34,23 +37,20 @@ def _linux_dir() -> Path:
     return hermes_boot._hermes_home() / "linux"
 
 
-def _build_argv() -> list[str]:
-    linux_dir = _linux_dir()
-    proot = linux_dir / "bin" / "proot"
-    rootfs = linux_dir / "rootfs"
-    from moch import hermes_boot
+def _build_argv() -> tuple[list[str], dict]:
+    """Shared M8 launch path: the linker64 prefix + native-lib PROOT_LOADER
+    come from linux_env.build_guest_launch — the ONE argv/env shape for every
+    guest entry (the M7.5 version execve'd the app-data proot directly and
+    died EACCES under targetSdk 29+)."""
+    from moch import linux_env
 
-    workspace = hermes_boot._hermes_home() / "workspace"
-    env = dict(os.environ)
-    env["LD_LIBRARY_PATH"] = str(linux_dir / "bin" / "lib")
+    argv, env = linux_env.build_guest_launch(["/bin/bash", "--norc", "--noprofile"])
+    # Session-only extras: a quiet non-interactive shell with the guest's
+    # own PATH/HOME — commands travel the pipes, there is no tty.
     env["TERM"] = "dumb"
     env["HOME"] = "/root"
     env["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-    return (
-        [str(proot), "-r", str(rootfs), "-b", f"{workspace}:/workspace",
-         "-b", "/dev", "-b", "/proc", "-0", "-w", "/root", "/bin/bash", "--norc", "--noprofile"],
-        env,
-    )
+    return argv, env
 
 
 def start() -> dict:

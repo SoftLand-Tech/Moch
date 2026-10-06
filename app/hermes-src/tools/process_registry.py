@@ -25,7 +25,8 @@ _IS_WINDOWS = platform.system() == "Windows"
 # (not merely "not Windows") so macOS and other POSIX platforms never touch systemd.
 # See #70716.
 _IS_LINUX = platform.system() == "Linux"
-from tools.environments.local import _find_shell, _resolve_safe_cwd, _sanitize_subprocess_env
+from tools.environments.local import (_apply_exec_trampoline, _find_shell, _resolve_safe_cwd,
+                                      _sanitize_subprocess_env)
 from hermes_cli._subprocess_compat import windows_hide_flags
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, NamedTuple, Optional
@@ -973,7 +974,11 @@ class ProcessRegistry(ProcessCheckpointMixin):
         sourced, user tools on PATH), wrapped in a transient systemd scope when we are
         the supervised gateway (own cgroup: an OOM kills only the worker, not the
         gateway and its messaging control plane)."""
-        argv = [_find_shell(), "-lic", f"set +m; {safe_command}"]
+        # HERMES_EXEC_TRAMPOLINE (Moch Linux on Android): the resolved shell may
+        # be an app-data script the kernel cannot execve; _apply_exec_trampoline
+        # routes it through /system/bin/sh when (and only when) the env contract
+        # is set — argv is unchanged everywhere else.
+        argv = _apply_exec_trampoline([_find_shell(), "-lic", f"set +m; {safe_command}"])
         # This applies to both pipe mode and the PTY path above. See #70716.
         in_supervised_gateway = _IS_LINUX and _is_supervised_gateway_process()
         if in_supervised_gateway and _systemd_run_user_scope_available():

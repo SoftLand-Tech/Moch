@@ -71,19 +71,46 @@ def _prepare_home(home: Path) -> None:
     # system paths so every `sh`/`bash` resolution lands in the guest. Before
     # install the dir doesn't exist and the entry is inert.
     linux_bin = home / "linux" / "bin"
-    if (home / "linux" / "rootfs").exists() and not (linux_bin / "sh").exists():
-        # Guest installed but shims missing (installed by an older build):
-        # tiny idempotent files — created here so routing works from the
-        # next command without any download or UI interaction.
+    if (home / "linux" / "rootfs").exists():
+        # Repair gate (M8 §4.5.3): shims missing OR their format marker
+        # absent/stale — M7.5 format-1 bodies bake the app-data loader path,
+        # dead under untrusted_app (targetSdk 29+). Without this gate,
+        # existing installs keep EACCES-ing forever after the M8 update:
+        # the wizard says "Already installed" and nothing prompts a
+        # bootstrap() re-run. Tiny idempotent files either way.
         try:
-            from moch.linux_env import ensure_shims
+            from moch.linux_env import ensure_shims, shims_current
 
-            ensure_shims()
+            if not shims_current(linux_bin):
+                ensure_shims()
         except Exception:  # noqa: BLE001 — routing falls back to native sh
             pass
     linux_bin_str = str(linux_bin)
     if linux_bin_str not in os.environ.get("PATH", ""):
         os.environ["PATH"] = linux_bin_str + ":" + os.environ.get("PATH", "")
+    # M8 (targetSdk 36) env exports the guest launch chain depends on.
+    # 1. MOCH_NATIVE_LIB_DIR — the shim resolves PROOT_LOADER through it at
+    #    RUNTIME (nativeLibraryDir is re-randomized on every app update, so
+    #    it is never persisted into any file). Steady-state exporter: the
+    #    shim runs at every boot, while bootstrap()/ensure_shims() only run
+    #    at provisioning or repair. If the Chaquopy java bridge is not ready
+    #    yet, leave unset — bootstrap() seeds it later (§4.3).
+    try:
+        from moch.linux_env import _native_lib_dir
+
+        os.environ.setdefault("MOCH_NATIVE_LIB_DIR", _native_lib_dir())
+    except Exception:  # noqa: BLE001 — java bridge not ready; bootstrap() seeds it
+        pass
+    # 2. HERMES_EXEC_TRAMPOLINE — hermes execs the resolved shell (our PATH
+    #    shim, an app-data script) through /system/bin/sh: the kernel cannot
+    #    execve an app-data script under untrusted_app, but /system/bin/sh
+    #    (a system file) reading it is fine. UNCONDITIONAL, not gated on the
+    #    guest existing: the setup wizard provisions the guest mid-session
+    #    in this same process and boot() never re-runs _prepare_home — a
+    #    shim-gated trampoline would leave the agent's first post-wizard
+    #    commands dying EACCES until a manual restart.
+    if os.path.exists("/system/bin/sh"):
+        os.environ["HERMES_EXEC_TRAMPOLINE"] = "/system/bin/sh"
     # Android child-VM shim (M5 hotfix): hermes spawns child interpreters
     # (slash worker = automations "Run now", cron jobs, one-shots) via
     # sys.executable, which under Chaquopy is an app_process64 launcher. The
