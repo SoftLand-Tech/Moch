@@ -73,8 +73,43 @@ STAMP_MECHANISM = 2
 # env-snapshot + cwd files under $TMPDIR inside the guest; without the
 # self-binds every command died at that cd (on-device 2026-10-06). v3 added
 # the self-healing PROOT_TMP_DIR mkdir after proot startup failures.
-SHIM_FORMAT = 4
+# v5: proot-distro parity flags (link2symlink/sysvipc/-L/fake utsname) +
+# resolv.conf seeding — apt/dpkg upgrades died on link(2) EPERM and DNS
+# was unresolvable (on-device 2026-10-06, third field round).
+SHIM_FORMAT = 5
 _SHIM_MARKER = f"# moch-shim-format: {SHIM_FORMAT}"
+
+# proot-distro parity on Android (proot_distro/commands/login/proot_cmd.py
+# — verified against the cloned source): link(2) is denied on app storage
+# (kernel/SELinux), which kills dpkg's hardlink-based atomic updates —
+# --link2symlink emulates hard links; --sysvipc emulates SysV IPC; -L
+# corrects lstat sizes for dpkg's symlink warnings; the fake utsname hides
+# the Android "<release>-perf" kernel string from guest tooling (backslash-
+# separated utsname fields, proot-distro's exact shape). All four ship in
+# the pinned termux proot binary (strings-verified).
+FAKE_UTSNAME = (
+    "\\Linux\\localhost\\6.17.0-moch\\#1 SMP PREEMPT_DYNAMIC"
+    "\\aarch64\\localdomain\\-1\\"
+)
+PROOT_PARITY_FLAGS = ["--link2symlink", "--sysvipc", "-L", f"--kernel-release={FAKE_UTSNAME}"]
+
+# ubuntu-base ships an EMPTY /etc/resolv.conf — apt/pacman cannot resolve
+# anything until it is seeded. proot-distro writes the host's resolv.conf
+# at install time; Android has none to copy, so seed public resolvers.
+# Only when missing/empty, to respect user edits inside the guest.
+_DNS_RESOLV = "nameserver 8.8.8.8\nnameserver 1.1.1.1\n"
+
+
+def ensure_guest_dns() -> None:
+    """Seed the guest resolv.conf when missing/empty (idempotent, best-effort)."""
+    resolv = _linux_dir() / "rootfs" / "etc" / "resolv.conf"
+    try:
+        if resolv.exists() and resolv.stat().st_size > 0:
+            return
+        resolv.parent.mkdir(parents=True, exist_ok=True)
+        resolv.write_text(_DNS_RESOLV, encoding="utf-8")
+    except OSError:
+        pass  # non-fatal: fixable by hand inside the guest
 
 
 def _linux_dir() -> Path:
@@ -167,6 +202,7 @@ def build_guest_launch(guest_argv: list[str]) -> tuple[list[str], dict]:
         "-b", "/dev",
         "-b", "/proc",
         "-0",
+        *PROOT_PARITY_FLAGS,
         "-w", "/root",
         *guest_argv,
     ]
@@ -188,11 +224,13 @@ export LD_LIBRARY_PATH="$LD/bin/lib"
 export PROOT_LOADER="$MOCH_NATIVE_LIB_DIR/{LOADER_LIB_NAME}"
 export PROOT_TMP_DIR="$LD/tmp"
 mkdir -p "$LD/tmp"
+[ -s "$LD/rootfs/etc/resolv.conf" ] || printf 'nameserver 8.8.8.8\\nnameserver 1.1.1.1\\n' > "$LD/rootfs/etc/resolv.conf"
 WS="${{MOCH_WORKSPACE:-$LD/../workspace}}"
 SC="${{TMPDIR:-$LD/../cache/scratch}}"
 exec /system/bin/linker64 "$LD/bin/proot" -r "$LD/rootfs" \\
-  -b "$WS:/workspace" -b "$WS:$WS" -b "$SC:$SC" -b /dev -b /proc -0 -w /root \\
-  /bin/bash "$@"
+  -b "$WS:/workspace" -b "$WS:$WS" -b "$SC:$SC" -b /dev -b /proc -0 \\
+  --link2symlink --sysvipc -L --kernel-release='{FAKE_UTSNAME}' \\
+  -w /root /bin/bash "$@"
 """
 
 
@@ -476,6 +514,7 @@ def bootstrap(distro: str = "ubuntu-24.04") -> dict:
                     _safe_extract(tf, rootfs)
         step("rootfs", _rootfs)
 
+    step("dns", ensure_guest_dns)
     step("stamp", lambda: _write_stamp(linux_dir, distro))
 
     report["ok"] = True

@@ -226,6 +226,13 @@ class TestBuildGuestLaunch(MochLinuxExecTest):
         self.assertIn("/dev", argv)
         self.assertIn("/proc", argv)
         self.assertIn("-0", argv)
+        # proot-distro parity: hardlink emulation (dpkg), SysV IPC, lstat
+        # fix, fake utsname (Android "-perf" kernel string)
+        self.assertIn("--link2symlink", argv)
+        self.assertIn("--sysvipc", argv)
+        self.assertIn("-L", argv)
+        self.assertTrue(any(a.startswith("--kernel-release=") and "\\Linux\\" in a for a in argv),
+                        argv)
         self.assertIn("-w", argv)
         self.assertEqual(argv[argv.index("-w") + 1], "/root")
         # guest argv appended verbatim
@@ -265,6 +272,11 @@ class TestShims(MochLinuxExecTest):
             # wrapper cd; env-snapshot/cwd files)
             self.assertIn('-b "$WS:$WS"', body)
             self.assertIn('-b "$SC:$SC"', body)
+            # v5: proot-distro parity + DNS seeding
+            self.assertIn("--link2symlink", body)
+            self.assertIn("--sysvipc", body)
+            self.assertIn("--kernel-release='", body)
+            self.assertIn('resolv.conf" ] || printf', body)
 
     def test_ensure_shims_creates_proot_tmp_dir(self):
         # On-device 2026-10-06: wizard-only installs never ran a
@@ -277,10 +289,11 @@ class TestShims(MochLinuxExecTest):
         self.assertTrue((self.linux / "tmp").is_dir())
 
     def test_older_format_shim_is_stale(self):
-        # The exact field-upgrade path: the v3 body (mkdir, no self-bind)
-        # and older markers must be detected stale so the boot-time repair
-        # gate rewrites them (v2 lacked the mkdir, v3 lacked the self-bind).
-        for stale_marker in ("# moch-shim-format: 2", "# moch-shim-format: 3"):
+        # The exact field-upgrade path: older shim bodies must be detected
+        # stale so the boot-time repair gate rewrites them (v2 lacked the
+        # mkdir, v3 lacked the self-binds, v4 lacked the parity flags).
+        for stale_marker in ("# moch-shim-format: 2", "# moch-shim-format: 3",
+                             "# moch-shim-format: 4"):
             shim = self.linux / "bin" / "sh"
             shim.parent.mkdir(parents=True, exist_ok=True)
             shim.write_text(
@@ -332,9 +345,13 @@ class TestVersionStamps(MochLinuxExecTest):
         self.assertTrue(report["ok"], report)
         self.assertFalse(any("FAILED" in s for s in report["steps"]), report["steps"])
         self.assertEqual([s.split(":")[0] for s in report["steps"]],
-                         ["proot", "libtalloc", "libandroid-shmem", "shims", "rootfs", "stamp"])
+                         ["proot", "libtalloc", "libandroid-shmem", "shims", "rootfs", "dns", "stamp"])
         self.assertEqual((self.linux / "bin" / "proot").read_bytes(), b"PROOT")
         self.assertTrue((self.linux / "rootfs" / "etc" / "os-release").exists())
+        # ubuntu-base ships an EMPTY resolv.conf — must be seeded (apt DNS)
+        resolv = self.linux / "rootfs" / "etc" / "resolv.conf"
+        self.assertTrue(resolv.stat().st_size > 0, "resolv.conf must be seeded")
+        self.assertIn("nameserver", resolv.read_text(encoding="utf-8"))
         # stamp keys are EXACTLY the five — no loader_sha256 (loader ships in
         # the APK), no native_lib_dir (that path is never persisted)
         self.assertEqual(set(self._stamp()),

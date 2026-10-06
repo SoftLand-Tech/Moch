@@ -12,6 +12,21 @@ workspace path inside the guest — fixed by self-binding the workspace and
 $TMPDIR at their host paths, `-b "$WS:$WS"` / `-b "$SC:$SC"`). The full
 exec matrix below has not yet been run on device.**
 
+Field round 3 (2026-10-06, node/npm install attempt) surfaced two more
+Moch-vs-proot-distro gaps, fixed the same day: (1) ubuntu-base ships an
+EMPTY `/etc/resolv.conf` — apt could not resolve anything (now seeded at
+bootstrap + guarded in the shim, public resolvers); (2) **link(2) is denied
+on app storage** (kernel/SELinux), killing dpkg's hardlink-based atomic
+updates — every `apt-get upgrade` died with EACCES. Fix: proot-distro
+parity flags, verified against the cloned `proot_distro` source and the
+pinned binary (`proot_distro/commands/login/proot_cmd.py`):
+`--link2symlink` (hard-link emulation — Termux's standard answer, on for
+every non-Termux distro login), `--sysvipc`, `-L` (lstat sizes for dpkg),
+and a faked `--kernel-release` utsname (`\Linux\localhost\6.17.0-moch\…`),
+plus the resolv seeding. `--kill-on-exit` deliberately NOT adopted:
+Moch/hermes keeps background processes alive across terminal calls, which
+that flag would kill. SHIM_FORMAT 5, versionCode 7.
+
 ## What changed (the one-paragraph version)
 
 The raise 28 → 36 moves the app into the `untrusted_app` SELinux domain,
