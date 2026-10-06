@@ -249,6 +249,33 @@ class TestShims(MochLinuxExecTest):
             self.assertIn(': "${MOCH_NATIVE_LIB_DIR:?moch linux:', body)
             self.assertIn('exec /system/bin/linker64 "$LD/bin/proot"', body)
             self.assertNotIn("/data/app", body)
+            # v3: self-healing temp dir — proot dies at startup without it
+            self.assertIn('mkdir -p "$LD/tmp"', body)
+
+    def test_ensure_shims_creates_proot_tmp_dir(self):
+        # On-device 2026-10-06: wizard-only installs never ran a
+        # build_guest_launch() caller, so PROOT_TMP_DIR pointed at a
+        # missing dir and proot failed with "can't create temporary
+        # directory" + "can't create glue rootfs" on every command.
+        self.assertFalse((self.linux / "tmp").exists())
+        with self._patched_native():
+            le.ensure_shims()
+        self.assertTrue((self.linux / "tmp").is_dir())
+
+    def test_v2_shim_without_mkdir_is_stale(self):
+        # The exact regression: a format-2 shim body (no mkdir) must be
+        # detected stale so the boot-time repair gate rewrites it.
+        shim = self.linux / "bin" / "sh"
+        shim.parent.mkdir(parents=True, exist_ok=True)
+        shim.write_text(
+            "#!/system/bin/sh\n# moch-shim-format: 2\nexport PROOT_TMP_DIR=\"$LD/tmp\"\n",
+            encoding="utf-8",
+        )
+        self.assertFalse(le.shims_current(self.linux / "bin"))
+        with self._patched_native():
+            le.ensure_shims()
+        self.assertTrue(le.shims_current(self.linux / "bin"))
+        self.assertIn('mkdir -p "$LD/tmp"', shim.read_text(encoding="utf-8"))
 
     def test_repoint_guest_bin_sh_to_bash(self):
         rootfs = self.linux / "rootfs"

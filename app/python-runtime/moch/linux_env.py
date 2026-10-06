@@ -68,7 +68,11 @@ STAMP_MECHANISM = 2
 # into the shim body — dead under untrusted_app. Format 2 resolves the
 # loader through $MOCH_NATIVE_LIB_DIR at runtime (never persisted —
 # nativeLibraryDir re-randomizes on every app update).
-SHIM_FORMAT = 2
+# v3: the shim self-heals PROOT_TMP_DIR (mkdir -p) before exec — v2 shims
+# died at proot startup ("can't create temporary directory") whenever no
+# build_guest_launch() caller (test probe / linuxExec) had run first, i.e.
+# on every wizard-only install (found on-device 2026-10-06).
+SHIM_FORMAT = 3
 _SHIM_MARKER = f"# moch-shim-format: {SHIM_FORMAT}"
 
 
@@ -168,6 +172,7 @@ LD="{linux_dir}"
 export LD_LIBRARY_PATH="$LD/bin/lib"
 export PROOT_LOADER="$MOCH_NATIVE_LIB_DIR/{LOADER_LIB_NAME}"
 export PROOT_TMP_DIR="$LD/tmp"
+mkdir -p "$LD/tmp"
 exec /system/bin/linker64 "$LD/bin/proot" -r "$LD/rootfs" \\
   -b "${{MOCH_WORKSPACE:-$LD/../workspace}}:/workspace" -b /dev -b /proc -0 -w /root \\
   /bin/bash "$@"
@@ -202,6 +207,10 @@ def ensure_shims() -> None:
     linux_dir = _linux_dir()
     bin_dir = linux_dir / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
+    # proot writes its glue/temp files here; bootstrap() and the shim path
+    # never go through build_guest_launch(), so create it unconditionally
+    # (idempotent) — a missing dir killed proot at startup on-device.
+    (linux_dir / "tmp").mkdir(parents=True, exist_ok=True)
     # Every Moch launcher exports this; setdefault here covers wizard-time
     # provisioning (the same live process keeps running afterwards).
     os.environ.setdefault("MOCH_NATIVE_LIB_DIR", _native_lib_dir())
