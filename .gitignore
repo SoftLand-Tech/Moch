@@ -8,3 +8,4 @@ app/.venv-embedcheck/
 embedded/.wheelbuild/
 __pycache__/
 *.pyc
+.research/
