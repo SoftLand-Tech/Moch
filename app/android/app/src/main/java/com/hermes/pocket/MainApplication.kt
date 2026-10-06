@@ -12,6 +12,7 @@ import com.facebook.react.common.ReleaseLevel
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint
 import com.hermes.pocket.hermes.HermesBridgePackage
 import com.hermes.pocket.hermes.HermesRuntime
+import com.hermes.pocket.sharein.ShareInPackage
 
 import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ExpoReactHostFactory
@@ -26,6 +27,7 @@ class MainApplication : Application(), ReactApplication {
           // Packages that cannot be autolinked yet can be added manually here, for example:
           // add(MyReactNativePackage())
           add(HermesBridgePackage())
+          add(ShareInPackage())
         }
     )
   }

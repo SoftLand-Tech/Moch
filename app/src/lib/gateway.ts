@@ -495,9 +495,13 @@ async function dial(c: ConnConfig, opts?: { isRetry?: boolean }): Promise<void> 
       if (g?.error) throw new Error(`embedded runtime failed: ${String(g.error).slice(0, 400)}`)
       if (g?.ready) { if (g.token) c = { ...c, token: g.token }; break }
       if (gen !== connectGen) return // superseded by a newer dial
-      const { promise, resolve } = Promise.withResolvers<void>()
+      // Hand-rolled withResolvers: tsconfig.scripts.json's lib is ES2022 and
+      // Promise.withResolvers is ES2024 — that config compiles this file via
+      // the scripts' transitive imports.
+      let resolve!: () => void
+      const pause = new Promise<void>((r) => { resolve = r })
       setTimeout(resolve, 1000)
-      await promise
+      await pause
     }
   }
   const v = validateConfig(c)

@@ -48,6 +48,29 @@
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="hermes"/>
       </intent-filter>
+      <!-- "Ask Moch" share target (share-in): text/links, media and PDFs from
+           any app's share sheet land in the chat composer (ShareInModule.kt
+           relay → src/lib/shareIn.ts inbox → chat.tsx composer). Hand-added
+           to the prebuilt manifest — a future expo prebuild would need a
+           config plugin to keep these. -->
+      <intent-filter android:label="Ask Moch">
+        <action android:name="android.intent.action.SEND"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <data android:mimeType="text/plain"/>
+      </intent-filter>
+      <intent-filter android:label="Ask Moch">
+        <action android:name="android.intent.action.SEND"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <data android:mimeType="image/*"/>
+        <data android:mimeType="video/*"/>
+        <data android:mimeType="audio/*"/>
+        <data android:mimeType="application/pdf"/>
+      </intent-filter>
+      <intent-filter android:label="Ask Moch">
+        <action android:name="android.intent.action.SEND_MULTIPLE"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <data android:mimeType="image/*"/>
+      </intent-filter>
     </activity>
   </application>
 </manifest>
