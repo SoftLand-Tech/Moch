@@ -68,11 +68,12 @@ STAMP_MECHANISM = 2
 # into the shim body — dead under untrusted_app. Format 2 resolves the
 # loader through $MOCH_NATIVE_LIB_DIR at runtime (never persisted —
 # nativeLibraryDir re-randomizes on every app update).
-# v3: the shim self-heals PROOT_TMP_DIR (mkdir -p) before exec — v2 shims
-# died at proot startup ("can't create temporary directory") whenever no
-# build_guest_launch() caller (test probe / linuxExec) had run first, i.e.
-# on every wizard-only install (found on-device 2026-10-06).
-SHIM_FORMAT = 3
+# v4: the workspace AND $TMPDIR scratch dir are self-bound at their host
+# paths — hermes' wrapper cds to the host workspace and reads/writes its
+# env-snapshot + cwd files under $TMPDIR inside the guest; without the
+# self-binds every command died at that cd (on-device 2026-10-06). v3 added
+# the self-healing PROOT_TMP_DIR mkdir after proot startup failures.
+SHIM_FORMAT = 4
 _SHIM_MARKER = f"# moch-shim-format: {SHIM_FORMAT}"
 
 
@@ -139,6 +140,12 @@ def build_guest_launch(guest_argv: list[str]) -> tuple[list[str], dict]:
     workspace = hermes_boot._hermes_home() / "workspace"
     tmp_dir = linux_dir / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
+    # hermes' session machinery ($TMPDIR = <home>/cache/scratch, set by
+    # hermes_boot before anything imports) writes the env snapshot and cwd
+    # files from INSIDE the guest and reads them back host-side — same
+    # self-bind treatment as the workspace so both sides see one path.
+    scratch = os.environ.get("TMPDIR") or str(hermes_boot._hermes_home() / "cache" / "scratch")
+    Path(scratch).mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env["LD_LIBRARY_PATH"] = str(linux_dir / "bin" / "lib")
     env["PROOT_LOADER"] = str(loader_path())
@@ -149,6 +156,14 @@ def build_guest_launch(guest_argv: list[str]) -> tuple[list[str], dict]:
         str(proot),
         "-r", str(rootfs),
         "-b", f"{workspace}:/workspace",
+        # Self-bind at the host path (same shape as -b /dev): hermes' command
+        # wrapper runs `cd <host workspace>` INSIDE the guest before every
+        # payload — without this bind the cd fails and every command dies
+        # (on-device 2026-10-06: "cd: …/workspace: No such file or directory").
+        # With it, host and guest spell the workspace identically, so hermes'
+        # pwd-based cwd tracking stays consistent across the boundary.
+        "-b", f"{workspace}:{workspace}",
+        "-b", f"{scratch}:{scratch}",
         "-b", "/dev",
         "-b", "/proc",
         "-0",
@@ -173,8 +188,10 @@ export LD_LIBRARY_PATH="$LD/bin/lib"
 export PROOT_LOADER="$MOCH_NATIVE_LIB_DIR/{LOADER_LIB_NAME}"
 export PROOT_TMP_DIR="$LD/tmp"
 mkdir -p "$LD/tmp"
+WS="${{MOCH_WORKSPACE:-$LD/../workspace}}"
+SC="${{TMPDIR:-$LD/../cache/scratch}}"
 exec /system/bin/linker64 "$LD/bin/proot" -r "$LD/rootfs" \\
-  -b "${{MOCH_WORKSPACE:-$LD/../workspace}}:/workspace" -b /dev -b /proc -0 -w /root \\
+  -b "$WS:/workspace" -b "$WS:$WS" -b "$SC:$SC" -b /dev -b /proc -0 -w /root \\
   /bin/bash "$@"
 """
 

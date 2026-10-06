@@ -169,6 +169,8 @@ class MochLinuxExecTest(unittest.TestCase):
         tmp = Path(self._tmp.name)
         self.home = tmp / ".hermes"
         os.environ["HERMES_HOME"] = str(self.home)
+        self.scratch = self.home / "cache" / "scratch"
+        os.environ["TMPDIR"] = str(self.scratch)  # hermetic: launch binds resolve it
         self.linux = self.home / "linux"
         self.native_dir = tmp / "nlib"
         self.native_dir.mkdir()
@@ -213,6 +215,14 @@ class TestBuildGuestLaunch(MochLinuxExecTest):
         self.assertEqual(argv[2:4], ["-r", str(self.linux / "rootfs")])
         # both binds present: workspace and the system binds
         self.assertIn(f"{self.home / 'workspace'}:/workspace", argv)
+        # self-bind at the host path: hermes' wrapper cds to the host
+        # workspace INSIDE the guest — without this the cd kills every command
+        ws = str(self.home / "workspace")
+        self.assertIn(f"{ws}:{ws}", argv)
+        # scratch self-bind ($TMPDIR): hermes' env-snapshot/cwd files are
+        # written guest-side and read host-side under this path
+        sc = str(self.scratch)
+        self.assertIn(f"{sc}:{sc}", argv)
         self.assertIn("/dev", argv)
         self.assertIn("/proc", argv)
         self.assertIn("-0", argv)
@@ -251,6 +261,10 @@ class TestShims(MochLinuxExecTest):
             self.assertNotIn("/data/app", body)
             # v3: self-healing temp dir — proot dies at startup without it
             self.assertIn('mkdir -p "$LD/tmp"', body)
+            # v4: workspace + scratch self-binds at their host paths (hermes
+            # wrapper cd; env-snapshot/cwd files)
+            self.assertIn('-b "$WS:$WS"', body)
+            self.assertIn('-b "$SC:$SC"', body)
 
     def test_ensure_shims_creates_proot_tmp_dir(self):
         # On-device 2026-10-06: wizard-only installs never ran a
@@ -262,20 +276,22 @@ class TestShims(MochLinuxExecTest):
             le.ensure_shims()
         self.assertTrue((self.linux / "tmp").is_dir())
 
-    def test_v2_shim_without_mkdir_is_stale(self):
-        # The exact regression: a format-2 shim body (no mkdir) must be
-        # detected stale so the boot-time repair gate rewrites it.
-        shim = self.linux / "bin" / "sh"
-        shim.parent.mkdir(parents=True, exist_ok=True)
-        shim.write_text(
-            "#!/system/bin/sh\n# moch-shim-format: 2\nexport PROOT_TMP_DIR=\"$LD/tmp\"\n",
-            encoding="utf-8",
-        )
-        self.assertFalse(le.shims_current(self.linux / "bin"))
-        with self._patched_native():
-            le.ensure_shims()
-        self.assertTrue(le.shims_current(self.linux / "bin"))
-        self.assertIn('mkdir -p "$LD/tmp"', shim.read_text(encoding="utf-8"))
+    def test_older_format_shim_is_stale(self):
+        # The exact field-upgrade path: the v3 body (mkdir, no self-bind)
+        # and older markers must be detected stale so the boot-time repair
+        # gate rewrites them (v2 lacked the mkdir, v3 lacked the self-bind).
+        for stale_marker in ("# moch-shim-format: 2", "# moch-shim-format: 3"):
+            shim = self.linux / "bin" / "sh"
+            shim.parent.mkdir(parents=True, exist_ok=True)
+            shim.write_text(
+                f"#!/system/bin/sh\n{stale_marker}\nexport PROOT_TMP_DIR=\"$LD/tmp\"\n",
+                encoding="utf-8",
+            )
+            self.assertFalse(le.shims_current(self.linux / "bin"), stale_marker)
+            with self._patched_native():
+                le.ensure_shims()
+            self.assertTrue(le.shims_current(self.linux / "bin"), stale_marker)
+            self.assertIn('-b "$WS:$WS"', shim.read_text(encoding="utf-8"))
 
     def test_repoint_guest_bin_sh_to_bash(self):
         rootfs = self.linux / "rootfs"
