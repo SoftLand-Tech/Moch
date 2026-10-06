@@ -1,8 +1,16 @@
 # Milestone 8 — guest exec under targetSdkVersion 36
 
 Status: **implemented per `embedded/EXEC-DESIGN.md` (rev 4); unit-tested
-locally (`app/python-runtime/tests/test_linux_exec.py`, 34 tests); on-device
-matrix below not yet run (no device in the implementer's environment).**
+locally (`app/python-runtime/tests/test_linux_exec.py`, 36 tests).
+On-device 2026-10-06 (versionCode 6, commit `6c48c29`): the AGENT-CHAT
+path is verified — `cat /etc/os-release && pwd && whoami` through hermes'
+terminal tool returns Ubuntu 24.04.4, the host-spelled workspace cwd, and
+root, at targetSdkVersion 36. Two field fixes landed on the way:
+`deca8a1` (proot PROOT_TMP_DIR never created on wizard-only installs —
+proot died at startup) and `6c48c29` (hermes' wrapper `cd`s to the host
+workspace path inside the guest — fixed by self-binding the workspace and
+$TMPDIR at their host paths, `-b "$WS:$WS"` / `-b "$SC:$SC"`). The full
+exec matrix below has not yet been run on device.**
 
 ## What changed (the one-paragraph version)
 
