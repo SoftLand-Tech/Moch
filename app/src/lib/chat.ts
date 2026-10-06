@@ -255,6 +255,39 @@ export const pendingStoredIds = computed([sessionsById, pendingBySession], (map,
   return out
 })
 
+// ── Shell-facing summary keys ───────────────────────────────────────────────
+//
+// flushStreams re-roots sessionsById on every 33ms token batch (patchSession),
+// and every array/map computed over it mints a fresh identity per evaluation —
+// nanostores notifies on !Object.is, so subscribers like the always-mounted
+// ScreenShell (and the mounted-forever Sidebar it feeds) re-rendered at the
+// full flush rate all through a streaming turn. These string computeds carry
+// only shell-relevant fields: an identical string across message-only flushes
+// bails on Object.is, so the shell re-renders at real turn edges, title
+// changes, and chat-list changes — never per token batch. Message arrays are
+// still read fresh via sessionsById.get()/listen (ref-read) where needed.
+
+/** Everything the drawer/shell derive from the session map, folded into one
+ *  comparable string: the key set (sessions added/removed via their live ids)
+ *  plus each entry's title/busy/storedId/createdAtMs. */
+export const sessionsSummaryKey = computed(sessionsById, (map) =>
+  Object.entries(map)
+    .map(([id, s]) => `${id}|${s.title ?? ''}|${s.busy ? 1 : 0}|${s.storedId ?? ''}|${s.createdAtMs ?? 0}`)
+    .sort()
+    .join(';'),
+)
+
+/** busyStoredIds as a stable string — same content, identity that survives
+ *  flushes that don't flip a busy flag. */
+export const busyStoredKey = computed(sessionsById, (map) =>
+  Object.values(map)
+    .filter((s) => s.busy)
+    .map((s) => s.storedId)
+    .filter(Boolean)
+    .sort()
+    .join(','),
+)
+
 /** Messages queued for the chat on screen (composed while a turn ran). */
 export const activeQueue = computed([sendQueue, activeStoredId], (map, stored): QueuedSend[] =>
   (stored && map[stored]) || [],

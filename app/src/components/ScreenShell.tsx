@@ -33,13 +33,14 @@ import { attentionById, rowStatus } from '../lib/attention'
 import { isConnected as isConnectedAtom, connectionState, rpc } from '../lib/gateway'
 import {
   activeStoredId,
-  busyStoredIds,
-  pendingStoredIds,
+  busyStoredKey,
+  pendingCount,
   forgetSession,
   isSessionNotFound,
   newChat,
   switchToSession,
   sessionsById,
+  sessionsSummaryKey,
 } from '../lib/chat'
 import { loadCatalog } from '../lib/slash'
 import { loadSessions, patchRowTitle, sessionRows, toMs } from '../lib/sessionList'
@@ -77,11 +78,26 @@ export function ScreenShell({
   const connState = useStore(connectionState)
   const connecting = connState === 'connecting'
 
-  const pending = useStore(pendingStoredIds)
-  const busy = useStore(busyStoredIds)
+  // Shell subscriptions are flush-stable by construction (see the summary-key
+  // computeds in lib/chat): during a streaming turn this component must NOT
+  // re-render per 33ms message flush — the hamburger tap, the edge swipe, and
+  // new-chat all wait on this same JS thread. Numbers and strings bail on
+  // Object.is; the session map itself is ref-read (below), not subscribed.
+  const pendingN = useStore(pendingCount)
+  const busyKey = useStore(busyStoredKey)
+  const busy = useMemo(() => (busyKey ? busyKey.split(',') : []), [busyKey])
   const attention = useStore(attentionById)
   const current = useStore(activeStoredId)
-  const all = useStore(sessionsById)
+  const summaryKey = useStore(sessionsSummaryKey)
+  // Ref-read map: the latest sessionsById lands here synchronously on every
+  // set(), but only a summary-string CHANGE re-renders the shell. The `recent`
+  // memo below still sees fresh data whenever a real re-render happens.
+  const sessionsRef = useRef(sessionsById.get())
+  React.useEffect(
+    () => sessionsById.listen((m) => { sessionsRef.current = m }),
+    [],
+  )
+  const all = sessionsRef.current
   const rows = useStore(sessionRows)
 
   // ── Swipe anywhere to open the drawer ────────────────────────────────────
@@ -430,11 +446,11 @@ export function ScreenShell({
         onRename={handleRename}
         onDelete={handleDelete}
         footer={
-          pending.length > 0 ? (
+          pendingN > 0 ? (
             <View style={s.footerNote}>
               <Icon name="alert-circle" size={14} color={C.amber} />
               <Text style={s.footerText}>
-                {pending.length} conversation{pending.length > 1 ? 's' : ''} waiting on you
+                {pendingN} conversation{pendingN > 1 ? 's' : ''} waiting on you
               </Text>
             </View>
           ) : null

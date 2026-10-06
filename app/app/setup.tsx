@@ -8,6 +8,7 @@ import { C, useStyles } from '../src/lib/theme'
 import {
   linuxBootstrap,
   linuxStatus,
+  linuxStatusLive,
   requestBatteryExemption,
   type LinuxGuestStatus,
 } from '../src/lib/hermesRuntime'
@@ -161,7 +162,7 @@ function InstallStep() {
   const s = useStyles(makeS)
   const [status, setStatus] = useState<LinuxGuestStatus | null>(null)
   useEffect(() => {
-    const t = setInterval(() => { void linuxStatus().then(setStatus).catch(() => {}) }, 2000)
+    const t = setInterval(() => { void linuxStatusLive().then(setStatus).catch(() => {}) }, 2000)
     return () => clearInterval(t)
   }, [])
   const done = status?.bootstrapped
