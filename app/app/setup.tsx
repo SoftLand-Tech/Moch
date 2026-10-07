@@ -19,7 +19,9 @@ import { ProviderKeyForm } from '../src/components/ProviderKeyForm'
 /**
  * First-run setup wizard for the embedded ("This phone") mode:
  * environment → provider → basics → install progress.
- * Reachable from Settings → LINUX ENVIRONMENT → "Run setup".
+ * BUG-057: the comment used to claim a Settings → "Run setup" entry that
+ * doesn't exist — the real route is the pair screen's embedded-mode card
+ * (src/components/PairForm.tsx pushes /setup).
  */
 export default function Setup() {
   const s = useStyles(makeS)
@@ -47,7 +49,29 @@ function EnvStep({ onNext }: { onNext: () => void }) {
   const s = useStyles(makeS)
   const [distro, setDistro] = useState('ubuntu-24.04')
   const [existing, setExisting] = useState<LinuxGuestStatus | null>(null)
+  // BUG-016: the bootstrap is a minutes-long download that can fail — the
+  // old button swallowed every error and advanced regardless, stranding the
+  // Install step on an infinite spinner with no retry and no busy state.
+  const [booting, setBooting] = useState(false)
+  const [bootErr, setBootErr] = useState<string | null>(null)
   useEffect(() => { void linuxStatus().then(setExisting).catch(() => {}) }, [])
+  const runBootstrap = async () => {
+    if (booting) return
+    setBootErr(null)
+    setBooting(true)
+    try {
+      const r = await linuxBootstrap(distro === "none" ? "skip" : distro)
+      if (!r || r.ok === false) {
+        setBootErr("The install didn't finish — check the connection and try again.")
+        return
+      }
+      onNext()
+    } catch (e) {
+      setBootErr(e instanceof Error ? e.message : "The install failed — check the connection and try again.")
+    } finally {
+      setBooting(false)
+    }
+  }
   return (
     <>
       <Text style={s.sub}>
@@ -56,7 +80,7 @@ function EnvStep({ onNext }: { onNext: () => void }) {
       </Text>
       {[
         { id: 'ubuntu-24.04', name: 'Ubuntu 24.04 LTS', desc: '~31 MB download · newest packages' },
-        { id: 'debian-12', name: 'Debian 12', desc: 'smaller base, rocksolid' },
+        { id: 'debian-12', name: 'Debian 12', desc: 'smaller base, rock solid' },
         { id: 'none', name: 'None for now', desc: 'Android-only tools; can install later in Settings' },
       ].map((o) => (
         <Pressable key={o.id} style={[s.card, distro === o.id && s.cardOn]} onPress={() => setDistro(o.id)}>
@@ -71,8 +95,9 @@ function EnvStep({ onNext }: { onNext: () => void }) {
       {existing?.bootstrapped ? (
         <Text style={s.note}>Already installed: {existing.distro || 'Linux'} · {existing.sizeMb} MB</Text>
       ) : null}
-      <Pressable style={[s.btn, s.btnBlock]} onPress={async () => { await linuxBootstrap(distro === 'none' ? 'skip' : distro).catch(() => {}); onNext() }}>
-        <Text style={s.btnText}>{distro === 'none' ? 'Continue without Linux' : 'Install environment'}</Text>
+      {bootErr ? <Text style={s.err}>{bootErr}</Text> : null}
+      <Pressable style={[s.btn, s.btnBlock, booting && s.btnBusy]} disabled={booting} onPress={() => { void runBootstrap() }}>
+        <Text style={s.btnText}>{booting ? "Installing…" : distro === "none" ? "Continue without Linux" : "Install environment"}</Text>
       </Pressable>
       <Pressable style={s.ghost} onPress={() => router.replace('/(tabs)/chat')}>
         <Text style={s.ghostText}>Skip setup</Text>
@@ -90,7 +115,9 @@ function ProviderStep({ onNext }: { onNext: () => void }) {
   useEffect(() => { void fetchModelOptions().catch(() => {}) }, [])
   return (
     <>
-      <Text style={s.sub}>Pick the model provider the agent should use. Keys are stored on this phone.</Text>
+      {/* BUG-052: the wire truth is server-side (model.save_key RPC) — the
+          old "on this phone" copy contradicted the Models tab and reality. */}
+      <Text style={s.sub}>Pick the model provider the agent should use. Keys are stored on your computer (the agent's server).</Text>
       {providers.slice(0, 8).map((p) => (
         <Pressable key={p.slug} style={[s.card, picked === p.slug && s.cardOn]} onPress={() => setPicked(p.slug)}>
           <View style={s.cardHead}>
@@ -136,7 +163,15 @@ function BasicsStep({ onNext }: { onNext: () => void }) {
   return (
     <>
       <Text style={s.sub}>Two permissions that keep the agent reliable in the background.</Text>
-      <Pressable style={s.card} onPress={() => setNotif(notif || true)}>
+      {/* BUG-057: the tap actually (re-)requests the permission — it used to
+          run `setNotif(notif || true)`, i.e. always flip to "allowed" without
+          asking anything, so a user who denied could fake the card green. */}
+      <Pressable
+        style={s.card}
+        onPress={() => { void ensureNotificationPermission().then((ok) => setNotif(ok)).catch(() => {}) }}
+        accessibilityRole="button"
+        accessibilityLabel="Allow notifications"
+      >
         <View style={s.cardHead}>
           <Icon name={notif ? 'notifications' : 'notifications-outline'} size={20} color={C.accent} />
           <Text style={s.cardTitle}>{notif ? 'Notifications allowed' : 'Notifications — asking…'}</Text>
@@ -201,6 +236,8 @@ const makeS = () => StyleSheet.create({
   okTag: { color: C.accent, fontSize: 12, fontWeight: '700' },
   note: { color: C.textFaint, fontSize: 12.5, marginVertical: 10 },
   btn: { backgroundColor: C.accent, borderRadius: 12, paddingVertical: 15, alignItems: 'center', minHeight: 52, justifyContent: 'center' },
+  btnBusy: { opacity: 0.6 },
+  err: { color: C.red, fontSize: 13, lineHeight: 18, marginTop: 10, textAlign: 'center' },
   btnBlock: { marginTop: 16 },
   btnText: { color: C.onAccent, fontSize: 16, fontWeight: '800' },
   ghost: { alignItems: 'center', paddingVertical: 14 },
