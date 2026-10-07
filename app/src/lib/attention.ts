@@ -186,7 +186,11 @@ export function resetAttention(): void {
 // ── Row status ──────────────────────────────────────────────────────────────
 
 /** A chat-list row's dot: an attention state outranks the "working" pulse. */
-export function rowStatus(busy: boolean, a?: AttentionRecord): RowStatus | undefined {
+export function rowStatus(busy: boolean, a?: AttentionRecord, pending?: boolean): RowStatus | undefined {
   if (a) return a.kind
+  // BUG-085: an unanswered question keeps its amber dot even after the chat
+  // was opened (opening clears the event-driven 'input' mark) — the question
+  // is still blocking, so the row must keep saying so.
+  if (pending) return 'input'
   return busy ? 'busy' : undefined
 }

@@ -20,10 +20,14 @@ import { C, useStyles } from '../lib/theme'
  * never reach this queue — they go out as local notifications instead.
  */
 
-const KIND_META = {
-  input: { color: C.amber, icon: 'help-circle' as const, ms: 9000 },
-  done: { color: C.greenSoft, icon: 'checkmark-circle' as const, ms: 6500 },
-  error: { color: C.red, icon: 'warning' as const, ms: 8000 },
+// BUG-017: resolve colors at RENDER time — `C` is mutated in place by
+// applyTheme, and a module-scope snapshot freezes the import-time palette
+// forever (theme.ts's contract: styles must never be snapshotted at module
+// scope). Shapes/timings are palette-independent and stay static.
+const KIND_META: Record<SessionToast['kind'], { color: () => string; icon: 'help-circle' | 'checkmark-circle' | 'warning'; ms: number }> = {
+  input: { color: () => C.amber, icon: 'help-circle', ms: 9000 },
+  done: { color: () => C.greenSoft, icon: 'checkmark-circle', ms: 6500 },
+  error: { color: () => C.red, icon: 'warning', ms: 8000 },
 }
 
 function ToastCard({ t }: { t: SessionToast }) {
@@ -58,7 +62,7 @@ function ToastCard({ t }: { t: SessionToast }) {
         onPress={open}
         accessibilityLabel={`${t.title}. ${t.body}. Open conversation${t.chatTitle ? ` ${t.chatTitle}` : ''}`}
       >
-        <View style={[s.iconWrap, { backgroundColor: meta.color }]}>
+        <View style={[s.iconWrap, { backgroundColor: meta.color() }]}>
           <Icon name={meta.icon} size={17} color="#081114" />
         </View>
         <View style={s.textWrap}>
