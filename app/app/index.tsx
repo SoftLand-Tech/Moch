@@ -3,7 +3,6 @@ import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Pressable } from
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { useStore } from '@nanostores/react'
-import { Ionicons } from '@expo/vector-icons'
 import { Icon } from '../src/components/Icon'
 import { PairForm } from '../src/components/PairForm'
 import { MochiStage } from '../src/components/Mascot'

@@ -286,6 +286,10 @@ function SettingsInner() {
     showAlert('Forget this computer?', 'Removes the current computer from this device. Others stay saved.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Forget', style: 'destructive', onPress: async () => {
+        // BUG-034: tear the socket down BEFORE forgetting — the old flow
+        // left a live 'open' connection to the machine it just revoked
+        // (green "Connected" hero, its events still streaming in).
+        disconnect()
         const remaining = await forgetActiveServer()
         const next = mostRecentServer(remaining)
         if (next) {
@@ -376,7 +380,7 @@ function SettingsInner() {
           <Row
             icon="add-circle-outline"
             label="Add computer"
-            sub="Scan a QR from scripts/hermes-pair.sh"
+            sub="Pair with a computer — scan its pairing QR code"
             chevron
             onPress={() => router.push('/add-computer')}
           />
@@ -455,7 +459,7 @@ function SettingsInner() {
           <Row
             icon="information-circle-outline"
             label="Moch v1.0"
-            sub="Mobile client for your self-hosted Hermes gateway (same JSON-RPC protocol). Pair from your PC with scripts/hermes-pair.sh."
+            sub="Mobile client for your self-hosted Hermes agent. Pair from the Add computer screen or your PC's pairing tool."
             disabled
           />
         </Section>
@@ -515,10 +519,12 @@ const makeS = () => StyleSheet.create({
   rowInner: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10 },
   rowIcon: {
     width: 30, height: 30, borderRadius: 9,
-    backgroundColor: 'rgba(247,146,54,0.12)',
+    // BUG-017: theme token, not a hard-coded Mocheme literal (the literal
+    // kept the chips orange under the Relay theme).
+    backgroundColor: C.accentSoft,
     alignItems: 'center', justifyContent: 'center',
   },
-  rowIconDanger: { backgroundColor: 'rgba(239,68,68,0.12)' },
+  rowIconDanger: { backgroundColor: C.redSoft },
   rowText: { flex: 1, gap: 1 },
   rowLabel: { color: C.text, fontSize: 15, fontWeight: '600' },
   rowLabelDisabled: { color: C.textDim },
@@ -531,6 +537,4 @@ const makeS = () => StyleSheet.create({
   miniDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.textFaint },
   activeTag: { color: C.greenSoft, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
   serverForget: { paddingHorizontal: 14, paddingVertical: 14, minHeight: 56, justifyContent: 'center' },
-  warn: { color: C.red, fontSize: 12, lineHeight: 17, paddingHorizontal: 14, paddingVertical: 6 },
-  note: { color: C.textFaint, fontSize: 12, lineHeight: 17, paddingHorizontal: 14, paddingVertical: 6 },
 })
