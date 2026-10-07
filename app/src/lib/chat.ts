@@ -1035,7 +1035,7 @@ export async function createSession(title?: string): Promise<ResumeResult> {
  *  withBootPaint, switches through switchToSession) — removed; resumeShared
  *  is the primitive every path uses. */
 async function runResume(storedId: string): Promise<ResumeResult> {
-  const res = await rpc<{ session_id?: string; stored_session_id?: string; messages?: Array<Record<string, unknown>>; info?: { model?: string; provider?: string; reasoning_effort?: string } }>(
+  const res = await rpc<{ session_id?: string; stored_session_id?: string; messages?: Array<Record<string, unknown>>; info?: { model?: string; provider?: string; reasoning_effort?: string }; running?: boolean; status?: string }>(
     'session.resume',
     { session_id: storedId, cols: CREATE_COLS },
   )
@@ -1074,7 +1074,20 @@ async function runResume(storedId: string): Promise<ResumeResult> {
   }
   // Carry messages/tools/todos/title/usage/busy over from the previous
   // entry — a rotated live id must not land on an empty 'New chat' state.
-  next[id] = { ...(prev ?? makeSession(id, newStored)), id, storedId: newStored, detached: false, provisional: false }
+  next[id] = {
+    ...(prev ?? makeSession(id, newStored)),
+    id,
+    storedId: newStored,
+    detached: false,
+    provisional: false,
+    // BUG-084: the resume payload reports whether a turn is mid-flight —
+    // trust it. The client only ever set busy from its OWN sends, so a cold
+    // re-entry (app restart / deep link / cold drawer row) into a running
+    // chat rendered fully idle — no stop button, no live tool footer, no
+    // drawer busy dot — until the next text delta. Older gateways omit the
+    // field: keep the carried-over entry's value instead of forcing idle.
+    busy: typeof res.running === 'boolean' ? res.running : (prev?.busy ?? false),
+  }
   sessionsById.set(next)
   if (pendDirty) pendingBySession.set(pend)
   // Guarded re-point: only move the screen if the user is still looking at
@@ -1589,19 +1602,67 @@ export function applyHistory(sessionId: string, list?: Array<Record<string, unkn
     // extraction drops, exactly like the old empty-text drop.
     const extracted = extractMedia(text ? [{ kind: 'text' as const, text }] : [])
     const hasMedia = extracted.some((seg) => seg.kind === 'media')
-    if (!hasMedia && !text) continue
+    // BUG-083: the gateway forwards each assistant row's durable reasoning
+    // on every resume (session_history.py forwards `reasoning` /
+    // `reasoning_content` verbatim) — map it into the same collapsible
+    // thinking block the live stream renders instead of discarding it.
+    // meta stays unset → the header reads a plain "Thought" (the true
+    // duration isn't recoverable from history). A reasoning-only row
+    // (interrupted turn) is still worth showing; only a row with nothing
+    // visible at all drops, exactly like the old empty-text drop.
+    const reasoning = role === 'assistant' ? textOf(m.reasoning ?? m.reasoning_content ?? '').trim() : ''
+    if (!hasMedia && !text && !reasoning) continue
     // BUG-077: mark truncation instead of silently clipping long rows.
     const capped = extracted.map((seg) =>
       seg.kind === 'text' && seg.text.length > 8000 ? { ...seg, text: `${seg.text.slice(0, 8000)}…` } : seg,
     )
+    const segs: ChatSegment[] = []
+    if (reasoning) {
+      segs.push({
+        kind: 'thinking',
+        text: `${reasoning.slice(0, 8000)}${reasoning.length > 8000 ? '…' : ''}`,
+        startedAt: Number(m.ts ?? m.timestamp ?? Date.now()) || undefined,
+      })
+    }
+    if (hasMedia) {
+      segs.push(...capped)
+    } else if (reasoning) {
+      // REVIEW FIX (BUG-083 follow-up): Chat.tsx's `segmentsOf` renders
+      // `segments` INSTEAD of `m.text` — a reasoning row carrying only a
+      // thinking segment rendered just the collapsible and dropped the
+      // answer outright. The live stream always pushes a text segment
+      // alongside thinking for the same reason (see the queueStream append);
+      // the history mapping must honor the same contract.
+      segs.push({ kind: 'text', text: `${text.slice(0, 8000)}${text.length > 8000 ? '…' : ''}` })
+    }
     const rowText = (hasMedia ? joinedTextOf(capped) : text)
     mapped.push({
       id: nid(),
       role,
       text: `${rowText.slice(0, 8000)}${rowText.length > 8000 ? '…' : ''}`,
       ts: Number(m.ts ?? m.timestamp ?? Date.now()),
-      ...(hasMedia ? { segments: capped } : {}),
+      ...(segs.length ? { segments: segs } : {}),
     })
+  }
+  // BUG-084: history rows never carry `streaming` — a resume/reconnect
+  // resync flattened an in-flight tail (cursor and live thinking vanished,
+  // text went static) and when the server hadn't flushed the partial yet,
+  // the mapped replacement DROPPED the live partial answer outright.
+  // Re-attach the live tail when it is still the growing end of the
+  // conversation: a history row it extends (either direction) resumes as
+  // the streaming bubble; otherwise the live partial is appended.
+  const prevEntry = sessionsById.get()[sessionId]
+  const tail = prevEntry?.messages[prevEntry.messages.length - 1]
+  if (tail?.role === 'assistant' && tail.streaming) {
+    const last = mapped[mapped.length - 1]
+    const cont =
+      !!last && last.role === 'assistant' && last.text.length > 0 &&
+      (tail.text.startsWith(last.text) || last.text.startsWith(tail.text))
+    if (last && cont) {
+      mapped[mapped.length - 1] = { ...last, streaming: true, segments: last.segments?.length ? last.segments : tail.segments }
+    } else {
+      mapped.push(tail)
+    }
   }
   if (mapped.length) {
     patchSession(sessionId, { messages: mapped.slice(-MAX_MESSAGES) })
