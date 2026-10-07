@@ -879,6 +879,7 @@ export default function Chat() {
             <Pressable
               style={({ pressed }) => [s.banner, pressed && s.btnPressed]}
               onPress={() => { void retryNow().catch(() => {}) }}
+              accessibilityRole="button"
               accessibilityLabel="Reconnect"
             >
               <Text style={s.bannerText}>
@@ -915,6 +916,7 @@ export default function Chat() {
               style={({ pressed }) => [s.modelChip, s.modelFloatChip, pressed && s.btnPressed]}
               onPress={() => setModelPickerOpen(true)}
               hitSlop={6}
+              accessibilityRole="button"
               accessibilityLabel={`Current model ${curModel}. Tap to change`}
             >
               <Icon name="cube-outline" size={12} color={C.accent} />
@@ -1097,8 +1099,15 @@ export default function Chat() {
                 </Text>
                 <Text style={s.slashHint}>tap to fill</Text>
               </View>
-              <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 320 }}>
-                {slashItems.map((it, i) => {
+              {/* BUG-054: virtualized — the registry can hold 120+ rows and an
+                  unvirtualized ScrollView mounted every one of them on each
+                  keystroke's filtered list. */}
+              <FlatList
+                keyboardShouldPersistTaps="handled"
+                style={{ maxHeight: 320 }}
+                data={slashItems}
+                keyExtractor={(it, i) => `${it.kind ?? 'c'}-${it.text.startsWith('/') ? it.text : `/${it.text}`}-${i}`}
+                renderItem={({ item: it }) => {
                   // complete.slash returns `text` without the leading slash
                   // and `display` with it, for both commands and skills.
                   const isSkill = it.kind === 'skill'
@@ -1106,7 +1115,6 @@ export default function Chat() {
                   const insertable = it.text.startsWith('/') ? it.text : `/${it.text}`
                   return (
                     <Pressable
-                      key={`${it.kind ?? 'c'}-${insertable}-${i}`}
                       style={({ pressed }) => [s.slashRow, pressed && s.slashRowPressed]}
                       onPress={() => {
                         updateInput(insertable)
@@ -1130,8 +1138,8 @@ export default function Chat() {
                       <Text style={s.slashKind}>{isSkill ? 'skill' : 'cmd'}</Text>
                     </Pressable>
                   )
-                })}
-              </ScrollView>
+                }}
+              />
             </View>
           ) : null}
 
@@ -1219,7 +1227,8 @@ export default function Chat() {
                           onChangeText={(t) => setBatchAnswers((a) => ({ ...a, [q.qid]: t }))}
                           placeholder="Your answer…"
                           placeholderTextColor={C.textFaint}
-                          accessibilityLabel={`Answer ${q.qid}`}
+                          // BUG-049: the question text, not an internal id.
+                          accessibilityLabel={`Answer: ${q.question ?? 'the question'}`}
                         />
                       ) : null}
                     </View>

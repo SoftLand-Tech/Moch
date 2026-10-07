@@ -378,7 +378,7 @@ function SettingsInner() {
           <Row
             icon="add-circle-outline"
             label="Add computer"
-            sub="Scan a QR from scripts/hermes-pair.sh"
+            sub="Pair with a computer — scan its pairing QR code"
             chevron
             onPress={() => router.push('/add-computer')}
           />
@@ -457,7 +457,7 @@ function SettingsInner() {
           <Row
             icon="information-circle-outline"
             label="Moch v1.0"
-            sub="Mobile client for your self-hosted Hermes gateway (same JSON-RPC protocol). Pair from your PC with scripts/hermes-pair.sh."
+            sub="Mobile client for your self-hosted Hermes agent. Pair from the Add computer screen or your PC's pairing tool."
             disabled
           />
         </Section>

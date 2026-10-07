@@ -159,7 +159,9 @@ export default function Controls() {
       if (p.auth_type === 'api_key') {
         setKeyFor(p)
       } else {
-        void showAlert(p.name, p.warning ?? 'This provider signs in another way (OAuth or a host tool). Run `moch model` on the computer to set it up.')
+        // BUG-053: no dead CLI references — the npm `moch` package is
+        // deprecated; sign-in flows live on the computer's agent settings.
+        void showAlert(p.name, p.warning ?? 'This provider signs in another way (OAuth or a host tool) — set it up on the computer, in the agent\'s own settings screen.')
       }
       return
     }
