@@ -34,7 +34,9 @@ function fmtWhen(ts?: number): string {
   const ms = toMs(ts)
   if (!ms) return ''
   const d = new Date(ms)
-  const diff = Date.now() - ms
+  // BUG-058: clamp negative diffs — a future/clock-skewed timestamp passed
+  // the `diff < 60_000` check forever, pinning the label at "just now".
+  const diff = Math.max(0, Date.now() - ms)
   if (diff < 60_000) return 'just now'
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`

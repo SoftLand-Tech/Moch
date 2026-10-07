@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -229,7 +229,10 @@ export default function Chat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storedId])
 
-  useEffect(() => {
+  // BUG-078: useLayoutEffect — the hide/reset must land BEFORE the first
+  // paint of the new chat; a post-paint useEffect leaked a one-frame flash
+  // of the previous chat's top.
+  useLayoutEffect(() => {
     setInput(draftFor(storedId))
     setStick(true)
     setShowScrollBtn(false)
@@ -666,7 +669,11 @@ export default function Chat() {
       return
     }
     if (busy) {
-      if (!storedId) return // nowhere to queue yet — keep the text
+      if (!storedId) {
+        // BUG-075: a silent no-op — say why the send didn't happen.
+        showAlert('One moment', 'The chat is still opening — try again in a second.')
+        return // keep the text
+      }
       // Attachment-only sends queue with empty text (allowEmpty); the chips
       // ride the in-memory attach map keyed by the queued id.
       const item = enqueueSend(storedId, text, { allowEmpty: pendingAttachments.length > 0 })
@@ -1064,11 +1071,13 @@ export default function Chat() {
               ) : null}
               {td.length > 0 ? (
                 <View style={s.todos}>
+                  {/* BUG-077: show what was cut instead of silently dropping. */}
                   {td.slice(0, 4).map((t, i) => (
                     <Text key={i} style={s.todo}>
                       {t.done ? '✓' : '○'} {t.text}
                     </Text>
                   ))}
+                  {td.length > 4 ? <Text style={s.todoMore}>+{td.length - 4} more</Text> : null}
                 </View>
               ) : null}
             </View>
@@ -1267,7 +1276,14 @@ export default function Chat() {
                     />
                     <Pressable
                       style={({ pressed }) => [s.miniSend, pressed && s.btnPressed]}
-                      onPress={() => { const t = answerText; setAnswerText(''); void respondClarify(t) }}
+                      onPress={() => {
+                        // BUG-075: an empty tap used to wipe the field and do
+                        // nothing — keep the text, and only send a real answer.
+                        const t = answerText.trim()
+                        if (!t) return
+                        setAnswerText('')
+                        void respondClarify(t)
+                      }}
                       accessibilityLabel="Send clarification"
                     >
                       <Icon name="arrow-up" size={17} color={C.onAccent} />
@@ -1611,6 +1627,7 @@ const makeS = () => StyleSheet.create({
   toolsOpenList: { maxHeight: 170 },
   todos: { paddingHorizontal: 16, paddingVertical: 2 },
   todo: { color: C.textDim, fontSize: 12.5, lineHeight: 18 },
+  todoMore: { color: C.textFaint, fontSize: 12, marginTop: 2 },
   fab: {
     position: 'absolute',
     right: 16,
