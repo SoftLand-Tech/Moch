@@ -209,6 +209,9 @@ async function writeTokenFor(id: string, token: string): Promise<void> {
     await SecureStore.setItemAsync(key, token)
     return
   }
+  // BUG-071: say so — a silent plaintext fallback is a security posture
+  // change the user should be able to see in the logs.
+  log('warn', 'auth', `SecureStore unavailable — per-server token stored in PLAINTEXT AsyncStorage (key ${key})`)
   try { await AsyncStorage.setItem(key, token) } catch {}
 }
 
@@ -439,7 +442,10 @@ function scheduleReconnect() {
   if (reconnectTimer) return
   const attempt = reconnectAttempt.get() + 1
   reconnectAttempt.set(attempt)
-  const delay = Math.min(1000 * 2 ** Math.min(attempt - 1, 5), 30_000)
+  // BUG-070: ±30% jitter — a fixed schedule syncs with server restarts and
+  // reconnect storms (every client retrying on the same second).
+  const base = Math.min(1000 * 2 ** Math.min(attempt - 1, 5), 30_000)
+  const delay = Math.min(Math.round(base * (0.7 + Math.random() * 0.6)), 30_000)
   log('warn', 'gateway', `socket closed — retry #${attempt} in ${Math.round(delay / 1000)}s`)
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null
