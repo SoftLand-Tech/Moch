@@ -185,4 +185,117 @@ class HermesBridgeModule(reactContext: ReactApplicationContext) :
       promise.reject("linux_reset", e.message, e)
     }
   }
+
+  /**
+   * Interactive guest terminal (M9) — JS polls linuxTermDrain on a timer
+   * while the terminal screen is mounted, so the bridge stays promise-only
+   * (no native event emitter; same threading shape as linuxExec).
+   */
+  @ReactMethod
+  fun linuxTermProbe(promise: Promise) {
+    Thread {
+      try {
+        val py = com.chaquo.python.Python.getInstance()
+        val result = py.getModule("moch.terminal").callAttr("probe").toString()
+        val obj = org.json.JSONObject(result)
+        val map = Arguments.createMap()
+        map.putBoolean("pty", obj.optBoolean("pty", false))
+        map.putBoolean("guest", obj.optBoolean("guest", false))
+        map.putBoolean("shell", obj.optBoolean("shell", false))
+        if (obj.has("error")) map.putString("error", obj.optString("error"))
+        promise.resolve(map)
+      } catch (e: Exception) {
+        promise.reject("linux_term_probe", e.message, e)
+      }
+    }.start()
+  }
+
+  @ReactMethod
+  fun linuxTermStart(cols: Int, rows: Int, promise: Promise) {
+    Thread {
+      try {
+        val py = com.chaquo.python.Python.getInstance()
+        val result = py.getModule("moch.terminal").callAttr("start", cols, rows).toString()
+        val obj = org.json.JSONObject(result)
+        val map = Arguments.createMap()
+        map.putBoolean("ok", obj.optBoolean("ok", false))
+        map.putBoolean("alreadyRunning", obj.optBoolean("already_running", false))
+        if (obj.has("error")) map.putString("error", obj.optString("error"))
+        promise.resolve(map)
+      } catch (e: Exception) {
+        promise.reject("linux_term_start", e.message, e)
+      }
+    }.start()
+  }
+
+  @ReactMethod
+  fun linuxTermWrite(dataB64: String, promise: Promise) {
+    try {
+      val py = com.chaquo.python.Python.getInstance()
+      val result = py.getModule("moch.terminal").callAttr("write", dataB64).toString()
+      val obj = org.json.JSONObject(result)
+      if (obj.optBoolean("ok", false)) promise.resolve(true)
+      else promise.reject("linux_term_write", obj.optString("error", "write failed"))
+    } catch (e: Exception) {
+      promise.reject("linux_term_write", e.message, e)
+    }
+  }
+
+  @ReactMethod
+  fun linuxTermDrain(promise: Promise) {
+    try {
+      val py = com.chaquo.python.Python.getInstance()
+      val result = py.getModule("moch.terminal").callAttr("drain").toString()
+      val obj = org.json.JSONObject(result)
+      val map = Arguments.createMap()
+      val arr = Arguments.createArray()
+      val raw = obj.optJSONArray("chunks")
+      if (raw != null) {
+        for (i in 0 until raw.length()) arr.pushString(raw.optString(i))
+      }
+      map.putArray("chunks", arr)
+      map.putBoolean("alive", obj.optBoolean("alive", false))
+      promise.resolve(map)
+    } catch (e: Exception) {
+      promise.reject("linux_term_drain", e.message, e)
+    }
+  }
+
+  @ReactMethod
+  fun linuxTermReplay(promise: Promise) {
+    try {
+      val py = com.chaquo.python.Python.getInstance()
+      val result = py.getModule("moch.terminal").callAttr("replay").toString()
+      val obj = org.json.JSONObject(result)
+      val map = Arguments.createMap()
+      map.putString("chunk", obj.optString("chunk", ""))
+      map.putBoolean("alive", obj.optBoolean("alive", false))
+      promise.resolve(map)
+    } catch (e: Exception) {
+      promise.reject("linux_term_replay", e.message, e)
+    }
+  }
+
+  @ReactMethod
+  fun linuxTermResize(cols: Int, rows: Int, promise: Promise) {
+    try {
+      val py = com.chaquo.python.Python.getInstance()
+      py.getModule("moch.terminal").callAttr("resize", cols, rows)
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.reject("linux_term_resize", e.message, e)
+    }
+  }
+
+  @ReactMethod
+  fun linuxTermKill(promise: Promise) {
+    try {
+      val py = com.chaquo.python.Python.getInstance()
+      val result = py.getModule("moch.terminal").callAttr("kill").toString()
+      val obj = org.json.JSONObject(result)
+      promise.resolve(obj.optBoolean("ok", false))
+    } catch (e: Exception) {
+      promise.reject("linux_term_kill", e.message, e)
+    }
+  }
 }

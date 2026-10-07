@@ -190,6 +190,7 @@ export function ScreenShell({
     // header's search icon (Relay theme only) — the drawer needs its own
     // entry so the Chats screen isn't orphaned.
     { key: 'chats', label: 'Chats', icon: 'list-outline' },
+    { key: 'terminal', label: 'Terminal', icon: 'terminal-outline' },
     { key: 'automations', label: 'Automations', icon: 'timer-outline', mochis: runningAuto },
     { key: 'skills', label: 'Skills', icon: 'sparkles-outline' },
     { key: 'connectors', label: 'Connectors', icon: 'extension-puzzle-outline' },
@@ -240,15 +241,17 @@ export function ScreenShell({
           ? '/(tabs)/chat'
           : key === 'chats'
             ? '/(tabs)/sessions'
-            : key === 'automations'
-              ? '/(tabs)/automations'
-              : key === 'skills'
-                ? '/(tabs)/skills'
-                : key === 'connectors'
-                  ? '/(tabs)/connectors'
-                  : key === 'agent'
-                    ? '/(tabs)/agent'
-                    : '/(tabs)/settings'
+            : key === 'terminal'
+              ? '/(tabs)/terminal'
+              : key === 'automations'
+                ? '/(tabs)/automations'
+                : key === 'skills'
+                  ? '/(tabs)/skills'
+                  : key === 'connectors'
+                    ? '/(tabs)/connectors'
+                    : key === 'agent'
+                      ? '/(tabs)/agent'
+                      : '/(tabs)/settings'
       // navigate, never push: `/(tabs)` is a single route on the root stack,
       // so push mounts a whole fresh copy of every tab screen each tap —
       // navigate just switches the tab inside the instance we already have.
