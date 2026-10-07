@@ -1150,7 +1150,12 @@ async function withBootPaint(stored: string): Promise<ResumeResult> {
 }
 
 /** Boot: restore the last session, or create one. Safe to call repeatedly. */
-export async function ensureSession(): Promise<string> {
+export async function ensureSession(opts?: { create?: boolean }): Promise<string> {
+  // BUG-013: look-only surfaces (the Models tab) pass create:false — merely
+  // VISITING them must not mint a server-side session for an unsent chat
+  // (the local-only invariant the chat screen deliberately upholds). They
+  // get the provisional/live id or '' and skip session-scoped reads.
+  const create = opts?.create !== false
   const current = activeSession.get()
   if (current) {
     const state = sessionsById.get()[current]
@@ -1158,6 +1163,7 @@ export async function ensureSession(): Promise<string> {
     // real action (send / model pick) — an unsent chat never exists on the
     // server and never shows in the saved list.
     if (state?.provisional) {
+      if (!create) return current
       if (inflightCreate) return await inflightCreate
       const tempId = current
       const pseudo = state.storedId
@@ -1200,6 +1206,9 @@ export async function ensureSession(): Promise<string> {
       /* fall through to a fresh chat */
     }
   }
+  // BUG-013: nothing active and creating is off — report "none" instead of
+  // minting a session for a surface that was merely visited.
+  if (!create) return ''
   const r = await createSession()
   activeSession.set(r.sessionId)
   return r.sessionId
