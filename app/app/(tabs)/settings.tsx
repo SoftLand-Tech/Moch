@@ -300,11 +300,11 @@ function SettingsInner() {
     ])
   }
 
-  const confirmNewChat = () => {
-    showAlert('New chat?', 'Clears the current transcript and starts a fresh session.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Start', onPress: () => { void newChat().catch((e) => showAlert('Failed', String(e))) } },
-    ])
+  // BUG-049: one new-chat contract everywhere — immediate switch, like the
+  // drawer, the Chats tab and /new. The transcript detaches (nothing is
+  // deleted) and stays one tap away in the drawer.
+  const startNewChat = () => {
+    void newChat().catch((e) => showAlert('Failed', String(e)))
   }
 
   return (
@@ -433,9 +433,9 @@ function SettingsInner() {
         <Section title="CHAT">
           <Row
             icon="chatbox-ellipses-outline"
-            label="Start new chat session"
-            sub="Clears the current transcript and starts fresh"
-            onPress={confirmNewChat}
+            label="New chat"
+            sub="Starts a fresh chat — the current one stays in Chats"
+            onPress={startNewChat}
           />
           <Divider />
           <Row

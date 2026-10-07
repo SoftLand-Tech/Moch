@@ -42,6 +42,14 @@ export function PairForm({ onPaired }: { onPaired: () => void }) {
       setError(e instanceof Error ? e.message : 'Invalid server address.')
       return
     }
+    // BUG-069: soft shape check on the probe token (hermes probe keys are
+    // base64 of exactly 16 bytes → 24 chars). A short token surfaces as an
+    // opaque connect error otherwise. Non-blocking: the server stays
+    // authoritative.
+    if (t.length < 16) {
+      setError('That token looks too short — pairing tokens are usually longer. Check it and try again.')
+      return
+    }
     setBusy(true)
     setError(null)
     try {
