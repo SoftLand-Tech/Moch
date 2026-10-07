@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { View, Text, FlatList, Pressable, TextInput, StyleSheet, RefreshControl } from 'react-native'
-import { Ionicons } from '@expo/vector-icons'
 import { Icon } from '../../src/components/Icon'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useStore } from '@nanostores/react'
@@ -21,14 +20,8 @@ import { showAlert } from '../../src/components/AlertDialog'
 import { StatusDot } from '../../src/components/Sidebar'
 import { loadSessions, sessionRows, sessionListLoading, sessionListError, toMs, type SessionRow } from '../../src/lib/sessionList'
 
-interface Sess {
-  id: string
-  title?: string
-  preview?: string
-  started_at?: number
-  message_count?: number
-  source?: string
-}
+// BUG-063: the row type IS SessionRow — the local duplicate dropped.
+type Sess = SessionRow
 
 // Timestamp normalisation lives in the session-list store (shared with the
 // drawer) so both agree on the unit.

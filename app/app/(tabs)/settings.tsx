@@ -529,6 +529,4 @@ const makeS = () => StyleSheet.create({
   miniDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.textFaint },
   activeTag: { color: C.greenSoft, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
   serverForget: { paddingHorizontal: 14, paddingVertical: 14, minHeight: 56, justifyContent: 'center' },
-  warn: { color: C.red, fontSize: 12, lineHeight: 17, paddingHorizontal: 14, paddingVertical: 6 },
-  note: { color: C.textFaint, fontSize: 12, lineHeight: 17, paddingHorizontal: 14, paddingVertical: 6 },
 })
