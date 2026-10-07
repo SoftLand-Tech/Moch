@@ -35,6 +35,7 @@ import {
   activeStoredId,
   busyStoredKey,
   pendingCount,
+  pendingStoredIds,
   forgetSession,
   isSessionNotFound,
   newChat,
@@ -89,6 +90,9 @@ export function ScreenShell({
   const busyKey = useStore(busyStoredKey)
   const busy = useMemo(() => (busyKey ? busyKey.split(',') : []), [busyKey])
   const attention = useStore(attentionById)
+  // BUG-085: chats with an unanswered question keep their amber row dot even
+  // after being opened (opening clears the event-driven mark).
+  const pendingStored = useStore(pendingStoredIds)
   const current = useStore(activeStoredId)
   const summaryKey = useStore(sessionsSummaryKey)
   // Ref-read map: the latest sessionsById lands here synchronously on every
@@ -201,7 +205,10 @@ export function ScreenShell({
     // conversation, and `started_at` is a real timestamp. Falling back to the
     // in-memory store (for a chat created before the first fetch landed) is
     // ordered by creation time, never by the per-session `lastSeq`.
-    const statusOf = (id: string) => rowStatus(busy.includes(id), attention[id])
+    // BUG-085: unanswered questions keep the amber dot even after the chat
+    // was opened (opening clears the event-driven mark; the question still
+    // blocks) — derived from pendingBySession, the source of truth.
+    const statusOf = (id: string) => rowStatus(busy.includes(id), attention[id], pendingStored.includes(id))
     const fromServer = rows.map((r) => ({
       id: r.id,
       title: r.title || r.preview?.slice(0, 60) || 'Untitled',
@@ -227,7 +234,7 @@ export function ScreenShell({
     // Uncapped: the sidebar's own search filters this list, and server rows
     // are bounded by the session.list fetch anyway.
     return [...locals, ...fromServer]
-  }, [rows, all, busy, attention, current])
+  }, [rows, all, busy, attention, current, pendingStored])
 
   const go = useCallback(
     (key: string) => {
