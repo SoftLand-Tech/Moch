@@ -48,6 +48,19 @@ export function toMs(ts?: number | null): number {
 }
 
 let inflight: Promise<SessionRow[]> | null = null
+// BUG-024/028: generation guard. A force refresh used to overwrite a still-
+// running fetch's slot, and whichever finished first cleared the spinner and
+// nulled `inflight` while the other was mid-flight — a third caller then
+// started a third fetch, and a STALE response could overwrite fresher rows
+// (or land after resetSessionList and repopulate the old backend's chats).
+// Every load stamps itself; only the newest generation may write rows,
+// clear the spinner, or null `inflight`.
+let loadGen = 0
+
+/** Rows fetched per call (BUG-020: was a silent 200 — the RPC contract has
+ *  no maximum, so heavy users' older chats simply vanished; full cursor
+ *  pagination is a gateway protocol addition, tracked in bugs.md). */
+const LIST_LIMIT = 1000
 
 /**
  * Fetch the conversation list. Concurrent callers share one request so the
@@ -55,13 +68,17 @@ let inflight: Promise<SessionRow[]> | null = null
  */
 export function loadSessions(opts?: { force?: boolean }): Promise<SessionRow[]> {
   if (inflight && !opts?.force) return inflight
+  const gen = ++loadGen
 
   inflight = (async () => {
     sessionListLoading.set(true)
     sessionListError.set(null)
     try {
       // `search` is NOT a valid param here (the contract is extra="forbid").
-      const res = await rpc<{ sessions?: SessionRow[] }>('session.list', { limit: 200 })
+      const res = await rpc<{ sessions?: SessionRow[] }>('session.list', { limit: LIST_LIMIT })
+      // Superseded (a newer force fetch, or a backend-switch reset) — never
+      // write stale rows over fresher ones.
+      if (gen !== loadGen) return sessionRows.get()
       // BUG-012: the server already orders rows by last activity
       // (order_by_last_active=True) — the old client re-sort by started_at
       // (immutable CREATION time) destroyed that order, so actively-used old
@@ -71,13 +88,15 @@ export function loadSessions(opts?: { force?: boolean }): Promise<SessionRow[]> 
       return rows
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Could not load chats'
-      sessionListError.set(msg)
+      if (gen === loadGen) sessionListError.set(msg)
       log('info', 'sessions', `session.list failed: ${msg}`)
       // Keep whatever we already had rather than blanking the list.
       return sessionRows.get()
     } finally {
-      sessionListLoading.set(false)
-      inflight = null
+      if (gen === loadGen) {
+        sessionListLoading.set(false)
+        inflight = null
+      }
     }
   })()
 
@@ -97,6 +116,9 @@ export function liveIdFor(storedId: string): string | undefined {
 }
 
 export function resetSessionList() {
+  // BUG-024: invalidate any in-flight fetch — a response from the OLD
+  // backend landing after this reset must not repopulate the rows.
+  loadGen++
   inflight = null
   sessionRows.set([])
   liveIds.set({})
