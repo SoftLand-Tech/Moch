@@ -276,8 +276,10 @@ function SettingsInner() {
   const exportTranscript = async () => {
     const text = messages.get().map((m) => `[${new Date(m.ts).toLocaleString()}] ${m.role}: ${m.text}`).join('\n\n')
     if (!text) { showAlert('Empty', 'No messages to export.'); return }
+    // BUG-077: say so when the clipboard cap clips the export.
+    const clipped = text.length > 50000
     await Clipboard.setStringAsync(text.slice(0, 50000))
-    showAlert('Copied', 'Transcript copied to clipboard.')
+    showAlert('Copied', clipped ? 'Copied — long transcripts are capped at 50,000 characters.' : 'Transcript copied to clipboard.')
   }
 
   const forgetCurrent = () => {

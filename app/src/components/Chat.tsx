@@ -365,7 +365,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
           {header}
         </Pressable>
         {open ? (
-          <Text style={s.thinkText}>{seg.text.length > 4000 ? seg.text.slice(-4000) : seg.text}</Text>
+          <Text style={s.thinkText}>{seg.text.length > 4000 ? `…truncated — last 4000 chars:\n${seg.text.slice(-4000)}` : seg.text}</Text>
         ) : null}
       </View>
     )
@@ -378,7 +378,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
     >
       {header}
       {open ? (
-        <Text style={s.thinkText}>{seg.text.length > 4000 ? seg.text.slice(-4000) : seg.text}</Text>
+        <Text style={s.thinkText}>{seg.text.length > 4000 ? `…truncated — last 4000 chars:\n${seg.text.slice(-4000)}` : seg.text}</Text>
       ) : null}
     </Pressable>
   )

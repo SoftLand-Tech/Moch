@@ -1478,13 +1478,15 @@ export function applyHistory(sessionId: string, list?: Array<Record<string, unkn
     const extracted = extractMedia(text ? [{ kind: 'text' as const, text }] : [])
     const hasMedia = extracted.some((seg) => seg.kind === 'media')
     if (!hasMedia && !text) continue
+    // BUG-077: mark truncation instead of silently clipping long rows.
     const capped = extracted.map((seg) =>
-      seg.kind === 'text' && seg.text.length > 8000 ? { ...seg, text: seg.text.slice(0, 8000) } : seg,
+      seg.kind === 'text' && seg.text.length > 8000 ? { ...seg, text: `${seg.text.slice(0, 8000)}…` } : seg,
     )
+    const rowText = (hasMedia ? joinedTextOf(capped) : text)
     mapped.push({
       id: nid(),
       role,
-      text: (hasMedia ? joinedTextOf(capped) : text).slice(0, 8000),
+      text: `${rowText.slice(0, 8000)}${rowText.length > 8000 ? '…' : ''}`,
       ts: Number(m.ts ?? m.timestamp ?? Date.now()),
       ...(hasMedia ? { segments: capped } : {}),
     })
