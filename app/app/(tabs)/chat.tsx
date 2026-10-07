@@ -1516,7 +1516,9 @@ const makeS = () => StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
   // Shared press feedback so every tappable answers on the frame it's hit.
   btnPressed: { opacity: 0.6 },
-  banner: { backgroundColor: '#241A08', paddingVertical: 9, paddingHorizontal: 14 },
+  // BUG-017: amberSoft token — the literal was hue-locked to Mocheme and
+  // clashed with Relay's teal band after a theme switch.
+  banner: { backgroundColor: C.amberSoft, paddingVertical: 9, paddingHorizontal: 14 },
   bannerText: { color: C.amber, fontSize: 12.5, fontWeight: '600', textAlign: 'center' },
   empty: { paddingHorizontal: 16, paddingTop: 24, gap: 2 },
   booting: { flex: 1, flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 80 },
