@@ -63,6 +63,7 @@ import { AttachmentChip } from '../../src/components/media/AttachmentChip'
 import { AttachSheet } from '../../src/components/media/AttachSheet'
 import { chatTabFocused } from '../../src/lib/attention'
 import { draftFor, setDraft } from '../../src/lib/drafts'
+import { shareInInbox, ackShareIn, applySharedToDraft, type SharedFile } from '../../src/lib/shareIn'
 import { isConnected as isConnectedAtom, connectionState, gatewayError, retryNow, reconnectAttempt } from '../../src/lib/gateway'
 import { completeSlash, loadCatalog, runCommand, parseSlashCommand, canonicalName, interactiveTarget, describeCommand, subsFor, argumentModeFor, slashLabel, localCompleteSync, type CompletionItem, type SlashOutcome } from '../../src/lib/slash'
 import { liveModel, liveReasoning, liveReasoningDisplay, fetchReasoningDisplay } from '../../src/lib/modelState'
@@ -107,6 +108,7 @@ export default function Chat() {
   const booting = !!(storedId && loadings[storedId]) && msgs.length === 0
   const banner = useStore(chatBanner)
   const online = useStore(isConnectedAtom)
+  const sharedIn = useStore(shareInInbox)
   // A short drop (background socket death + ~2s rebuild) must not flash the
   // offline banner — the chat renders fine from cache meanwhile. The banner
   // only appears when the outage outlasts this grace window.
@@ -556,8 +558,45 @@ export default function Chat() {
 
   /** Chips update in place as the attach pipeline progresses. */
   const patchAttachment = useCallback((id: string, patch: Partial<PendingAttachment>) => {
-    setPendingAttachments((cur) => cur.map((a) => (a.id === id ? { ...a, ...patch } : a)))
+    setPendingAttachments((cur) => cur.map((a) => a.id === id ? { ...a, ...patch } : a))
   }, [])
+
+  // "Ask Moch" share target: a share delivered by shareIn.ts lands here.
+  // Text merges into the composer draft; files ride the SAME addAttachment
+  // gates as a picked file (size/count caps, alerts). Consumed in one pass —
+  // ack first so a re-render can't double-apply — and nothing auto-sends:
+  // the user reviews the composer and taps Send (ChatGPT's share behavior).
+  useEffect(() => {
+    if (!sharedIn) return
+    ackShareIn()
+    const cur = draftFor(storedId)
+    const merged = applySharedToDraft(cur, sharedIn)
+    if (merged !== cur) updateInput(merged)
+    sharedIn.files.forEach((f: SharedFile, i: number) => {
+      const inferred = mediaKindForPath(f.name)
+      const kind: PendingAttachment['kind'] =
+        inferred === 'unknown' || inferred === 'file' ? 'file' : inferred
+      addAttachment({
+        id: `shr${sharedIn.at}_${i}_${Math.random().toString(36).slice(2, 8)}`,
+        kind,
+        uri: f.uri,
+        name: f.name,
+        size: f.size,
+        mime: f.mime,
+        state: 'pick',
+      })
+    })
+    if (sharedIn.skipped > 0) {
+      showAlert(
+        'Share skipped',
+        `${sharedIn.skipped} shared file${sharedIn.skipped === 1 ? '' : 's'} exceeded the ${formatBytes(ATTACH_MAX_BYTES)} limit.`,
+      )
+    }
+    // One-shot per share: ack above clears the trigger, so the closed-over
+    // helpers (updateInput/addAttachment) are only read on the firing pass.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharedIn])
+
 
   const send = async () => {
     if (recording) return // finishing the take wins over sending

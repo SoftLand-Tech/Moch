@@ -1,6 +1,7 @@
 package com.hermes.pocket
 import expo.modules.splashscreen.SplashScreenManager
 
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 
@@ -8,6 +9,7 @@ import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
 import com.facebook.react.defaults.DefaultReactActivityDelegate
+import com.hermes.pocket.sharein.ShareInRelay
 
 import expo.modules.ReactActivityDelegateWrapper
 
@@ -21,6 +23,9 @@ class MainActivity : ReactActivity() {
     SplashScreenManager.registerOnActivity(this)
     // @generated end expo-splashscreen
     super.onCreate(null)
+    // "Ask Moch" share target, cold-start leg: the app was not running when
+    // the user shared. onNewIntent below covers the app-alive leg.
+    ShareInRelay.capture(applicationContext, intent)
   }
 
   /**
@@ -42,6 +47,13 @@ class MainActivity : ReactActivity() {
               mainComponentName,
               fabricEnabled
           ){})
+  }
+
+  // Share target while the app was alive — launchMode is singleTask, so an
+  // ACTION_SEND from the system sheet lands here instead of recreating us.
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    ShareInRelay.capture(applicationContext, intent)
   }
 
   /**

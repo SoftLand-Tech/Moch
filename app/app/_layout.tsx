@@ -22,6 +22,7 @@ import { hookChatEvents, loadOutbox, switchToSession } from '../src/lib/chat'
 import { loadAttention, pendingOpenStoredId, requestOpenSession } from '../src/lib/attention'
 import { loadDrafts } from '../src/lib/drafts'
 import { loadSendQueue } from '../src/lib/sendQueue'
+import { initShareIn, deliverSharedNow, shareInInbox } from '../src/lib/shareIn'
 import { syncBackendIdentity } from '../src/lib/backendIdentity'
 import { parseConnectUrl } from '../src/lib/pairing'
 import { pruneRelayMedia } from '../src/lib/mediaCache'
@@ -43,6 +44,7 @@ export default function RootLayout() {
   const savedServers = useStore(serversStore)
   const activeId = useStore(activeServerId)
   const pendingOpen = useStore(pendingOpenStoredId)
+  const sharedIn = useStore(shareInInbox)
   const [splashGone, setSplashGone] = useState(false)
   // Rendered as the stable last sibling of both layout branches, so the
   // branch switch (saved config loading in) never remounts it mid-animation.
@@ -151,8 +153,18 @@ export default function RootLayout() {
         // Back in hand — tray knocks we sent while the user was away are
         // stale now that the chat surface is reachable again.
         void dismissMochNotifications()
+        // A share received while backgrounded may have missed the native
+        // event (the process was suspended) — re-pull on foreground.
+        deliverSharedNow()
       }
     })
+
+    // "Ask Moch" share target: cold-start pull (a share captured in
+    // MainActivity.onCreate) + the MochShareIn nudge. Routing happens in the
+    // sharedIn effect below (and per-pull via the callback) so a share always
+    // lands the user on the composer, however it was delivered.
+    const routeToChat = () => { try { router.navigate('/(tabs)/chat') } catch {} }
+    const offShare = initShareIn(routeToChat)
 
     // Notification tap → the chat it is about (covers killed-state launch
     // too). Routed through push.ts so expo-notifications is never in this
@@ -175,6 +187,7 @@ export default function RootLayout() {
       offToken()
       sub.remove()
       appSub.remove()
+      offShare()
       removeNotifSub?.()
     }
   }, [])
@@ -190,6 +203,14 @@ export default function RootLayout() {
     try { router.navigate('/(tabs)/chat') } catch {}
     void switchToSession(pendingOpen.storedId).catch(() => {})
   }, [pendingOpen, online, router])
+
+  // A share waiting in the inbox routes to the chat tab whose composer will
+  // consume it (chat.tsx). Covers every delivery path: cold-start pull,
+  // event nudge, foreground re-pull.
+  useEffect(() => {
+    if (!sharedIn) return
+    try { router.navigate('/(tabs)/chat') } catch {}
+  }, [sharedIn, router])
 
   if (!cfg) {
     return (
