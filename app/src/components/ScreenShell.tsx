@@ -38,6 +38,8 @@ import {
   forgetSession,
   isSessionNotFound,
   newChat,
+  patchSession,
+  resumeShared,
   switchToSession,
   sessionsById,
   sessionsSummaryKey,
@@ -288,15 +290,23 @@ export function ScreenShell({
 
   const handleRename = useCallback(async (storedId: string, title: string) => {
     try {
+      // BUG-006: session.title is a LIVE-session method — the row's stored
+      // id 4001s ("session not found") and the title never lands anywhere.
+      // Resolve the live handle first (minting one via a quiet resume when
+      // the chat isn't tracked), then patch BOTH surfaces: the list row and
+      // the in-memory entry the open chat's header reads.
       // `session.title` with an explicit title writes user-provenance; the
       // auto-titler never overwrites those, so a manual rename sticks.
-      await rpc('session.title', { session_id: storedId, title })
+      let live = liveIdOf(storedId)
+      if (!live) live = (await resumeShared(storedId)).sessionId
+      await rpc('session.title', { session_id: live, title })
       patchRowTitle([storedId], title)
+      patchSession(live, { title })
       return null
     } catch (e) {
       return e instanceof Error ? e.message : 'Rename failed'
     }
-  }, [])
+  }, [liveIdOf])
 
   const handleDelete = useCallback(async (storedId: string) => {
     try {

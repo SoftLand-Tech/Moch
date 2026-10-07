@@ -362,7 +362,10 @@ function patchActive(patch: Partial<SessionState>) {
   sessionsById.set({ ...map, [id]: { ...cur, ...patch } })
 }
 
-function patchSession(id: string, patch: Partial<SessionState>) {
+// Exported for the drawer's rename flow (BUG-006): a successful manual
+// rename patches the open chat's in-memory title so the header updates
+// without waiting for an event echo or the next list poll.
+export function patchSession(id: string, patch: Partial<SessionState>) {
   const map = sessionsById.get()
   const cur = map[id]
   if (!cur) return
@@ -1040,7 +1043,11 @@ const inflightResumes = new Map<string, Promise<ResumeResult>>()
 
 /** Shared, deduped resume core — the one primitive every path that needs a
  *  live handle for a stored id goes through. */
-function resumeShared(storedId: string): Promise<ResumeResult> {
+/** Shared, deduped resume core — the one primitive every path that needs a
+ *  live handle for a stored id goes through. Exported for surface-agnostic
+ *  callers that must resolve a live id before a live-session RPC (BUG-006
+ *  rename). */
+export function resumeShared(storedId: string): Promise<ResumeResult> {
   const inflight = inflightResumes.get(storedId)
   if (inflight) return inflight
   const p = runResume(storedId).finally(() => {
