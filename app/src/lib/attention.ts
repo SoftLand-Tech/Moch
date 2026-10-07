@@ -54,12 +54,20 @@ export const toasts = atom<SessionToast[]>([])
 
 let toastSeq = 0
 
-/** Queue a toast. A newer toast for the same chat+kind replaces the old one;
- *  at most three are on screen (oldest dropped). */
+/** Queue a toast. Newest renders on TOP (BUG-026: it used to append, so the
+ *  newest card hid UNDER older ones); a newer toast for the same chat+kind
+ *  replaces the old one IN PLACE (same React key — no unmount/remount
+ *  flash); at most three are on screen (oldest dropped). */
 export function pushToast(t: Omit<SessionToast, 'id'>): void {
-  const list = toasts.get().filter((x) => !(x.storedId === t.storedId && x.kind === t.kind))
-  list.push({ ...t, id: ++toastSeq })
-  toasts.set(list.slice(-3))
+  const existing = toasts.get()
+  const idx = existing.findIndex((x) => x.storedId === t.storedId && x.kind === t.kind)
+  if (idx >= 0) {
+    const next = [...existing]
+    next[idx] = { ...existing[idx], ...t, id: existing[idx].id }
+    toasts.set(next)
+    return
+  }
+  toasts.set([{ ...t, id: ++toastSeq }, ...existing].slice(0, 3))
 }
 
 export function dismissToast(id: number): void {
