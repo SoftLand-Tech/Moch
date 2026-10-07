@@ -163,8 +163,16 @@ export function groupChats<T extends GroupableChat>(
   const archivedSet = new Set(archived)
 
   const todayStart = startOfDay(now)
-  const yesterdayStart = todayStart - DAY_MS
-  const weekStart = todayStart - 6 * DAY_MS
+  // BUG-059: calendar-day arithmetic via Date (not fixed 24h subtractions) —
+  // `todayStart - k * DAY_MS` drifted an hour across DST transitions and
+  // mis-bucketed early-morning chats between Yesterday / Previous 7 days.
+  const dayStart = (offsetDays: number): number => {
+    const d = new Date(todayStart)
+    d.setDate(d.getDate() - offsetDays)
+    return d.getTime()
+  }
+  const yesterdayStart = dayStart(1)
+  const weekStart = dayStart(6)
 
   const byRecency = (a: T, b: T) => (b.ts ?? 0) - (a.ts ?? 0)
   const groups: Record<ChatGroupKey, T[]> = { pinned: [], today: [], yesterday: [], week: [], older: [], archived: [] }

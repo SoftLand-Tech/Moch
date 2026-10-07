@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, Animated, AccessibilityInfo, Image } from 'react-native'
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, Animated, Image } from 'react-native'
 // The maintained fork. The original `react-native-markdown-display` pins
 // markdown-it 10, which does `require('punycode')` — a Node builtin that
 // Metro's Hermes runtime does not provide, so it breaks the Android bundle.
@@ -8,12 +8,12 @@ import { View, Text, StyleSheet, Pressable, ActivityIndicator, Animated, Accessi
 import Markdown from '@ronradtke/react-native-markdown-display'
 import * as Clipboard from 'expo-clipboard'
 import * as Speech from 'expo-speech'
-import { Ionicons } from '@expo/vector-icons'
 import { Icon } from './Icon'
 import { speakText, stopTts } from '../lib/voice'
 import { C, S, useStyles, useShape } from '../lib/theme'
 import { formatThinkMeta, type ChatMessage, type ChatSegment, type ToolItem } from '../lib/chat'
 import { MediaSegmentView } from './media/MediaSegmentView'
+import { useReduceMotion } from './useReduceMotion'
 import { CommandCard } from './CommandOutput'
 
 /** A message's renderable content: explicit segments, else its plain text. */
@@ -70,10 +70,9 @@ export const makeCardMdStyles = () => {
  */
 export const ThinkingDots = React.memo(function ThinkingDots() {
   const s = useStyles(makeS)
-  const [reduce, setReduce] = useState(false)
-  useEffect(() => {
-    AccessibilityInfo.isReduceMotionEnabled().then(setReduce).catch(() => {})
-  }, [])
+  // BUG-056: shared live hook — the old one-shot read went stale until a
+  // remount (no listener on the OS setting).
+  const reduce = useReduceMotion()
   const dots = useRef<Animated.Value[]>([0, 1, 2].map(() => new Animated.Value(0))).current
   useEffect(() => {
     if (reduce) return
@@ -216,12 +215,15 @@ export const MessageBubble = React.memo(function MessageBubble({
             // JS thread until flushes stop landing mid-turn ("all at once at the
             // end"). One Text node is trivial to re-render; the full Markdown
             // render happens once, when the segment completes.
-            <Text key={i} style={s.streamText}>{seg.text}</Text>
+            // BUG-040: the cursor rides INLINE at the text tail — as its own
+            // block-level Text node it rendered on its own line below the
+            // growing paragraph.
+            <Text key={i} style={s.streamText}>{seg.text}▍</Text>
           ) : (
             <Markdown key={i} style={md}>{seg.text}</Markdown>
           ),
         )}
-        {m.streaming ? (hasVisibleText ? <Text style={s.cursor}>▍</Text> : <ThinkingDots />) : null}
+        {m.streaming && !hasVisibleText ? <ThinkingDots /> : null}
         {m.status === 'failed' ? (
           <View style={s.failedRow}>
             <Icon name="alert-circle" size={15} color={C.red} />
@@ -235,6 +237,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               onPress={copy}
               hitSlop={10}
               style={({ pressed }) => [s.iconBtn, pressed && s.iconPressed]}
+              accessibilityRole="button"
               accessibilityLabel="Copy message"
             >
               <Icon name={copied ? 'checkmark' : 'copy-outline'} size={15} color={copied ? C.greenSoft : C.textFaint} />
@@ -243,6 +246,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               onPress={() => { void toggleSpeak() }}
               hitSlop={10}
               style={({ pressed }) => [s.iconBtn, pressed && s.iconPressed]}
+              accessibilityRole="button"
               accessibilityLabel={speakState === 'playing' ? 'Stop playback' : 'Listen'}
             >
               {speakState === 'loading' ? (
@@ -277,6 +281,9 @@ export const MessageBubble = React.memo(function MessageBubble({
           ) : null,
         )}
       </View>
+      {/* BUG-045: user messages get a timestamp too — only assistant rows
+          showed one. */}
+      <Text style={s.userTime}>{fmtTime(m.ts)}</Text>
       {m.status === 'failed' ? (
         <View style={s.failedRow}>
           <Icon name="alert-circle" size={15} color={C.red} />
@@ -365,7 +372,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
           {header}
         </Pressable>
         {open ? (
-          <Text style={s.thinkText}>{seg.text.length > 4000 ? seg.text.slice(-4000) : seg.text}</Text>
+          <Text style={s.thinkText}>{seg.text.length > 4000 ? `…truncated — last 4000 chars:\n${seg.text.slice(-4000)}` : seg.text}</Text>
         ) : null}
       </View>
     )
@@ -378,7 +385,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
     >
       {header}
       {open ? (
-        <Text style={s.thinkText}>{seg.text.length > 4000 ? seg.text.slice(-4000) : seg.text}</Text>
+        <Text style={s.thinkText}>{seg.text.length > 4000 ? `…truncated — last 4000 chars:\n${seg.text.slice(-4000)}` : seg.text}</Text>
       ) : null}
     </Pressable>
   )
@@ -433,6 +440,8 @@ const makeS = () => StyleSheet.create({
   avatarWrap: { width: 30, height: 30, borderRadius: 15, overflow: 'hidden', marginTop: 2 },
   avatarImg: { width: 30, height: 30 },
   userWrap: { paddingHorizontal: 16, paddingVertical: 6, alignItems: 'flex-end' },
+  // BUG-045: per-message timestamp under the user's bubble.
+  userTime: { color: C.textFaint, fontSize: 10.5, alignSelf: 'flex-end', marginTop: 3, marginRight: 4 },
   userBubble: {
     backgroundColor: C.userBubble,
     borderRadius: S.radiusBubble,
@@ -451,7 +460,6 @@ const makeS = () => StyleSheet.create({
   userBubbleMedia: { paddingHorizontal: 6, paddingVertical: 6, gap: 6 },
   userText: { color: C.userText, fontSize: 16, lineHeight: 23 },
   streamText: { color: C.text, fontSize: 16, lineHeight: 24 },
-  cursor: { color: C.textDim, fontSize: 15, marginTop: 2 },
   dotsRow: { flexDirection: 'row', alignItems: 'center', gap: 3, height: 12, marginTop: 2 },
   dot: { width: 5, height: 5, borderRadius: 3, backgroundColor: C.blush },
   botActions: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, marginLeft: -6 },
