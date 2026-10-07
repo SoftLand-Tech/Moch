@@ -46,7 +46,7 @@ import {
   sessionsSummaryKey,
 } from '../lib/chat'
 import { loadCatalog } from '../lib/slash'
-import { loadSessions, patchRowTitle, sessionRows, toMs } from '../lib/sessionList'
+import { loadLastActive, loadSessions, lastActiveByStoredId, lastActiveFor, patchRowTitle, sessionRows, toMs } from '../lib/sessionList'
 import { forgetChatMarks, loadChatMarks, toggleArchive, togglePin } from '../lib/chatListState'
 
 /**
@@ -105,6 +105,10 @@ export function ScreenShell({
   )
   const all = sessionsRef.current
   const rows = useStore(sessionRows)
+  // Revive-to-top overlay: subscribing (not just ref-reading) means a bump —
+  // send, or a message.start/complete for a background chat — recomputes the
+  // drawer's `recent` immediately.
+  const lastActiveMap = useStore(lastActiveByStoredId)
 
   // ── Swipe anywhere to open the drawer ────────────────────────────────────
   // The drawer's progress (0 closed → 1 open) lives here so this gesture and
@@ -180,23 +184,27 @@ export function ScreenShell({
   // Pin/archive marks are app-local; restore them once at startup.
   React.useEffect(() => {
     void loadChatMarks()
+    // Revive-to-top: local last-activity bumps survive restart, so the
+    // drawer can bubble recently-used old chats before the first fetch.
+    void loadLastActive()
   }, [])
 
   const runningAuto = useStore(runningAutomationCount)
 
-  const nav = useMemo<NavItem[]>(() => [
+  // ── Drawer nav (ChatGPT-style): top block + Settings docked at the bottom ─
+  // The Chats screen stays reachable via the chat header's search icon; the
+  // drawer's own grouped chat list is the richer surface. Skills and Models
+  // moved into Settings' AGENT section.
+  const topNav = useMemo<NavItem[]>(() => [
     { key: 'chat', label: 'Chat', icon: 'chatbubble-outline' },
-    // BUG-018: the full session list was reachable only via the chat
-    // header's search icon (Relay theme only) — the drawer needs its own
-    // entry so the Chats screen isn't orphaned.
-    { key: 'chats', label: 'Chats', icon: 'list-outline' },
     { key: 'terminal', label: 'Terminal', icon: 'terminal-outline' },
     { key: 'automations', label: 'Automations', icon: 'timer-outline', mochis: runningAuto },
-    { key: 'skills', label: 'Skills', icon: 'sparkles-outline' },
     { key: 'connectors', label: 'Connectors', icon: 'extension-puzzle-outline' },
-    { key: 'agent', label: 'Models', icon: 'cube-outline' },
-    { key: 'settings', label: 'Settings', icon: 'settings-outline' },
   ], [runningAuto])
+
+  const bottomNav = useMemo<NavItem[]>(() => [
+    { key: 'settings', label: 'Settings', icon: 'settings-outline' },
+  ], [])
 
   const recent = useMemo<RecentChat[]>(() => {
     // The server list is the source of truth: it covers every stored
@@ -210,7 +218,12 @@ export function ScreenShell({
     const fromServer = rows.map((r) => ({
       id: r.id,
       title: r.title || r.preview?.slice(0, 60) || 'Untitled',
-      ts: toMs(r.started_at),
+      // Revive-to-top: started_at is creation time only, so a revived old
+      // chat never bubbled. The local bump (bumpSessionActivity, in
+      // sessionList) overlays the real last activity — max() of the two,
+      // so groupChats buckets a revived chat into "Today" and sorts it
+      // first. Server refreshes stay authoritative for content.
+      ts: Math.max(toMs(r.started_at), lastActiveMap[r.id] ?? 0),
       status: statusOf(r.id),
       active: r.id === current,
     }))
@@ -224,7 +237,7 @@ export function ScreenShell({
       .map((s) => ({
         id: s.storedId,
         title: s.title || 'New chat',
-        ts: s.createdAtMs ?? 0,
+        ts: Math.max(s.createdAtMs ?? 0, lastActiveFor(s.storedId)),
         status: statusOf(s.storedId),
         active: s.storedId === current,
       }))
@@ -232,26 +245,22 @@ export function ScreenShell({
     // Uncapped: the sidebar's own search filters this list, and server rows
     // are bounded by the session.list fetch anyway.
     return [...locals, ...fromServer]
-  }, [rows, all, busy, attention, current, pendingStored])
+  }, [rows, all, busy, attention, current, pendingStored, lastActiveMap])
 
   const go = useCallback(
     (key: string) => {
+      // Skills and Models now live inside Settings (AGENT section); the Chats
+      // screen is reachable from the chat header's search icon.
       const route =
         key === 'chat'
           ? '/(tabs)/chat'
-          : key === 'chats'
-            ? '/(tabs)/sessions'
-            : key === 'terminal'
-              ? '/(tabs)/terminal'
-              : key === 'automations'
-                ? '/(tabs)/automations'
-                : key === 'skills'
-                  ? '/(tabs)/skills'
-                  : key === 'connectors'
-                    ? '/(tabs)/connectors'
-                    : key === 'agent'
-                      ? '/(tabs)/agent'
-                      : '/(tabs)/settings'
+          : key === 'terminal'
+            ? '/(tabs)/terminal'
+            : key === 'automations'
+              ? '/(tabs)/automations'
+              : key === 'connectors'
+                ? '/(tabs)/connectors'
+                : '/(tabs)/settings'
       // navigate, never push: `/(tabs)` is a single route on the root stack,
       // so push mounts a whole fresh copy of every tab screen each tap —
       // navigate just switches the tab inside the instance we already have.
@@ -359,8 +368,13 @@ export function ScreenShell({
       {S.trayHeader ? (
         // Mocheme tray — one row: the title floats dead-center (absolutely
         // positioned, inset by the measured controls width so it can never
-        // run under the model chip; onSearch deliberately has no tray
-        // affordance — search lives in the drawer's Chats tab).
+        // run under the model chip).
+        // REVIEW FIX (BUG-018 regression): the redesign removed the drawer's
+        // Chats entry, and this tray branch used to omit the onSearch
+        // affordance — together that made /(tabs)/sessions (and its
+        // pending-questions banner) unreachable in the DEFAULT theme, the
+        // exact bug the drawer entry was added to fix. The search circle now
+        // renders in the tray too, same as the Relay header.
         // The card starts BELOW the status bar (marginTop carries the inset);
         // padding the inset inside the card used to paint a tall empty head
         // above the buttons — the "top padding too much" bug.
@@ -387,6 +401,16 @@ export function ScreenShell({
             </Pressable>
             <View style={s.traySpacer} />
             <View style={s.trayRight}>
+              {onSearch ? (
+                <Pressable
+                  style={({ pressed }) => [s.trayCircle, pressed && s.circlePressed]}
+                  onPress={onSearch}
+                  hitSlop={8}
+                  accessibilityLabel="All chats"
+                >
+                  <Icon name="search" size={18} color={C.text} />
+                </Pressable>
+              ) : null}
               {right}
               {/* BUG-046: the status chip is now a real reconnect control —
                   it used to be an inert Pressable with no press feedback
@@ -467,7 +491,8 @@ export function ScreenShell({
         }}
         onClose={() => setOpen(false)}
         onRequestOpen={() => setOpen(true)}
-        nav={nav}
+        nav={topNav}
+        bottomNav={bottomNav}
         recent={recent}
         onNav={go}
         onNewChat={startNew}

@@ -5,7 +5,7 @@ import { rpc, onEvent, onServerRequest, getClient, isConnected, connConfig } fro
 import { getEmbeddedGateway } from './hermesRuntime'
 import { log } from './log'
 import { notifyLocal, setBadge } from './push'
-import { bindLiveId, liveIdFor, sessionRows, sessionListComplete, toMs, upsertOptimisticRow, patchRowTitle } from './sessionList'
+import { bindLiveId, liveIdFor, sessionRows, sessionListComplete, toMs, upsertOptimisticRow, patchRowTitle, bumpSessionActivity } from './sessionList'
 import { hookModelState, noteSessionInfo } from './modelState'
 import { markAttention, clearAttention, pushToast, chatTabFocused, pendingOpenStoredId, type AttentionKind } from './attention'
 import { clearDraft, draftFor, setDraft } from './drafts'
@@ -1859,6 +1859,12 @@ export async function sendPrompt(
       if (attachedImagePaths.length) void detachImages(sid, attachedImagePaths)
       throw err
     }
+    // Revive-to-top: the send just made this chat the most recently active
+    // one — bump its local timestamp and move its list row to the front so
+    // the drawer/Chats reorders NOW (the ≤60s poll would otherwise be the
+    // first reorder, and the row's started_at is creation time only).
+    const sentStored = sessionsById.get()[sid]?.storedId
+    if (sentStored) bumpSessionActivity(sentStored)
   } catch (err) {
     if (sid) {
       const s2 = sessionsById.get()[sid]
@@ -2383,6 +2389,10 @@ export function hookChatEvents() {
 
       case 'message.start': {
         flushStreams()
+        // Revive-to-top: a turn starting is activity — bump the chat so the
+        // drawer bubbles it (order only; content stays server-authoritative).
+        const startStored = sessionsById.get()[eSid]?.storedId
+        if (startStored) bumpSessionActivity(startStored)
         // A new turn is in flight — any prior attention marker (green "done",
         // red "error") is stale; the busy pulse takes over until it lands.
         clearAttentionLive(eSid)
@@ -2420,6 +2430,10 @@ export function hookChatEvents() {
 
       case 'message.complete': {
         flushStreams()
+        // Revive-to-top: same bump as message.start — covers turns whose
+        // start event was missed (reconnect/replay gap).
+        const doneStored = sessionsById.get()[eSid]?.storedId
+        if (doneStored) bumpSessionActivity(doneStored)
         const text = typeof p.text === 'string' ? p.text : ''
         const cur = sessionsById.get()[eSid]
         if (!cur) break
