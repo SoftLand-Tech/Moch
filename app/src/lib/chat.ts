@@ -2388,7 +2388,14 @@ sessionRows.subscribe((rows) => {
       delete pend[liveId]
       pendChanged = true
     }
-    if (s.storedId && !isPseudoStoredId(s.storedId)) clearAttention(s.storedId)
+    if (s.storedId && !isPseudoStoredId(s.storedId)) {
+      clearAttention(s.storedId)
+      // BUG-066: the chat is gone server-side — drop its cached transcript
+      // too, or the AsyncStorage blob (up to 300 messages) persists forever
+      // (the user can no longer trigger forgetSession on a chat that isn't
+      // even listed).
+      void dropCachedTranscript(s.storedId)
+    }
   }
   if (changed) sessionsById.set(next)
   if (pendChanged) pendingBySession.set(pend)
