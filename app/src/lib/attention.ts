@@ -16,7 +16,7 @@ import { log } from './log'
  *
  * The map persists to AsyncStorage so the badges survive a relaunch (a chat
  * that finished while the phone was closed is still green until opened).
- * Opening a chat clears its badge (`resumeSession` calls `clearAttention`).
+ * Opening a chat clears its badge (switchToSession and the resume paths call clearAttention).
  *
  * This file must stay free of react-native/expo imports: scripts/ runs it in
  * plain node for unit tests (same contract as chatListState).
@@ -54,12 +54,20 @@ export const toasts = atom<SessionToast[]>([])
 
 let toastSeq = 0
 
-/** Queue a toast. A newer toast for the same chat+kind replaces the old one;
- *  at most three are on screen (oldest dropped). */
+/** Queue a toast. Newest renders on TOP (BUG-026: it used to append, so the
+ *  newest card hid UNDER older ones); a newer toast for the same chat+kind
+ *  replaces the old one IN PLACE (same React key — no unmount/remount
+ *  flash); at most three are on screen (oldest dropped). */
 export function pushToast(t: Omit<SessionToast, 'id'>): void {
-  const list = toasts.get().filter((x) => !(x.storedId === t.storedId && x.kind === t.kind))
-  list.push({ ...t, id: ++toastSeq })
-  toasts.set(list.slice(-3))
+  const existing = toasts.get()
+  const idx = existing.findIndex((x) => x.storedId === t.storedId && x.kind === t.kind)
+  if (idx >= 0) {
+    const next = [...existing]
+    next[idx] = { ...existing[idx], ...t, id: existing[idx].id }
+    toasts.set(next)
+    return
+  }
+  toasts.set([{ ...t, id: ++toastSeq }, ...existing].slice(0, 3))
 }
 
 export function dismissToast(id: number): void {
@@ -178,7 +186,11 @@ export function resetAttention(): void {
 // ── Row status ──────────────────────────────────────────────────────────────
 
 /** A chat-list row's dot: an attention state outranks the "working" pulse. */
-export function rowStatus(busy: boolean, a?: AttentionRecord): RowStatus | undefined {
+export function rowStatus(busy: boolean, a?: AttentionRecord, pending?: boolean): RowStatus | undefined {
   if (a) return a.kind
+  // BUG-085: an unanswered question keeps its amber dot even after the chat
+  // was opened (opening clears the event-driven 'input' mark) — the question
+  // is still blocking, so the row must keep saying so.
+  if (pending) return 'input'
   return busy ? 'busy' : undefined
 }

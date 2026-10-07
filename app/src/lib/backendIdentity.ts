@@ -1,12 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { log } from './log'
 import type { ConnConfig } from './gateway'
-import { resetSessionCaches, loadOutbox, OUTBOX_KEY } from './chat'
+import { resetSessionCaches, resetOutbox, loadOutbox, OUTBOX_KEY } from './chat'
 import { resetDrafts, loadDrafts, DRAFTS_KEY } from './drafts'
 import { resetSendQueue, loadSendQueue, QUEUE_KEY } from './sendQueue'
 import { resetChatMarks, MARKS_KEY } from './chatListState'
 import { resetAttention, ATTENTION_KEY } from './attention'
 import { resetSessionList } from './sessionList'
+import { resetMediaState } from './mediaState'
+import { wipeMediaCaches } from './mediaCache'
 
 /**
  * Which backend do this device's session caches belong to?
@@ -70,64 +72,126 @@ let syncedThisRun: string | null = null
  * debounces would re-write the old blobs from memory), then storage, then
  * the new fingerprint.
  */
+/** BUG-032: single-flight for concurrent dials (boot connect vs deep link) —
+ *  concurrent runs used to interleave the purge/shelve/restore sequence (the
+ *  syncedThisRun guard is set only at the END), and the last finisher won
+ *  IDENTITY_KEY even if the other dial owned the final socket. */
+let inflightSync: Promise<void> | null = null
+
+/** BUG-032: cap the per-backend shelves — every fingerprint change added up
+ *  to three `*.orphan.<fp>` blobs that lived forever. Oldest sets evict. */
+const MAX_BACKEND_SHELVES = 6
+const SHELF_INDEX_KEY = 'hermes.shelfIndex.v1'
+
 export async function syncBackendIdentity(c: ConnConfig): Promise<void> {
-  const identity = backendIdentityOf(c)
-  if (syncedThisRun === identity) return
-  let stored: string | null = null
-  try {
-    stored = await AsyncStorage.getItem(IDENTITY_KEY)
-  } catch {
-    /* unreadable — treat as foreign and re-scope */
+  if (inflightSync) {
+    await inflightSync.catch(() => {})
+    if (syncedThisRun === backendIdentityOf(c)) return
   }
-  if (stored === identity) {
+  const run = (async () => {
+    const identity = backendIdentityOf(c)
+    if (syncedThisRun === identity) return
+    let stored: string | null = null
+    try {
+      stored = await AsyncStorage.getItem(IDENTITY_KEY)
+    } catch (err) {
+      // BUG-032: an unreadable identity used to count as "foreign" and purge
+      // EVERYTHING (transcripts, marks) on a transient storage error. Do
+      // nothing instead — the next successful dial re-checks.
+      log('warn', 'identity', `identity read failed — skipping re-scope this dial: ${String(err)}`)
+      return
+    }
+    if (stored === identity) {
+      syncedThisRun = identity
+      return
+    }
+    // In-memory FIRST, through each cache's own reset helper.
+    await resetSessionCaches()
+    // BUG-031: media caches are keyed by PATH only — machine B must never
+    // render machine A's cached bytes for a same-named gateway path. Wipe the
+    // relay-media tree and the per-key states; correct bytes re-download on
+    // view. expo-image's disk cache keys the same way — clear it too (dynamic
+    // import keeps the app-only dependency out of node test graphs).
+    await wipeMediaCaches()
+    resetMediaState()
+    try {
+      const { Image } = await import('expo-image')
+      await Image.clearDiskCache()
+    } catch (err) {
+      log('warn', 'identity', `expo-image cache clear failed: ${String(err)}`)
+    }
+    // BUG-019: the outbox atom had no reset — a failed reload below left the
+    // OLD machine's unsent texts live in memory (and even a successful switch
+    // left them when the new machine had no shelved outbox). Clear before the
+    // shelf/restore dance; the loadOutbox() at the end re-reads storage.
+    resetOutbox()
+    resetDrafts()
+    resetSendQueue()
+    resetChatMarks()
+    resetAttention()
+    resetSessionList()
+    try {
+      // BUG-032: on a FIRST-ever sync (no stored identity) shelve under the
+      // REAL fingerprint — the old 'legacy' placeholder produced a shelf no
+      // fingerprint could ever restore (the content was composed on THIS
+      // device; it belongs to whatever machine this install pairs first).
+      const previous = stored ?? identity
+      // User content (drafts, queued sends, offline outbox) is never deleted:
+      // shelve it under the backend it was composed for — pairing back to that
+      // machine puts it back (restore below).
+      for (const base of SHELFED_KEYS) {
+        const raw = await AsyncStorage.getItem(base)
+        if (raw && raw !== '{}' && raw !== '[]') {
+          await AsyncStorage.setItem(shelfKey(base, previous), raw)
+        }
+        await AsyncStorage.removeItem(base)
+      }
+      // Cosmetic/decorative caches just go.
+      await AsyncStorage.multiRemove([MARKS_KEY, ATTENTION_KEY])
+      // Same machine again? Put its shelved words back before anything reads.
+      for (const base of SHELFED_KEYS) {
+        const sk = shelfKey(base, identity)
+        const raw = await AsyncStorage.getItem(sk)
+        if (raw !== null) {
+          await AsyncStorage.setItem(base, raw)
+          await AsyncStorage.removeItem(sk)
+        }
+      }
+      // BUG-032: cap the shelves (LRU by fingerprint, oldest evicted) and
+      // drop stale 'legacy' index entries — the pre-fix migration shelf is
+      // promoted-by-fingerprint now and no real fp ever equals 'legacy'.
+      const rawIndex = await AsyncStorage.getItem(SHELF_INDEX_KEY)
+      let index: string[] = []
+      try {
+        const parsed = JSON.parse(rawIndex ?? '[]') as unknown
+        if (Array.isArray(parsed)) index = parsed.filter((x): x is string => typeof x === 'string')
+      } catch { /* corrupt index — rebuild */ }
+      index = index.filter((fp) => fp !== previous && fp !== 'legacy')
+      index.push(previous)
+      while (index.length > MAX_BACKEND_SHELVES) {
+        const evict = index.shift()
+        if (!evict) break
+        for (const base of SHELFED_KEYS) await AsyncStorage.removeItem(shelfKey(base, evict))
+      }
+      await AsyncStorage.setItem(SHELF_INDEX_KEY, JSON.stringify(index))
+    } catch {
+      /* best effort — a failed shelf must never block connecting */
+    }
     syncedThisRun = identity
-    return
-  }
-  // In-memory FIRST, through each cache's own reset helper.
-  await resetSessionCaches()
-  resetDrafts()
-  resetSendQueue()
-  resetChatMarks()
-  resetAttention()
-  resetSessionList()
-  try {
-    const previous = stored ?? 'legacy'
-    // User content (drafts, queued sends, offline outbox) is never deleted:
-    // shelve it under the backend it was composed for — pairing back to that
-    // machine puts it back (restore below).
-    for (const base of SHELFED_KEYS) {
-      const raw = await AsyncStorage.getItem(base)
-      if (raw && raw !== '{}' && raw !== '[]') {
-        await AsyncStorage.setItem(shelfKey(base, previous), raw)
-      }
-      await AsyncStorage.removeItem(base)
+    try {
+      await AsyncStorage.setItem(IDENTITY_KEY, identity)
+    } catch {
+      /* best effort */
     }
-    // Cosmetic/decorative caches just go.
-    await AsyncStorage.multiRemove([MARKS_KEY, ATTENTION_KEY])
-    // Same machine again? Put its shelved words back before anything reads.
-    for (const base of SHELFED_KEYS) {
-      const sk = shelfKey(base, identity)
-      const raw = await AsyncStorage.getItem(sk)
-      if (raw !== null) {
-        await AsyncStorage.setItem(base, raw)
-        await AsyncStorage.removeItem(sk)
-      }
+    // The restored/emptied stores live in module atoms hydrated at boot; a
+    // mid-session switch has to re-read them from storage right now.
+    try {
+      await Promise.all([loadOutbox(), loadDrafts(), loadSendQueue()])
+    } catch (err) {
+      log('warn', 'identity', `cache reload after backend switch failed: ${String(err)}`)
     }
-  } catch {
-    /* best effort — a failed shelf must never block connecting */
-  }
-  syncedThisRun = identity
-  try {
-    await AsyncStorage.setItem(IDENTITY_KEY, identity)
-  } catch {
-    /* best effort */
-  }
-  // The restored/emptied stores live in module atoms hydrated at boot; a
-  // mid-session switch has to re-read them from storage right now.
-  try {
-    await Promise.all([loadOutbox(), loadDrafts(), loadSendQueue()])
-  } catch (err) {
-    log('warn', 'identity', `cache reload after backend switch failed: ${String(err)}`)
-  }
-  log('info', 'identity', `paired backend changed (was ${stored ?? 'unrecorded'}) — session caches re-scoped`)
+    log('info', 'identity', `paired backend changed (was ${stored ?? 'unrecorded'}) — session caches re-scoped`)
+  })()
+  inflightSync = run.finally(() => { inflightSync = null })
+  return inflightSync
 }

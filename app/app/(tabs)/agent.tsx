@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useStore } from '@nanostores/react'
 import { Icon } from '../../src/components/Icon'
 import { isConnected as isConnectedAtom, retryNow, rpc } from '../../src/lib/gateway'
-import { activeSession, ensureSession } from '../../src/lib/chat'
+import { activeSession, ensureSession, sessionsById } from '../../src/lib/chat'
 import {
   liveModel, liveProvider, fetchModelOptions, liveReasoningDisplay, modelOptions,
   modelOptionsLoading, rankProviders, disconnectProvider, fetchReasoningPrefs,
@@ -48,13 +48,17 @@ export default function Controls() {
 
   const refresh = React.useCallback(async () => {
     if (!online) return
+    // BUG-013: a provisional (unsent) chat has no server identity —
+    // session-scoped reads skip rather than minting one; global defaults
+    // show until a real chat exists.
+    const liveSid = sid && !sessionsById.get()[sid]?.provisional ? sid : null
     // Both reasoning layers (saved default + this chat's effective value) and
     // the saved everywhere-default model, alongside the provider inventory —
     // this screen is the preferences home, so it reads everything it can edit.
-    try { setPrefs(await fetchReasoningPrefs(sid)) } catch { /* prefs degrade to null */ }
+    try { setPrefs(await fetchReasoningPrefs(liveSid)) } catch { /* prefs degrade to null */ }
     try { setDefaultModel(await fetchDefaultModel()) } catch { /* stays null */ }
     try {
-      await fetchModelOptions(sid, { force: true })
+      await fetchModelOptions(liveSid, { force: true })
     } catch (err) {
       log('warn', 'agent', `model.options failed: ${String(err)}`)
     }
@@ -64,8 +68,11 @@ export default function Controls() {
     setLoading(true)
     void (async () => {
       try {
-        // The picker and the effort writes need a live session to scope against.
-        await ensureSession()
+        // BUG-013: visiting this tab must not mint a server session for an
+        // unsent chat — resolve the live id WITHOUT creating. Session-scoped
+        // reads above skip until a real chat exists; explicit picks still
+        // create on demand (ensureSession's default).
+        await ensureSession({ create: false })
         await refresh()
       } catch {
         /* offline banner path */
@@ -152,7 +159,9 @@ export default function Controls() {
       if (p.auth_type === 'api_key') {
         setKeyFor(p)
       } else {
-        void showAlert(p.name, p.warning ?? 'This provider signs in another way (OAuth or a host tool). Run `moch model` on the computer to set it up.')
+        // BUG-053: no dead CLI references — the npm `moch` package is
+        // deprecated; sign-in flows live on the computer's agent settings.
+        void showAlert(p.name, p.warning ?? 'This provider signs in another way (OAuth or a host tool) — set it up on the computer, in the agent\'s own settings screen.')
       }
       return
     }
