@@ -244,7 +244,7 @@ const makeS = () => StyleSheet.create({
   newBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.accent, justifyContent: 'center', alignItems: 'center' },
   btnPressed: { opacity: 0.6 },
   newText: { color: C.onAccent, fontSize: 14, fontWeight: '700' },
-  alertRow: { paddingVertical: 10, paddingHorizontal: 14, backgroundColor: '#241A08' },
+  alertRow: { paddingVertical: 10, paddingHorizontal: 14, backgroundColor: C.amberSoft },
   alertText: { color: C.amber, fontSize: 13, fontWeight: '700', textAlign: 'center' },
   errRow: { padding: 12, alignItems: 'center' },
   errText: { color: C.red, fontSize: 13 },
