@@ -164,6 +164,14 @@ export class JsonRpcRequestChannel {
   private readonly outstandingPings = new Set<string>()
   private lastLivenessAt = 0
   private readonly requestHandlers: ServerRequestHandler[] = []
+  // BUG-072: "once per connection generation" — actually enforced now. The
+  // gateway.ready frame replays on reconnects, and each replay re-sent the
+  // capabilities advertisement.
+  private capabilitiesAdvertised = false
+  // BUG-068: malformed frames were dropped with zero telemetry — a truncated
+  // frame or an HTML error body looked exactly like a silent stall.
+  private malformedFrames = 0
+  private lastMalformedLogAt = 0
   private readonly options: Required<
     Omit<JsonRpcRequestChannelOptions, 'onEvent' | 'onHeartbeatFailure' | 'onRequestHandlerError' | 'onUnhandledRequest'>
   > &
@@ -194,6 +202,8 @@ export class JsonRpcRequestChannel {
     this.stopHeartbeat()
     this.transport = transport
     this.lastLivenessAt = Date.now()
+    // BUG-072: a new generation re-advertises on its first gateway.ready.
+    this.capabilitiesAdvertised = false
   }
 
   /** Drop the transport and fail every in-flight call with `error`. */
@@ -371,6 +381,16 @@ export class JsonRpcRequestChannel {
     try {
       frame = JSON.parse(text) as JsonRpcFrame
     } catch {
+      // BUG-068: rate-limited telemetry — a truncated frame or an HTML error
+      // body used to vanish, looking exactly like a silent stall.
+      this.malformedFrames += 1
+      const now = Date.now()
+      if (now - this.lastMalformedLogAt > 30_000) {
+        this.lastMalformedLogAt = now
+        // Count over the window only; keep the line short (no body content —
+        // it can be a whole HTML page).
+        console.warn(`[json-rpc] dropping malformed frame(s): ${this.malformedFrames} so far (${text.length} bytes)`)
+      }
       return null
     }
 
@@ -412,7 +432,14 @@ export class JsonRpcRequestChannel {
 
     const params = frame.params as GatewayEvent | undefined
     if (frame.method === 'event' && params && typeof params.type === 'string') {
-      if (params.type === 'gateway.ready') this.advertiseCapabilities()
+      if (params.type === 'gateway.ready') {
+        // BUG-072: ready replays on every reconnect — advertise ONCE per
+        // generation (reset by dropSocket), not on every replayed frame.
+        if (!this.capabilitiesAdvertised) {
+          this.capabilitiesAdvertised = true
+          this.advertiseCapabilities()
+        }
+      }
       this.options.onEvent?.(params)
     }
     return frame
