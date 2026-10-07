@@ -16,7 +16,7 @@ import { log } from './log'
  *
  * The map persists to AsyncStorage so the badges survive a relaunch (a chat
  * that finished while the phone was closed is still green until opened).
- * Opening a chat clears its badge (`resumeSession` calls `clearAttention`).
+ * Opening a chat clears its badge (switchToSession and the resume paths call clearAttention).
  *
  * This file must stay free of react-native/expo imports: scripts/ runs it in
  * plain node for unit tests (same contract as chatListState).

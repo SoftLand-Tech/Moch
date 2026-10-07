@@ -1023,19 +1023,12 @@ export async function createSession(title?: string): Promise<ResumeResult> {
   return { sessionId: id, storedId, messages: res.messages ?? [] }
 }
 
-/**
- * Resume a stored session. Takes the DURABLE id (what `session.list` returns
- * and what we persist), returns the LIVE id used for RPCs and events.
- * Unconditional activation — only the boot path owns the screen this way.
- */
-export async function resumeSession(storedId: string): Promise<ResumeResult> {
-  const r = await resumeShared(storedId)
-  activeSession.set(r.sessionId)
-  clearAttention(r.storedId)
-  void AsyncStorage.setItem(LAST_SESSION_KEY, r.storedId)
-  return r
-}
-
+/** Resume a stored session. Takes the DURABLE id (what `session.list` returns
+ *  and what we persist), returns the LIVE id used for RPCs and events.
+ *  Unconditional activation — only the boot path owns the screen this way.
+ *  BUG-062: the exported wrapper had zero callers (boot goes through
+ *  withBootPaint, switches through switchToSession) — removed; resumeShared
+ *  is the primitive every path uses. */
 async function runResume(storedId: string): Promise<ResumeResult> {
   const res = await rpc<{ session_id?: string; stored_session_id?: string; messages?: Array<Record<string, unknown>>; info?: { model?: string; provider?: string; reasoning_effort?: string } }>(
     'session.resume',
@@ -1611,9 +1604,6 @@ export function applyHistory(sessionId: string, list?: Array<Record<string, unkn
 
 // ── Sending ────────────────────────────────────────────────────────────────
 
-// Back-compat flag mirrored from the per-session locks; terminal events reset
-// it as a stuck-send safety net.
-let sending = false
 // One in-flight submit per chat: a send to chat B while chat A's ack is still
 // pending must not be queued behind (or delivered to) A.
 const sendingSessions = new Set<string>()
@@ -1676,7 +1666,6 @@ export async function sendPrompt(
     return
   }
   sendingSessions.add(lockKey)
-  sending = true
   // First message of a fresh install is the one honest moment to offer push
   // ("buzz me when the reply lands") — one ask per install, fire-and-forget,
   // and never on a cold app open. Lazy require: chat.ts must stay loadable in
@@ -1821,7 +1810,6 @@ export async function sendPrompt(
     throw err
   } finally {
     sendingSessions.delete(lockKey)
-    sending = sendingSessions.size > 0
   }
 }
 
@@ -2365,7 +2353,6 @@ export function hookChatEvents() {
           tools: cur.tools.map((t) => (t.status === 'running' ? { ...t, status: 'done' as const } : t)),
           busy: false,
         })
-        sending = false
         schedulePersist(eSid)
         maybeFlushQueue(eSid)
         const failed = p.status === 'error' || !!p.error
@@ -2449,7 +2436,6 @@ export function hookChatEvents() {
       case 'background.complete': {
         flushStreams()
         patchSession(eSid, { busy: false })
-        sending = false
         maybeFlushQueue(eSid)
         log('info', 'chat', `background complete: ${JSON.stringify(p).slice(0, 200)}`)
         flagAttention(
@@ -2468,7 +2454,6 @@ export function hookChatEvents() {
         if (p.busy === false) {
           flushStreams()
           patchSession(eSid, { busy: false })
-          sending = false
           maybeFlushQueue(eSid)
         }
         break
@@ -2498,7 +2483,6 @@ export function hookChatEvents() {
           list.push({ id: nid(), role: 'assistant', text: msg, ts: Date.now(), status: 'failed', error: msg })
         }
         patchSession(eSid, { messages: list, busy: false })
-        sending = false
         schedulePersist(eSid)
         flagAttention(eSid, 'error', { title: 'Turn failed', body: msg })
         mochiMoment.set({ kind: 'error', sid: eSid, at: Date.now() })

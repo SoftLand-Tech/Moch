@@ -16,7 +16,6 @@ import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller
 import Animated, { useAnimatedStyle } from 'react-native-reanimated'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useStore } from '@nanostores/react'
-import { Ionicons } from '@expo/vector-icons'
 import { Icon } from '../../src/components/Icon'
 import * as Haptics from 'expo-haptics'
 import * as ImagePicker from 'expo-image-picker'

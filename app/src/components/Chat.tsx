@@ -8,7 +8,6 @@ import { View, Text, StyleSheet, Pressable, ActivityIndicator, Animated, Image }
 import Markdown from '@ronradtke/react-native-markdown-display'
 import * as Clipboard from 'expo-clipboard'
 import * as Speech from 'expo-speech'
-import { Ionicons } from '@expo/vector-icons'
 import { Icon } from './Icon'
 import { speakText, stopTts } from '../lib/voice'
 import { C, S, useStyles, useShape } from '../lib/theme'
