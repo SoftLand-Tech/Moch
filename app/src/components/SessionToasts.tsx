@@ -70,6 +70,17 @@ function ToastCard({ t }: { t: SessionToast }) {
           <Text style={s.title} numberOfLines={1}>{t.title}</Text>
           {t.body ? <Text style={s.body} numberOfLines={2}>{t.body}</Text> : null}
         </View>
+        {/* BUG-026: an explicit dismiss — the card body itself navigates, so
+            closing previously meant waiting out the timer. */}
+        <Pressable
+          hitSlop={8}
+          onPress={() => dismissToast(t.id)}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss notification"
+          style={({ pressed }) => [s.closeBtn, pressed && { opacity: 0.6 }]}
+        >
+          <Icon name="close" size={15} color={C.textFaint} />
+        </Pressable>
         <Icon name="chevron-forward" size={16} color={C.textFaint} />
       </Pressable>
     </Animated.View>
@@ -114,6 +125,7 @@ const makeS = () => StyleSheet.create({
     justifyContent: 'center',
   },
   textWrap: { flex: 1, gap: 1 },
+  closeBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   kicker: { color: C.textFaint, fontSize: 10.5, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
   title: { color: C.text, fontSize: 14, fontWeight: '700' },
   body: { color: C.textDim, fontSize: 12.5, lineHeight: 16.5 },
