@@ -16,7 +16,10 @@ import { log } from './log'
  *     landed in arbitrary positions.
  *
  * `session.list` is the real source: it covers every conversation Hermes has
- * stored, and `started_at` is a real wall-clock timestamp we can order by.
+ * stored. Its rows arrive ordered by LAST ACTIVITY (`order_by_last_active=
+ * True` server-side) and that order is authoritative — the client must NOT
+ * re-sort by `started_at` (immutable creation time): doing so buried
+ * actively-used old chats under newer-but-idle ones (BUG-012).
  */
 
 export interface SessionRow {
@@ -46,11 +49,6 @@ export function toMs(ts?: number | null): number {
   if (ts > 1e12) return ts // already milliseconds
   if (ts > 1e10) return ts // milliseconds on some backends
   return ts * 1000
-}
-
-/** Newest first, by wall clock. */
-export function sortSessions(rows: SessionRow[]): SessionRow[] {
-  return rows.slice().sort((a, b) => toMs(b.started_at) - toMs(a.started_at))
 }
 
 let inflight: Promise<SessionRow[]> | null = null
@@ -85,7 +83,11 @@ export function loadSessions(opts?: { force?: boolean }): Promise<SessionRow[]> 
       // Superseded (a newer force fetch, or a backend-switch reset) — never
       // write stale rows over fresher ones.
       if (gen !== loadGen) return sessionRows.get()
-      const rows = sortSessions(res?.sessions ?? [])
+      // BUG-012: the server already orders rows by last activity
+      // (order_by_last_active=True) — the old client re-sort by started_at
+      // (immutable CREATION time) destroyed that order, so actively-used old
+      // chats never rose to the top. Pass the server's order through.
+      const rows = res?.sessions ?? []
       sessionRows.set(rows)
       // BUG-025: only a non-truncated list proves absence elsewhere.
       sessionListComplete.set(rows.length < LIST_LIMIT)
@@ -133,6 +135,10 @@ export function resetSessionList() {
 /**
  * Optimistically insert a just-created chat so it appears immediately instead
  * of waiting for the next `session.list`. The server row replaces it later.
+ * BUG-012: a fresh chat IS the most recently active one — prepend it and let
+ * the server's `order_by_last_active` ordering take over on the next fetch
+ * (the old sortSessions re-sort by creation time buried actively-used old
+ * chats under newer-but-idle ones).
  */
 export function upsertOptimisticRow(storedId: string, title: string) {
   if (!storedId) return
@@ -144,12 +150,10 @@ export function upsertOptimisticRow(storedId: string, title: string) {
     }
     return
   }
-  sessionRows.set(
-    sortSessions([
-      { id: storedId, title, started_at: Date.now() / 1000, message_count: 0, source: 'mobile' },
-      ...rows,
-    ]),
-  )
+  sessionRows.set([
+    { id: storedId, title, started_at: Date.now() / 1000, message_count: 0, source: 'mobile' },
+    ...rows,
+  ])
 }
 
 /**

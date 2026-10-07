@@ -35,9 +35,12 @@ import {
   activeStoredId,
   busyStoredKey,
   pendingCount,
+  pendingStoredIds,
   forgetSession,
   isSessionNotFound,
   newChat,
+  patchSession,
+  resumeShared,
   switchToSession,
   sessionsById,
   sessionsSummaryKey,
@@ -87,6 +90,9 @@ export function ScreenShell({
   const busyKey = useStore(busyStoredKey)
   const busy = useMemo(() => (busyKey ? busyKey.split(',') : []), [busyKey])
   const attention = useStore(attentionById)
+  // BUG-085: chats with an unanswered question keep their amber row dot even
+  // after being opened (opening clears the event-driven mark).
+  const pendingStored = useStore(pendingStoredIds)
   const current = useStore(activeStoredId)
   const summaryKey = useStore(sessionsSummaryKey)
   // Ref-read map: the latest sessionsById lands here synchronously on every
@@ -187,6 +193,10 @@ export function ScreenShell({
 
   const nav = useMemo<NavItem[]>(() => [
     { key: 'chat', label: 'Chat', icon: 'chatbubble-outline' },
+    // BUG-018: the full session list was reachable only via the chat
+    // header's search icon (Relay theme only) — the drawer needs its own
+    // entry so the Chats screen isn't orphaned.
+    { key: 'chats', label: 'Chats', icon: 'list-outline' },
     { key: 'automations', label: 'Automations', icon: 'timer-outline', mochis: runningAuto },
     { key: 'skills', label: 'Skills', icon: 'sparkles-outline' },
     { key: 'connectors', label: 'Connectors', icon: 'extension-puzzle-outline' },
@@ -199,7 +209,10 @@ export function ScreenShell({
     // conversation, and `started_at` is a real timestamp. Falling back to the
     // in-memory store (for a chat created before the first fetch landed) is
     // ordered by creation time, never by the per-session `lastSeq`.
-    const statusOf = (id: string) => rowStatus(busy.includes(id), attention[id])
+    // BUG-085: unanswered questions keep the amber dot even after the chat
+    // was opened (opening clears the event-driven mark; the question still
+    // blocks) — derived from pendingBySession, the source of truth.
+    const statusOf = (id: string) => rowStatus(busy.includes(id), attention[id], pendingStored.includes(id))
     const fromServer = rows.map((r) => ({
       id: r.id,
       title: r.title || r.preview?.slice(0, 60) || 'Untitled',
@@ -225,22 +238,24 @@ export function ScreenShell({
     // Uncapped: the sidebar's own search filters this list, and server rows
     // are bounded by the session.list fetch anyway.
     return [...locals, ...fromServer]
-  }, [rows, all, busy, attention, current])
+  }, [rows, all, busy, attention, current, pendingStored])
 
   const go = useCallback(
     (key: string) => {
       const route =
         key === 'chat'
           ? '/(tabs)/chat'
-          : key === 'automations'
-            ? '/(tabs)/automations'
-            : key === 'skills'
-              ? '/(tabs)/skills'
-              : key === 'connectors'
-                ? '/(tabs)/connectors'
-                : key === 'agent'
-                  ? '/(tabs)/agent'
-                  : '/(tabs)/settings'
+          : key === 'chats'
+            ? '/(tabs)/sessions'
+            : key === 'automations'
+              ? '/(tabs)/automations'
+              : key === 'skills'
+                ? '/(tabs)/skills'
+                : key === 'connectors'
+                  ? '/(tabs)/connectors'
+                  : key === 'agent'
+                    ? '/(tabs)/agent'
+                    : '/(tabs)/settings'
       // navigate, never push: `/(tabs)` is a single route on the root stack,
       // so push mounts a whole fresh copy of every tab screen each tap —
       // navigate just switches the tab inside the instance we already have.
@@ -288,15 +303,23 @@ export function ScreenShell({
 
   const handleRename = useCallback(async (storedId: string, title: string) => {
     try {
+      // BUG-006: session.title is a LIVE-session method — the row's stored
+      // id 4001s ("session not found") and the title never lands anywhere.
+      // Resolve the live handle first (minting one via a quiet resume when
+      // the chat isn't tracked), then patch BOTH surfaces: the list row and
+      // the in-memory entry the open chat's header reads.
       // `session.title` with an explicit title writes user-provenance; the
       // auto-titler never overwrites those, so a manual rename sticks.
-      await rpc('session.title', { session_id: storedId, title })
+      let live = liveIdOf(storedId)
+      if (!live) live = (await resumeShared(storedId)).sessionId
+      await rpc('session.title', { session_id: live, title })
       patchRowTitle([storedId], title)
+      patchSession(live, { title })
       return null
     } catch (e) {
       return e instanceof Error ? e.message : 'Rename failed'
     }
-  }, [])
+  }, [liveIdOf])
 
   const handleDelete = useCallback(async (storedId: string) => {
     try {
@@ -402,7 +425,7 @@ export function ScreenShell({
               style={({ pressed }) => [s.circle, pressed && s.circlePressed]}
               onPress={onSearch}
               hitSlop={8}
-              accessibilityLabel="Search chats"
+              accessibilityLabel="All chats"
             >
               <Icon name="search" size={18} color={C.text} />
             </Pressable>

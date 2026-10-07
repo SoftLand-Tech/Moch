@@ -64,7 +64,7 @@ import { AttachSheet } from '../../src/components/media/AttachSheet'
 import { chatTabFocused } from '../../src/lib/attention'
 import { draftFor, setDraft } from '../../src/lib/drafts'
 import { shareInInbox, ackShareIn, applySharedToDraft, type SharedFile } from '../../src/lib/shareIn'
-import { isConnected as isConnectedAtom, connectionState, gatewayError, retryNow, reconnectAttempt } from '../../src/lib/gateway'
+import { isConnected as isConnectedAtom, connectionState, gatewayError, retryNow } from '../../src/lib/gateway'
 import { completeSlash, loadCatalog, runCommand, parseSlashCommand, canonicalName, interactiveTarget, describeCommand, subsFor, argumentModeFor, slashLabel, localCompleteSync, type CompletionItem, type SlashOutcome } from '../../src/lib/slash'
 import { liveModel, liveReasoning, liveReasoningDisplay, fetchReasoningDisplay } from '../../src/lib/modelState'
 import { ModelPickerSheet } from '../../src/components/ModelPickerSheet'
@@ -120,13 +120,14 @@ export default function Chat() {
     const t = setTimeout(() => setOfflineGrace(false), 2500)
     return () => clearTimeout(t)
   }, [online])
-  // The connect window (~1s wifi, up to 4s mobile data) is NOT an outage:
-  // showing OFFLINE while the dial is in flight made healthy opens look
-  // broken. Same for the first auto-reconnects after a mid-session drop —
-  // the app is already dialing and about to heal. OFFLINE appears when
-  // reconnects keep failing (3rd+ attempt, ~7s+ of real outage).
-  const reconnects = useStore(reconnectAttempt)
-  const showOfflineBanner = !online && !offlineGrace && connState !== 'connecting' && reconnects < 2
+  // BUG-005: after the grace window, the banner is the mid-session outage
+  // surface (the boot veil no longer covers the app once this run has
+  // connected). While a dial is in flight it reads "Connecting…"; during
+  // backoff waits (state 'closed') it reads "Offline — tap to retry", so
+  // there is continuous feedback through the whole outage instead of the
+  // old inverted attempt-gate that hid the banner exactly when the outage
+  // was real.
+  const showOfflineBanner = !online && !offlineGrace
   const conn = useStore(connectionState)
   const gerr = useStore(gatewayError)
   const curModel = useStore(liveModel)
@@ -446,12 +447,14 @@ export default function Chat() {
       if (out.action === 'show' && out.text) {
         // Command outputs render as the card family; the label is normalized
         // here once (slashLabel covers both name conventions out of slash.ts).
+        // BUG-015: file the card onto the chat the command RAN against (`s`,
+        // resolved before the await) — the active chat may have changed.
         pushLocalMessage(out.text, 'assistant', {
           name: slashLabel(out.name),
           variant: out.subtype,
           suggestion: out.suggestion,
           hint: out.hint,
-        })
+        }, s)
       }
       updateInput('')
       setSlashItems(null)
@@ -1095,13 +1098,18 @@ export default function Chat() {
                   Approval needed{req.replayed ? ' (restored)' : ''}
                 </Text>
               </View>
-              {req.toolName ? <Text style={s.sheetKicker}>{req.toolName}</Text> : null}
-              <Text style={s.sheetBody} selectable>
-                {req.command ?? req.description ?? 'The agent wants to run a command.'}
-              </Text>
-              {req.description && req.description !== req.command ? (
-                <Text style={s.sheetDesc}>{req.description}</Text>
-              ) : null}
+              {/* BUG-082: the body scrolls inside a height-capped card; the
+                  choices row below stays pinned and always reachable, no
+                  matter how long the command/description is. */}
+              <ScrollView style={s.sheetScroll} nestedScrollEnabled>
+                {req.toolName ? <Text style={s.sheetKicker}>{req.toolName}</Text> : null}
+                <Text style={s.sheetBody} selectable>
+                  {req.command ?? req.description ?? 'The agent wants to run a command.'}
+                </Text>
+                {req.description && req.description !== req.command ? (
+                  <Text style={s.sheetDesc}>{req.description}</Text>
+                ) : null}
+              </ScrollView>
               <View style={s.sheetRow}>
                 {approvalChoices.map((c) => {
                   const deny = c === 'deny'
@@ -1137,6 +1145,9 @@ export default function Chat() {
               </View>
               {isBatchClarify ? (
                 <>
+                  {/* BUG-082: unbounded question count — the list scrolls;
+                      the Send button below stays pinned. */}
+                  <ScrollView style={s.sheetScroll} nestedScrollEnabled>
                   {req.questions!.map((q) => (
                     <View key={q.qid} style={{ marginBottom: 10 }}>
                       <Text style={s.qText}>{q.question ?? q.qid}</Text>
@@ -1161,6 +1172,7 @@ export default function Chat() {
                       ) : null}
                     </View>
                   ))}
+                  </ScrollView>
                   <Pressable
                     style={({ pressed }) => [s.sheetBtn, { backgroundColor: C.accent }, pressed && s.btnPressed]}
                     onPress={() => { void respondClarifyBatch(batchAnswers) }}
@@ -1170,6 +1182,9 @@ export default function Chat() {
                 </>
               ) : (
                 <>
+                  {/* BUG-082: long question/many options scroll; the answer
+                      input stays pinned. */}
+                  <ScrollView style={s.sheetScroll} nestedScrollEnabled>
                   <Text style={s.sheetBody}>{req.question ?? 'Clarification needed'}</Text>
                   {req.options?.map((o) => (
                     <Pressable
@@ -1180,6 +1195,7 @@ export default function Chat() {
                       <Text style={s.clarifyText}>{o}</Text>
                     </Pressable>
                   ))}
+                  </ScrollView>
                   <View style={s.clarifyRow}>
                     <TextInput
                       style={[s.qInput, { flex: 1 }]}
@@ -1210,9 +1226,13 @@ export default function Chat() {
                   {req.method === 'sudo' ? 'Sudo requested' : 'Secret requested'}
                 </Text>
               </View>
-              <Text style={s.sheetBody} selectable>
-                {req.prompt}
-              </Text>
+              {/* BUG-082: long prompt scrolls; the password field and the
+                  Send/Deny row stay pinned. */}
+              <ScrollView style={s.sheetScroll} nestedScrollEnabled>
+                <Text style={s.sheetBody} selectable>
+                  {req.prompt}
+                </Text>
+              </ScrollView>
               <TextInput
                 style={s.qInput}
                 value={secretValue}
@@ -1496,7 +1516,9 @@ const makeS = () => StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
   // Shared press feedback so every tappable answers on the frame it's hit.
   btnPressed: { opacity: 0.6 },
-  banner: { backgroundColor: '#241A08', paddingVertical: 9, paddingHorizontal: 14 },
+  // BUG-017: amberSoft token — the literal was hue-locked to Mocheme and
+  // clashed with Relay's teal band after a theme switch.
+  banner: { backgroundColor: C.amberSoft, paddingVertical: 9, paddingHorizontal: 14 },
   bannerText: { color: C.amber, fontSize: 12.5, fontWeight: '600', textAlign: 'center' },
   empty: { paddingHorizontal: 16, paddingTop: 24, gap: 2 },
   booting: { flex: 1, flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 80 },
@@ -1563,7 +1585,12 @@ const makeS = () => StyleSheet.create({
   slashName: { color: C.text, fontSize: 14, fontWeight: '600' },
   slashMeta: { color: C.textFaint, fontSize: 11.5, marginTop: 1, lineHeight: 15 },
   slashKind: { color: C.textFaint, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
-  sheet: { marginHorizontal: 12, marginBottom: 8, backgroundColor: C.bgElev, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: C.border },
+  // BUG-082: cap the card so a long prompt can never push its own action
+  // row (or the composer) below the fold; the body scrolls instead.
+  sheet: { marginHorizontal: 12, marginBottom: 8, backgroundColor: C.bgElev, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: C.border, maxHeight: '55%', overflow: 'hidden' },
+  // The body shrinks (flexShrink) inside the capped card and scrolls; the
+  // action rows after it keep their intrinsic height and stay pinned.
+  sheetScroll: { flexShrink: 1 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
   sheetTitle: { color: C.text, fontSize: 13.5, fontWeight: '700' },
   sheetKicker: { color: C.textFaint, fontSize: 11.5, marginBottom: 4 },
