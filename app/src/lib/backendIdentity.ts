@@ -7,6 +7,8 @@ import { resetSendQueue, loadSendQueue, QUEUE_KEY } from './sendQueue'
 import { resetChatMarks, MARKS_KEY } from './chatListState'
 import { resetAttention, ATTENTION_KEY } from './attention'
 import { resetSessionList } from './sessionList'
+import { resetMediaState } from './mediaState'
+import { wipeMediaCaches } from './mediaCache'
 
 /**
  * Which backend do this device's session caches belong to?
@@ -85,6 +87,19 @@ export async function syncBackendIdentity(c: ConnConfig): Promise<void> {
   }
   // In-memory FIRST, through each cache's own reset helper.
   await resetSessionCaches()
+  // BUG-031: media caches are keyed by PATH only — machine B must never
+  // render machine A's cached bytes for a same-named gateway path. Wipe the
+  // relay-media tree and the per-key states; correct bytes re-download on
+  // view. expo-image's disk cache keys the same way — clear it too (dynamic
+  // import keeps the app-only dependency out of node test graphs).
+  await wipeMediaCaches()
+  resetMediaState()
+  try {
+    const { Image } = await import('expo-image')
+    await Image.clearDiskCache()
+  } catch (err) {
+    log('warn', 'identity', `expo-image cache clear failed: ${String(err)}`)
+  }
   resetDrafts()
   resetSendQueue()
   resetChatMarks()
