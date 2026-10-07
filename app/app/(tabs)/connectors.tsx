@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { View, Text, FlatList, StyleSheet, Pressable, TextInput, ActivityIndicator, Modal, ScrollView, Image } from 'react-native'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useFocusEffect } from 'expo-router'
+import { View, Text, FlatList, StyleSheet, Pressable, TextInput, ActivityIndicator, Modal, ScrollView, Image, Linking } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { MCP_LOGOS } from '../../src/lib/mcpLogos'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
@@ -8,11 +9,12 @@ import { useStore } from '@nanostores/react'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
 import { C, useStyles } from '../../src/lib/theme'
-import { isConnected as isConnectedAtom } from '../../src/lib/gateway'
+import { connConfig, isConnected as isConnectedAtom } from '../../src/lib/gateway'
 import {
-  mcpServers, mcpRuntime, mcpCatalog, mcpUnsupported, mcpLoading, catalogLoading,
-  loadMcpServers, loadMcpCatalog, installCatalogServer, addCustomServer,
+  mcpServers, mcpRuntime, mcpCatalog, mcpUnsupported, mcpLoading, catalogLoading, mcpListError,
+  loadMcpServers, loadMcpCatalog, refreshMcpRuntime, installCatalogServer, addCustomServer,
   removeMcpServer, testMcpServer, saveMcpApiKey, reloadAgentMcp,
+  startMcpOauth, pollMcpOauth, cancelMcpOauth,
   type McpServer, type McpTestResult,
 } from '../../src/lib/mcpState'
 
@@ -26,7 +28,7 @@ import {
 /** Running-state line under a server name — from cached runtime, never a probe. */
 function statusLine(srv: McpServer, rt?: { status?: string; error?: string; tools?: number }): { text: string; color: string } {
   if (srv.auth === 'oauth' && srv.oauth_tokens_present === false) {
-    return { text: 'needs sign-in on the computer', color: C.amber }
+    return { text: 'sign-in needed', color: C.amber }
   }
   if (!srv.enabled) return { text: 'disabled', color: C.textFaint }
   switch (rt?.status) {
@@ -37,6 +39,16 @@ function statusLine(srv: McpServer, rt?: { status?: string; error?: string; tool
     case 'lazy': return { text: `idle · starts on first use${rt.tools ? ` · ${rt.tools} tools` : ''}`, color: C.textDim }
     default: return { text: 'not running yet', color: C.textFaint }
   }
+}
+
+/**
+ * Command-transport server (npx/uvx/local binary). The embedded gateway
+ * can't spawn child processes on Android (same limitation as
+ * slash_worker_bridge), so while paired to the loopback host these run on
+ * the computer only.
+ */
+function isCommandServer(srv: McpServer): boolean {
+  return srv.transport === 'stdio' || !!srv.command
 }
 
 /**
@@ -88,6 +100,10 @@ export default function Connectors() {
   const catalog = useStore(mcpCatalog)
   const loading = useStore(mcpLoading)
   const catLoading = useStore(catalogLoading)
+  const listError = useStore(mcpListError)
+  const connCfg = useStore(connConfig)
+  /** Loopback pairing → the embedded gateway runs on this phone's machine. */
+  const loopbackHost = !!connCfg?.host && connCfg.host.startsWith('127.0.0.1')
   const [query, setQuery] = useState('')
   const [tab, setTab] = useState<'yours' | 'browse'>('yours')
   const [open, setOpen] = useState<McpServer | null>(null)
@@ -102,7 +118,23 @@ export default function Connectors() {
     void loadMcpCatalog()
   }, [online])
 
+  // Refresh on mount and whenever the gateway (re)connects — `online`
+  // flips true on reconnect, so the effect below re-runs `refresh`.
   useEffect(() => { refresh() }, [refresh])
+
+  // Live statuses: `mcp.servers.status` is cached-only, so poll it lightly
+  // (one RPC) while the tab is VISIBLE — useFocusEffect, not useEffect:
+  // expo-router tabs stay mounted after first visit (the BUG-055 premise),
+  // so a mount-scoped interval would keep firing app-wide for the whole
+  // session. Focus-scoped: starts on focus, torn down on blur/unmount.
+  useFocusEffect(
+    useCallback(() => {
+      if (!online) return
+      void refreshMcpRuntime()
+      const id = setInterval(() => { void refreshMcpRuntime() }, 5_000)
+      return () => clearInterval(id)
+    }, [online]),
+  )
 
   const serverList = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -208,6 +240,16 @@ export default function Connectors() {
           ))}
         </View>
 
+        {listError ? (
+          <View style={s.errBanner}>
+            <Ionicons name="alert-circle" size={16} color={C.amber} />
+            <Text style={s.errBannerText} numberOfLines={2}>Couldn't load servers — {listError}</Text>
+            <Pressable style={({ pressed }) => [pressed && s.pressed]} onPress={refresh} accessibilityLabel="Retry loading servers">
+              <Text style={s.errRetry}>Retry</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         {tab === 'yours' ? (
           // Distinct keys: without them React reconciles the two lists into
           // one instance across the tab switch, and numColumns can't change
@@ -222,17 +264,21 @@ export default function Connectors() {
             contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 32 }}
             ListEmptyComponent={
               <Text style={s.empty}>
-                {loading ? '' : online ? (query ? 'No matches' : 'No MCP servers yet — browse the catalog or add one') : 'Offline'}
+                {loading || listError ? '' : online ? (query ? 'No matches' : 'No MCP servers yet — browse the catalog or add one') : 'Offline'}
               </Text>
             }
             renderItem={({ item }) => {
               const st = statusLine(item, runtime[item.name])
+              const desktopOnly = loopbackHost && isCommandServer(item)
               return (
                 <Pressable style={({ pressed }) => [s.row, pressed && s.rowPressed]} onPress={() => setOpen(item)} accessibilityLabel={item.name}>
                   <TileAvatar name={item.name} size={42} />
                   <View style={{ flex: 1 }}>
                     <View style={s.rowHead}>
                       <Text style={s.rowName} numberOfLines={1}>{item.name}</Text>
+                      {desktopOnly ? (
+                        <View style={s.amberBadge}><Text style={s.amberBadgeText}>Desktop only</Text></View>
+                      ) : null}
                       <Text style={s.badge}>{item.transport}</Text>
                     </View>
                     <Text style={[s.rowDesc, { color: st.color }]} numberOfLines={2}>{st.text}</Text>
@@ -289,6 +335,7 @@ export default function Connectors() {
       <ServerSheet
         server={open}
         runtime={open ? runtime[open.name] : undefined}
+        desktopOnly={loopbackHost && !!open && isCommandServer(open)}
         onClose={() => setOpen(null)}
         onChanged={() => { void loadMcpServers(); void loadMcpCatalog() }}
         onRemoved={onRemoved}
@@ -322,10 +369,12 @@ export default function Connectors() {
 // ── Server detail sheet ─────────────────────────────────────────────────────
 
 function ServerSheet({
-  server, runtime, onClose, onChanged, onRemoved, onNeedKey,
+  server, runtime, desktopOnly, onClose, onChanged, onRemoved, onNeedKey,
 }: {
   server: McpServer | null
   runtime?: { status?: string; tools?: number; connected?: boolean; error?: string }
+  /** Loopback pairing + command transport — can't run on the phone. */
+  desktopOnly?: boolean
   onClose: () => void
   onChanged: () => void
   onRemoved: (name: string) => void
@@ -335,11 +384,104 @@ function ServerSheet({
   const [testing, setTesting] = useState(false)
   const [result, setResult] = useState<McpTestResult | null>(null)
   const [removing, setRemoving] = useState(false)
+  /** In-app OAuth sign-in: waiting on the browser, failed, or timed out. */
+  const [oauthFlow, setOauthFlow] = useState<{ phase: 'waiting' | 'error' | 'timeout'; message?: string } | null>(null)
+  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null)
+  const activeSession = useRef<string | null>(null)
+  /**
+   * The server the active session belongs to, ref'd alongside it: when the
+   * sheet CLOSES, `server` is already null, so reading `server?.name` in the
+   * cleanup effect skipped the gateway-side cancel — the flow (and its
+   * callback worker) hung until the server's own timeout. The ref still
+   * knows the name.
+   */
+  const activeName = useRef<string | null>(null)
 
-  useEffect(() => { setResult(null) }, [server?.name])
+  const stopOauthPolling = useCallback(() => {
+    if (pollTimer.current) { clearInterval(pollTimer.current); pollTimer.current = null }
+    activeSession.current = null
+    activeName.current = null
+  }, [])
+
+  // Leaving the sheet (closing it OR switching servers) stops the poller and
+  // cancels the gateway-side flow so its callback worker isn't left hanging.
+  // Uses the ref'd name — `server` is null by the time a close lands here.
+  useEffect(() => {
+    const session = activeSession.current
+    const name = activeName.current
+    if (session && name) void cancelMcpOauth(name, session).catch(() => {})
+    stopOauthPolling()
+    setOauthFlow(null)
+    setResult(null)
+    return undefined
+  }, [server?.name, stopOauthPolling])
+
+  useEffect(
+    () => () => {
+      const session = activeSession.current
+      const name = activeName.current
+      if (session && name) void cancelMcpOauth(name, session).catch(() => {})
+      stopOauthPolling()
+    },
+    [stopOauthPolling],
+  )
 
   if (!server) return null
   const st = statusLine(server, runtime)
+
+  const startSignIn = async () => {
+    stopOauthPolling()
+    setOauthFlow({ phase: 'waiting' })
+    let session: string
+    let authUrl: string
+    try {
+      const started = await startMcpOauth(server.name)
+      session = started.session_id
+      authUrl = started.auth_url
+    } catch (err) {
+      setOauthFlow({ phase: 'error', message: err instanceof Error ? err.message : String(err) })
+      return
+    }
+    activeSession.current = session
+    activeName.current = server.name
+    // The embedded gateway's loopback callback is on the paired machine —
+    // reachable from the phone's own browser, so open the URL there.
+    void Linking.openURL(authUrl).catch(() => {})
+    const startedAt = Date.now()
+    pollTimer.current = setInterval(() => {
+      if (activeSession.current !== session) { stopOauthPolling(); return }
+      if (Date.now() - startedAt > 5 * 60_000) {
+        const name = server.name
+        stopOauthPolling()
+        void cancelMcpOauth(name, session).catch(() => {})
+        setOauthFlow({ phase: 'timeout', message: 'Sign-in timed out after 5 minutes — try again.' })
+        return
+      }
+      void pollMcpOauth(server.name, session)
+        .then((status) => {
+          if (activeSession.current !== session) return
+          if (status.status === 'approved') {
+            stopOauthPolling()
+            setOauthFlow(null)
+            void loadMcpServers()
+            onChanged()
+          } else if (status.status === 'error') {
+            stopOauthPolling()
+            setOauthFlow({ phase: 'error', message: status.error ?? 'Sign-in failed' })
+          }
+        })
+        .catch(() => { /* transient RPC hiccup — keep polling */ })
+    }, 1_500)
+  }
+
+  const cancelSignIn = () => {
+    const session = activeSession.current
+    const name = server.name
+    stopOauthPolling()
+    if (session) void cancelMcpOauth(name, session).catch(() => {})
+    setOauthFlow(null)
+  }
+
 
   const runTest = async () => {
     setTesting(true)
@@ -399,11 +541,39 @@ function ServerSheet({
               <Text style={s.cfgLine} numberOfLines={2}>env: {server.env.join(', ')}</Text>
             ) : null}
 
+            {desktopOnly ? (
+              <Text style={s.hint}>Command-based servers run on your computer, not on the phone.</Text>
+            ) : null}
+
             {oauthMissing ? (
-              <Text style={s.hint}>
-                This server uses OAuth. Finish sign-in on the machine: run{' '}
-                <Text style={s.code}>hermes mcp login {server.name}</Text>, then test here.
-              </Text>
+              oauthFlow ? (
+                oauthFlow.phase === 'waiting' ? (
+                  <View style={s.oauthRow}>
+                    <ActivityIndicator size="small" color={C.textDim} />
+                    <Text style={s.rowDesc}>Waiting for browser approval…</Text>
+                    <Pressable style={({ pressed }) => [s.oauthCancel, pressed && s.pressed]} onPress={cancelSignIn} accessibilityLabel="Cancel sign-in">
+                      <Text style={s.oauthCancelText}>Cancel</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <View style={s.oauthRow}>
+                    <Ionicons name={oauthFlow.phase === 'timeout' ? 'time-outline' : 'alert-circle'} size={16} color={C.amber} />
+                    <Text style={[s.rowDesc, { color: C.amber, flex: 1 }]} numberOfLines={3}>
+                      {oauthFlow.message ?? 'Sign-in failed'}
+                    </Text>
+                    <Pressable style={({ pressed }) => [s.oauthCancel, pressed && s.pressed]} onPress={() => void startSignIn()} accessibilityLabel="Try again">
+                      <Text style={s.oauthCancelText}>Try again</Text>
+                    </Pressable>
+                  </View>
+                )
+              ) : (
+                <View style={s.oauthRow}>
+                  <Text style={[s.hint, { flex: 1 }]}>This server uses OAuth. Sign in from your phone's browser.</Text>
+                  <Pressable style={({ pressed }) => [s.signInBtn, pressed && s.pressed]} onPress={() => void startSignIn()} accessibilityLabel="Sign in">
+                    <Text style={s.signInText}>Sign in</Text>
+                  </Pressable>
+                </View>
+              )
             ) : null}
 
             {testing ? (
@@ -675,6 +845,26 @@ const makeS = () => StyleSheet.create({
   emptyTitle: { color: C.text, fontSize: 16, fontWeight: '700', textAlign: 'center' },
   emptyBody: { color: C.textDim, fontSize: 13.5, lineHeight: 19, textAlign: 'center' },
   pressed: { opacity: 0.55 },
+  errBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    marginHorizontal: 16, marginBottom: 8, padding: 10,
+    backgroundColor: C.bgCard, borderRadius: 12, borderWidth: 1, borderColor: C.borderSoft,
+  },
+  errBannerText: { color: C.textDim, fontSize: 12.5, flex: 1, lineHeight: 17 },
+  errRetry: { color: C.accent, fontSize: 13, fontWeight: '800' },
+  amberBadge: {
+    backgroundColor: C.amberSoft, borderRadius: 8,
+    paddingHorizontal: 6, paddingVertical: 2,
+  },
+  amberBadgeText: { color: C.amber, fontSize: 10.5, fontWeight: '800', textTransform: 'uppercase' },
+  oauthRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  signInBtn: {
+    backgroundColor: C.accent, borderRadius: 12, paddingHorizontal: 16,
+    minHeight: 40, alignItems: 'center', justifyContent: 'center',
+  },
+  signInText: { color: C.onAccent, fontSize: 14, fontWeight: '800' },
+  oauthCancel: { paddingHorizontal: 10, minHeight: 36, alignItems: 'center', justifyContent: 'center' },
+  oauthCancelText: { color: C.accent, fontSize: 13, fontWeight: '700' },
 
   // sheets
   sheetScrim: { flex: 1, justifyContent: 'flex-end', backgroundColor: C.scrim },
