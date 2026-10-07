@@ -164,6 +164,23 @@ function relayMediaDir(): Directory {
   return dir
 }
 
+/**
+ * BUG-031: media caches are keyed by PATH only, so after switching to a
+ * different machine a same-named gateway path would render the PREVIOUS
+ * machine's cached bytes (audio/docs would play A's recordings for B's
+ * filenames). The backend-identity switch wipes the relay-media tree; the
+ * correct bytes simply re-download on view. (expo-image's disk cache is
+ * cleared by the caller — kept out of this module's static graph.)
+ */
+export async function wipeMediaCaches(): Promise<void> {
+  try {
+    const dir = new Directory(Paths.cache, RELAY_MEDIA_DIR)
+    if (dir.exists) dir.delete()
+  } catch (err) {
+    log('warn', 'media', `relay-media wipe failed: ${String(err)}`)
+  }
+}
+
 /** Local file for a gateway path, downloading on miss. Filename is
  *  `cacheKeyFor(path)` — no index store; existence IS the cache. */
 export function localMediaPath(path: string): string {

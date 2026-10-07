@@ -35,6 +35,12 @@ export function clearMediaState(key: string): void {
   mediaState.set(next)
 }
 
+/** BUG-031: drop every per-key state on a backend switch — the wiped cache
+ *  makes them all stale. The per-key computed stores react to this atom. */
+export function resetMediaState(): void {
+  mediaState.set({})
+}
+
 // Per-key computed stores: components subscribe to ONE cache key, so one
 // download's progress ticks never re-render anyone else's chips.
 const keyStores = new Map<string, Store<MediaLoadState>>()

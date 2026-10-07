@@ -17,6 +17,7 @@ import {
   connect, gatewayError, retryNow, disconnect, reconnectAttempt, onForeground, redactedUrl,
   servers as serversStore, activeServerId, refreshServers, switchToServer,
   forgetActiveServer, mostRecentServer, onDialConfig, type SavedServer,
+  everConnected,
 } from '../src/lib/gateway'
 import { loadSessions } from '../src/lib/sessionList'
 import { refreshRunningAutomations } from '../src/lib/automationsState'
@@ -219,7 +220,12 @@ export default function RootLayout() {
   useEffect(() => {
     if (!pendingOpen || !online) return
     pendingOpenStoredId.set(null)
-    if (Date.now() - pendingOpen.at > 60_000) return
+    if (Date.now() - pendingOpen.at > 60_000) {
+      // BUG-029: a stale tap used to be dropped SILENTLY — the user tapped a
+      // notification and nothing happened, with no hint why.
+      setLinkMsg("That chat couldn't be opened — the connection took too long. Try the notification again.")
+      return
+    }
     try { router.navigate('/(tabs)/chat') } catch {}
     void switchToSession(pendingOpen.storedId).catch(() => {})
   }, [pendingOpen, online, router])
@@ -250,6 +256,13 @@ export default function RootLayout() {
 
   const failed = !online && (state === 'error' || state === 'closed')
   const connecting = !online && state === 'connecting'
+  // BUG-005: the full-screen veil only owns the screen BEFORE the first
+  // successful connect of this run (boot / boot-failure). Once the app has
+  // been connected, a mid-session drop must degrade to the chat screen's
+  // own banner — cached history, drafts and the queue strip stay usable
+  // instead of hiding behind an opaque overlay.
+  const everOpen = useStore(everConnected)
+  const bootStruggling = !everOpen
 
   return (
     <KeyboardProvider>
@@ -268,14 +281,16 @@ export default function RootLayout() {
         <Stack.Screen name="add-computer" options={{ headerShown: false, presentation: 'modal' }} />
         <Stack.Screen name="setup" options={{ headerShown: false, presentation: 'modal' }} />
       </Stack>
-      {!online && state !== 'idle' ? (
+      {!online && state !== 'idle' && bootStruggling ? (
         <View style={s.overlay}>
           {/* Mochi inside the veil — made VISIBLE so the connecting/offline
               states actually show. The overlay instance mounts cold per
               disconnect (~200-500ms low-end), so the status text below lands
               first and Mochi fades in a beat later. Connecting uses the
               patient waiting loop (rock + wandering gaze) — the connecting
-              pose itself ships static, so waiting IS the loading animation. */}
+              pose itself ships static, so waiting IS the loading animation.
+              BUG-005: boot-only — once this run has connected, outages
+              degrade to the chat screen's banner instead of this overlay. */}
           <MochiStage state={connecting ? 'mochi-waiting' : 'mochi-offline'} size={168} />
           {failed ? (
             <>

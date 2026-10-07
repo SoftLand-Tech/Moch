@@ -250,6 +250,25 @@ export function parseSlashCommand(text: string): ParsedCommand | null {
 }
 
 /**
+ * BUG-042: only a KNOWN command routes to the command pipeline. Any other
+ * leading-slash text ("/usr/bin/env", "/etc/hosts — what's in there?") is a
+ * normal message the user wants ANSWERED, not a dispatch that errors out and
+ * eats the typed text. Checks the loaded gateway registry (canonical +
+ * skill commands); an EMPTY registry (offline / not yet loaded) keeps the
+ * legacy dispatch behavior rather than guessing.
+ */
+export function isKnownSlashCommand(text: string): boolean {
+  const parsed = parseSlashCommand(text)
+  if (!parsed) return false
+  const canon = canonicalName(parsed.name)
+  const present = (rec: Record<string, unknown>): boolean =>
+    Object.prototype.hasOwnProperty.call(rec, canon) || Object.prototype.hasOwnProperty.call(rec, `/${canon}`)
+  const catalog = commandCatalog.get()
+  if (Object.keys(catalog).length === 0) return true
+  return present(catalog) || present(skillCommands.get())
+}
+
+/**
  * Collapse a user-typed command name to one canonical word, no slashes.
  * Handles "//airtable" (skill keys already carry a slash) and "Airtable".
  */
