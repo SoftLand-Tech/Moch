@@ -1058,6 +1058,8 @@ export default function Chat() {
               <Pressable
                 style={({ pressed }) => [s.fab, pressed && s.btnPressed]}
                 onPress={jumpToLatest}
+                hitSlop={4}
+                accessibilityRole="button"
                 accessibilityLabel="Jump to latest"
               >
               <Icon name="arrow-down" size={19} color={C.text} />
@@ -1147,7 +1149,13 @@ export default function Chat() {
                         pressed && s.btnPressed,
                       ]}
                       onPress={() => {
-                        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+                        // BUG-050: refusing the agent is a warning, not a
+                        // success — the haptic language must match the red
+                        // Deny styling (AlertDialog uses Warning for
+                        // destructive choices too).
+                        void Haptics.notificationAsync(
+                          deny ? Haptics.NotificationFeedbackType.Warning : Haptics.NotificationFeedbackType.Success,
+                        )
                         void respondApproval(c as 'once' | 'session' | 'always' | 'deny')
                       }}
                       accessibilityLabel={c}
@@ -1476,6 +1484,7 @@ export default function Chat() {
               <Pressable
                 style={({ pressed }) => [s.steerChip, steerMode && s.steerChipOn, pressed && s.btnPressed]}
                 onPress={() => setSteerMode(!steerMode)}
+                hitSlop={8}
                 accessibilityRole="button"
                 accessibilityLabel={steerMode ? 'Steer mode on' : 'Steer mode'}
               >
