@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, FlatList, Pressable, TextInput, StyleSheet, RefreshControl } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { Icon } from '../../src/components/Icon'
@@ -66,6 +66,9 @@ function SessionsInner() {
   const s = useStyles(makeS)
   const list = useStore(sessionRows)
   const [query, setQuery] = useState('')
+  // BUG-018: the tray's search affordance FOCUSES the field (it used to
+  // merely clear the query); submit blurs instead of doing nothing.
+  const searchRef = useRef<TextInput>(null)
   const [refreshing, setRefreshing] = useState(false)
   const loading = useStore(sessionListLoading)
   const error = useStore(sessionListError)
@@ -165,17 +168,20 @@ function SessionsInner() {
   }, [])
 
   return (
-    <ScreenShell title="Chats" showBrand onSearch={() => setQuery('')}>
+    <ScreenShell title="Chats" showBrand onSearch={() => searchRef.current?.focus()}>
       <View style={s.root}>
         <View style={s.searchRow}>
           <TextInput
+            ref={searchRef}
             style={s.search}
             value={query}
             onChangeText={setQuery}
             placeholder="Search conversations…"
             placeholderTextColor={C.textFaint}
             autoCorrect={false}
+            autoCapitalize="none"
             returnKeyType="search"
+            onSubmitEditing={() => searchRef.current?.blur()}
             accessibilityLabel="Search sessions"
           />
           <Pressable

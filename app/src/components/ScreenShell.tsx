@@ -193,6 +193,10 @@ export function ScreenShell({
 
   const nav = useMemo<NavItem[]>(() => [
     { key: 'chat', label: 'Chat', icon: 'chatbubble-outline' },
+    // BUG-018: the full session list was reachable only via the chat
+    // header's search icon (Relay theme only) — the drawer needs its own
+    // entry so the Chats screen isn't orphaned.
+    { key: 'chats', label: 'Chats', icon: 'list-outline' },
     { key: 'automations', label: 'Automations', icon: 'timer-outline', mochis: runningAuto },
     { key: 'skills', label: 'Skills', icon: 'sparkles-outline' },
     { key: 'connectors', label: 'Connectors', icon: 'extension-puzzle-outline' },
@@ -241,15 +245,17 @@ export function ScreenShell({
       const route =
         key === 'chat'
           ? '/(tabs)/chat'
-          : key === 'automations'
-            ? '/(tabs)/automations'
-            : key === 'skills'
-              ? '/(tabs)/skills'
-              : key === 'connectors'
-                ? '/(tabs)/connectors'
-                : key === 'agent'
-                  ? '/(tabs)/agent'
-                  : '/(tabs)/settings'
+          : key === 'chats'
+            ? '/(tabs)/sessions'
+            : key === 'automations'
+              ? '/(tabs)/automations'
+              : key === 'skills'
+                ? '/(tabs)/skills'
+                : key === 'connectors'
+                  ? '/(tabs)/connectors'
+                  : key === 'agent'
+                    ? '/(tabs)/agent'
+                    : '/(tabs)/settings'
       // navigate, never push: `/(tabs)` is a single route on the root stack,
       // so push mounts a whole fresh copy of every tab screen each tap —
       // navigate just switches the tab inside the instance we already have.
@@ -419,7 +425,7 @@ export function ScreenShell({
               style={({ pressed }) => [s.circle, pressed && s.circlePressed]}
               onPress={onSearch}
               hitSlop={8}
-              accessibilityLabel="Search chats"
+              accessibilityLabel="All chats"
             >
               <Icon name="search" size={18} color={C.text} />
             </Pressable>
