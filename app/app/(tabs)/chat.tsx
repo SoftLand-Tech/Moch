@@ -867,17 +867,33 @@ export default function Chat() {
         title={title || 'Moch'}
         onSearch={() => router.navigate('/(tabs)/sessions')}
         right={
-          !S.trayHeader && curModel ? (
+          <>
+            {/* New chat, on the header like the drawer pill — same flow
+                (ScreenShell startNew → newChat). Always available, even when
+                the model chip is hidden (tray header / no model yet). */}
             <Pressable
-              style={({ pressed }) => [s.modelChip, pressed && s.btnPressed]}
-              onPress={() => setModelPickerOpen(true)}
+              style={({ pressed }) => [s.headerIconBtn, pressed && s.btnPressed]}
+              onPress={() => {
+                router.navigate('/(tabs)/chat')
+                void newChat().catch((e) => showAlert('New chat failed', e instanceof Error ? e.message : String(e)))
+              }}
               hitSlop={6}
-              accessibilityLabel={`Current model ${curModel}. Tap to change`}
+              accessibilityLabel="New chat"
             >
-              <Icon name="cube-outline" size={12} color={C.accent} />
-              <Text style={s.modelChipText} numberOfLines={1}>{curModel}</Text>
+              <Icon name="add" size={18} color={C.text} />
             </Pressable>
-          ) : null
+            {!S.trayHeader && curModel ? (
+              <Pressable
+                style={({ pressed }) => [s.modelChip, pressed && s.btnPressed]}
+                onPress={() => setModelPickerOpen(true)}
+                hitSlop={6}
+                accessibilityLabel={`Current model ${curModel}. Tap to change`}
+              >
+                <Icon name="cube-outline" size={12} color={C.accent} />
+                <Text style={s.modelChipText} numberOfLines={1}>{curModel}</Text>
+              </Pressable>
+            ) : null}
+          </>
         }
       >
         <Animated.View style={[s.root, kbPad]}>
@@ -1657,6 +1673,18 @@ const makeS = () => StyleSheet.create({
     borderColor: S.modelChipTint ? C.accentSoft : C.border,
   },
   modelChipText: { color: C.textDim, fontSize: 11.5, fontWeight: '700', flexShrink: 1 },
+  // Header new-chat button: same circle vocabulary as the drawer's other
+  // header controls, so it reads next to the model chip without competing.
+  headerIconBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.bgCard,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
   modelFloatChip: { position: 'absolute', top: 8, left: 12, zIndex: 2 },
   slashHead: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: C.borderSoft },
   slashHeadText: { color: C.accent, fontSize: 11, fontWeight: '800', letterSpacing: 0.5, flex: 1 },

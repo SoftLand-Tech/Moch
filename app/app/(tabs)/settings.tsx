@@ -11,7 +11,7 @@ import { router } from 'expo-router'
 import { connConfig, connectionState, gatewayError, disconnect, retryNow, redactedUrl,
   servers as serversStore, activeServerId, switchToServer, removeServer, forgetActiveServer,
   mostRecentServer, type SavedServer } from '../../src/lib/gateway'
-import { newChat, activeSession, messages } from '../../src/lib/chat'
+import { activeSession, messages } from '../../src/lib/chat'
 import { diagLog, logText } from '../../src/lib/log'
 import {
   notificationsEnabled, setNotificationsEnabled, ensureNotificationPermission,
@@ -300,13 +300,6 @@ function SettingsInner() {
     ])
   }
 
-  // BUG-049: one new-chat contract everywhere — immediate switch, like the
-  // drawer, the Chats tab and /new. The transcript detaches (nothing is
-  // deleted) and stays one tap away in the drawer.
-  const startNewChat = () => {
-    void newChat().catch((e) => showAlert('Failed', String(e)))
-  }
-
   return (
     <ScreenShell title="Settings" showBrand>
       <ScrollView style={s.root} contentContainerStyle={{ padding: 16, gap: 18, paddingBottom: 44 }}>
@@ -322,11 +315,9 @@ function SettingsInner() {
           </View>
         </View>
 
-        <Section title="ON-PHONE RUNTIME">
+        <Section title="RUNTIME">
           <RuntimeSectionRows />
-        </Section>
-
-        <Section title="LINUX ENVIRONMENT">
+          <Divider />
           <LinuxSectionRows />
         </Section>
         <Section title="APPEARANCE">
@@ -335,6 +326,24 @@ function SettingsInner() {
               <ThemeCard key={t.id} id={t.id} name={t.name} desc={t.desc} swatches={t.swatches} onPick={(id) => { void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); void setTheme(id) }} />
             ))}
           </View>
+        </Section>
+
+        <Section title="AGENT">
+          <Row
+            icon="sparkles-outline"
+            label="Skills"
+            sub="Browse and manage the agent's skills"
+            chevron
+            onPress={() => router.push('/(tabs)/skills')}
+          />
+          <Divider />
+          <Row
+            icon="cube-outline"
+            label="Models"
+            sub="Provider, model and reasoning effort"
+            chevron
+            onPress={() => router.push('/(tabs)/agent')}
+          />
         </Section>
 
         <Section title="COMPUTERS">
@@ -430,12 +439,12 @@ function SettingsInner() {
           />
         </Section>
 
-        <Section title="CHAT">
+        <Section title="ABOUT">
           <Row
-            icon="chatbox-ellipses-outline"
-            label="New chat"
-            sub="Starts a fresh chat — the current one stays in Chats"
-            onPress={startNewChat}
+            icon="copy-outline"
+            label="Copy diagnostics"
+            sub={`${logs.length} log lines`}
+            onPress={copyDiagnostics}
           />
           <Divider />
           <Row
@@ -444,18 +453,7 @@ function SettingsInner() {
             sub={msgCount ? `${msgCount} messages — copies to clipboard` : 'No messages yet'}
             onPress={exportTranscript}
           />
-        </Section>
-
-        <Section title="DIAGNOSTICS">
-          <Row
-            icon="copy-outline"
-            label="Copy diagnostics"
-            sub={`${logs.length} log lines`}
-            onPress={copyDiagnostics}
-          />
-        </Section>
-
-        <Section title="ABOUT">
+          <Divider />
           <Row
             icon="information-circle-outline"
             label="Moch v1.0"

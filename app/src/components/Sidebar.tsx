@@ -75,6 +75,11 @@ interface Props {
    */
   onRequestOpen?: () => void
   nav: NavItem[]
+  /**
+   * Bottom-docked nav (ChatGPT-style): rendered after the chat list, pinned
+   * above the New-chat pill at the panel's bottom edge.
+   */
+  bottomNav?: NavItem[]
   recent: RecentChat[]
   onNav: (key: string) => void
   onNewChat: () => void
@@ -223,6 +228,7 @@ export function Sidebar({
   primed,
   onRequestOpen,
   nav,
+  bottomNav,
   recent,
   onNav,
   onNewChat,
@@ -328,6 +334,47 @@ export function Sidebar({
   const progressRef = useRef(0)
   const moveSeenRef = useRef(false)
   const firstRun = useRef(true)
+
+  // Shared row renderer for the top nav block and the bottom-docked one.
+  const renderNavRows = (items: NavItem[]) =>
+    items.map((item) => (
+      <Pressable
+        key={item.key}
+        style={({ pressed }) => [
+          s.navRow,
+          item.key === activeKey && S.drawerRoundedCap && s.navRowOn,
+          pressed && s.rowPressed,
+        ]}
+        onPress={() => {
+          onNav(item.key)
+          onClose()
+        }}
+        accessibilityLabel={item.label}
+      >
+        <Icon
+          name={item.icon}
+          size={20}
+          color={item.key === activeKey && S.drawerRoundedCap ? C.accent : C.text}
+        />
+        <Text style={s.navLabel}>{item.label}</Text>
+        {item.mochis ? (
+          <View
+            style={s.mochiRunRow}
+            accessibilityLabel={`${item.mochis} running automation${item.mochis === 1 ? '' : 's'}`}
+          >
+            {Array.from({ length: Math.min(item.mochis, 3) }).map((_, i) => (
+              <Image key={i} source={MOCHI_RUN[i]} style={[s.mochiMini, i > 0 && s.mochiMiniOverlap]} />
+            ))}
+            {item.mochis > 3 ? <Text style={s.mochiMore}>+{item.mochis - 3}</Text> : null}
+          </View>
+        ) : null}
+        {item.badge ? (
+          <View style={s.badge}>
+            <Text style={s.badgeText}>{item.badge > 9 ? '9+' : item.badge}</Text>
+          </View>
+        ) : null}
+      </Pressable>
+    ))
 
   // Open/close slide. A layout effect on the `open` prop flip, so no extra
   // render sits between the tap/gesture-release and the first animated frame;
@@ -665,46 +712,7 @@ export function Sidebar({
           </Pressable>
         </View>
 
-        <View>
-          {nav.map((item) => (
-            <Pressable
-              key={item.key}
-              style={({ pressed }) => [
-                s.navRow,
-                item.key === activeKey && S.drawerRoundedCap && s.navRowOn,
-                pressed && s.rowPressed,
-              ]}
-              onPress={() => {
-                onNav(item.key)
-                onClose()
-              }}
-              accessibilityLabel={item.label}
-            >
-              <Icon
-                name={item.icon}
-                size={20}
-                color={item.key === activeKey && S.drawerRoundedCap ? C.accent : C.text}
-              />
-              <Text style={s.navLabel}>{item.label}</Text>
-              {item.mochis ? (
-                <View
-                  style={s.mochiRunRow}
-                  accessibilityLabel={`${item.mochis} running automation${item.mochis === 1 ? '' : 's'}`}
-                >
-                  {Array.from({ length: Math.min(item.mochis, 3) }).map((_, i) => (
-                    <Image key={i} source={MOCHI_RUN[i]} style={[s.mochiMini, i > 0 && s.mochiMiniOverlap]} />
-                  ))}
-                  {item.mochis > 3 ? <Text style={s.mochiMore}>+{item.mochis - 3}</Text> : null}
-                </View>
-              ) : null}
-              {item.badge ? (
-                <View style={s.badge}>
-                  <Text style={s.badgeText}>{item.badge > 9 ? '9+' : item.badge}</Text>
-                </View>
-              ) : null}
-            </Pressable>
-          ))}
-        </View>
+        <View>{renderNavRows(nav)}</View>
 
         {recent.length > 0 ? (
           <>
@@ -764,7 +772,9 @@ export function Sidebar({
 
         {footer}
 
-        {/* Primary action, pinned like ChatGPT's blue button. */}
+        {/* Bottom-docked nav (Settings) + primary action, pinned like
+            ChatGPT's blue button at the panel's bottom edge. */}
+        {bottomNav?.length ? <View>{renderNavRows(bottomNav)}</View> : null}
         <Pressable
           style={({ pressed }) => [s.newChat, pressed && { opacity: 0.85 }]}
           onPress={() => {

@@ -1,7 +1,6 @@
 import { atom } from 'nanostores'
 import { rpc } from './gateway'
 import { log } from './log'
-
 /**
  * The server's conversation list.
  *
@@ -49,6 +48,103 @@ export function toMs(ts?: number | null): number {
   if (ts > 1e12) return ts // already milliseconds
   if (ts > 1e10) return ts // milliseconds on some backends
   return ts * 1000
+}
+
+// ── Local last-activity bumps (revive-to-top) ────────────────────────────────
+// The server list orders by last activity, but its rows carry only the
+// CREATION-time `started_at` — and the poll only refreshes every ~60s. So a
+// revived old chat (a new prompt sent into it) stayed buried in "Older" in
+// the drawer until a fresh fetch landed. These bumps are a LOCAL overlay:
+// order only — the server refresh stays authoritative for content.
+
+const LAST_ACTIVE_KEY = 'hermes.lastActiveMap.v1'
+/** Cap, mirroring storedIdMap: bounded so the blob can't grow forever. */
+const LAST_ACTIVE_CAP = 200
+
+export const lastActiveByStoredId = atom<Record<string, number>>({})
+
+/**
+ * AsyncStorage is imported lazily (same contract as chatListState): scripts/
+ * run in plain node where the RN package cannot load; tests inject a fake.
+ */
+type StorageLike = {
+  getItem: (key: string) => Promise<string | null>
+  setItem: (key: string, value: string) => Promise<void>
+}
+let storageOverride: StorageLike | null = null
+/** Scripts inject a fake storage here; real apps never call this. */
+export function _useLastActiveStorageForTests(s: StorageLike | null) {
+  storageOverride = s
+}
+async function lastActiveStorage(): Promise<StorageLike> {
+  if (storageOverride) return storageOverride
+  const mod = (await import('@react-native-async-storage/async-storage')) as unknown as
+    StorageLike & { default?: StorageLike }
+  return mod.default ?? mod
+}
+
+let lastActiveLoaded = false
+
+export async function loadLastActive(): Promise<void> {
+  if (lastActiveLoaded) return
+  try {
+    const s = await lastActiveStorage()
+    const raw = await s.getItem(LAST_ACTIVE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      if (parsed && typeof parsed === 'object') {
+        const clean: Record<string, number> = {}
+        for (const [k, v] of Object.entries(parsed)) {
+          if (typeof v === 'number' && Number.isFinite(v) && v > 0) clean[k] = v
+        }
+        lastActiveByStoredId.set(clean)
+      }
+    }
+  } catch (err) {
+    log('warn', 'sessions', `load last-active failed: ${err instanceof Error ? err.message : String(err)}`)
+  }
+  lastActiveLoaded = true
+}
+
+function persistLastActive() {
+  const payload = JSON.stringify(lastActiveByStoredId.get())
+  void lastActiveStorage()
+    .then((s) => s.setItem(LAST_ACTIVE_KEY, payload))
+    .catch(() => {
+      /* best effort */
+    })
+}
+
+/**
+ * Record local activity on a chat: stamp Date.now() and MOVE its row to the
+ * front of sessionRows so the drawer/Chats list reorders immediately, without
+ * waiting for the ≤60s session.list poll. Content stays server-authoritative —
+ * this only touches ORDER.
+ */
+export function bumpSessionActivity(storedId: string) {
+  if (!storedId || storedId.startsWith('new:')) return
+  const now = Date.now()
+  const prev = lastActiveByStoredId.get()
+  if (prev[storedId] !== now) {
+    // Rebuild with the bumped key LAST (insertion order = recency), then cap.
+    const entries = Object.entries(prev).filter(([k]) => k !== storedId)
+    entries.push([storedId, now])
+    const bounded = Object.fromEntries(entries.slice(-LAST_ACTIVE_CAP))
+    lastActiveByStoredId.set(bounded)
+    persistLastActive()
+  }
+  // Move the row (if present) to the front — order only.
+  const rows = sessionRows.get()
+  const idx = rows.findIndex((r) => r.id === storedId)
+  if (idx > 0) {
+    const row = rows[idx]
+    sessionRows.set([row, ...rows.slice(0, idx), ...rows.slice(idx + 1)])
+  }
+}
+
+/** The chat's locally-bumped last-activity ms, or 0 when never bumped. */
+export function lastActiveFor(storedId: string): number {
+  return lastActiveByStoredId.get()[storedId] ?? 0
 }
 
 let inflight: Promise<SessionRow[]> | null = null
