@@ -70,18 +70,22 @@ async function main() {
   check('pruning drops the oldest', att.attentionById.get()['bulk-0'] === undefined)
 
   // ── Toasts ──────────────────────────────────────────────────────────────
+  // BUG-026: newest renders on TOP; same chat+kind replaces IN PLACE (same
+  // React key, no remount flash); cap still drops the oldest.
   att.toasts.set([])
   att.pushToast({ kind: 'input', title: 'Approval needed', body: 'rm -rf', storedId: 'a' })
   att.pushToast({ kind: 'done', title: 'Agent replied', body: 'hi', storedId: 'b' })
-  check('toasts queue in order', att.toasts.get().length === 2)
+  check('toasts stack newest-on-top', att.toasts.get().length === 2 && att.toasts.get()[0].storedId === 'b')
 
   att.pushToast({ kind: 'input', title: 'Approval needed', body: 'updated command', storedId: 'a' })
   const afterReplace = att.toasts.get()
-  check('same chat+kind replaces its toast', afterReplace.length === 2 && afterReplace[1].body === 'updated command')
+  check('same chat+kind replaces its toast in place', afterReplace.length === 2 && afterReplace[1].body === 'updated command')
 
   att.pushToast({ kind: 'error', title: 'Turn failed', body: 'x', storedId: 'c' })
   att.pushToast({ kind: 'done', title: 'Agent replied', body: 'y', storedId: 'd' })
-  check('queue capped at three (oldest dropped)', att.toasts.get().length === 3 && !att.toasts.get().some((t) => t.storedId === 'b'))
+  check('queue capped at three (oldest dropped, newest on top)', att.toasts.get().length === 3
+    && att.toasts.get()[0].storedId === 'd'
+    && !att.toasts.get().some((t) => t.storedId === 'a'))
 
   const id = att.toasts.get()[0].id
   att.dismissToast(id)
