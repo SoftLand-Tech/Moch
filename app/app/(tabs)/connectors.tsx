@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useFocusEffect } from 'expo-router'
 import { View, Text, FlatList, StyleSheet, Pressable, TextInput, ActivityIndicator, Modal, ScrollView, Image, Linking } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { MCP_LOGOS } from '../../src/lib/mcpLogos'
@@ -122,12 +123,18 @@ export default function Connectors() {
   useEffect(() => { refresh() }, [refresh])
 
   // Live statuses: `mcp.servers.status` is cached-only, so poll it lightly
-  // (one RPC) while the tab is mounted; cleaned up on unmount/offline.
-  useEffect(() => {
-    if (!online) return
-    const id = setInterval(() => { void refreshMcpRuntime() }, 5_000)
-    return () => clearInterval(id)
-  }, [online])
+  // (one RPC) while the tab is VISIBLE — useFocusEffect, not useEffect:
+  // expo-router tabs stay mounted after first visit (the BUG-055 premise),
+  // so a mount-scoped interval would keep firing app-wide for the whole
+  // session. Focus-scoped: starts on focus, torn down on blur/unmount.
+  useFocusEffect(
+    useCallback(() => {
+      if (!online) return
+      void refreshMcpRuntime()
+      const id = setInterval(() => { void refreshMcpRuntime() }, 5_000)
+      return () => clearInterval(id)
+    }, [online]),
+  )
 
   const serverList = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -381,17 +388,27 @@ function ServerSheet({
   const [oauthFlow, setOauthFlow] = useState<{ phase: 'waiting' | 'error' | 'timeout'; message?: string } | null>(null)
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null)
   const activeSession = useRef<string | null>(null)
+  /**
+   * The server the active session belongs to, ref'd alongside it: when the
+   * sheet CLOSES, `server` is already null, so reading `server?.name` in the
+   * cleanup effect skipped the gateway-side cancel — the flow (and its
+   * callback worker) hung until the server's own timeout. The ref still
+   * knows the name.
+   */
+  const activeName = useRef<string | null>(null)
 
   const stopOauthPolling = useCallback(() => {
     if (pollTimer.current) { clearInterval(pollTimer.current); pollTimer.current = null }
     activeSession.current = null
+    activeName.current = null
   }, [])
 
-  // Leaving the sheet (or switching servers) stops the poller and cancels
-  // the gateway-side flow so its callback worker isn't left hanging.
+  // Leaving the sheet (closing it OR switching servers) stops the poller and
+  // cancels the gateway-side flow so its callback worker isn't left hanging.
+  // Uses the ref'd name — `server` is null by the time a close lands here.
   useEffect(() => {
     const session = activeSession.current
-    const name = server?.name
+    const name = activeName.current
     if (session && name) void cancelMcpOauth(name, session).catch(() => {})
     stopOauthPolling()
     setOauthFlow(null)
@@ -399,7 +416,15 @@ function ServerSheet({
     return undefined
   }, [server?.name, stopOauthPolling])
 
-  useEffect(() => () => stopOauthPolling(), [stopOauthPolling])
+  useEffect(
+    () => () => {
+      const session = activeSession.current
+      const name = activeName.current
+      if (session && name) void cancelMcpOauth(name, session).catch(() => {})
+      stopOauthPolling()
+    },
+    [stopOauthPolling],
+  )
 
   if (!server) return null
   const st = statusLine(server, runtime)
@@ -418,6 +443,7 @@ function ServerSheet({
       return
     }
     activeSession.current = session
+    activeName.current = server.name
     // The embedded gateway's loopback callback is on the paired machine —
     // reachable from the phone's own browser, so open the URL there.
     void Linking.openURL(authUrl).catch(() => {})
