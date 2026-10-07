@@ -52,6 +52,18 @@ rsync -a "${RSYNC_FILTERS[@]}" --include='hermes_state_*.py' --exclude='*' "$SRC
 VERSION="$(python3 -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('$SRC/pyproject.toml').read_text())['project']['version'])")"
 COMMIT="$(git -C "$SRC" rev-parse HEAD 2>/dev/null || echo unknown)"
 
+# Chaquopy's packager drops EMPTY __init__.py files, and hermes' plugin
+# discovery (iter_plugin_dirs) requires one per provider dir — on-device
+# that silently skipped optional providers (image_gen, browser), so the
+# phone agent lost capabilities the desktop has (device-verified,
+# test_report.md bug 3). Stamp every empty init non-empty: comment-only,
+# semantically identical everywhere else.
+EMPTY_INITS="$(find "$DST" -name '__init__.py' -size 0 | wc -l)"
+if [ "$EMPTY_INITS" -gt 0 ]; then
+  find "$DST" -name '__init__.py' -size 0 -exec sh -c 'printf "# vendored: kept non-empty — Chaquopy drops empty __init__.py files.\n" > "$1"' _ {} \;
+  echo "stamped $EMPTY_INITS empty __init__.py file(s) non-empty"
+fi
+
 python3 - "$DST/VENDOR.json" "$VERSION" "$COMMIT" "$SRC" <<'EOF'
 import json, sys, datetime
 path, version, commit, src = sys.argv[1:]
