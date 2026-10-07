@@ -110,13 +110,35 @@ export async function uploadToGateway(uri: string, name: string, mime?: string):
   const safeName = sanitizeBasename(name)
   const remotePath = `${root}/relay-uploads/${Date.now()}_${randTag()}-${safeName}`
   const mimeType = mime ?? mimeForPath(remotePath)
-  const res = await FileSystem.uploadAsync(`${httpBase(c)}/api/files/upload-stream`, uri, {
-    uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-    fieldName: 'file',
-    mimeType,
-    parameters: { path: remotePath },
-    headers: { 'X-Hermes-Session-Token': c.token },
+  // BUG-011: uploadAsync has no deadline of its own — a stalled upload hung
+  // sendPrompt forever, holding the session's send lock (every later send to
+  // that chat silently vanished into the outbox until app restart). Race the
+  // upload against a size-derived deadline, like the JSON fallback below.
+  const info = await FileSystem.getInfoAsync(uri)
+  const size = info.exists && typeof info.size === 'number' ? info.size : 0
+  const deadlineMs = uploadTimeoutMs(size * 2, ATTACH_RATE_KBPS)
+  let timerId: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_, reject) => {
+    timerId = setTimeout(
+      () => reject(new Error(`Upload timed out after ${Math.round(deadlineMs / 1000)}s — check the connection and retry`)),
+      deadlineMs,
+    )
   })
+  let res: FileSystem.FileSystemUploadResult
+  try {
+    res = await Promise.race([
+      FileSystem.uploadAsync(`${httpBase(c)}/api/files/upload-stream`, uri, {
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: 'file',
+        mimeType,
+        parameters: { path: remotePath },
+        headers: { 'X-Hermes-Session-Token': c.token },
+      }),
+      deadline,
+    ])
+  } finally {
+    if (timerId) clearTimeout(timerId)
+  }
   if (res.status === 404) {
     // Older deployed gateway: upload-stream doesn't exist → JSON endpoint.
     return uploadViaJsonFallback(c, uri, remotePath, mimeType)
