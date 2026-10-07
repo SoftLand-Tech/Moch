@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useStore } from '@nanostores/react'
 import { dismissToast, requestOpenSession, toasts, type SessionToast } from '../lib/attention'
 import { C, useStyles } from '../lib/theme'
+import { useReduceMotion } from './useReduceMotion'
 
 /**
  * In-app counterpart of a push notification: when something happens in a
@@ -34,20 +35,26 @@ function ToastCard({ t }: { t: SessionToast }) {
   const s = useStyles(makeS)
   const router = useRouter()
   const meta = KIND_META[t.kind]
-  // Cards mount at their resting place with opacity 0 and fade/slide in —
-  // transform-only animation, so nothing re-layouts under the keyboard.
+  // BUG-056: cards mount at their resting place with opacity 0 and fade/slide
+  // in — transform-only animation, so nothing re-layouts under the keyboard.
+  // Under the OS reduce-motion setting the card appears in place, no motion.
+  const reduceMotion = useReduceMotion()
   const anim = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
-    Animated.timing(anim, {
-      toValue: 1,
-      duration: 220,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start()
+    if (reduceMotion) {
+      anim.setValue(1)
+    } else {
+      Animated.timing(anim, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start()
+    }
     const timer = setTimeout(() => dismissToast(t.id), meta.ms)
     return () => clearTimeout(timer)
-  }, [anim, t.id, meta.ms])
+  }, [anim, t.id, meta.ms, reduceMotion])
 
   const open = () => {
     dismissToast(t.id)

@@ -1,7 +1,7 @@
 import { atom } from 'nanostores'
 import { Platform } from 'react-native'
 import * as FileSystem from 'expo-file-system/legacy'
-import { createAudioPlayer, type AudioPlayer } from 'expo-audio'
+import { createAudioPlayer, type AudioPlayer, type AudioStatus } from 'expo-audio'
 import { apiFetch } from './http'
 import { log } from './log'
 
@@ -120,8 +120,16 @@ let player: AudioPlayer | null = null
 export async function playUri(uri: string): Promise<void> {
   stopTts()
   player = createAudioPlayer({ uri })
+  // BUG-044: clear the playing state when playback ENDS naturally — nothing
+  // reset it before, so the Listen icon stayed "Stop" (wrong a11y label too)
+  // after the audio finished. Only the CURRENT player's end counts; a newer
+  // playUri replaced it (stopTts already reset the state for that path).
+  const p = player
+  p.addListener('playbackStatusUpdate', (status: AudioStatus) => {
+    if (status.didJustFinish && player === p) stopTts()
+  })
   ttsPlaying.set(true)
-  player.play()
+  p.play()
 }
 
 export function stopTts() {

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, Animated, AccessibilityInfo, Image } from 'react-native'
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, Animated, Image } from 'react-native'
 // The maintained fork. The original `react-native-markdown-display` pins
 // markdown-it 10, which does `require('punycode')` — a Node builtin that
 // Metro's Hermes runtime does not provide, so it breaks the Android bundle.
@@ -14,6 +14,7 @@ import { speakText, stopTts } from '../lib/voice'
 import { C, S, useStyles, useShape } from '../lib/theme'
 import { formatThinkMeta, type ChatMessage, type ChatSegment, type ToolItem } from '../lib/chat'
 import { MediaSegmentView } from './media/MediaSegmentView'
+import { useReduceMotion } from './useReduceMotion'
 import { CommandCard } from './CommandOutput'
 
 /** A message's renderable content: explicit segments, else its plain text. */
@@ -70,10 +71,9 @@ export const makeCardMdStyles = () => {
  */
 export const ThinkingDots = React.memo(function ThinkingDots() {
   const s = useStyles(makeS)
-  const [reduce, setReduce] = useState(false)
-  useEffect(() => {
-    AccessibilityInfo.isReduceMotionEnabled().then(setReduce).catch(() => {})
-  }, [])
+  // BUG-056: shared live hook — the old one-shot read went stale until a
+  // remount (no listener on the OS setting).
+  const reduce = useReduceMotion()
   const dots = useRef<Animated.Value[]>([0, 1, 2].map(() => new Animated.Value(0))).current
   useEffect(() => {
     if (reduce) return

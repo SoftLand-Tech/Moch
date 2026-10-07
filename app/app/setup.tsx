@@ -20,7 +20,9 @@ import { ProviderKeyForm } from '../src/components/ProviderKeyForm'
 /**
  * First-run setup wizard for the embedded ("This phone") mode:
  * environment → provider → basics → install progress.
- * Reachable from Settings → LINUX ENVIRONMENT → "Run setup".
+ * BUG-057: the comment used to claim a Settings → "Run setup" entry that
+ * doesn't exist — the real route is the pair screen's embedded-mode card
+ * (src/components/PairForm.tsx pushes /setup).
  */
 export default function Setup() {
   const s = useStyles(makeS)
@@ -162,7 +164,15 @@ function BasicsStep({ onNext }: { onNext: () => void }) {
   return (
     <>
       <Text style={s.sub}>Two permissions that keep the agent reliable in the background.</Text>
-      <Pressable style={s.card} onPress={() => setNotif(notif || true)}>
+      {/* BUG-057: the tap actually (re-)requests the permission — it used to
+          run `setNotif(notif || true)`, i.e. always flip to "allowed" without
+          asking anything, so a user who denied could fake the card green. */}
+      <Pressable
+        style={s.card}
+        onPress={() => { void ensureNotificationPermission().then((ok) => setNotif(ok)).catch(() => {}) }}
+        accessibilityRole="button"
+        accessibilityLabel="Allow notifications"
+      >
         <View style={s.cardHead}>
           <Icon name={notif ? 'notifications' : 'notifications-outline'} size={20} color={C.accent} />
           <Text style={s.cardTitle}>{notif ? 'Notifications allowed' : 'Notifications — asking…'}</Text>
