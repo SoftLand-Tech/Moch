@@ -606,12 +606,20 @@ export function onForeground() {
   // right now: waiting for the heartbeat cycle to notice costs up to 45s of
   // "reconnecting" on the next thing the user touches.
   if (foregroundProbeInFlight || !client) return
+  const cli = client
   foregroundProbeInFlight = true
-  client
+  cli
     .request('gateway.ping', {}, 2500)
     .catch(() => {
       if (connectionState.get() === 'open') {
         log('info', 'gateway', 'foreground probe found a dead socket — rebuilding')
+        // BUG-009: tear the half-open generation down BEFORE redialing. A
+        // dead socket still reports readyState OPEN with an unchanged URL,
+        // so the protocol gateway's same-URL idempotence guard would no-op
+        // the rebuild and the app would sit 'open' on a corpse — sends
+        // hanging for the full request timeout — until a heartbeat (only if
+        // the server negotiated one) happened to notice.
+        cli.invalidate('foreground probe found a dead socket')
         void retryNow().catch(() => {})
       }
     })
