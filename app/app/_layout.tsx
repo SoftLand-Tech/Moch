@@ -18,10 +18,12 @@ import {
   servers as serversStore, activeServerId, refreshServers, switchToServer,
   forgetActiveServer, mostRecentServer, onDialConfig, type SavedServer,
 } from '../src/lib/gateway'
+import { loadSessions } from '../src/lib/sessionList'
+import { refreshRunningAutomations } from '../src/lib/automationsState'
 import { hookChatEvents, loadOutbox, switchToSession } from '../src/lib/chat'
 import { loadAttention, pendingOpenStoredId, requestOpenSession } from '../src/lib/attention'
-import { loadDrafts } from '../src/lib/drafts'
-import { loadSendQueue } from '../src/lib/sendQueue'
+import { flushDrafts, loadDrafts } from '../src/lib/drafts'
+import { flushSendQueue, loadSendQueue } from '../src/lib/sendQueue'
 import { initShareIn, deliverSharedNow, shareInInbox } from '../src/lib/shareIn'
 import { syncBackendIdentity } from '../src/lib/backendIdentity'
 import { parseConnectUrl } from '../src/lib/pairing'
@@ -156,8 +158,25 @@ export default function RootLayout() {
         // A share received while backgrounded may have missed the native
         // event (the process was suspended) — re-pull on foreground.
         deliverSharedNow()
+      } else if (s === 'background') {
+        // BUG-035: the queue/draft writes are debounced ~400ms and Android
+        // can freeze the process right after backgrounding with no further
+        // JS callback — a just-typed draft or just-queued message would be
+        // lost. Flush the pending writes NOW, while there's still a tick.
+        void flushSendQueue().catch(() => {})
+        void flushDrafts().catch(() => {})
       }
     })
+
+    // BUG-055: ONE centralized 60s poller for the whole app — the per-shell
+    // intervals scaled with mounted tabs (up to ~7 pollers, since
+    // expo-router tabs stay mounted after first visit).
+    const pollId = setInterval(() => {
+      if (isConnectedAtom.get()) {
+        void loadSessions()
+        void refreshRunningAutomations()
+      }
+    }, 60_000)
 
     // "Ask Moch" share target: cold-start pull (a share captured in
     // MainActivity.onCreate) + the MochShareIn nudge. Routing happens in the
@@ -187,6 +206,7 @@ export default function RootLayout() {
       offToken()
       sub.remove()
       appSub.remove()
+      clearInterval(pollId)
       offShare()
       removeNotifSub?.()
     }

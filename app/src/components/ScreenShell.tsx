@@ -30,7 +30,7 @@ import {
 import { C, S, useStyles, useShape } from '../lib/theme'
 import { runningAutomationCount, refreshRunningAutomations } from '../lib/automationsState'
 import { attentionById, rowStatus } from '../lib/attention'
-import { isConnected as isConnectedAtom, connectionState, rpc } from '../lib/gateway'
+import { isConnected as isConnectedAtom, connectionState, retryNow, rpc } from '../lib/gateway'
 import {
   activeStoredId,
   busyStoredKey,
@@ -163,16 +163,9 @@ export function ScreenShell({
     // Refresh whenever the connection comes back.
   }, [online])
 
-  // Keep it fresh: a new message lands, a title gets set.
-  React.useEffect(() => {
-    const id = setInterval(() => {
-      if (online) {
-        void loadSessions()
-        void refreshRunningAutomations()
-      }
-    }, 60_000)
-    return () => clearInterval(id)
-  }, [online])
+  // BUG-055: the 60s list/automations poll moved to the ROOT layout — one
+  // interval for the whole app instead of one per mounted tab shell (tabs
+  // stay mounted after first visit, so this used to become ~7 pollers).
 
   React.useEffect(() => {
     void loadCatalog().catch(() => {})
@@ -365,10 +358,15 @@ export function ScreenShell({
             <View style={s.traySpacer} />
             <View style={s.trayRight}>
               {right}
+              {/* BUG-046: the status chip is now a real reconnect control —
+                  it used to be an inert Pressable with no press feedback
+                  while the banner next to it said "tap to retry". */}
               <Pressable
-                style={s.trayCircle}
+                style={({ pressed }) => [s.trayCircle, !online && pressed && s.circlePressed]}
                 hitSlop={8}
-                accessibilityLabel={online ? 'Connected' : connecting ? 'Connecting' : 'Not connected'}
+                onPress={online ? undefined : () => { void retryNow().catch(() => {}) }}
+                accessibilityRole={online ? undefined : 'button'}
+                accessibilityLabel={online ? 'Connected' : connecting ? 'Connecting' : 'Not connected — tap to retry'}
               >
                 <Icon
                   name={online ? 'radio-button-on' : connecting ? 'ellipse-outline' : 'cloud-offline-outline'}
@@ -408,10 +406,13 @@ export function ScreenShell({
             </Pressable>
           ) : null}
           {right}
+          {/* BUG-046: functional reconnect control (was inert). */}
           <Pressable
-            style={s.circle}
+            style={({ pressed }) => [s.circle, !online && pressed && s.circlePressed]}
             hitSlop={8}
-            accessibilityLabel={online ? 'Connected' : connecting ? 'Connecting' : 'Not connected'}
+            onPress={online ? undefined : () => { void retryNow().catch(() => {}) }}
+            accessibilityRole={online ? undefined : 'button'}
+            accessibilityLabel={online ? 'Connected' : connecting ? 'Connecting' : 'Not connected — tap to retry'}
           >
             <Icon
               name={online ? 'radio-button-on' : connecting ? 'ellipse-outline' : 'cloud-offline-outline'}

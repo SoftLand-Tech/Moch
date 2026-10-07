@@ -1709,16 +1709,24 @@ export async function retryMessage(id: string) {
 export async function stopRun() {
   const sid = activeSession.get()
   if (!sid) return
+  let stopped = false
   try {
     await rpc('session.interrupt', { session_id: sid })
+    stopped = true
   } catch (err) {
     log('warn', 'chat', `interrupt failed: ${String(err)}`)
   }
   flushStreams()
-  patchSession(sid, { busy: false })
+  // BUG-047: only declare idle when the interrupt actually landed — the old
+  // code cleared busy unconditionally, so a failed interrupt showed idle
+  // while the server kept generating and the queue head flushed into a
+  // still-running turn. Turn-end events reconcile the UI either way.
+  if (stopped) patchSession(sid, { busy: false })
   mochiMoment.set({ kind: 'apologetic', sid, at: Date.now() })
-  // A stop is a turn-end edge too — queued follow-ups get their turn.
-  maybeFlushQueue(sid)
+  if (stopped) {
+    // A stop is a turn-end edge too — queued follow-ups get their turn.
+    maybeFlushQueue(sid)
+  }
 }
 
 export async function steerRun(text: string) {
