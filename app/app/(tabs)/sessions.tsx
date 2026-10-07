@@ -228,6 +228,9 @@ function SessionsInner() {
       <FlatList
         data={shown}
         keyExtractor={(x) => x.id}
+        // BUG-027: with the search field focused, the first tap used to only
+        // dismiss the keyboard — a second tap opened the chat.
+        keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.textDim} onRefresh={async () => { setRefreshing(true); await load(true); setRefreshing(false) }} />}
         renderItem={({ item }) => {
           // `session.list` yields stored ids; all our per-session state is

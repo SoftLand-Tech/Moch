@@ -163,6 +163,14 @@ export default function Chat() {
   // measured view frame, which doesn't line up on every device (MIUI et al).
   const kb = useReanimatedKeyboardAnimation()
   const kbPad = useAnimatedStyle(() => ({ paddingBottom: -kb.height.value }))
+  // BUG-037: the keyboard lifts the composer via the root pad, and at that
+  // point the safe-area bottom inset is COVERED by the keyboard — the
+  // composer's own inset padding must zero out while the IME is open (it
+  // previously stacked, floating the pill ~2× the gesture-bar height above
+  // the keys with dead background between).
+  const composerPad = useAnimatedStyle(() => ({
+    paddingBottom: kb.height.value < 0 ? 0 : Math.max(insets.bottom, 10),
+  }))
   const recorder = useAudioRecorder(REC_OPTIONS)
   const [recording, setRecording] = useState(false)
   const [recSecs, setRecSecs] = useState(0)
@@ -176,6 +184,11 @@ export default function Chat() {
   // Composer attachments (ChatGPT-style chips). Memory-only — queued ones
   // ride chat.ts's in-memory map keyed by the queued send id.
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([])
+  // BUG-038: chips are scoped to the chat like drafts — switching chats used
+  // to carry them over, and Send delivered them (and any caption text) to
+  // the NEWLY active chat.
+  const attachmentsByChat = useRef<Record<string, PendingAttachment[]>>({})
+  const lastChatsRef = useRef(storedId)
   // The ChatGPT-style attach action sheet (library / camera / file).
   const [attachOpen, setAttachOpen] = useState(false)
 
@@ -200,6 +213,18 @@ export default function Chat() {
   // over from the previous chat (stale offset, stray jump FAB, wrong
   // bottom-follow). scrollMetrics is a ref declared below — safe to touch
   // here because the effect body runs after the render completes.
+  useEffect(() => {
+    // BUG-038: swap the attachment chips alongside the draft — stash the
+    // outgoing chat's chips, restore the incoming chat's (or none).
+    const prev = lastChatsRef.current
+    if (prev !== storedId) {
+      if (prev) attachmentsByChat.current[prev] = pendingAttachments
+      setPendingAttachments(attachmentsByChat.current[storedId] ?? [])
+      lastChatsRef.current = storedId
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storedId])
+
   useEffect(() => {
     setInput(draftFor(storedId))
     setStick(true)
@@ -1260,7 +1285,7 @@ export default function Chat() {
           ) : null}
 
           {/* ── Composer: rounded pill, like ChatGPT ── */}
-          <View style={[s.composerWrap, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+          <Animated.View style={[s.composerWrap, composerPad]}>
             {queued.length > 0 ? (
               <View style={s.queueStrip}>
                 <View style={s.queueHead}>
@@ -1458,7 +1483,7 @@ export default function Chat() {
                 <Text style={[s.steerText, steerMode && { color: C.onAccent }]}>Steer</Text>
               </Pressable>
             ) : null}
-          </View>
+          </Animated.View>
 
           {/* Interactive pickers — attach sources, /model, options/mixed commands, and the command browser */}
           <AttachSheet
