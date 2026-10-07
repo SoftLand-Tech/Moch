@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, Pressable, ScrollView, StyleSheet, TextInput, ActivityIndicator } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { KeyboardAvoidingView, useKeyboardState } from 'react-native-keyboard-controller'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
 import { Icon } from '../../src/components/Icon'
@@ -21,8 +22,11 @@ type Gate = 'checking' | 'noprobe' | 'noguest' | 'nopty' | 'ready' | 'failed'
 
 export default function Terminal() {
   const s = useStyles(makeS)
+  // Drop the bottom safe-area edge while the keyboard is open so the lift
+  // below doesn't double-count the inset.
+  const keyboard = useKeyboardState()
   return (
-    <SafeAreaView style={s.frame} edges={['bottom']}>
+    <SafeAreaView style={s.frame} edges={keyboard.isVisible ? [] : ['bottom']}>
       <ScreenShell
         title="Terminal"
         right={<TerminalMenu onKill={() => killRef.current?.()} onClear={() => clearRef.current?.()} />}
@@ -70,10 +74,13 @@ function TerminalInner() {
     text: '',
     alive: false,
   })
-  const [input, setInput] = useState('')
+  const [hidden, setHidden] = useState('')
   const [fontSize, setFontSize] = useState(13)
   const scrollRef = useRef<ScrollView>(null)
   const inputRef = useRef<TextInput>(null)
+  // Last value of the hidden composer field — diffed per change to derive
+  // the exact keystrokes to forward to the PTY.
+  const prevHiddenRef = useRef('')
 
   const ctl = useMemo(
     () =>
@@ -144,11 +151,28 @@ function TerminalInner() {
     [ctl],
   )
 
+  // Direct PTY typing: the PTY has ECHO ON, so the drained output is the
+  // display — forward each keystroke and never render local input (no
+  // double echo). Added chars go as-is; removals become DEL (\x7f).
+  const onHiddenChange = useCallback(
+    (t: string) => {
+      const prev = prevHiddenRef.current
+      if (t.length > prev.length && t.startsWith(prev)) {
+        for (const ch of t.slice(prev.length)) send(ch)
+      } else {
+        for (let i = 0; i < prev.length - t.length; i++) send('\x7f')
+      }
+      prevHiddenRef.current = t
+      setHidden(t)
+    },
+    [send],
+  )
+
   const submitLine = useCallback(() => {
-    if (!input) return
-    send(input + '\n')
-    setInput('')
-  }, [input, send])
+    send(TERM_KEYS.ENTER)
+    prevHiddenRef.current = ''
+    setHidden('')
+  }, [send])
 
   killRef.current = useCallback(() => {
     showAlert('Kill terminal session?', 'The shell and its jobs die. Next open boots a fresh one.', [
@@ -208,45 +232,55 @@ function TerminalInner() {
   const dead = snap.state === 'dead'
 
   return (
-    <View style={s.root}>
-      <ScrollView
-        ref={scrollRef}
-        style={s.output}
-        contentContainerStyle={s.outputInner}
-        showsVerticalScrollIndicator
-      >
-        <Text selectable style={[s.mono, { fontSize }]}>
-          {snap.text || (snap.state === 'starting' ? 'booting shell…' : '')}
-        </Text>
-        {dead ? <Text style={[s.mono, s.deadLine, { fontSize }]}>[session ended — Retry to boot a fresh shell]</Text> : null}
-      </ScrollView>
+    <KeyboardAvoidingView style={s.root} behavior="padding">
+      {/* Touching the output area focuses the hidden input so the caret +
+          keyboard appear; touches bubble from the ScrollView to this View. */}
+      <View style={s.outputWrap} onTouchEnd={() => inputRef.current?.focus()}>
+        <ScrollView
+          ref={scrollRef}
+          style={s.output}
+          contentContainerStyle={s.outputInner}
+          showsVerticalScrollIndicator
+        >
+          <Text selectable style={[s.mono, { fontSize }]}>
+            {snap.text || (snap.state === 'starting' ? 'booting shell…' : '')}
+          </Text>
+          {dead ? (
+            <>
+              <Text style={[s.mono, s.deadLine, { fontSize }]}>[session ended]</Text>
+              <Pressable
+                style={({ pressed }) => [s.retry, pressed && s.pressed]}
+                onPress={() => void ctl.start(80, 24)}
+                accessibilityLabel="Restart shell"
+              >
+                <Text style={s.retryText}>Retry</Text>
+              </Pressable>
+            </>
+          ) : null}
+        </ScrollView>
+      </View>
+
+      {/* Invisible direct-typing field: zero-size, never rendered as text
+          (the PTY echo in the drained output is the display). */}
+      <TextInput
+        ref={inputRef}
+        value={hidden}
+        onChangeText={onHiddenChange}
+        onSubmitEditing={submitLine}
+        style={s.hiddenInput}
+        autoFocus
+        autoCorrect={false}
+        autoCapitalize="none"
+        multiline={false}
+        blurOnSubmit={false}
+        editable={!dead}
+        accessibilityLabel="Terminal input"
+      />
 
       <KeyRow onKey={send} />
 
       <View style={s.composer}>
-        <Text style={s.prompt}>$</Text>
-        <TextInput
-          ref={inputRef}
-          style={[s.input, { fontSize }]}
-          value={input}
-          onChangeText={setInput}
-          onSubmitEditing={submitLine}
-          placeholder={dead ? 'session ended' : 'type a command…'}
-          placeholderTextColor={C.textFaint}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="send"
-          editable={!dead}
-          blurOnSubmit={false}
-        />
-        <Pressable
-          style={({ pressed }) => [s.send, pressed && s.pressed]}
-          onPress={submitLine}
-          hitSlop={8}
-          accessibilityLabel="Send command"
-        >
-          <Icon name="return-up-forward" size={18} color={C.text} />
-        </Pressable>
+        <Text style={s.prompt}>{dead ? 'session ended' : '$ touch output to type'}</Text>
         <Pressable
           style={({ pressed }) => [s.send, pressed && s.pressed]}
           onPress={() => setFontSize((f) => Math.min(20, f + 1))}
@@ -256,12 +290,14 @@ function TerminalInner() {
           <Text style={s.aa}>A+</Text>
         </Pressable>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   )
 }
 
 const KEYS: { label: string; seq: string; hint: string }[] = [
   { label: 'Tab', seq: TERM_KEYS.TAB, hint: 'Autocomplete' },
+  { label: '←', seq: TERM_KEYS.LEFT, hint: 'Cursor left' },
+  { label: '→', seq: TERM_KEYS.RIGHT, hint: 'Cursor right' },
   { label: '↑', seq: TERM_KEYS.UP, hint: 'History back' },
   { label: '↓', seq: TERM_KEYS.DOWN, hint: 'History forward' },
   { label: '^C', seq: TERM_KEYS.CTRL_C, hint: 'Interrupt' },
@@ -295,9 +331,11 @@ const makeS = () =>
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, padding: 24 },
     dim: { color: C.textDim, fontSize: 14, textAlign: 'center' },
     output: { flex: 1, backgroundColor: '#000', marginHorizontal: 10, borderRadius: 12, borderWidth: 1, borderColor: C.border },
+    outputWrap: { flex: 1 },
     outputInner: { padding: 10, paddingBottom: 16 },
     mono: { color: '#E8E8E8', fontFamily: 'monospace' },
     deadLine: { color: C.amber ?? '#E5A50A', marginTop: 8 },
+    hiddenInput: { position: 'absolute', width: 1, height: 1, opacity: 0 },
     keyRow: { flexDirection: 'row', gap: 6, paddingHorizontal: 10, paddingTop: 8 },
     key: {
       flex: 1,
@@ -311,17 +349,6 @@ const makeS = () =>
     keyText: { color: C.text, fontSize: 13, fontWeight: '600' },
     composer: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 10 },
     prompt: { color: C.textDim, fontSize: 16, fontWeight: '700' },
-    input: {
-      flex: 1,
-      color: C.text,
-      fontFamily: 'monospace',
-      backgroundColor: C.bgCard,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: C.borderSoft,
-      paddingHorizontal: 12,
-      paddingVertical: 9,
-    },
     send: {
       width: 40,
       height: 40,

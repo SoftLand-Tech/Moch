@@ -63,7 +63,7 @@ async function main() {
     'cursor moves stripped',
     m.stripAnsi('a\x1b[2Kb\x1b[1A') === 'ab',
   )
-  check('CRLF → LF', m.stripAnsi('one\r\ntwo\ragain') === 'one\ntwo\nagain')
+  check('CRLF → LF; lone \r kept for CR handling', m.stripAnsi('one\r\ntwo\ragain') === 'one\ntwo\ragain')
   check('OSC title stripped', m.stripAnsi('\x1b]0;title\x07after') === 'after')
 
   // ── appendCapped ──────────────────────────────────────────────────────
@@ -71,6 +71,8 @@ async function main() {
   const capped = m.appendCapped('x'.repeat(100), 'y'.repeat(100), 150)
   check('cap keeps the tail', capped.length === 150 && capped.endsWith('y'.repeat(100)))
   check('empty add is identity', m.appendCapped('ab', '') === 'ab')
+  check('lone \r overwrites the current line (CR artifact fix)', m.appendCapped('hello', '\rbye') === 'bye')
+  check('CR then newline still breaks lines', m.appendCapped('hello', '\rbye\nok') === 'bye\nok')
 
   // ── controller: start banks replay + tick banks drain ─────────────────
   const rep = b64('\x1b[1mroot@moch\x1b[0m:~# ')
