@@ -13,8 +13,11 @@ import {
   activeStoredId,
   busyStoredKey,
   pendingCount,
+  sessionsById,
+  isSessionNotFound,
   pendingStoredIds,
 } from '../../src/lib/chat'
+import { forgetChatMarks } from '../../src/lib/chatListState'
 import { C, useStyles } from '../../src/lib/theme'
 import { attentionById, rowStatus } from '../../src/lib/attention'
 import { ScreenShell } from '../../src/components/ScreenShell'
@@ -127,11 +130,30 @@ function SessionsInner() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          // `session.delete` is the real method; the fallback loop is gone
-          // because unknown methods answer -32601 and hide a genuine failure.
+          // BUG-004: mirror the drawer's flow — the gateway refuses to delete
+          // a session that is live in its process ("cannot delete an active
+          // session"; live handles persist for hours), so detach first, then
+          // close the live handle best-effort. A row id from session.list is
+          // a STORED id and forgetSession is live-keyed, so resolve before
+          // cleanup; 'not found' (deleted elsewhere) means the goal is
+          // already achieved — clean up locally instead of failing.
           try {
-            await rpc('session.delete', { session_id: s.id })
-            await forgetSession(s.id)
+            const live = Object.values(sessionsById.get()).find((x) => x.storedId === s.id)?.id
+            if (activeStoredId.get() === s.id) await newChat()
+            if (live) {
+              try {
+                await rpc('session.close', { session_id: live })
+              } catch {
+                /* best effort — a dead handle must not block the delete */
+              }
+            }
+            try {
+              await rpc('session.delete', { session_id: s.id })
+            } catch (err) {
+              if (!isSessionNotFound(err)) throw err
+            }
+            await forgetSession(live ?? s.id)
+            forgetChatMarks(s.id)
             // Drop it from the shared store so the drawer updates too.
             sessionRows.set(sessionRows.get().filter((x) => x.id !== s.id))
           } catch (e) {
