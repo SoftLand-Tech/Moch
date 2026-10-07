@@ -42,6 +42,14 @@ export function PairForm({ onPaired }: { onPaired: () => void }) {
       setError(e instanceof Error ? e.message : 'Invalid server address.')
       return
     }
+    // BUG-069: soft shape check on the probe token (hermes probe keys are
+    // base64 of exactly 16 bytes → 24 chars). A short token surfaces as an
+    // opaque connect error otherwise. Non-blocking: the server stays
+    // authoritative.
+    if (t.length < 16) {
+      setError('That token looks too short — pairing tokens are usually longer. Check it and try again.')
+      return
+    }
     setBusy(true)
     setError(null)
     try {
@@ -125,7 +133,8 @@ export function PairForm({ onPaired }: { onPaired: () => void }) {
         <Icon name="qr-code-outline" size={22} color={C.onAccent} />
         <Text style={s.scanText}>Scan QR code</Text>
       </Pressable>
-      <Text style={s.scanHint}>On your computer run scripts/hermes-pair.sh —{'\n'}it prints the QR to scan.</Text>
+      {/* BUG-053: name the user-facing tool, not the maintainer script path. */}
+      <Text style={s.scanHint}>On your computer, open the agent's pairing screen —{'\n'}it prints the QR code to scan.</Text>
 
       <Pressable
         style={({ pressed }) => [s.localBtn, pressed && s.pressed]}
@@ -223,7 +232,7 @@ export function PairForm({ onPaired }: { onPaired: () => void }) {
             onBarcodeScanned={(r) => onScanned(r.data)}
           />
           <View style={s.scannerFooter}>
-            <Text style={s.scannerHint}>Point at the QR printed by hermes-pair.sh</Text>
+            <Text style={s.scannerHint}>Point at the pairing QR code on your computer's screen</Text>
             <Pressable style={s.secondaryBtn} onPress={() => setShowScanner(false)}>
               <Text style={s.secondaryText}>Cancel</Text>
             </Pressable>

@@ -276,14 +276,20 @@ function SettingsInner() {
   const exportTranscript = async () => {
     const text = messages.get().map((m) => `[${new Date(m.ts).toLocaleString()}] ${m.role}: ${m.text}`).join('\n\n')
     if (!text) { showAlert('Empty', 'No messages to export.'); return }
+    // BUG-077: say so when the clipboard cap clips the export.
+    const clipped = text.length > 50000
     await Clipboard.setStringAsync(text.slice(0, 50000))
-    showAlert('Copied', 'Transcript copied to clipboard.')
+    showAlert('Copied', clipped ? 'Copied — long transcripts are capped at 50,000 characters.' : 'Transcript copied to clipboard.')
   }
 
   const forgetCurrent = () => {
     showAlert('Forget this computer?', 'Removes the current computer from this device. Others stay saved.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Forget', style: 'destructive', onPress: async () => {
+        // BUG-034: tear the socket down BEFORE forgetting — the old flow
+        // left a live 'open' connection to the machine it just revoked
+        // (green "Connected" hero, its events still streaming in).
+        disconnect()
         const remaining = await forgetActiveServer()
         const next = mostRecentServer(remaining)
         if (next) {
@@ -294,11 +300,11 @@ function SettingsInner() {
     ])
   }
 
-  const confirmNewChat = () => {
-    showAlert('New chat?', 'Clears the current transcript and starts a fresh session.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Start', onPress: () => { void newChat().catch((e) => showAlert('Failed', String(e))) } },
-    ])
+  // BUG-049: one new-chat contract everywhere — immediate switch, like the
+  // drawer, the Chats tab and /new. The transcript detaches (nothing is
+  // deleted) and stays one tap away in the drawer.
+  const startNewChat = () => {
+    void newChat().catch((e) => showAlert('Failed', String(e)))
   }
 
   return (
@@ -374,7 +380,7 @@ function SettingsInner() {
           <Row
             icon="add-circle-outline"
             label="Add computer"
-            sub="Scan a QR from scripts/hermes-pair.sh"
+            sub="Pair with a computer — scan its pairing QR code"
             chevron
             onPress={() => router.push('/add-computer')}
           />
@@ -427,9 +433,9 @@ function SettingsInner() {
         <Section title="CHAT">
           <Row
             icon="chatbox-ellipses-outline"
-            label="Start new chat session"
-            sub="Clears the current transcript and starts fresh"
-            onPress={confirmNewChat}
+            label="New chat"
+            sub="Starts a fresh chat — the current one stays in Chats"
+            onPress={startNewChat}
           />
           <Divider />
           <Row
@@ -453,7 +459,7 @@ function SettingsInner() {
           <Row
             icon="information-circle-outline"
             label="Moch v1.0"
-            sub="Mobile client for your self-hosted Hermes gateway (same JSON-RPC protocol). Pair from your PC with scripts/hermes-pair.sh."
+            sub="Mobile client for your self-hosted Hermes agent. Pair from the Add computer screen or your PC's pairing tool."
             disabled
           />
         </Section>
@@ -513,10 +519,12 @@ const makeS = () => StyleSheet.create({
   rowInner: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10 },
   rowIcon: {
     width: 30, height: 30, borderRadius: 9,
-    backgroundColor: 'rgba(247,146,54,0.12)',
+    // BUG-017: theme token, not a hard-coded Mocheme literal (the literal
+    // kept the chips orange under the Relay theme).
+    backgroundColor: C.accentSoft,
     alignItems: 'center', justifyContent: 'center',
   },
-  rowIconDanger: { backgroundColor: 'rgba(239,68,68,0.12)' },
+  rowIconDanger: { backgroundColor: C.redSoft },
   rowText: { flex: 1, gap: 1 },
   rowLabel: { color: C.text, fontSize: 15, fontWeight: '600' },
   rowLabelDisabled: { color: C.textDim },
@@ -529,6 +537,4 @@ const makeS = () => StyleSheet.create({
   miniDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.textFaint },
   activeTag: { color: C.greenSoft, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
   serverForget: { paddingHorizontal: 14, paddingVertical: 14, minHeight: 56, justifyContent: 'center' },
-  warn: { color: C.red, fontSize: 12, lineHeight: 17, paddingHorizontal: 14, paddingVertical: 6 },
-  note: { color: C.textFaint, fontSize: 12, lineHeight: 17, paddingHorizontal: 14, paddingVertical: 6 },
 })

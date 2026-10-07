@@ -63,7 +63,7 @@ A focused performance pass over the drawer, chat switching, and streaming UI. Th
 
 **Skipped — outside every owned file set, needs an owner:**
 
-- **A2-28** — `src/lib/gateway.ts` reconnect ordering (start `cli.connect` before/alongside the config storage writes). Not edited by anyone this pass.
+- **A2-28** — `src/lib/gateway.ts` reconnect ordering (start `cli.connect` before/alongside the config storage writes). ~~Not edited by anyone this pass.~~ **UPDATE (2026-10-07): done since — `dial()` now persists concurrently with the handshake (`persistChain` runs un-awaited alongside `cli.connect`), so this item is closed; the line above is kept for history.**
 - **A2-29** — voice-transcribe base64 encode stutter in `src/lib/voice.ts`. Also needs a product call: a lower-bitrate preset trades transcription quality, and an upload path would change the gateway's `/api/audio/transcribe` contract.
 
 **Known platform limits accepted:**

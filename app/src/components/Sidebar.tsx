@@ -23,6 +23,7 @@ import { useStore } from '@nanostores/react'
 import { archivedIds, groupChats, pinnedIds } from '../lib/chatListState'
 import type { RowStatus } from '../lib/attention'
 import { C, S, useStyles, useShape } from '../lib/theme'
+import { useReduceMotion } from './useReduceMotion'
 
 export interface NavItem {
   key: string
@@ -881,8 +882,11 @@ export function Sidebar({
  */
 export function StatusDot({ status }: { status?: RowStatus }) {
   const pulse = useRef(new Animated.Value(1)).current
+  // BUG-056: honor reduce-motion LIVE — the busy pulse renders static (full
+  // opacity) under the OS setting.
+  const reduceMotion = useReduceMotion()
   useEffect(() => {
-    if (status !== 'busy') return
+    if (status !== 'busy' || reduceMotion) return
     const a = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, { toValue: 0.25, duration: 650, useNativeDriver: true }),
@@ -891,7 +895,7 @@ export function StatusDot({ status }: { status?: RowStatus }) {
     )
     a.start()
     return () => a.stop()
-  }, [status, pulse])
+  }, [status, pulse, reduceMotion])
   if (!status) return null
   const color = status === 'input' ? C.amber : status === 'done' ? C.greenSoft : status === 'error' ? C.red : C.accent
   return (
@@ -1041,7 +1045,7 @@ const makeS = () => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  badgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  badgeText: { color: C.onAccent, fontSize: 11, fontWeight: '800' },
   // Mini Mochi run-counter next to "Automations": up to three overlapping
   // faces, then a +N suffix.
   mochiRunRow: { flexDirection: 'row', alignItems: 'center' },

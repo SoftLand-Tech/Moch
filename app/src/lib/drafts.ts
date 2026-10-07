@@ -89,10 +89,15 @@ export function setDraft(storedId: string | null | undefined, text: string): voi
     return
   }
   if (had === text) return
-  const next = { ...map, [storedId]: text.slice(0, 8000) }
+  // BUG-065: delete-then-set refreshes the chat's insertion-order slot, so
+  // the eviction cap drops the LEAST-RECENTLY-active chat's draft.
+  const next = { ...map }
+  delete next[storedId]
+  next[storedId] = text.slice(0, 8000)
   const keys = Object.keys(next)
   if (keys.length > MAX_DRAFTS) {
-    // Insertion order approximates recency; drop the oldest extras.
+    // Drop the least-recently-updated extras (insertion order after the
+    // refresh above is true recency order).
     for (const k of keys.slice(0, keys.length - MAX_DRAFTS)) delete next[k]
   }
   drafts.set(next)

@@ -5,7 +5,7 @@ import { rpc, onEvent, onServerRequest, getClient, isConnected, connConfig } fro
 import { getEmbeddedGateway } from './hermesRuntime'
 import { log } from './log'
 import { notifyLocal, setBadge } from './push'
-import { bindLiveId, liveIdFor, sessionRows, toMs, upsertOptimisticRow, patchRowTitle } from './sessionList'
+import { bindLiveId, liveIdFor, sessionRows, sessionListComplete, toMs, upsertOptimisticRow, patchRowTitle } from './sessionList'
 import { hookModelState, noteSessionInfo } from './modelState'
 import { markAttention, clearAttention, pushToast, chatTabFocused, pendingOpenStoredId, type AttentionKind } from './attention'
 import { clearDraft, draftFor, setDraft } from './drafts'
@@ -180,7 +180,14 @@ export const activeSessionId = computed(activeSession, id => (id && sessionsById
 /** Server requests awaiting an answer, grouped by the session they block. */
 const pendingBySession = atom<Record<string, PendingRequest[]>>({})
 /** Queued prompts that could not be sent yet (offline). */
-export const outbox = atom<string[]>([])
+/** One outbox entry: text composed offline, pinned to the chat it was
+ *  composed for (BUG-008). `storedId: ''` = legacy unpinned entry from an
+ *  older install — flushed with the old active-chat contract. */
+export interface OutboxItem {
+  storedId: string
+  text: string
+}
+export const outbox = atom<OutboxItem[]>([])
 
 const view = computed([sessionsById, activeSession], (map, id): SessionState =>
   (id && map[id]) || EMPTY,
@@ -362,7 +369,10 @@ function patchActive(patch: Partial<SessionState>) {
   sessionsById.set({ ...map, [id]: { ...cur, ...patch } })
 }
 
-function patchSession(id: string, patch: Partial<SessionState>) {
+// Exported for the drawer's rename flow (BUG-006): a successful manual
+// rename patches the open chat's in-memory title so the header updates
+// without waiting for an event echo or the next list poll.
+export function patchSession(id: string, patch: Partial<SessionState>) {
   const map = sessionsById.get()
   const cur = map[id]
   if (!cur) return
@@ -736,6 +746,11 @@ async function loadStoredIdMap() {
 
 async function rememberStoredId(liveId: string, storedId: string) {
   if (!liveId || !storedId || storedIdMap[liveId] === storedId) return
+  // BUG-064: delete-then-set refreshes the key's insertion order — a plain
+  // assignment kept an old key in its original slot, so the 200-cap evicted
+  // long-lived ACTIVE pairs while stale ones survived (and evictions strand
+  // their legacy v1 transcript blobs forever).
+  delete storedIdMap[liveId]
   storedIdMap[liveId] = storedId
   // Bound the map so it can't grow forever.
   const entries = Object.entries(storedIdMap)
@@ -761,8 +776,8 @@ async function persistOutbox() {
   }
 }
 
-function enqueueOffline(text: string) {
-  outbox.set([...outbox.get(), text].slice(0, MAX_OUTBOX))
+function enqueueOffline(text: string, storedId = '') {
+  outbox.set([...outbox.get(), { storedId, text }].slice(0, MAX_OUTBOX))
   void persistOutbox()
 }
 
@@ -770,27 +785,91 @@ export async function loadOutbox() {
   try {
     const raw = await AsyncStorage.getItem(OUTBOX_KEY)
     if (raw) {
-      const list = JSON.parse(raw) as string[]
-      if (Array.isArray(list)) outbox.set(list.filter((x) => typeof x === 'string').slice(0, MAX_OUTBOX))
+      const list = JSON.parse(raw) as unknown
+      if (Array.isArray(list)) {
+        // Accept both shapes: legacy `string[]` entries (storedId '') and
+        // pinned `OutboxItem[]` entries.
+        const items: OutboxItem[] = []
+        for (const x of list) {
+          if (typeof x === 'string') items.push({ storedId: '', text: x })
+          else if (x && typeof x === 'object' && typeof (x as { text?: unknown }).text === 'string') {
+            const rawStored = (x as { storedId?: unknown }).storedId
+            items.push({ storedId: typeof rawStored === 'string' ? rawStored : '', text: (x as { text: string }).text })
+          }
+        }
+        outbox.set(items.slice(0, MAX_OUTBOX))
+      }
     }
   } catch {
     /* best effort */
   }
 }
 
-export async function flushOutbox(): Promise<void> {
-  const q = outbox.get()
-  if (!q.length) return
+/** BUG-019: clear the in-memory outbox WITHOUT touching storage — the
+ *  backend-identity switch runs this before re-reading, so a previous
+ *  machine's unsent texts never survive into the new pairing (a failed
+ *  shelf reload must not leave the old machine's texts live in the atom). */
+export function resetOutbox() {
   outbox.set([])
-  await persistOutbox()
-  for (const text of q) {
+}
+
+export async function flushOutbox(): Promise<void> {
+  // BUG-002: send one at a time and remove each item BEFORE its send — the
+  // old clear-then-iterate dropped every item after the first failure (its
+  // catch re-enqueued only the failing text; the caller swallows the throw).
+  // Items after a failure now simply stay queued. Single enqueue layer
+  // (BUG-008): a failed send is re-enqueued by sendPrompt's own offline
+  // path, never re-added here.
+  while (outbox.get().length) {
+    const [item, ...rest] = outbox.get()
+    outbox.set(rest)
+    await persistOutbox()
     try {
-      await sendPrompt(text)
+      if (item.storedId) {
+        // Pinned (BUG-008): deliver to the chat it was composed for, never
+        // to whichever chat happens to be active at flush time.
+        const live = Object.values(sessionsById.get()).find((s) => s.storedId === item.storedId)?.id
+        if (live) {
+          await sendPrompt(item.text, { session: live })
+        } else {
+          // Not tracked (cold boot / evicted handle): a quiet resume brings
+          // the handle back; a not-found answer means the chat is gone.
+          try {
+            const fresh = await resumeShared(item.storedId)
+            await sendPrompt(item.text, { session: fresh.sessionId })
+          } catch (resumeErr) {
+            if (!isSessionNotFound(resumeErr)) throw resumeErr
+            log('warn', 'chat', `outbox item dropped — chat ${item.storedId} no longer exists`)
+          }
+        }
+      } else {
+        await sendPrompt(item.text)
+      }
+      // The stale 'failed' row from the original offline failure would
+      // duplicate the freshly delivered message — drop it (BUG-008).
+      dropMatchingFailedRow(item.storedId, item.text)
     } catch (err) {
-      enqueueOffline(text)
+      // sendPrompt's offline path re-enqueued the failed item; if it threw
+      // for a reason that did NOT re-enqueue (e.g. the pinned guard), put
+      // it back so nothing is lost. Either way, stop — remaining items
+      // stay queued for the next flush.
+      if (!outbox.get().some((x) => x.text === item.text && x.storedId === item.storedId)) {
+        outbox.set([...outbox.get(), item].slice(0, MAX_OUTBOX))
+        void persistOutbox()
+      }
       throw err
     }
   }
+}
+
+/** Remove the first failed user row matching a just-flushed outbox item so
+ *  the transcript doesn't show the text twice (failed row + sent row). */
+function dropMatchingFailedRow(storedId: string, text: string) {
+  const entry = Object.values(sessionsById.get()).find((s) => s.storedId === storedId)
+  if (!entry) return
+  const idx = entry.messages.findIndex((m) => m.role === 'user' && m.status === 'failed' && m.text === text)
+  if (idx < 0) return
+  patchSession(entry.id, { messages: entry.messages.filter((_, i) => i !== idx) })
 }
 
 // ── Queued attachments (memory-only) ───────────────────────────────────────
@@ -949,19 +1028,12 @@ export async function createSession(title?: string): Promise<ResumeResult> {
   return { sessionId: id, storedId, messages: res.messages ?? [] }
 }
 
-/**
- * Resume a stored session. Takes the DURABLE id (what `session.list` returns
- * and what we persist), returns the LIVE id used for RPCs and events.
- * Unconditional activation — only the boot path owns the screen this way.
- */
-export async function resumeSession(storedId: string): Promise<ResumeResult> {
-  const r = await resumeShared(storedId)
-  activeSession.set(r.sessionId)
-  clearAttention(r.storedId)
-  void AsyncStorage.setItem(LAST_SESSION_KEY, r.storedId)
-  return r
-}
-
+/** Resume a stored session. Takes the DURABLE id (what `session.list` returns
+ *  and what we persist), returns the LIVE id used for RPCs and events.
+ *  Unconditional activation — only the boot path owns the screen this way.
+ *  BUG-062: the exported wrapper had zero callers (boot goes through
+ *  withBootPaint, switches through switchToSession) — removed; resumeShared
+ *  is the primitive every path uses. */
 async function runResume(storedId: string): Promise<ResumeResult> {
   const res = await rpc<{ session_id?: string; stored_session_id?: string; messages?: Array<Record<string, unknown>>; info?: { model?: string; provider?: string; reasoning_effort?: string }; running?: boolean; status?: string }>(
     'session.resume',
@@ -1053,7 +1125,11 @@ const inflightResumes = new Map<string, Promise<ResumeResult>>()
 
 /** Shared, deduped resume core — the one primitive every path that needs a
  *  live handle for a stored id goes through. */
-function resumeShared(storedId: string): Promise<ResumeResult> {
+/** Shared, deduped resume core — the one primitive every path that needs a
+ *  live handle for a stored id goes through. Exported for surface-agnostic
+ *  callers that must resolve a live id before a live-session RPC (BUG-006
+ *  rename). */
+export function resumeShared(storedId: string): Promise<ResumeResult> {
   const inflight = inflightResumes.get(storedId)
   if (inflight) return inflight
   const p = runResume(storedId).finally(() => {
@@ -1085,7 +1161,12 @@ async function withBootPaint(stored: string): Promise<ResumeResult> {
 }
 
 /** Boot: restore the last session, or create one. Safe to call repeatedly. */
-export async function ensureSession(): Promise<string> {
+export async function ensureSession(opts?: { create?: boolean }): Promise<string> {
+  // BUG-013: look-only surfaces (the Models tab) pass create:false — merely
+  // VISITING them must not mint a server-side session for an unsent chat
+  // (the local-only invariant the chat screen deliberately upholds). They
+  // get the provisional/live id or '' and skip session-scoped reads.
+  const create = opts?.create !== false
   const current = activeSession.get()
   if (current) {
     const state = sessionsById.get()[current]
@@ -1093,6 +1174,7 @@ export async function ensureSession(): Promise<string> {
     // real action (send / model pick) — an unsent chat never exists on the
     // server and never shows in the saved list.
     if (state?.provisional) {
+      if (!create) return current
       if (inflightCreate) return await inflightCreate
       const tempId = current
       const pseudo = state.storedId
@@ -1112,10 +1194,14 @@ export async function ensureSession(): Promise<string> {
         if (activeStoredId.get() === r.storedId) activeSession.set(r.sessionId)
         return r.sessionId
       } catch (err) {
+        // BUG-014: reattach failed (dead stored id after a serve reinstall,
+        // or a resume-specific error). Silently minting a fresh session and
+        // switching to it HIJACKED the screen mid-look AND rerouted the
+        // in-flight send into an empty chat with the real error swallowed.
+        // Fail loudly instead: sendPrompt's catch marks the user row failed
+        // with THIS error and the user stays on the chat they were reading.
         log('warn', 'chat', `could not reattach released session: ${String(err)}`)
-        const fresh = await createSession()
-        activeSession.set(fresh.sessionId)
-        return fresh.sessionId
+        throw err instanceof Error ? err : new Error(String(err))
       }
     }
     return current
@@ -1135,6 +1221,9 @@ export async function ensureSession(): Promise<string> {
       /* fall through to a fresh chat */
     }
   }
+  // BUG-013: nothing active and creating is off — report "none" instead of
+  // minting a session for a surface that was merely visited.
+  if (!create) return ''
   const r = await createSession()
   activeSession.set(r.sessionId)
   return r.sessionId
@@ -1371,10 +1460,18 @@ export function switchToSession(storedId: string): Promise<string> {
   void loadCachedTranscript(storedId)
   return resumeShared(storedId)
     .then(settle)
-    .catch((err: unknown) => {
+    .catch(async (err: unknown) => {
+      setSessionLoading(storedId, false)
+      if (isSessionNotFound(err)) {
+        // BUG-029: the target doesn't exist (deleted elsewhere, stale
+        // notification). The placeholder would otherwise sit under a
+        // forever-failing retry banner — fall back to a local new chat
+        // instead; the reconciliation sweep drops the placeholder.
+        const fresh = await newChat().catch(() => '')
+        return fresh || activeSession.get() || ''
+      }
       // Keep the placeholder — it holds the cached transcript, so offline
       // reading still works; the banner offers the retry.
-      setSessionLoading(storedId, false)
       failSwitch()
       throw err
     })
@@ -1401,6 +1498,10 @@ export async function forgetSession(liveId: string) {
     }
     clearAttention(stored)
     clearDraft(stored)
+    // BUG-033: the queued sends' attachments ride a memory map keyed by
+    // queued id — drop them with the queue or they leak for the process
+    // lifetime.
+    for (const q of sendQueue.get()[stored] ?? []) queuedAttachments.delete(q.id)
     clearSendQueue(stored)
     setSessionLoading(stored, false)
     // Must drop the STORED-keyed v2 entry (and the legacy v1s) or a deleted
@@ -1444,6 +1545,14 @@ export async function resetSessionCaches(): Promise<void> {
   sessionLoadings.set({})
   pendingBySession.set({})
   storedIdMap = {}
+  // BUG-033: UI residue the old reset skipped — a stale "Couldn't open this
+  // chat" banner (its retry closure targets the PREVIOUS machine's stored
+  // id), buffered stream deltas, queued-send attachments, and the mascot
+  // moment all survived a backend switch.
+  chatBanner.set(null)
+  mochiMoment.set(null)
+  streamBufs.clear()
+  queuedAttachments.clear()
   // storedIdMapLoaded stays true: the map is genuinely empty now, and
   // rememberStoredId repopulates it on the next create/resume/info event.
   try {
@@ -1460,10 +1569,13 @@ export async function resetSessionCaches(): Promise<void> {
 /** Append a message the app produced itself (e.g. slash command output).
  *  `cmd` labels a command-output card; it rides the message object (and the
  *  persistence envelope, which stores whole messages) write-once. */
-export function pushLocalMessage(text: string, role: 'user' | 'assistant' = 'assistant', cmd?: CommandMeta) {
+export function pushLocalMessage(text: string, role: 'user' | 'assistant' = 'assistant', cmd?: CommandMeta, targetSid?: string) {
   const t = text.trim()
   if (!t) return
-  const sid = activeSession.get()
+  // BUG-015: an explicit target wins — the active chat may have changed
+  // while the command's RPC was in flight, and the output card belongs to
+  // the chat the command ran against.
+  const sid = targetSid ?? activeSession.get()
   if (!sid) return
   const s = sessionsById.get()[sid]
   if (!s) return
@@ -1490,26 +1602,44 @@ export function applyHistory(sessionId: string, list?: Array<Record<string, unkn
     // extraction drops, exactly like the old empty-text drop.
     const extracted = extractMedia(text ? [{ kind: 'text' as const, text }] : [])
     const hasMedia = extracted.some((seg) => seg.kind === 'media')
-    if (!hasMedia && !text) continue
-    const capped = extracted.map((seg) =>
-      seg.kind === 'text' && seg.text.length > 8000 ? { ...seg, text: seg.text.slice(0, 8000) } : seg,
-    )
     // BUG-083: the gateway forwards each assistant row's durable reasoning
     // on every resume (session_history.py forwards `reasoning` /
     // `reasoning_content` verbatim) — map it into the same collapsible
     // thinking block the live stream renders instead of discarding it.
     // meta stays unset → the header reads a plain "Thought" (the true
-    // duration isn't recoverable from history).
+    // duration isn't recoverable from history). A reasoning-only row
+    // (interrupted turn) is still worth showing; only a row with nothing
+    // visible at all drops, exactly like the old empty-text drop.
     const reasoning = role === 'assistant' ? textOf(m.reasoning ?? m.reasoning_content ?? '').trim() : ''
+    if (!hasMedia && !text && !reasoning) continue
+    // BUG-077: mark truncation instead of silently clipping long rows.
+    const capped = extracted.map((seg) =>
+      seg.kind === 'text' && seg.text.length > 8000 ? { ...seg, text: `${seg.text.slice(0, 8000)}…` } : seg,
+    )
     const segs: ChatSegment[] = []
     if (reasoning) {
-      segs.push({ kind: 'thinking', text: reasoning.slice(0, 8000), startedAt: Number(m.ts ?? m.timestamp ?? Date.now()) || undefined })
+      segs.push({
+        kind: 'thinking',
+        text: `${reasoning.slice(0, 8000)}${reasoning.length > 8000 ? '…' : ''}`,
+        startedAt: Number(m.ts ?? m.timestamp ?? Date.now()) || undefined,
+      })
     }
-    if (hasMedia) segs.push(...capped)
+    if (hasMedia) {
+      segs.push(...capped)
+    } else if (reasoning) {
+      // REVIEW FIX (BUG-083 follow-up): Chat.tsx's `segmentsOf` renders
+      // `segments` INSTEAD of `m.text` — a reasoning row carrying only a
+      // thinking segment rendered just the collapsible and dropped the
+      // answer outright. The live stream always pushes a text segment
+      // alongside thinking for the same reason (see the queueStream append);
+      // the history mapping must honor the same contract.
+      segs.push({ kind: 'text', text: `${text.slice(0, 8000)}${text.length > 8000 ? '…' : ''}` })
+    }
+    const rowText = (hasMedia ? joinedTextOf(capped) : text)
     mapped.push({
       id: nid(),
       role,
-      text: (hasMedia ? joinedTextOf(capped) : text).slice(0, 8000),
+      text: `${rowText.slice(0, 8000)}${rowText.length > 8000 ? '…' : ''}`,
       ts: Number(m.ts ?? m.timestamp ?? Date.now()),
       ...(segs.length ? { segments: segs } : {}),
     })
@@ -1542,9 +1672,6 @@ export function applyHistory(sessionId: string, list?: Array<Record<string, unkn
 
 // ── Sending ────────────────────────────────────────────────────────────────
 
-// Back-compat flag mirrored from the per-session locks; terminal events reset
-// it as a stuck-send safety net.
-let sending = false
 // One in-flight submit per chat: a send to chat B while chat A's ack is still
 // pending must not be queued behind (or delivered to) A.
 const sendingSessions = new Set<string>()
@@ -1588,11 +1715,25 @@ export async function sendPrompt(
   }
   const lockKey = pinned ?? activeSession.get() ?? '_boot'
   if (sendingSessions.has(lockKey)) {
-    enqueueOffline(text)
+    // BUG-003: the composer is already cleared and no bubble exists — the
+    // old silent outbox park made the text invisible (the outbox only
+    // flushes on an offline→online edge) and a later flush would deliver
+    // it to whichever chat is active. Park it on the chat's VISIBLE
+    // busy-queue instead: the strip shows it immediately and
+    // maybeFlushQueue delivers it when this chat's turn ends.
+    const lockedStored = sessionsById.get()[lockKey]?.storedId
+    if (lockedStored) {
+      const queuedItem = enqueueSend(lockedStored, text, { allowEmpty: attachments.length > 0 })
+      if (queuedItem) {
+        if (attachments.length) setQueuedAttachments(queuedItem.id, attachments)
+        return
+      }
+      // Queue full — fall through to the outbox so the text still survives.
+    }
+    enqueueOffline(text, lockedStored ?? '')
     return
   }
   sendingSessions.add(lockKey)
-  sending = true
   // First message of a fresh install is the one honest moment to offer push
   // ("buzz me when the reply lands") — one ask per install, fire-and-forget,
   // and never on a cold app open. Lazy require: chat.ts must stay loadable in
@@ -1647,7 +1788,9 @@ export async function sendPrompt(
         })
         mochiMoment.set({ kind: 'error', sid: target!, at: Date.now() })
       }
-      enqueueOffline(text)
+      // BUG-008: re-enqueue pinned to the chat the send was bound for, so a
+      // later flush delivers it HERE and not to whichever chat is active.
+      enqueueOffline(text, t0?.storedId ?? '')
       throw err
     }
 
@@ -1735,7 +1878,6 @@ export async function sendPrompt(
     throw err
   } finally {
     sendingSessions.delete(lockKey)
-    sending = sendingSessions.size > 0
   }
 }
 
@@ -1748,22 +1890,39 @@ export async function retryMessage(id: string) {
   // re-picked from here, so a text-only retry would silently drop them.
   if (m.segments?.some((seg) => seg.kind === 'media')) return
   patchSession(sid, { messages: messages.get().filter((x) => x.id !== id) })
-  await sendPrompt(m.text)
+  // BUG-008: drop this chat's outbox copy of the same text first — the old
+  // code resent while the outbox entry survived, so the reconnect flush
+  // delivered the message a second time. If the retry fails, sendPrompt's
+  // offline path re-enqueues it, so exactly one copy always remains.
+  const retryStored = sessionsById.get()[sid]?.storedId ?? ''
+  outbox.set(outbox.get().filter((x) => !(x.text === m.text && (x.storedId === retryStored || x.storedId === ''))))
+  void persistOutbox()
+  // Pinned to THIS chat: a retry must never land in whichever chat is
+  // active by the time the RPC resolves.
+  await sendPrompt(m.text, { session: sid })
 }
 
 export async function stopRun() {
   const sid = activeSession.get()
   if (!sid) return
+  let stopped = false
   try {
     await rpc('session.interrupt', { session_id: sid })
+    stopped = true
   } catch (err) {
     log('warn', 'chat', `interrupt failed: ${String(err)}`)
   }
   flushStreams()
-  patchSession(sid, { busy: false })
+  // BUG-047: only declare idle when the interrupt actually landed — the old
+  // code cleared busy unconditionally, so a failed interrupt showed idle
+  // while the server kept generating and the queue head flushed into a
+  // still-running turn. Turn-end events reconcile the UI either way.
+  if (stopped) patchSession(sid, { busy: false })
   mochiMoment.set({ kind: 'apologetic', sid, at: Date.now() })
-  // A stop is a turn-end edge too — queued follow-ups get their turn.
-  maybeFlushQueue(sid)
+  if (stopped) {
+    // A stop is a turn-end edge too — queued follow-ups get their turn.
+    maybeFlushQueue(sid)
+  }
 }
 
 export async function steerRun(text: string) {
@@ -1771,6 +1930,12 @@ export async function steerRun(text: string) {
   const t = text.trim().slice(0, 4000)
   if (!sid || !t) return
   const userRow = { id: nid(), role: 'user' as const, text: t, ts: Date.now() }
+  // BUG-015: the user row belongs to `sid` — read THAT session's messages
+  // from the map at patch time, never the computed ACTIVE view. The old
+  // `messages.get()` resolved to whichever chat was active after the RPC:
+  // switching mid-steer grafted — or wholesale replaced — the WRONG chat's
+  // transcript while the steer bubble appeared nowhere.
+  const targetMessages = () => sessionsById.get()[sid]?.messages ?? []
   // Prefer a true interrupt: `session.redirect` cancels the in-flight model
   // request (completed work + partial reasoning stay as context), appends the
   // text as a real user message, and the agent loop retries NOW — so a steer
@@ -1780,7 +1945,7 @@ export async function steerRun(text: string) {
   try {
     const r = await rpc<{ status?: string }>('session.redirect', { session_id: sid, text: t })
     if (r?.status === 'redirected' || r?.status === 'queued') {
-      patchSession(sid, { messages: [...messages.get(), userRow] })
+      patchSession(sid, { messages: [...targetMessages(), userRow] })
       return
     }
   } catch {
@@ -1789,7 +1954,7 @@ export async function steerRun(text: string) {
   // Fallback: buffer for the next tool-batch boundary. Works WHILE busy —
   // separate path from sendPrompt.
   await rpc('session.steer', { session_id: sid, text: t })
-  patchSession(sid, { messages: [...messages.get(), userRow] })
+  patchSession(sid, { messages: [...targetMessages(), userRow] })
 }
 
 // ── Busy-queue flush ───────────────────────────────────────────────────────
@@ -1820,9 +1985,11 @@ function maybeFlushQueue(liveId: string): void {
       queuedAttachments.delete(head.id)
       // No recursion here: the submit only ACKed — busy is already true, and
       // the new turn's end edge (or its failure) drives the next release.
-    } catch {
-      // Send failed (offline, dead handle…): the head — and its attachments —
-      // stay queued for the next idle edge. No retry loop.
+    } catch (err) {
+      // BUG-073: a session deleted mid-flush throws "not tracked" here —
+      // say so instead of a silent empty catch (acceptable for a deleted
+      // chat, but it should be visible in the log).
+      log('warn', 'chat', `queued head flush failed for ${liveId}: ${String(err)}`)
     } finally {
       queueFlushes.delete(liveId)
     }
@@ -1909,7 +2076,24 @@ function onServerRequestMessage(req: {
   replayed?: boolean
 }): boolean {
   const p = req.params ?? {}
-  const sessionId = typeof p.session_id === 'string' ? p.session_id : (activeSession.get() ?? '')
+  let sessionId = typeof p.session_id === 'string' ? p.session_id : (activeSession.get() ?? '')
+  // BUG-089: resolve the id through the tracked map before filing —
+  // (a) a request emitted under an OLD live id during resume rotation lands
+  // under a dead key (unmarked AND unanswerable); rebind it to the current
+  // live id for the same stored id.
+  if (sessionId && !sessionsById.get()[sessionId]) {
+    const stored = storedIdFor(sessionId)
+    const rebound = stored ? Object.values(sessionsById.get()).find((s) => s.storedId === stored)?.id : undefined
+    if (rebound) sessionId = rebound
+  }
+  // BUG-067: a ''-keyed request can never match any activeSession, so the
+  // question would sit unfiled AND unanswerable until the backend's deadline.
+  // There is nothing sensible to do with an unaddressable request — log and
+  // drop it (the backend's own deadline handles its side).
+  if (!sessionId) {
+    log('warn', 'chat', `server request ${req.method} has no session_id and no active chat — dropped`)
+    return false
+  }
 
   switch (req.method) {
     case 'approval': {
@@ -2155,6 +2339,14 @@ export function hookChatEvents() {
             `Hermes closed this session (${String(p.reason ?? 'idle')}). It will reconnect when you send.`,
             { screen: 'chat' },
           )
+        } else {
+          // BUG-088: a mid-turn release ends the turn SILENTLY when the user
+          // is elsewhere — no pulse, no dot, nothing. Mark the row so the
+          // chat isn't a dead end.
+          flagAttention(eSid, 'done', {
+            title: 'Session released',
+            body: `Hermes closed this session (${String(p.reason ?? 'idle')}). Send a message to reconnect.`,
+          })
         }
         break
       }
@@ -2200,9 +2392,19 @@ export function hookChatEvents() {
         if (!cur) break
         const list = cur.messages
         const last = list[list.length - 1]
-        if (last?.role === 'assistant' && last.streaming) break
+        if (last?.role === 'assistant' && last.streaming) {
+          // BUG-060: a STALE streaming tail (its turn died without a terminal
+          // event — killed process, lost frame) would swallow this new row:
+          // flushStreams grafts the new turn onto the old bubble. Finalize
+          // the stale tail first so each turn renders as its own message.
+          const list2 = [...cur.messages]
+          list2[list2.length - 1] = freezeThoughts({ ...last, streaming: false })
+          patchSession(eSid, { messages: list2 })
+        }
+        const cur2 = sessionsById.get()[eSid]
+        const list2 = cur2?.messages ?? []
         patchSession(eSid, {
-          messages: [...list, { id: nid(), role: 'assistant', text: '', streaming: true, ts: Date.now() }],
+          messages: [...list2, { id: nid(), role: 'assistant', text: '', streaming: true, ts: Date.now() }],
         })
         break
       }
@@ -2251,12 +2453,25 @@ export function hookChatEvents() {
           list[i] = freezeThoughts(done)
           break
         }
+        // BUG-061: the finalize loop only updates an EXISTING streaming row —
+        // if message.start was missed (a reconnect/replay gap on a remote
+        // backend), the server's final answer was discarded while busy flipped
+        // false. Append it as a completed message instead.
+        if (!finalJoined && text) {
+          const failed = p.status === 'error' || !!p.error
+          list.push({
+            id: nid(),
+            role: 'assistant',
+            text: stripMediaFromText(text).slice(0, 32000),
+            ts: Date.now(),
+            ...(failed ? { status: 'failed' as const, error: String(p.error ?? p.failure_reason ?? 'Turn failed') } : {}),
+          })
+        }
         if (list.length) patchSession(eSid, { messages: list })
         patchSession(eSid, {
           tools: cur.tools.map((t) => (t.status === 'running' ? { ...t, status: 'done' as const } : t)),
           busy: false,
         })
-        sending = false
         schedulePersist(eSid)
         maybeFlushQueue(eSid)
         const failed = p.status === 'error' || !!p.error
@@ -2340,7 +2555,6 @@ export function hookChatEvents() {
       case 'background.complete': {
         flushStreams()
         patchSession(eSid, { busy: false })
-        sending = false
         maybeFlushQueue(eSid)
         log('info', 'chat', `background complete: ${JSON.stringify(p).slice(0, 200)}`)
         flagAttention(
@@ -2359,7 +2573,6 @@ export function hookChatEvents() {
         if (p.busy === false) {
           flushStreams()
           patchSession(eSid, { busy: false })
-          sending = false
           maybeFlushQueue(eSid)
         }
         break
@@ -2373,12 +2586,22 @@ export function hookChatEvents() {
         const list = [...cur.messages]
         const last = list[list.length - 1]
         if (last?.streaming) {
-          list[list.length - 1] = freezeThoughts({ ...last, streaming: false, text: last.text || msg })
+          list[list.length - 1] = freezeThoughts({
+            ...last,
+            streaming: false,
+            // BUG-010: keep any partial text but MARK the failure — the old
+            // code silently discarded the error (a half-answered turn looked
+            // complete: no failed marker, no error surface) or, on an empty
+            // bubble, rendered the raw error string as the agent's answer
+            // with copy/Listen buttons attached.
+            ...(last.text ? {} : { text: msg }),
+            status: 'failed',
+            error: msg,
+          })
         } else {
           list.push({ id: nid(), role: 'assistant', text: msg, ts: Date.now(), status: 'failed', error: msg })
         }
         patchSession(eSid, { messages: list, busy: false })
-        sending = false
         schedulePersist(eSid)
         flagAttention(eSid, 'error', { title: 'Turn failed', body: msg })
         mochiMoment.set({ kind: 'error', sid: eSid, at: Date.now() })
@@ -2407,5 +2630,43 @@ function formatUsage(u: Record<string, unknown>): string {
   if (cost !== undefined) parts.push(`$${cost.toFixed(3)}`)
   return parts.join(' · ')
 }
+
+// ── Server-list reconciliation (BUG-025) ───────────────────────────────────
+// Chats deleted elsewhere (another device, a serve reinstall) used to haunt
+// the drawer forever: nothing pruned sessionsById against sessionRows, so
+// the local entry survived until an app restart — and tapping it always
+// failed to the retry banner. When a COMPLETE server list is in hand (a
+// truncated one proves nothing about absence), drop tracked sessions whose
+// stored id is absent — except the chat on screen and provisional windows.
+sessionRows.subscribe((rows) => {
+  if (!rows.length || !sessionListComplete.get()) return
+  const active = activeSession.get()
+  const map = sessionsById.get()
+  const present = new Set(rows.map((r) => r.id))
+  let changed = false
+  let pendChanged = false
+  const next = { ...map }
+  const pend = { ...pendingBySession.get() }
+  for (const [liveId, s] of Object.entries(map)) {
+    if (liveId === active || s.provisional || liveId.startsWith('pending:')) continue
+    if (present.has(s.storedId)) continue
+    delete next[liveId]
+    changed = true
+    if (pend[liveId]) {
+      delete pend[liveId]
+      pendChanged = true
+    }
+    if (s.storedId && !isPseudoStoredId(s.storedId)) {
+      clearAttention(s.storedId)
+      // BUG-066: the chat is gone server-side — drop its cached transcript
+      // too, or the AsyncStorage blob (up to 300 messages) persists forever
+      // (the user can no longer trigger forgetSession on a chat that isn't
+      // even listed).
+      void dropCachedTranscript(s.storedId)
+    }
+  }
+  if (changed) sessionsById.set(next)
+  if (pendChanged) pendingBySession.set(pend)
+})
 
 export { refreshBadge }
