@@ -88,6 +88,12 @@ class _Session:
             self.replay_bytes -= len(old)
 
 
+# SINGLE-SESSION CONTRACT: exactly one interactive pty exists per device —
+# the RN Terminal screen, the Hermes bridge, and this module all assume one
+# shared _Session behind this module global. A later start() replaces the
+# previous shell (it closes the old process first). Multi-instance support
+# = follow-up: turn this into a session-id -> _Session registry and thread
+# ids through the bridge + TS layers with a multiplexed drain.
 _state = _Session()
 
 

@@ -99,8 +99,13 @@ export function stripAnsi(s: string): string {
       .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
       // OSC sequences: ESC ] ... BEL or ESC \
       .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-      // leftover control chars except \n \t (keep \r→\n for dumb rendering)
-      .replace(/\r\n?/g, '\n')
+      // CRLF → LF. A lone \r is KEPT: appendCapped interprets it as
+      // "reset to line start" so CR-overwrites (progress bars, tab
+      // rewrites) replace the current line instead of stacking.
+      // NOTE: this is intentionally minimal — full VT100 semantics
+      // (cursor moves, EL/ED, …) are the planned xterm.js renderer.
+      .replace(/\r\n/g, '\n')
+      // leftover control chars except \n \t \r (handled above/by appendCapped)
       // eslint-disable-next-line no-control-regex
       .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
   )
@@ -108,11 +113,39 @@ export function stripAnsi(s: string): string {
 
 // ── Scrollback buffer ────────────────────────────────────────────────────────
 
-/** Append-only capped text buffer shared by the screen and tests. */
+/**
+ * Append-only capped text buffer shared by the screen and tests.
+ *
+ * Consumes stripAnsi output. A lone \r (not followed by \n) means
+ * "carriage return: back to column 0" — everything up to the last \n is
+ * rewritten by the text that follows, so CR-overwrites replace the
+ * current line instead of stacking extra lines. Deterministic and
+ * streaming-safe per call; full VT100 semantics = the planned xterm.js
+ * renderer (see file header).
+ */
 export function appendCapped(prev: string, add: string, cap = TERM_TEXT_CAP): string {
   if (!add) return prev
-  const next = prev + add
-  return next.length > cap ? next.slice(next.length - cap) : next
+  let out = prev
+  let overwrote = false
+  let buf = ''
+  for (const ch of add) {
+    if (ch === '\r') {
+      // First CR in this chunk drops prev's current (last) line; later
+      // CRs just reset what we've accumulated since the last newline.
+      if (!overwrote) {
+        out = prev.slice(0, prev.lastIndexOf('\n') + 1)
+        overwrote = true
+      }
+      buf = ''
+    } else if (ch === '\n') {
+      out += buf + '\n'
+      buf = ''
+    } else {
+      buf += ch
+    }
+  }
+  out += buf
+  return out.length > cap ? out.slice(out.length - cap) : out
 }
 
 // ── Controller ───────────────────────────────────────────────────────────────
