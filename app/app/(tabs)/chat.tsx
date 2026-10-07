@@ -64,8 +64,8 @@ import { AttachSheet } from '../../src/components/media/AttachSheet'
 import { chatTabFocused } from '../../src/lib/attention'
 import { draftFor, setDraft } from '../../src/lib/drafts'
 import { shareInInbox, ackShareIn, applySharedToDraft, type SharedFile } from '../../src/lib/shareIn'
-import { isConnected as isConnectedAtom, connectionState, gatewayError, retryNow, reconnectAttempt } from '../../src/lib/gateway'
-import { completeSlash, loadCatalog, runCommand, parseSlashCommand, canonicalName, interactiveTarget, describeCommand, subsFor, argumentModeFor, slashLabel, localCompleteSync, type CompletionItem, type SlashOutcome } from '../../src/lib/slash'
+import { isConnected as isConnectedAtom, connectionState, gatewayError, retryNow } from '../../src/lib/gateway'
+import { completeSlash, loadCatalog, runCommand, parseSlashCommand, canonicalName, interactiveTarget, describeCommand, subsFor, argumentModeFor, slashLabel, localCompleteSync, isKnownSlashCommand, type CompletionItem, type SlashOutcome } from '../../src/lib/slash'
 import { liveModel, liveReasoning, liveReasoningDisplay, fetchReasoningDisplay } from '../../src/lib/modelState'
 import { ModelPickerSheet } from '../../src/components/ModelPickerSheet'
 import { CommandOptionsSheet } from '../../src/components/CommandOptionsSheet'
@@ -120,13 +120,14 @@ export default function Chat() {
     const t = setTimeout(() => setOfflineGrace(false), 2500)
     return () => clearTimeout(t)
   }, [online])
-  // The connect window (~1s wifi, up to 4s mobile data) is NOT an outage:
-  // showing OFFLINE while the dial is in flight made healthy opens look
-  // broken. Same for the first auto-reconnects after a mid-session drop —
-  // the app is already dialing and about to heal. OFFLINE appears when
-  // reconnects keep failing (3rd+ attempt, ~7s+ of real outage).
-  const reconnects = useStore(reconnectAttempt)
-  const showOfflineBanner = !online && !offlineGrace && connState !== 'connecting' && reconnects < 2
+  // BUG-005: after the grace window, the banner is the mid-session outage
+  // surface (the boot veil no longer covers the app once this run has
+  // connected). While a dial is in flight it reads "Connecting…"; during
+  // backoff waits (state 'closed') it reads "Offline — tap to retry", so
+  // there is continuous feedback through the whole outage instead of the
+  // old inverted attempt-gate that hid the banner exactly when the outage
+  // was real.
+  const showOfflineBanner = !online && !offlineGrace
   const conn = useStore(connectionState)
   const gerr = useStore(gatewayError)
   const curModel = useStore(liveModel)
@@ -162,12 +163,25 @@ export default function Chat() {
   // measured view frame, which doesn't line up on every device (MIUI et al).
   const kb = useReanimatedKeyboardAnimation()
   const kbPad = useAnimatedStyle(() => ({ paddingBottom: -kb.height.value }))
+  // BUG-037: the keyboard lifts the composer via the root pad, and at that
+  // point the safe-area bottom inset is COVERED by the keyboard — the
+  // composer's own inset padding must zero out while the IME is open (it
+  // previously stacked, floating the pill ~2× the gesture-bar height above
+  // the keys with dead background between).
+  const composerPad = useAnimatedStyle(() => ({
+    paddingBottom: kb.height.value < 0 ? 0 : Math.max(insets.bottom, 10),
+  }))
   const recorder = useAudioRecorder(REC_OPTIONS)
   const [recording, setRecording] = useState(false)
   const [recSecs, setRecSecs] = useState(0)
   const voiceState = useStore(voiceBusy)
   const recTimer = useRef<ReturnType<typeof setInterval> | null>(null)
+  // BUG-048: mirrors recSecs so the interval callback can check the limit
+  // without a side effect inside a state updater.
+  const recSecsRef = useRef(0)
   const slashSeq = useRef(0)
+  // BUG-043: the slash starter focuses the composer so the palette opens.
+  const inputRef = useRef<TextInput>(null)
   // Mascot waterfall — recording (press-to-talk) and the composer text (any
   // keystroke is activity) feed the idle clock; everything else it subscribes
   // to itself.
@@ -175,6 +189,11 @@ export default function Chat() {
   // Composer attachments (ChatGPT-style chips). Memory-only — queued ones
   // ride chat.ts's in-memory map keyed by the queued send id.
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([])
+  // BUG-038: chips are scoped to the chat like drafts — switching chats used
+  // to carry them over, and Send delivered them (and any caption text) to
+  // the NEWLY active chat.
+  const attachmentsByChat = useRef<Record<string, PendingAttachment[]>>({})
+  const lastChatsRef = useRef(storedId)
   // The ChatGPT-style attach action sheet (library / camera / file).
   const [attachOpen, setAttachOpen] = useState(false)
 
@@ -199,6 +218,18 @@ export default function Chat() {
   // over from the previous chat (stale offset, stray jump FAB, wrong
   // bottom-follow). scrollMetrics is a ref declared below — safe to touch
   // here because the effect body runs after the render completes.
+  useEffect(() => {
+    // BUG-038: swap the attachment chips alongside the draft — stash the
+    // outgoing chat's chips, restore the incoming chat's (or none).
+    const prev = lastChatsRef.current
+    if (prev !== storedId) {
+      if (prev) attachmentsByChat.current[prev] = pendingAttachments
+      setPendingAttachments(attachmentsByChat.current[storedId] ?? [])
+      lastChatsRef.current = storedId
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storedId])
+
   useEffect(() => {
     setInput(draftFor(storedId))
     setStick(true)
@@ -446,16 +477,21 @@ export default function Chat() {
       if (out.action === 'show' && out.text) {
         // Command outputs render as the card family; the label is normalized
         // here once (slashLabel covers both name conventions out of slash.ts).
+        // BUG-015: file the card onto the chat the command RAN against (`s`,
+        // resolved before the await) — the active chat may have changed.
         pushLocalMessage(out.text, 'assistant', {
           name: slashLabel(out.name),
           variant: out.subtype,
           suggestion: out.suggestion,
           hint: out.hint,
-        })
+        }, s)
       }
       updateInput('')
       setSlashItems(null)
     } catch (e) {
+      // BUG-041: the composer was cleared before the dispatch — a failed
+      // command must give the text back (the plain-send failure path does).
+      updateInput(trimmed)
       showAlert('Command failed', e instanceof Error ? e.message : String(e))
     }
   }
@@ -605,7 +641,10 @@ export default function Chat() {
     // Whatever this dispatch turns into (turn, steer, queued message), the
     // user's eye belongs at the newest message.
     jumpToLatest()
-    if (text.startsWith('/') && pendingAttachments.length === 0) {
+    // BUG-042: only KNOWN commands dispatch — any other leading-slash text
+    // ("/usr/bin/env — what's in there?") is a normal message the user wants
+    // answered, not a command error that eats the typed text.
+    if (text.startsWith('/') && pendingAttachments.length === 0 && isKnownSlashCommand(text)) {
       updateInput('')
       await runSlash(text)
       return
@@ -720,11 +759,14 @@ export default function Chat() {
       recorder.record()
       setRecording(true)
       setRecSecs(0)
+      recSecsRef.current = 0
       recTimer.current = setInterval(() => {
-        setRecSecs((n) => {
-          if (n + 1 >= 120) void finishRecording()
-          return n + 1
-        })
+        // BUG-048: the limit check lives OUTSIDE the state updater — updaters
+        // must be pure, and finishRecording() (async: recorder stop, haptics,
+        // transcription) is not idempotent.
+        recSecsRef.current += 1
+        setRecSecs(recSecsRef.current)
+        if (recSecsRef.current >= 120) void finishRecording()
       }, 1000)
     } catch (e) {
       stopRecTimer()
@@ -958,8 +1000,13 @@ export default function Chat() {
                       key={st.label}
                       style={({ pressed }) => [s.starter, pressed && s.starterPressed]}
                       onPress={() => {
-                        if (st.label === 'Browse slash commands') updateInput('/')
-                        else updateInput(st.label)
+                        // BUG-043: the slash palette only renders while the
+                        // composer is focused — the starter must focus it or
+                        // the user stares at a lone "/" with no catalog.
+                        if (st.label === 'Browse slash commands') {
+                          updateInput('/')
+                          inputRef.current?.focus()
+                        } else updateInput(st.label)
                       }}
                       accessibilityLabel={st.label}
                     >
@@ -1032,6 +1079,8 @@ export default function Chat() {
               <Pressable
                 style={({ pressed }) => [s.fab, pressed && s.btnPressed]}
                 onPress={jumpToLatest}
+                hitSlop={4}
+                accessibilityRole="button"
                 accessibilityLabel="Jump to latest"
               >
               <Icon name="arrow-down" size={19} color={C.text} />
@@ -1103,13 +1152,18 @@ export default function Chat() {
                   Approval needed{req.replayed ? ' (restored)' : ''}
                 </Text>
               </View>
-              {req.toolName ? <Text style={s.sheetKicker}>{req.toolName}</Text> : null}
-              <Text style={s.sheetBody} selectable>
-                {req.command ?? req.description ?? 'The agent wants to run a command.'}
-              </Text>
-              {req.description && req.description !== req.command ? (
-                <Text style={s.sheetDesc}>{req.description}</Text>
-              ) : null}
+              {/* BUG-082: the body scrolls inside a height-capped card; the
+                  choices row below stays pinned and always reachable, no
+                  matter how long the command/description is. */}
+              <ScrollView style={s.sheetScroll} nestedScrollEnabled>
+                {req.toolName ? <Text style={s.sheetKicker}>{req.toolName}</Text> : null}
+                <Text style={s.sheetBody} selectable>
+                  {req.command ?? req.description ?? 'The agent wants to run a command.'}
+                </Text>
+                {req.description && req.description !== req.command ? (
+                  <Text style={s.sheetDesc}>{req.description}</Text>
+                ) : null}
+              </ScrollView>
               <View style={s.sheetRow}>
                 {approvalChoices.map((c) => {
                   const deny = c === 'deny'
@@ -1122,7 +1176,13 @@ export default function Chat() {
                         pressed && s.btnPressed,
                       ]}
                       onPress={() => {
-                        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+                        // BUG-050: refusing the agent is a warning, not a
+                        // success — the haptic language must match the red
+                        // Deny styling (AlertDialog uses Warning for
+                        // destructive choices too).
+                        void Haptics.notificationAsync(
+                          deny ? Haptics.NotificationFeedbackType.Warning : Haptics.NotificationFeedbackType.Success,
+                        )
                         void respondApproval(c as 'once' | 'session' | 'always' | 'deny')
                       }}
                       accessibilityLabel={c}
@@ -1145,6 +1205,9 @@ export default function Chat() {
               </View>
               {isBatchClarify ? (
                 <>
+                  {/* BUG-082: unbounded question count — the list scrolls;
+                      the Send button below stays pinned. */}
+                  <ScrollView style={s.sheetScroll} nestedScrollEnabled>
                   {req.questions!.map((q) => (
                     <View key={q.qid} style={{ marginBottom: 10 }}>
                       <Text style={s.qText}>{q.question ?? q.qid}</Text>
@@ -1170,6 +1233,7 @@ export default function Chat() {
                       ) : null}
                     </View>
                   ))}
+                  </ScrollView>
                   <Pressable
                     style={({ pressed }) => [s.sheetBtn, { backgroundColor: C.accent }, pressed && s.btnPressed]}
                     onPress={() => { void respondClarifyBatch(batchAnswers) }}
@@ -1179,6 +1243,9 @@ export default function Chat() {
                 </>
               ) : (
                 <>
+                  {/* BUG-082: long question/many options scroll; the answer
+                      input stays pinned. */}
+                  <ScrollView style={s.sheetScroll} nestedScrollEnabled>
                   <Text style={s.sheetBody}>{req.question ?? 'Clarification needed'}</Text>
                   {req.options?.map((o) => (
                     <Pressable
@@ -1189,6 +1256,7 @@ export default function Chat() {
                       <Text style={s.clarifyText}>{o}</Text>
                     </Pressable>
                   ))}
+                  </ScrollView>
                   <View style={s.clarifyRow}>
                     <TextInput
                       style={[s.qInput, { flex: 1 }]}
@@ -1219,9 +1287,13 @@ export default function Chat() {
                   {req.method === 'sudo' ? 'Sudo requested' : 'Secret requested'}
                 </Text>
               </View>
-              <Text style={s.sheetBody} selectable>
-                {req.prompt}
-              </Text>
+              {/* BUG-082: long prompt scrolls; the password field and the
+                  Send/Deny row stay pinned. */}
+              <ScrollView style={s.sheetScroll} nestedScrollEnabled>
+                <Text style={s.sheetBody} selectable>
+                  {req.prompt}
+                </Text>
+              </ScrollView>
               <TextInput
                 style={s.qInput}
                 value={secretValue}
@@ -1249,7 +1321,7 @@ export default function Chat() {
           ) : null}
 
           {/* ── Composer: rounded pill, like ChatGPT ── */}
-          <View style={[s.composerWrap, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+          <Animated.View style={[s.composerWrap, composerPad]}>
             {queued.length > 0 ? (
               <View style={s.queueStrip}>
                 <View style={s.queueHead}>
@@ -1372,6 +1444,7 @@ export default function Chat() {
                 <VoiceRecStrip recorder={recorder} secs={recSecs} onCancel={() => { void cancelRecording() }} />
               ) : (
                 <TextInput
+                  ref={inputRef}
                   style={s.input}
                   value={input}
                   onChangeText={updateInput}
@@ -1440,6 +1513,7 @@ export default function Chat() {
               <Pressable
                 style={({ pressed }) => [s.steerChip, steerMode && s.steerChipOn, pressed && s.btnPressed]}
                 onPress={() => setSteerMode(!steerMode)}
+                hitSlop={8}
                 accessibilityRole="button"
                 accessibilityLabel={steerMode ? 'Steer mode on' : 'Steer mode'}
               >
@@ -1447,7 +1521,7 @@ export default function Chat() {
                 <Text style={[s.steerText, steerMode && { color: C.onAccent }]}>Steer</Text>
               </Pressable>
             ) : null}
-          </View>
+          </Animated.View>
 
           {/* Interactive pickers — attach sources, /model, options/mixed commands, and the command browser */}
           <AttachSheet
@@ -1505,7 +1579,9 @@ const makeS = () => StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
   // Shared press feedback so every tappable answers on the frame it's hit.
   btnPressed: { opacity: 0.6 },
-  banner: { backgroundColor: '#241A08', paddingVertical: 9, paddingHorizontal: 14 },
+  // BUG-017: amberSoft token — the literal was hue-locked to Mocheme and
+  // clashed with Relay's teal band after a theme switch.
+  banner: { backgroundColor: C.amberSoft, paddingVertical: 9, paddingHorizontal: 14 },
   bannerText: { color: C.amber, fontSize: 12.5, fontWeight: '600', textAlign: 'center' },
   empty: { paddingHorizontal: 16, paddingTop: 24, gap: 2 },
   booting: { flex: 1, flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 80 },
@@ -1572,7 +1648,12 @@ const makeS = () => StyleSheet.create({
   slashName: { color: C.text, fontSize: 14, fontWeight: '600' },
   slashMeta: { color: C.textFaint, fontSize: 11.5, marginTop: 1, lineHeight: 15 },
   slashKind: { color: C.textFaint, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
-  sheet: { marginHorizontal: 12, marginBottom: 8, backgroundColor: C.bgElev, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: C.border },
+  // BUG-082: cap the card so a long prompt can never push its own action
+  // row (or the composer) below the fold; the body scrolls instead.
+  sheet: { marginHorizontal: 12, marginBottom: 8, backgroundColor: C.bgElev, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: C.border, maxHeight: '55%', overflow: 'hidden' },
+  // The body shrinks (flexShrink) inside the capped card and scrolls; the
+  // action rows after it keep their intrinsic height and stay pinned.
+  sheetScroll: { flexShrink: 1 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
   sheetTitle: { color: C.text, fontSize: 13.5, fontWeight: '700' },
   sheetKicker: { color: C.textFaint, fontSize: 11.5, marginBottom: 4 },

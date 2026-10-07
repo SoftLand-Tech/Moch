@@ -284,6 +284,10 @@ function SettingsInner() {
     showAlert('Forget this computer?', 'Removes the current computer from this device. Others stay saved.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Forget', style: 'destructive', onPress: async () => {
+        // BUG-034: tear the socket down BEFORE forgetting — the old flow
+        // left a live 'open' connection to the machine it just revoked
+        // (green "Connected" hero, its events still streaming in).
+        disconnect()
         const remaining = await forgetActiveServer()
         const next = mostRecentServer(remaining)
         if (next) {
@@ -513,10 +517,12 @@ const makeS = () => StyleSheet.create({
   rowInner: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10 },
   rowIcon: {
     width: 30, height: 30, borderRadius: 9,
-    backgroundColor: 'rgba(247,146,54,0.12)',
+    // BUG-017: theme token, not a hard-coded Mocheme literal (the literal
+    // kept the chips orange under the Relay theme).
+    backgroundColor: C.accentSoft,
     alignItems: 'center', justifyContent: 'center',
   },
-  rowIconDanger: { backgroundColor: 'rgba(239,68,68,0.12)' },
+  rowIconDanger: { backgroundColor: C.redSoft },
   rowText: { flex: 1, gap: 1 },
   rowLabel: { color: C.text, fontSize: 15, fontWeight: '600' },
   rowLabelDisabled: { color: C.textDim },
