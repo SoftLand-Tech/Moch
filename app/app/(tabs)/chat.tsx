@@ -176,6 +176,9 @@ export default function Chat() {
   const [recSecs, setRecSecs] = useState(0)
   const voiceState = useStore(voiceBusy)
   const recTimer = useRef<ReturnType<typeof setInterval> | null>(null)
+  // BUG-048: mirrors recSecs so the interval callback can check the limit
+  // without a side effect inside a state updater.
+  const recSecsRef = useRef(0)
   const slashSeq = useRef(0)
   // BUG-043: the slash starter focuses the composer so the palette opens.
   const inputRef = useRef<TextInput>(null)
@@ -756,11 +759,14 @@ export default function Chat() {
       recorder.record()
       setRecording(true)
       setRecSecs(0)
+      recSecsRef.current = 0
       recTimer.current = setInterval(() => {
-        setRecSecs((n) => {
-          if (n + 1 >= 120) void finishRecording()
-          return n + 1
-        })
+        // BUG-048: the limit check lives OUTSIDE the state updater — updaters
+        // must be pure, and finishRecording() (async: recorder stop, haptics,
+        // transcription) is not idempotent.
+        recSecsRef.current += 1
+        setRecSecs(recSecsRef.current)
+        if (recSecsRef.current >= 120) void finishRecording()
       }, 1000)
     } catch (e) {
       stopRecTimer()

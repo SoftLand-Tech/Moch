@@ -114,7 +114,9 @@ function ProviderStep({ onNext }: { onNext: () => void }) {
   useEffect(() => { void fetchModelOptions().catch(() => {}) }, [])
   return (
     <>
-      <Text style={s.sub}>Pick the model provider the agent should use. Keys are stored on this phone.</Text>
+      {/* BUG-052: the wire truth is server-side (model.save_key RPC) — the
+          old "on this phone" copy contradicted the Models tab and reality. */}
+      <Text style={s.sub}>Pick the model provider the agent should use. Keys are stored on your computer (the agent's server).</Text>
       {providers.slice(0, 8).map((p) => (
         <Pressable key={p.slug} style={[s.card, picked === p.slug && s.cardOn]} onPress={() => setPicked(p.slug)}>
           <View style={s.cardHead}>

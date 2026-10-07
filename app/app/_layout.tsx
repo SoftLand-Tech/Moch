@@ -19,6 +19,8 @@ import {
   forgetActiveServer, mostRecentServer, onDialConfig, type SavedServer,
   everConnected,
 } from '../src/lib/gateway'
+import { loadSessions } from '../src/lib/sessionList'
+import { refreshRunningAutomations } from '../src/lib/automationsState'
 import { hookChatEvents, loadOutbox, switchToSession } from '../src/lib/chat'
 import { loadAttention, pendingOpenStoredId, requestOpenSession } from '../src/lib/attention'
 import { flushDrafts, loadDrafts } from '../src/lib/drafts'
@@ -167,6 +169,16 @@ export default function RootLayout() {
       }
     })
 
+    // BUG-055: ONE centralized 60s poller for the whole app — the per-shell
+    // intervals scaled with mounted tabs (up to ~7 pollers, since
+    // expo-router tabs stay mounted after first visit).
+    const pollId = setInterval(() => {
+      if (isConnectedAtom.get()) {
+        void loadSessions()
+        void refreshRunningAutomations()
+      }
+    }, 60_000)
+
     // "Ask Moch" share target: cold-start pull (a share captured in
     // MainActivity.onCreate) + the MochShareIn nudge. Routing happens in the
     // sharedIn effect below (and per-pull via the callback) so a share always
@@ -195,6 +207,7 @@ export default function RootLayout() {
       offToken()
       sub.remove()
       appSub.remove()
+      clearInterval(pollId)
       offShare()
       removeNotifSub?.()
     }
