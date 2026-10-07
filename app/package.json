@@ -71,10 +71,11 @@
     "test:media": "tsx scripts/test-media.ts",
     "test:voice": "tsx scripts/test-voice.ts",
     "test:live": "tsx scripts/test-live.ts",
-    "verify": "npm run typecheck && npm run test && npm run test:imports && npm run test:live && npm run test:order && npm run test:chatlist && npm run test:attention && npm run test:queue && npm run test:slash && npm run test:interactive && npm run test:command-output && npm run test:media && npm run test:sharein && npm run test:voice",
+    "verify": "npm run typecheck && npm run test && npm run test:imports && npm run test:live && npm run test:order && npm run test:chatlist && npm run test:attention && npm run test:queue && npm run test:slash && npm run test:interactive && npm run test:command-output && npm run test:media && npm run test:sharein && npm run test:terminal && npm run test:voice",
     "pair": "./scripts/hermes-pair.sh",
     "watch": "./scripts/hermes-push-watch.sh",
-    "test:sharein": "tsx scripts/test-sharein.ts"
+    "test:sharein": "tsx scripts/test-sharein.ts",
+    "test:terminal": "tsx scripts/test-terminal.ts"
   },
   "private": true
 }

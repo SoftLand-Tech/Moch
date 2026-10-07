@@ -35,6 +35,13 @@ interface HermesBridgeModule {
   linuxStatus(): Promise<{ bootstrapped: boolean; sizeMb: number; distro: string }>
   linuxStatusLive(): Promise<{ bootstrapped: boolean; sizeMb: number; distro: string }>
   linuxReset(): Promise<boolean>
+  linuxTermProbe(): Promise<{ pty: boolean; guest: boolean; shell: boolean; error?: string }>
+  linuxTermStart(cols: number, rows: number): Promise<{ ok: boolean; alreadyRunning: boolean; error?: string }>
+  linuxTermWrite(dataB64: string): Promise<boolean>
+  linuxTermDrain(): Promise<{ chunks: string[]; alive: boolean }>
+  linuxTermReplay(): Promise<{ chunk: string; alive: boolean }>
+  linuxTermResize(cols: number, rows: number): Promise<boolean>
+  linuxTermKill(): Promise<boolean>
 }
 
 
@@ -109,4 +116,56 @@ export function linuxStatus(): Promise<LinuxGuestStatus | null> {
 export function linuxStatusLive(): Promise<LinuxGuestStatus | null> {
   if (!bridge) return Promise.resolve(null)
   return bridge.linuxStatusLive()
+}
+
+// ---- Interactive guest terminal (M9) ----
+
+export interface LinuxTermProbe {
+  pty: boolean
+  guest: boolean
+  shell: boolean
+  error?: string
+}
+
+export interface LinuxTermDrain {
+  chunks: string[]
+  alive: boolean
+}
+
+export function linuxTermProbe(): Promise<LinuxTermProbe | null> {
+  if (!bridge?.linuxTermProbe) return Promise.resolve(null)
+  return bridge.linuxTermProbe()
+}
+
+export function linuxTermStart(
+  cols: number,
+  rows: number,
+): Promise<{ ok: boolean; alreadyRunning: boolean; error?: string } | null> {
+  if (!bridge?.linuxTermStart) return Promise.resolve(null)
+  return bridge.linuxTermStart(cols, rows)
+}
+
+export function linuxTermWrite(dataB64: string): Promise<boolean> {
+  if (!bridge?.linuxTermWrite) return Promise.resolve(false)
+  return bridge.linuxTermWrite(dataB64).catch(() => false)
+}
+
+export function linuxTermDrain(): Promise<LinuxTermDrain | null> {
+  if (!bridge?.linuxTermDrain) return Promise.resolve(null)
+  return bridge.linuxTermDrain().catch(() => null)
+}
+
+export function linuxTermReplay(): Promise<{ chunk: string; alive: boolean } | null> {
+  if (!bridge?.linuxTermReplay) return Promise.resolve(null)
+  return bridge.linuxTermReplay().catch(() => null)
+}
+
+export function linuxTermResize(cols: number, rows: number): Promise<boolean> {
+  if (!bridge?.linuxTermResize) return Promise.resolve(false)
+  return bridge.linuxTermResize(cols, rows).catch(() => false)
+}
+
+export function linuxTermKill(): Promise<boolean> {
+  if (!bridge?.linuxTermKill) return Promise.resolve(false)
+  return bridge.linuxTermKill().catch(() => false)
 }

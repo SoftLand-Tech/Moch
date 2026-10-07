@@ -24,6 +24,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="chat" />
       <Tabs.Screen name="sessions" />
       <Tabs.Screen name="agent" />
+      <Tabs.Screen name="terminal" />
       <Tabs.Screen name="automations" />
       <Tabs.Screen name="skills" />
       <Tabs.Screen name="connectors" />
