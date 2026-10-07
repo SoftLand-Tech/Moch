@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { View, Text, FlatList, Pressable, TextInput, StyleSheet, RefreshControl } from 'react-native'
+import { View, Text, FlatList, Pressable, TextInput, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { Icon } from '../../src/components/Icon'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -172,7 +172,10 @@ function SessionsInner() {
         </Pressable>
       ) : null}
 
-      {error ? (
+      {/* BUG-022: while offline this row's retry is a dead button (load
+          early-returns) and it stacked on top of the offline row — the
+          offline row covers the offline state, so this one yields. */}
+      {error && online ? (
         <Pressable style={({ pressed }) => [s.errRow, pressed && s.btnPressed]} onPress={() => { void load(true) }}>
           <Text style={s.errText}>{error} — tap to retry</Text>
         </Pressable>
@@ -219,10 +222,19 @@ function SessionsInner() {
           )
         }}
         ListEmptyComponent={
-          !loading ? (
+          loading && !list.length ? (
+            // BUG-021: first open shows a spinner instead of a blank void.
             <View style={s.emptyWrap}>
-              <Text style={s.empty}>{online ? (query ? 'No matches' : 'No conversations yet') : 'Offline'}</Text>
-              {online && !query ? (
+              <ActivityIndicator color={C.accent} />
+            </View>
+          ) : !loading ? (
+            <View style={s.emptyWrap}>
+              {/* BUG-021: an error is not emptiness — don't claim "No
+                  conversations yet" while the retry banner is up. */}
+              <Text style={s.empty}>
+                {error ? 'Could not load chats' : online ? (query ? 'No matches' : 'No conversations yet') : 'Offline'}
+              </Text>
+              {online && !query && !error ? (
                 <Pressable style={({ pressed }) => [s.newBtn, pressed && s.btnPressed]} onPress={startNew}>
                   <Text style={s.newText}>Start chatting</Text>
                 </Pressable>
