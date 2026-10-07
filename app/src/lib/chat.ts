@@ -1183,10 +1183,14 @@ export async function ensureSession(opts?: { create?: boolean }): Promise<string
         if (activeStoredId.get() === r.storedId) activeSession.set(r.sessionId)
         return r.sessionId
       } catch (err) {
+        // BUG-014: reattach failed (dead stored id after a serve reinstall,
+        // or a resume-specific error). Silently minting a fresh session and
+        // switching to it HIJACKED the screen mid-look AND rerouted the
+        // in-flight send into an empty chat with the real error swallowed.
+        // Fail loudly instead: sendPrompt's catch marks the user row failed
+        // with THIS error and the user stays on the chat they were reading.
         log('warn', 'chat', `could not reattach released session: ${String(err)}`)
-        const fresh = await createSession()
-        activeSession.set(fresh.sessionId)
-        return fresh.sessionId
+        throw err instanceof Error ? err : new Error(String(err))
       }
     }
     return current
@@ -1534,10 +1538,13 @@ export async function resetSessionCaches(): Promise<void> {
 /** Append a message the app produced itself (e.g. slash command output).
  *  `cmd` labels a command-output card; it rides the message object (and the
  *  persistence envelope, which stores whole messages) write-once. */
-export function pushLocalMessage(text: string, role: 'user' | 'assistant' = 'assistant', cmd?: CommandMeta) {
+export function pushLocalMessage(text: string, role: 'user' | 'assistant' = 'assistant', cmd?: CommandMeta, targetSid?: string) {
   const t = text.trim()
   if (!t) return
-  const sid = activeSession.get()
+  // BUG-015: an explicit target wins — the active chat may have changed
+  // while the command's RPC was in flight, and the output card belongs to
+  // the chat the command ran against.
+  const sid = targetSid ?? activeSession.get()
   if (!sid) return
   const s = sessionsById.get()[sid]
   if (!s) return
@@ -1839,6 +1846,12 @@ export async function steerRun(text: string) {
   const t = text.trim().slice(0, 4000)
   if (!sid || !t) return
   const userRow = { id: nid(), role: 'user' as const, text: t, ts: Date.now() }
+  // BUG-015: the user row belongs to `sid` — read THAT session's messages
+  // from the map at patch time, never the computed ACTIVE view. The old
+  // `messages.get()` resolved to whichever chat was active after the RPC:
+  // switching mid-steer grafted — or wholesale replaced — the WRONG chat's
+  // transcript while the steer bubble appeared nowhere.
+  const targetMessages = () => sessionsById.get()[sid]?.messages ?? []
   // Prefer a true interrupt: `session.redirect` cancels the in-flight model
   // request (completed work + partial reasoning stay as context), appends the
   // text as a real user message, and the agent loop retries NOW — so a steer
@@ -1848,7 +1861,7 @@ export async function steerRun(text: string) {
   try {
     const r = await rpc<{ status?: string }>('session.redirect', { session_id: sid, text: t })
     if (r?.status === 'redirected' || r?.status === 'queued') {
-      patchSession(sid, { messages: [...messages.get(), userRow] })
+      patchSession(sid, { messages: [...targetMessages(), userRow] })
       return
     }
   } catch {
@@ -1857,7 +1870,7 @@ export async function steerRun(text: string) {
   // Fallback: buffer for the next tool-batch boundary. Works WHILE busy —
   // separate path from sendPrompt.
   await rpc('session.steer', { session_id: sid, text: t })
-  patchSession(sid, { messages: [...messages.get(), userRow] })
+  patchSession(sid, { messages: [...targetMessages(), userRow] })
 }
 
 // ── Busy-queue flush ───────────────────────────────────────────────────────

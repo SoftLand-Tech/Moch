@@ -447,12 +447,14 @@ export default function Chat() {
       if (out.action === 'show' && out.text) {
         // Command outputs render as the card family; the label is normalized
         // here once (slashLabel covers both name conventions out of slash.ts).
+        // BUG-015: file the card onto the chat the command RAN against (`s`,
+        // resolved before the await) — the active chat may have changed.
         pushLocalMessage(out.text, 'assistant', {
           name: slashLabel(out.name),
           variant: out.subtype,
           suggestion: out.suggestion,
           hint: out.hint,
-        })
+        }, s)
       }
       updateInput('')
       setSlashItems(null)
