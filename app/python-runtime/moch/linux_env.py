@@ -424,6 +424,12 @@ def bootstrap(distro: str = "ubuntu-24.04") -> dict:
     first — never merged over). An absent stamp with an existing rootfs
     keeps it: the M7.5 → M8 upgrade path.
     """
+    # Setup wizard's "Continue without Linux" sends distro="skip" — not a
+    # ROOTFS_URLS key, so falling through died with a KeyError the UI showed
+    # as "the install failed". A skip is a successful no-op, not a failure.
+    if distro == "skip":
+        return {"ok": True, "skipped": True, "steps": ["Skipped — no Linux guest installed"]}
+
     machine = os.uname().machine
     if machine != "aarch64":
         # Pinned artifacts are aarch64-only; no loader jniLib exists for
