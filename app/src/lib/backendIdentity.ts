@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { log } from './log'
 import type { ConnConfig } from './gateway'
-import { resetSessionCaches, loadOutbox, OUTBOX_KEY } from './chat'
+import { resetSessionCaches, resetOutbox, loadOutbox, OUTBOX_KEY } from './chat'
 import { resetDrafts, loadDrafts, DRAFTS_KEY } from './drafts'
 import { resetSendQueue, loadSendQueue, QUEUE_KEY } from './sendQueue'
 import { resetChatMarks, MARKS_KEY } from './chatListState'
@@ -85,6 +85,11 @@ export async function syncBackendIdentity(c: ConnConfig): Promise<void> {
   }
   // In-memory FIRST, through each cache's own reset helper.
   await resetSessionCaches()
+  // BUG-019: the outbox atom had no reset — a failed reload below left the
+  // OLD machine's unsent texts live in memory (and even a successful switch
+  // left them when the new machine had no shelved outbox). Clear before the
+  // shelf/restore dance; the loadOutbox() at the end re-reads storage.
+  resetOutbox()
   resetDrafts()
   resetSendQueue()
   resetChatMarks()
