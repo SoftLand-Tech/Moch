@@ -368,8 +368,13 @@ export function ScreenShell({
       {S.trayHeader ? (
         // Mocheme tray — one row: the title floats dead-center (absolutely
         // positioned, inset by the measured controls width so it can never
-        // run under the model chip; onSearch deliberately has no tray
-        // affordance — search lives in the drawer's Chats tab).
+        // run under the model chip).
+        // REVIEW FIX (BUG-018 regression): the redesign removed the drawer's
+        // Chats entry, and this tray branch used to omit the onSearch
+        // affordance — together that made /(tabs)/sessions (and its
+        // pending-questions banner) unreachable in the DEFAULT theme, the
+        // exact bug the drawer entry was added to fix. The search circle now
+        // renders in the tray too, same as the Relay header.
         // The card starts BELOW the status bar (marginTop carries the inset);
         // padding the inset inside the card used to paint a tall empty head
         // above the buttons — the "top padding too much" bug.
@@ -396,6 +401,16 @@ export function ScreenShell({
             </Pressable>
             <View style={s.traySpacer} />
             <View style={s.trayRight}>
+              {onSearch ? (
+                <Pressable
+                  style={({ pressed }) => [s.trayCircle, pressed && s.circlePressed]}
+                  onPress={onSearch}
+                  hitSlop={8}
+                  accessibilityLabel="All chats"
+                >
+                  <Icon name="search" size={18} color={C.text} />
+                </Pressable>
+              ) : null}
               {right}
               {/* BUG-046: the status chip is now a real reconnect control —
                   it used to be an inert Pressable with no press feedback
