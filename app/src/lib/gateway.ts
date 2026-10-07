@@ -42,6 +42,11 @@ export const connConfig = atom<ConnConfig | null>(null)
 export const gatewayError = atom<string | null>(null)
 export const reconnectAttempt = atom(0)
 export const isConnected = computed(connectionState, (s) => s === 'open')
+/** True once any dial has fully opened this app run. The boot connection
+ *  veil only owns the screen BEFORE the first successful connect — after
+ *  that, mid-session drops degrade to the chat screen's own offline banner
+ *  instead of covering the whole app (BUG-005). */
+export const everConnected = atom(false)
 // Back-compat alias (old code imported `connected`)
 export const connected = isConnected
 
@@ -587,6 +592,7 @@ async function dial(c: ConnConfig, opts?: { isRetry?: boolean }): Promise<void> 
   if (gen !== connectGen) return
   reconnectAttempt.set(0)
   connectionState.set('open')
+  everConnected.set(true)
   log('info', 'gateway', `connected ${redactedUrl(v)}${ready ? '' : ' (no gateway.ready yet)'}`)
   await persist
 }

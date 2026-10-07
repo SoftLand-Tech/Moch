@@ -64,7 +64,7 @@ import { AttachSheet } from '../../src/components/media/AttachSheet'
 import { chatTabFocused } from '../../src/lib/attention'
 import { draftFor, setDraft } from '../../src/lib/drafts'
 import { shareInInbox, ackShareIn, applySharedToDraft, type SharedFile } from '../../src/lib/shareIn'
-import { isConnected as isConnectedAtom, connectionState, gatewayError, retryNow, reconnectAttempt } from '../../src/lib/gateway'
+import { isConnected as isConnectedAtom, connectionState, gatewayError, retryNow } from '../../src/lib/gateway'
 import { completeSlash, loadCatalog, runCommand, parseSlashCommand, canonicalName, interactiveTarget, describeCommand, subsFor, argumentModeFor, slashLabel, localCompleteSync, type CompletionItem, type SlashOutcome } from '../../src/lib/slash'
 import { liveModel, liveReasoning, liveReasoningDisplay, fetchReasoningDisplay } from '../../src/lib/modelState'
 import { ModelPickerSheet } from '../../src/components/ModelPickerSheet'
@@ -120,13 +120,14 @@ export default function Chat() {
     const t = setTimeout(() => setOfflineGrace(false), 2500)
     return () => clearTimeout(t)
   }, [online])
-  // The connect window (~1s wifi, up to 4s mobile data) is NOT an outage:
-  // showing OFFLINE while the dial is in flight made healthy opens look
-  // broken. Same for the first auto-reconnects after a mid-session drop —
-  // the app is already dialing and about to heal. OFFLINE appears when
-  // reconnects keep failing (3rd+ attempt, ~7s+ of real outage).
-  const reconnects = useStore(reconnectAttempt)
-  const showOfflineBanner = !online && !offlineGrace && connState !== 'connecting' && reconnects < 2
+  // BUG-005: after the grace window, the banner is the mid-session outage
+  // surface (the boot veil no longer covers the app once this run has
+  // connected). While a dial is in flight it reads "Connecting…"; during
+  // backoff waits (state 'closed') it reads "Offline — tap to retry", so
+  // there is continuous feedback through the whole outage instead of the
+  // old inverted attempt-gate that hid the banner exactly when the outage
+  // was real.
+  const showOfflineBanner = !online && !offlineGrace
   const conn = useStore(connectionState)
   const gerr = useStore(gatewayError)
   const curModel = useStore(liveModel)
