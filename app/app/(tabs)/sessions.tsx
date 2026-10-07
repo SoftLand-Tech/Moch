@@ -13,7 +13,11 @@ import {
   activeStoredId,
   busyStoredKey,
   pendingCount,
+  sessionsById,
+  isSessionNotFound,
+  pendingStoredIds,
 } from '../../src/lib/chat'
+import { forgetChatMarks } from '../../src/lib/chatListState'
 import { C, useStyles } from '../../src/lib/theme'
 import { attentionById, rowStatus } from '../../src/lib/attention'
 import { ScreenShell } from '../../src/components/ScreenShell'
@@ -73,6 +77,9 @@ function SessionsInner() {
   const busy = useMemo(() => (busyKey ? busyKey.split(',') : []), [busyKey])
   const attention = useStore(attentionById)
   const pending = useStore(pendingCount)
+  // BUG-085: unanswered questions keep their row dot even after the chat was
+  // opened (opening clears the event-driven mark; the question still blocks).
+  const pendingStored = useStore(pendingStoredIds)
 
   // The store is shared with the drawer, so both show the same list in the
   // same order. `search` is not a valid RPC param (extra="forbid"), so the
@@ -123,11 +130,30 @@ function SessionsInner() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          // `session.delete` is the real method; the fallback loop is gone
-          // because unknown methods answer -32601 and hide a genuine failure.
+          // BUG-004: mirror the drawer's flow — the gateway refuses to delete
+          // a session that is live in its process ("cannot delete an active
+          // session"; live handles persist for hours), so detach first, then
+          // close the live handle best-effort. A row id from session.list is
+          // a STORED id and forgetSession is live-keyed, so resolve before
+          // cleanup; 'not found' (deleted elsewhere) means the goal is
+          // already achieved — clean up locally instead of failing.
           try {
-            await rpc('session.delete', { session_id: s.id })
-            await forgetSession(s.id)
+            const live = Object.values(sessionsById.get()).find((x) => x.storedId === s.id)?.id
+            if (activeStoredId.get() === s.id) await newChat()
+            if (live) {
+              try {
+                await rpc('session.close', { session_id: live })
+              } catch {
+                /* best effort — a dead handle must not block the delete */
+              }
+            }
+            try {
+              await rpc('session.delete', { session_id: s.id })
+            } catch (err) {
+              if (!isSessionNotFound(err)) throw err
+            }
+            await forgetSession(live ?? s.id)
+            forgetChatMarks(s.id)
             // Drop it from the shared store so the drawer updates too.
             sessionRows.set(sessionRows.get().filter((x) => x.id !== s.id))
           } catch (e) {
@@ -164,7 +190,13 @@ function SessionsInner() {
       {pending > 0 ? (
         <Pressable
           style={({ pressed }) => [s.alertRow, pressed && s.btnPressed]}
-          onPress={() => router.navigate('/(tabs)/chat')}
+          onPress={() => {
+            // BUG-023: land on the blocking chat itself, not whatever chat
+            // happens to be active.
+            const first = pendingStored[0]
+            router.navigate('/(tabs)/chat')
+            if (first) void switchToSession(first).catch(() => {})
+          }}
         >
           <Text style={s.alertText}>
             {pending} question{pending > 1 ? 's' : ''} waiting on you — tap to answer
@@ -192,7 +224,7 @@ function SessionsInner() {
           // `session.list` yields stored ids; all our per-session state is
           // keyed by the same stored id, so compare in that space.
           const isCurrent = !!currentStored && currentStored === item.id
-          const status = rowStatus(busy.includes(item.id), attention[item.id])
+          const status = rowStatus(busy.includes(item.id), attention[item.id], pendingStored.includes(item.id))
           const label = item.title || item.preview?.slice(0, 80) || 'Untitled'
           return (
             <Pressable

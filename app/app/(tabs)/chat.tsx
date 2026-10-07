@@ -1096,13 +1096,18 @@ export default function Chat() {
                   Approval needed{req.replayed ? ' (restored)' : ''}
                 </Text>
               </View>
-              {req.toolName ? <Text style={s.sheetKicker}>{req.toolName}</Text> : null}
-              <Text style={s.sheetBody} selectable>
-                {req.command ?? req.description ?? 'The agent wants to run a command.'}
-              </Text>
-              {req.description && req.description !== req.command ? (
-                <Text style={s.sheetDesc}>{req.description}</Text>
-              ) : null}
+              {/* BUG-082: the body scrolls inside a height-capped card; the
+                  choices row below stays pinned and always reachable, no
+                  matter how long the command/description is. */}
+              <ScrollView style={s.sheetScroll} nestedScrollEnabled>
+                {req.toolName ? <Text style={s.sheetKicker}>{req.toolName}</Text> : null}
+                <Text style={s.sheetBody} selectable>
+                  {req.command ?? req.description ?? 'The agent wants to run a command.'}
+                </Text>
+                {req.description && req.description !== req.command ? (
+                  <Text style={s.sheetDesc}>{req.description}</Text>
+                ) : null}
+              </ScrollView>
               <View style={s.sheetRow}>
                 {approvalChoices.map((c) => {
                   const deny = c === 'deny'
@@ -1138,6 +1143,9 @@ export default function Chat() {
               </View>
               {isBatchClarify ? (
                 <>
+                  {/* BUG-082: unbounded question count — the list scrolls;
+                      the Send button below stays pinned. */}
+                  <ScrollView style={s.sheetScroll} nestedScrollEnabled>
                   {req.questions!.map((q) => (
                     <View key={q.qid} style={{ marginBottom: 10 }}>
                       <Text style={s.qText}>{q.question ?? q.qid}</Text>
@@ -1162,6 +1170,7 @@ export default function Chat() {
                       ) : null}
                     </View>
                   ))}
+                  </ScrollView>
                   <Pressable
                     style={({ pressed }) => [s.sheetBtn, { backgroundColor: C.accent }, pressed && s.btnPressed]}
                     onPress={() => { void respondClarifyBatch(batchAnswers) }}
@@ -1171,6 +1180,9 @@ export default function Chat() {
                 </>
               ) : (
                 <>
+                  {/* BUG-082: long question/many options scroll; the answer
+                      input stays pinned. */}
+                  <ScrollView style={s.sheetScroll} nestedScrollEnabled>
                   <Text style={s.sheetBody}>{req.question ?? 'Clarification needed'}</Text>
                   {req.options?.map((o) => (
                     <Pressable
@@ -1181,6 +1193,7 @@ export default function Chat() {
                       <Text style={s.clarifyText}>{o}</Text>
                     </Pressable>
                   ))}
+                  </ScrollView>
                   <View style={s.clarifyRow}>
                     <TextInput
                       style={[s.qInput, { flex: 1 }]}
@@ -1211,9 +1224,13 @@ export default function Chat() {
                   {req.method === 'sudo' ? 'Sudo requested' : 'Secret requested'}
                 </Text>
               </View>
-              <Text style={s.sheetBody} selectable>
-                {req.prompt}
-              </Text>
+              {/* BUG-082: long prompt scrolls; the password field and the
+                  Send/Deny row stay pinned. */}
+              <ScrollView style={s.sheetScroll} nestedScrollEnabled>
+                <Text style={s.sheetBody} selectable>
+                  {req.prompt}
+                </Text>
+              </ScrollView>
               <TextInput
                 style={s.qInput}
                 value={secretValue}
@@ -1564,7 +1581,12 @@ const makeS = () => StyleSheet.create({
   slashName: { color: C.text, fontSize: 14, fontWeight: '600' },
   slashMeta: { color: C.textFaint, fontSize: 11.5, marginTop: 1, lineHeight: 15 },
   slashKind: { color: C.textFaint, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
-  sheet: { marginHorizontal: 12, marginBottom: 8, backgroundColor: C.bgElev, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: C.border },
+  // BUG-082: cap the card so a long prompt can never push its own action
+  // row (or the composer) below the fold; the body scrolls instead.
+  sheet: { marginHorizontal: 12, marginBottom: 8, backgroundColor: C.bgElev, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: C.border, maxHeight: '55%', overflow: 'hidden' },
+  // The body shrinks (flexShrink) inside the capped card and scrolls; the
+  // action rows after it keep their intrinsic height and stay pinned.
+  sheetScroll: { flexShrink: 1 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
   sheetTitle: { color: C.text, fontSize: 13.5, fontWeight: '700' },
   sheetKicker: { color: C.textFaint, fontSize: 11.5, marginBottom: 4 },
