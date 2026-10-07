@@ -138,7 +138,7 @@ function isGatewayPath(path: string): boolean {
 // paths inside markdown/directive tokens, and unknown extensions all stay
 // text (overlaps are dropped later by splitMediaFromText's cursor check).
 
-const BARE_PATH_TOKEN_RE = /\/[^\s`"'<>()[\]{}]+/g
+const BARE_PATH_TOKEN_RE = /~?\/[^\s`"'<>()[\]{}]+/g
 /** Sentence punctuation riding on the end of a path ("/tmp/a.png."). */
 const BARE_PATH_TRAILING = /[.,;:!?]+$/
 
@@ -157,9 +157,12 @@ export function extractBarePaths(text: string): BarePathMatch[] {
     const start = m.index ?? 0
     const end = start + token.length
     if (token.length < 4) continue
-    // A gateway path has a directory part ("~/x" aside, "/" alone is prose):
-    // skip "/a.jpg" at the root, and anything whose preceding char folds it
+    // A gateway path has a directory part ("/" alone is prose): skip
+    // "/a.jpg" at the root, and anything whose preceding char folds it
     // into a larger token (https: , foo/bar, another slash).
+    // `~/…` counts as directory-parted — the gateway resolves `~` via
+    // expanduser, so home-rooted agent references (`~/.hermes/images/…`,
+    // `~/relay-uploads/…`) are servable paths, not prose.
     if (token.indexOf('/', 1) < 0) continue
     const prev = start > 0 ? text[start - 1] ?? '' : ''
     if (/[\w:/.@~]/.test(prev)) continue

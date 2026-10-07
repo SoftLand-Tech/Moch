@@ -300,6 +300,36 @@ async function main() {
     const par = m.splitMediaFromText('(see /tmp/a.jpg)')
     check('path inside parentheses extracts (parens are token boundaries)', par.media.length === 1 && par.media[0]!.path === '/tmp/a.jpg')
 
+    // Home-rooted references: the gateway resolves `~` via expanduser, so
+    // the agent's `~/.hermes/images/…` / `~/relay-uploads/…` prose must
+    // extract (previously the `~` prev-char guard dropped them to text).
+    const homeImg = m.splitMediaFromText("Here's your photo: ~/.hermes/images/shot.png")
+    check(
+      'home-rooted image path extracts',
+      homeImg.media.length === 1 && homeImg.media[0]!.mediaType === 'image' && homeImg.media[0]!.path === '~/.hermes/images/shot.png',
+      JSON.stringify(homeImg),
+    )
+    const homeDoc = m.splitMediaFromText('Report ready: ~/relay-uploads/report.pdf')
+    check(
+      'home-rooted doc path extracts as a file segment',
+      homeDoc.media.length === 1 && homeDoc.media[0]!.mediaType === 'file' && homeDoc.media[0]!.path === '~/relay-uploads/report.pdf',
+      JSON.stringify(homeDoc),
+    )
+    const homeAud = m.splitMediaFromText('Listen: ~/.hermes/workspace/voice.m4a')
+    check(
+      'home-rooted audio path extracts with the right kind',
+      homeAud.media.length === 1 && homeAud.media[0]!.mediaType === 'audio',
+      JSON.stringify(homeAud),
+    )
+    check(
+      'glued ~/ token stays text (mid-word, no boundary)',
+      m.splitMediaFromText('see foo~/bar.png here').media.length === 0,
+    )
+    check(
+      'home-rooted path without a known extension stays text',
+      m.splitMediaFromText('see ~/.hermes/notes here').media.length === 0,
+    )
+
     // Round trip through the segment builder, the way applyHistory consumes it.
     const segs = m.extractMedia([{ kind: 'text', text: screenshot } as never])
     check('extractMedia round trip: [text][media]', segs.length === 2 && (segs[0] as { text: string }).text === 'Here it is:' && (segs[1] as { kind: string }).kind === 'media')
