@@ -1872,6 +1872,15 @@ function onServerRequestMessage(req: {
 }): boolean {
   const p = req.params ?? {}
   let sessionId = typeof p.session_id === 'string' ? p.session_id : (activeSession.get() ?? '')
+  // BUG-089: resolve the id through the tracked map before filing —
+  // (a) a request emitted under an OLD live id during resume rotation lands
+  // under a dead key (unmarked AND unanswerable); rebind it to the current
+  // live id for the same stored id.
+  if (sessionId && !sessionsById.get()[sessionId]) {
+    const stored = storedIdFor(sessionId)
+    const rebound = stored ? Object.values(sessionsById.get()).find((s) => s.storedId === stored)?.id : undefined
+    if (rebound) sessionId = rebound
+  }
   // BUG-067: a ''-keyed request can never match any activeSession, so the
   // question would sit unfiled AND unanswerable until the backend's deadline.
   // There is nothing sensible to do with an unaddressable request — log and
