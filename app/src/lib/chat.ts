@@ -2328,7 +2328,18 @@ export function hookChatEvents() {
         const list = [...cur.messages]
         const last = list[list.length - 1]
         if (last?.streaming) {
-          list[list.length - 1] = freezeThoughts({ ...last, streaming: false, text: last.text || msg })
+          list[list.length - 1] = freezeThoughts({
+            ...last,
+            streaming: false,
+            // BUG-010: keep any partial text but MARK the failure — the old
+            // code silently discarded the error (a half-answered turn looked
+            // complete: no failed marker, no error surface) or, on an empty
+            // bubble, rendered the raw error string as the agent's answer
+            // with copy/Listen buttons attached.
+            ...(last.text ? {} : { text: msg }),
+            status: 'failed',
+            error: msg,
+          })
         } else {
           list.push({ id: nid(), role: 'assistant', text: msg, ts: Date.now(), status: 'failed', error: msg })
         }

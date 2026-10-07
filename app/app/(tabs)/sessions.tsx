@@ -212,7 +212,9 @@ function SessionsInner() {
                 <Text style={s.meta} numberOfLines={1}>
                   {item.source ? `${item.source} · ` : ''}
                   {item.message_count ?? 0} msgs
-                  {fmtWhen(item.started_at) ? ` · ${fmtWhen(item.started_at)}` : ''}
+                  {/* BUG-012: the only server timestamp is CREATION time —
+                      label it honestly instead of implying last-used. */}
+                  {fmtWhen(item.started_at) ? ` · started ${fmtWhen(item.started_at)}` : ''}
                 </Text>
               </View>
             </Pressable>
