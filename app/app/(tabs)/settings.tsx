@@ -284,6 +284,10 @@ function SettingsInner() {
     showAlert('Forget this computer?', 'Removes the current computer from this device. Others stay saved.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Forget', style: 'destructive', onPress: async () => {
+        // BUG-034: tear the socket down BEFORE forgetting — the old flow
+        // left a live 'open' connection to the machine it just revoked
+        // (green "Connected" hero, its events still streaming in).
+        disconnect()
         const remaining = await forgetActiveServer()
         const next = mostRecentServer(remaining)
         if (next) {

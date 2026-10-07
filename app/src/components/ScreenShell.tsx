@@ -300,9 +300,11 @@ export function ScreenShell({
 
   const handleDelete = useCallback(async (storedId: string) => {
     try {
-      // The gateway refuses to delete the ACTIVE session: detach the UI into
-      // a fresh chat first, then tear the old runtime down so the delete lands.
-      if (activeStoredId.get() === storedId) await newChat()
+      // BUG-030: the UI detaches only AFTER a successful delete — the old
+      // order (newChat() first) stranded the user in a fresh empty chat when
+      // the delete failed, with the old row still listed. The gateway's
+      // liveness is handled by closing the live handle below; the delete is
+      // what must gate the screen swap.
       const live = liveIdOf(storedId)
       if (live) {
         try {
@@ -321,7 +323,9 @@ export function ScreenShell({
         // other error still surfaces.
         if (!isSessionNotFound(err)) throw err
       }
+      const wasActive = activeStoredId.get() === storedId
       if (live) await forgetSession(live)
+      if (wasActive) await newChat()
       // Drop the row so the drawer updates without waiting for a poll.
       sessionRows.set(sessionRows.get().filter((r) => r.id !== storedId))
       forgetChatMarks(storedId)
