@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Platform: Android](https://img.shields.io/badge/platform-Android-3DDC84)](https://github.com/SoftLand-Tech/Moch/releases/latest)
 
-Moch is an open-source React Native (Expo 57) chat app for **your own [hermes](https://github.com/NousResearch/hermes-agent) agent**. The agent runs on a machine you own — a spare mini-PC at home, a homelab box, a VPS — and Moch is the window onto it from your phone. The app talks to *your* machine: it holds the keys and the sessions; the phone is a very convenient door to them. No accounts: your agent, your hardware, your data.
+Moch is an open-source React Native (Expo 57) chat app for **your own [hermes](https://github.com/NousResearch/hermes-agent) agent** — and it can run that agent two ways: **on a machine you own** (a spare mini-PC, a homelab box, a VPS), with Moch as the window onto it from your phone, or **entirely on your phone** — hermes ships inside the APK, complete with a real Ubuntu Linux it can drive. Either way it's *your* agent: your keys, your sessions, your data. No accounts.
 
 <p align="center">
   <img src="docs/screenshots/03-streaming.png" width="280" alt="Moch streaming a reply live, with a collapsed Thinking block showing elapsed time and tok/s" />
@@ -18,6 +18,12 @@ Moch is an open-source React Native (Expo 57) chat app for **your own [hermes](h
   <img src="docs/screenshots/05-sidebar.png" width="200" alt="Sidebar with chat search filtering the conversation list" />
   <img src="docs/screenshots/08-automations.png" width="200" alt="Automation editor with plain-language schedule and prompt fields" />
 </p>
+
+## Two ways to run your agent
+
+**Linked — the agent on your own machine.** The classic setup: hermes runs on hardware you control, and the phone connects through the official relay (or self-hosted). This is what the current release APK ships — follow [the one-command setup](#set-it-up-with-moch-link--one-command-recommended) below.
+
+**Embedded — the agent on the phone itself.** hermes runs inside the app: CPython 3.11 embedded in the APK, the agent booting at launch, and **Moch Linux** — a real Ubuntu 24.04 userspace under proot with apt, compilers and servers, so the agent can install and run whatever it needs. A foreground service keeps it alive in the background, automations fire on-device, and knocks (push notifications) tell you when a job is done. The embedded runtime is new and ships in development builds — not yet in the GitHub release APK.
 
 ## Set it up with moch-link — one command (recommended)
 
@@ -61,7 +67,8 @@ Moch is a monorepo: the whole product — phone app, link, and website — ships
 
 | Path | What it is |
 | --- | --- |
-| [`app/`](app/) | The **Expo 57 React Native client** (React Native 0.86). Chat UI, pairing, sessions, voice in/out, OTA updates. |
+| [`app/`](app/) | The **Expo 57 React Native client** (React Native 0.86). Chat UI, pairing, sessions, voice in/out, OTA updates — plus the **embedded runtime**: CPython via Chaquopy (`app/python-runtime/`), the vendored hermes tree (`app/hermes-src/`), aarch64 wheels (`app/wheels-android/`), and the Kotlin bridge + proot Linux environment. |
+| [`embedded/`](embedded/) | Design docs and milestone reports for the embedded runtime — the technical assessment, guest-exec under targetSdk 36, Moch Linux, knocks, and on-device verification procedures. |
 | [`moch-link/`](moch-link/) | The **moch-link** installer — the one-command link between an existing hermes install and the official relay. [`docs/install.sh`](docs/install.sh) is the published copy served at `moch.softland.tech/install.sh`; keep the two in sync. |
 | [`relay/`](relay/) | The **official relay** — the single-file Node service phones dial into. Run your own with [`relay/README.md`](relay/README.md); ours at `api.moch.softland.tech` is **free while Moch is new**. |
 | [`docs/`](docs/) | The **website source** (this page's home), published to GitHub Pages. |
@@ -75,6 +82,9 @@ Moch is a monorepo: the whole product — phone app, link, and website — ships
 - **Media and voice messages** — send images to your agent; the mic button records and transcribes through the server's STT, and *Listen* plays a reply through the server's TTS. No audio API keys ever live on the phone.
 - **Slash commands** — typing `/` drives off the gateway's own registry, so new server-side commands and skills appear without an app update.
 - **Automations** — scheduled jobs (cron, in plain language: `every 30m`, `every monday 9:00`) that run on the server, so they fire even when the app is closed.
+- **Moch Linux — a real Ubuntu, in your pocket** *(embedded mode)* — a full Ubuntu 24.04 userspace under proot inside the app's sandbox: the agent can `apt install`, compile, and run servers, all on-device. Verified working under Android's strictest targetSdk.
+- **"Ask Moch" share target** — share text, links, images, videos, audio or PDFs from any app straight into Moch; content lands in the composer as a draft with attachment chips, and you hit Send.
+- **Automation knocks** — when a scheduled job finishes (or needs you), Moch knocks with a push notification that lands even if the app was killed — tapping it opens the right chat.
 - **Provider API keys** — connect and disconnect model providers from the app; keys are stored and used server-side.
 - **OTA updates** — the app updates itself over the air; new features reach phones without a reinstall.
 
