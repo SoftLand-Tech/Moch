@@ -42,6 +42,11 @@ export const connConfig = atom<ConnConfig | null>(null)
 export const gatewayError = atom<string | null>(null)
 export const reconnectAttempt = atom(0)
 export const isConnected = computed(connectionState, (s) => s === 'open')
+/** True once any dial has fully opened this app run. The boot connection
+ *  veil only owns the screen BEFORE the first successful connect — after
+ *  that, mid-session drops degrade to the chat screen's own offline banner
+ *  instead of covering the whole app (BUG-005). */
+export const everConnected = atom(false)
 // Back-compat alias (old code imported `connected`)
 export const connected = isConnected
 
@@ -410,6 +415,13 @@ function ensureClient(): JsonRpcGatewayClient {
       scheduleReconnect()
     }
     if (s === 'open') {
+      // BUG-007: a live socket supersedes any pending reconnect timer. The
+      // timer may have been armed off a supersede 'closed' blip (e.g. a
+      // computer switch) for the PREVIOUS config — leaving it armed would
+      // dial the stale machine seconds later, hijack the healthy socket and
+      // re-point the active computer. Whatever config just opened is the
+      // wanted one; its retry bookkeeping is reset below.
+      cancelReconnect()
       reconnectAttempt.set(0)
       gatewayError.set(null)
     }
@@ -505,6 +517,13 @@ async function dial(c: ConnConfig, opts?: { isRetry?: boolean }): Promise<void> 
     }
   }
   const v = validateConfig(c)
+  // BUG-001: remember the validated config HERE, not only in retryNow —
+  // scheduleReconnect bails on `!lastConfig`, so a socket drop that happened
+  // before any manual retry/foreground cycle never armed a retry at all and
+  // the app sat on the connection veil until the user tapped. Clearing stays
+  // in clearConfig ("forget this computer"); explicit disconnects keep the
+  // config (manualClose guards the timer) so Retry can dial straight back.
+  lastConfig = v
   wantConnection = true
   manualClose = false
   gatewayError.set(null)
@@ -573,6 +592,7 @@ async function dial(c: ConnConfig, opts?: { isRetry?: boolean }): Promise<void> 
   if (gen !== connectGen) return
   reconnectAttempt.set(0)
   connectionState.set('open')
+  everConnected.set(true)
   log('info', 'gateway', `connected ${redactedUrl(v)}${ready ? '' : ' (no gateway.ready yet)'}`)
   await persist
 }
