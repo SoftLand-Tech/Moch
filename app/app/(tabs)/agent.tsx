@@ -237,10 +237,6 @@ export default function Controls() {
             {defaultModel.provider && defaultModel.provider !== 'unknown' ? ` · ${defaultModel.provider}` : ''}
           </Text>
         ) : null}
-        <Text style={s.hint}>
-          “This chat” switches the conversation now; “Everywhere” saves the new
-          default on the server; “Next reply only” tries it for one turn.
-        </Text>
       </View>
 
       <View>
@@ -311,10 +307,6 @@ export default function Controls() {
         {!providers.length && !optsLoading ? (
           <Text style={s.empty}>No provider inventory yet — reconnect or reopen this screen.</Text>
         ) : null}
-        <Text style={s.hint}>
-          Tap a provider to connect it with an API key (stored on your server) or
-          to disconnect one. OAuth providers are set up on the computer.
-        </Text>
       </View>
 
       <View>
@@ -358,11 +350,6 @@ export default function Controls() {
             </Pressable>
           ))}
         </View>
-        <Text style={s.hint}>
-          {effortScope === 'global'
-            ? 'Saved on the server — new chats and every device start on this level. “none” turns thinking off.'
-            : 'Only this conversation; new chats keep the saved default. “none” turns thinking off.'}
-        </Text>
       </View>
 
       <View>
@@ -376,7 +363,6 @@ export default function Controls() {
             accessibilityLabel="Show reasoning"
           />
         </View>
-        <Text style={s.hint}>Saved on the server — applies to every chat.</Text>
       </View>
     </ScrollView>
   )
@@ -479,5 +465,4 @@ const makeS = () => StyleSheet.create({
   effortTextOn: { color: C.onAccent, fontWeight: '800' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: C.bgCard, borderRadius: 12, borderWidth: 1, borderColor: C.border, paddingHorizontal: 14, minHeight: 56 },
   toggleLabel: { color: C.text, fontSize: 14.5, flex: 1 },
-  hint: { color: C.textDim, fontSize: 12, lineHeight: 17, marginTop: 8 },
 })
