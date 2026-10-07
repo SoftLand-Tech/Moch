@@ -1306,7 +1306,7 @@ export default function Chat() {
                             }
                           })
                         }}
-                        hitSlop={6}
+                        hitSlop={8}
                         accessibilityLabel="Send this now as a steer"
                       >
                         <Icon name="flash-outline" size={14} color={C.accent} />
@@ -1315,7 +1315,8 @@ export default function Chat() {
                     <Pressable
                       style={({ pressed }) => [s.queueAct, pressed && s.btnPressed]}
                       onPress={dropQueued}
-                      hitSlop={6}
+                      hitSlop={8}
+                      accessibilityRole="button"
                       accessibilityLabel="Remove queued message"
                     >
                       <Icon name="close" size={14} color={C.textDim} />
@@ -1407,7 +1408,8 @@ export default function Chat() {
                   {voiceState === 'transcribing' ? (
                     <ActivityIndicator color={C.textDim} size="small" />
                   ) : (
-                    <Icon name={recording ? 'square' : 'mic-outline'} size={19} color={recording ? '#fff' : C.textDim} />
+                    // BUG-080: token ink on the accent fill (was a literal).
+                    <Icon name={recording ? 'square' : 'mic-outline'} size={19} color={recording ? C.onAccent : C.textDim} />
                   )}
                 </Pressable>
               )}
