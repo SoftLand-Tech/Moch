@@ -1449,10 +1449,18 @@ export function switchToSession(storedId: string): Promise<string> {
   void loadCachedTranscript(storedId)
   return resumeShared(storedId)
     .then(settle)
-    .catch((err: unknown) => {
+    .catch(async (err: unknown) => {
+      setSessionLoading(storedId, false)
+      if (isSessionNotFound(err)) {
+        // BUG-029: the target doesn't exist (deleted elsewhere, stale
+        // notification). The placeholder would otherwise sit under a
+        // forever-failing retry banner — fall back to a local new chat
+        // instead; the reconciliation sweep drops the placeholder.
+        const fresh = await newChat().catch(() => '')
+        return fresh || activeSession.get() || ''
+      }
       // Keep the placeholder — it holds the cached transcript, so offline
       // reading still works; the banner offers the retry.
-      setSessionLoading(storedId, false)
       failSwitch()
       throw err
     })
@@ -1479,6 +1487,10 @@ export async function forgetSession(liveId: string) {
     }
     clearAttention(stored)
     clearDraft(stored)
+    // BUG-033: the queued sends' attachments ride a memory map keyed by
+    // queued id — drop them with the queue or they leak for the process
+    // lifetime.
+    for (const q of sendQueue.get()[stored] ?? []) queuedAttachments.delete(q.id)
     clearSendQueue(stored)
     setSessionLoading(stored, false)
     // Must drop the STORED-keyed v2 entry (and the legacy v1s) or a deleted
@@ -1522,6 +1534,14 @@ export async function resetSessionCaches(): Promise<void> {
   sessionLoadings.set({})
   pendingBySession.set({})
   storedIdMap = {}
+  // BUG-033: UI residue the old reset skipped — a stale "Couldn't open this
+  // chat" banner (its retry closure targets the PREVIOUS machine's stored
+  // id), buffered stream deltas, queued-send attachments, and the mascot
+  // moment all survived a backend switch.
+  chatBanner.set(null)
+  mochiMoment.set(null)
+  streamBufs.clear()
+  queuedAttachments.clear()
   // storedIdMapLoaded stays true: the map is genuinely empty now, and
   // rememberStoredId repopulates it on the next create/resume/info event.
   try {

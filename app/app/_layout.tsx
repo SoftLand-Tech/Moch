@@ -200,7 +200,12 @@ export default function RootLayout() {
   useEffect(() => {
     if (!pendingOpen || !online) return
     pendingOpenStoredId.set(null)
-    if (Date.now() - pendingOpen.at > 60_000) return
+    if (Date.now() - pendingOpen.at > 60_000) {
+      // BUG-029: a stale tap used to be dropped SILENTLY — the user tapped a
+      // notification and nothing happened, with no hint why.
+      setLinkMsg("That chat couldn't be opened — the connection took too long. Try the notification again.")
+      return
+    }
     try { router.navigate('/(tabs)/chat') } catch {}
     void switchToSession(pendingOpen.storedId).catch(() => {})
   }, [pendingOpen, online, router])
