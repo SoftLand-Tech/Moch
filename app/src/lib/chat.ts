@@ -736,6 +736,11 @@ async function loadStoredIdMap() {
 
 async function rememberStoredId(liveId: string, storedId: string) {
   if (!liveId || !storedId || storedIdMap[liveId] === storedId) return
+  // BUG-064: delete-then-set refreshes the key's insertion order — a plain
+  // assignment kept an old key in its original slot, so the 200-cap evicted
+  // long-lived ACTIVE pairs while stale ones survived (and evictions strand
+  // their legacy v1 transcript blobs forever).
+  delete storedIdMap[liveId]
   storedIdMap[liveId] = storedId
   // Bound the map so it can't grow forever.
   const entries = Object.entries(storedIdMap)
@@ -1775,9 +1780,11 @@ function maybeFlushQueue(liveId: string): void {
       queuedAttachments.delete(head.id)
       // No recursion here: the submit only ACKed — busy is already true, and
       // the new turn's end edge (or its failure) drives the next release.
-    } catch {
-      // Send failed (offline, dead handle…): the head — and its attachments —
-      // stay queued for the next idle edge. No retry loop.
+    } catch (err) {
+      // BUG-073: a session deleted mid-flush throws "not tracked" here —
+      // say so instead of a silent empty catch (acceptable for a deleted
+      // chat, but it should be visible in the log).
+      log('warn', 'chat', `queued head flush failed for ${liveId}: ${String(err)}`)
     } finally {
       queueFlushes.delete(liveId)
     }
@@ -1864,7 +1871,15 @@ function onServerRequestMessage(req: {
   replayed?: boolean
 }): boolean {
   const p = req.params ?? {}
-  const sessionId = typeof p.session_id === 'string' ? p.session_id : (activeSession.get() ?? '')
+  let sessionId = typeof p.session_id === 'string' ? p.session_id : (activeSession.get() ?? '')
+  // BUG-067: a ''-keyed request can never match any activeSession, so the
+  // question would sit unfiled AND unanswerable until the backend's deadline.
+  // There is nothing sensible to do with an unaddressable request — log and
+  // drop it (the backend's own deadline handles its side).
+  if (!sessionId) {
+    log('warn', 'chat', `server request ${req.method} has no session_id and no active chat — dropped`)
+    return false
+  }
 
   switch (req.method) {
     case 'approval': {
@@ -2155,9 +2170,19 @@ export function hookChatEvents() {
         if (!cur) break
         const list = cur.messages
         const last = list[list.length - 1]
-        if (last?.role === 'assistant' && last.streaming) break
+        if (last?.role === 'assistant' && last.streaming) {
+          // BUG-060: a STALE streaming tail (its turn died without a terminal
+          // event — killed process, lost frame) would swallow this new row:
+          // flushStreams grafts the new turn onto the old bubble. Finalize
+          // the stale tail first so each turn renders as its own message.
+          const list2 = [...cur.messages]
+          list2[list2.length - 1] = freezeThoughts({ ...last, streaming: false })
+          patchSession(eSid, { messages: list2 })
+        }
+        const cur2 = sessionsById.get()[eSid]
+        const list2 = cur2?.messages ?? []
         patchSession(eSid, {
-          messages: [...list, { id: nid(), role: 'assistant', text: '', streaming: true, ts: Date.now() }],
+          messages: [...list2, { id: nid(), role: 'assistant', text: '', streaming: true, ts: Date.now() }],
         })
         break
       }
@@ -2205,6 +2230,20 @@ export function hookChatEvents() {
           done = { ...done, segments: extracted, text: finalJoined }
           list[i] = freezeThoughts(done)
           break
+        }
+        // BUG-061: the finalize loop only updates an EXISTING streaming row —
+        // if message.start was missed (a reconnect/replay gap on a remote
+        // backend), the server's final answer was discarded while busy flipped
+        // false. Append it as a completed message instead.
+        if (!finalJoined && text) {
+          const failed = p.status === 'error' || !!p.error
+          list.push({
+            id: nid(),
+            role: 'assistant',
+            text: stripMediaFromText(text).slice(0, 32000),
+            ts: Date.now(),
+            ...(failed ? { status: 'failed' as const, error: String(p.error ?? p.failure_reason ?? 'Turn failed') } : {}),
+          })
         }
         if (list.length) patchSession(eSid, { messages: list })
         patchSession(eSid, {
