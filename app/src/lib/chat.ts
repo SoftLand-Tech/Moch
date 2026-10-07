@@ -5,7 +5,7 @@ import { rpc, onEvent, onServerRequest, getClient, isConnected, connConfig } fro
 import { getEmbeddedGateway } from './hermesRuntime'
 import { log } from './log'
 import { notifyLocal, setBadge } from './push'
-import { bindLiveId, liveIdFor, sessionRows, toMs, upsertOptimisticRow, patchRowTitle } from './sessionList'
+import { bindLiveId, liveIdFor, sessionRows, sessionListComplete, toMs, upsertOptimisticRow, patchRowTitle } from './sessionList'
 import { hookModelState, noteSessionInfo } from './modelState'
 import { markAttention, clearAttention, pushToast, chatTabFocused, pendingOpenStoredId, type AttentionKind } from './attention'
 import { clearDraft, draftFor, setDraft } from './drafts'
@@ -2499,5 +2499,43 @@ function formatUsage(u: Record<string, unknown>): string {
   if (cost !== undefined) parts.push(`$${cost.toFixed(3)}`)
   return parts.join(' · ')
 }
+
+// ── Server-list reconciliation (BUG-025) ───────────────────────────────────
+// Chats deleted elsewhere (another device, a serve reinstall) used to haunt
+// the drawer forever: nothing pruned sessionsById against sessionRows, so
+// the local entry survived until an app restart — and tapping it always
+// failed to the retry banner. When a COMPLETE server list is in hand (a
+// truncated one proves nothing about absence), drop tracked sessions whose
+// stored id is absent — except the chat on screen and provisional windows.
+sessionRows.subscribe((rows) => {
+  if (!rows.length || !sessionListComplete.get()) return
+  const active = activeSession.get()
+  const map = sessionsById.get()
+  const present = new Set(rows.map((r) => r.id))
+  let changed = false
+  let pendChanged = false
+  const next = { ...map }
+  const pend = { ...pendingBySession.get() }
+  for (const [liveId, s] of Object.entries(map)) {
+    if (liveId === active || s.provisional || liveId.startsWith('pending:')) continue
+    if (present.has(s.storedId)) continue
+    delete next[liveId]
+    changed = true
+    if (pend[liveId]) {
+      delete pend[liveId]
+      pendChanged = true
+    }
+    if (s.storedId && !isPseudoStoredId(s.storedId)) {
+      clearAttention(s.storedId)
+      // BUG-066: the chat is gone server-side — drop its cached transcript
+      // too, or the AsyncStorage blob (up to 300 messages) persists forever
+      // (the user can no longer trigger forgetSession on a chat that isn't
+      // even listed).
+      void dropCachedTranscript(s.storedId)
+    }
+  }
+  if (changed) sessionsById.set(next)
+  if (pendChanged) pendingBySession.set(pend)
+})
 
 export { refreshBadge }
