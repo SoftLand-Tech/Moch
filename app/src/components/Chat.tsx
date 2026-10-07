@@ -235,6 +235,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               onPress={copy}
               hitSlop={10}
               style={({ pressed }) => [s.iconBtn, pressed && s.iconPressed]}
+              accessibilityRole="button"
               accessibilityLabel="Copy message"
             >
               <Icon name={copied ? 'checkmark' : 'copy-outline'} size={15} color={copied ? C.greenSoft : C.textFaint} />
@@ -243,6 +244,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               onPress={() => { void toggleSpeak() }}
               hitSlop={10}
               style={({ pressed }) => [s.iconBtn, pressed && s.iconPressed]}
+              accessibilityRole="button"
               accessibilityLabel={speakState === 'playing' ? 'Stop playback' : 'Listen'}
             >
               {speakState === 'loading' ? (
