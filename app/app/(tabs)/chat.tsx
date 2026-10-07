@@ -1195,7 +1195,7 @@ export default function Chat() {
                       }}
                       accessibilityLabel={c}
                     >
-                      <Text style={[s.sheetBtnText, !deny && { color: C.onAccent }]}>
+                      <Text style={[s.sheetBtnText, !deny && { color: C.onAccent }]} numberOfLines={1}>
                         {c === 'once' ? 'Allow' : c === 'session' ? 'Always this chat' : c === 'always' ? 'Always' : 'Deny'}
                       </Text>
                     </Pressable>
@@ -1675,10 +1675,14 @@ const makeS = () => StyleSheet.create({
   sheetKicker: { color: C.textFaint, fontSize: 11.5, marginBottom: 4 },
   sheetBody: { color: C.text, fontSize: 14.5, lineHeight: 21, marginBottom: 12 },
   sheetDesc: { color: C.textDim, fontSize: 12.5, marginBottom: 10, lineHeight: 18 },
+  // BUG-087: centered text + side padding + single-line labels — with the
+  // default 4-choice set each pill gets ~71dp on a 360dp screen and
+  // 'Always this chat' used to wrap into ragged left-aligned multi-line
+  // pills that read as broken.
   sheetRow: { flexDirection: 'row', gap: 8 },
-  sheetBtn: { flex: 1, borderRadius: 22, paddingVertical: 11, alignItems: 'center', minHeight: 44, justifyContent: 'center' },
+  sheetBtn: { flex: 1, borderRadius: 22, paddingVertical: 11, paddingHorizontal: 8, alignItems: 'center', minHeight: 44, justifyContent: 'center' },
   denyBtn: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: C.red },
-  sheetBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  sheetBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700', textAlign: 'center' },
   qText: { color: C.text, fontSize: 14.5, marginBottom: 6, lineHeight: 20 },
   qInput: { backgroundColor: C.bgCard, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 11, color: C.text, fontSize: 15, marginTop: 8, minHeight: 44 },
   clarifyBtn: { backgroundColor: C.bgCard, borderRadius: 20, paddingVertical: 11, alignItems: 'center', marginTop: 6, minHeight: 44, justifyContent: 'center' },
