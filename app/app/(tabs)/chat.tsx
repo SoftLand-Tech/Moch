@@ -65,7 +65,7 @@ import { chatTabFocused } from '../../src/lib/attention'
 import { draftFor, setDraft } from '../../src/lib/drafts'
 import { shareInInbox, ackShareIn, applySharedToDraft, type SharedFile } from '../../src/lib/shareIn'
 import { isConnected as isConnectedAtom, connectionState, gatewayError, retryNow, reconnectAttempt } from '../../src/lib/gateway'
-import { completeSlash, loadCatalog, runCommand, parseSlashCommand, canonicalName, interactiveTarget, describeCommand, subsFor, argumentModeFor, slashLabel, localCompleteSync, type CompletionItem, type SlashOutcome } from '../../src/lib/slash'
+import { completeSlash, loadCatalog, runCommand, parseSlashCommand, canonicalName, interactiveTarget, describeCommand, subsFor, argumentModeFor, slashLabel, localCompleteSync, isKnownSlashCommand, type CompletionItem, type SlashOutcome } from '../../src/lib/slash'
 import { liveModel, liveReasoning, liveReasoningDisplay, fetchReasoningDisplay } from '../../src/lib/modelState'
 import { ModelPickerSheet } from '../../src/components/ModelPickerSheet'
 import { CommandOptionsSheet } from '../../src/components/CommandOptionsSheet'
@@ -168,6 +168,8 @@ export default function Chat() {
   const voiceState = useStore(voiceBusy)
   const recTimer = useRef<ReturnType<typeof setInterval> | null>(null)
   const slashSeq = useRef(0)
+  // BUG-043: the slash starter focuses the composer so the palette opens.
+  const inputRef = useRef<TextInput>(null)
   // Mascot waterfall — recording (press-to-talk) and the composer text (any
   // keystroke is activity) feed the idle clock; everything else it subscribes
   // to itself.
@@ -456,6 +458,9 @@ export default function Chat() {
       updateInput('')
       setSlashItems(null)
     } catch (e) {
+      // BUG-041: the composer was cleared before the dispatch — a failed
+      // command must give the text back (the plain-send failure path does).
+      updateInput(trimmed)
       showAlert('Command failed', e instanceof Error ? e.message : String(e))
     }
   }
@@ -605,7 +610,10 @@ export default function Chat() {
     // Whatever this dispatch turns into (turn, steer, queued message), the
     // user's eye belongs at the newest message.
     jumpToLatest()
-    if (text.startsWith('/') && pendingAttachments.length === 0) {
+    // BUG-042: only KNOWN commands dispatch — any other leading-slash text
+    // ("/usr/bin/env — what's in there?") is a normal message the user wants
+    // answered, not a command error that eats the typed text.
+    if (text.startsWith('/') && pendingAttachments.length === 0 && isKnownSlashCommand(text)) {
       updateInput('')
       await runSlash(text)
       return
@@ -956,8 +964,13 @@ export default function Chat() {
                       key={st.label}
                       style={({ pressed }) => [s.starter, pressed && s.starterPressed]}
                       onPress={() => {
-                        if (st.label === 'Browse slash commands') updateInput('/')
-                        else updateInput(st.label)
+                        // BUG-043: the slash palette only renders while the
+                        // composer is focused — the starter must focus it or
+                        // the user stares at a lone "/" with no catalog.
+                        if (st.label === 'Browse slash commands') {
+                          updateInput('/')
+                          inputRef.current?.focus()
+                        } else updateInput(st.label)
                       }}
                       accessibilityLabel={st.label}
                     >
@@ -1363,6 +1376,7 @@ export default function Chat() {
                 <VoiceRecStrip recorder={recorder} secs={recSecs} onCancel={() => { void cancelRecording() }} />
               ) : (
                 <TextInput
+                  ref={inputRef}
                   style={s.input}
                   value={input}
                   onChangeText={updateInput}
