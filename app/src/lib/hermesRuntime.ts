@@ -33,6 +33,7 @@ interface HermesBridgeModule {
   linuxBootstrap(distro: string): Promise<{ ok: boolean; steps: string }>
   linuxExec(command: string): Promise<{ ok: boolean; stdout: string; stderr: string; error: string }>
   linuxStatus(): Promise<{ bootstrapped: boolean; sizeMb: number; distro: string }>
+  linuxStatusLive(): Promise<{ bootstrapped: boolean; sizeMb: number; distro: string }>
   linuxReset(): Promise<boolean>
 }
 
@@ -95,4 +96,17 @@ export function linuxExec(command: string): Promise<{ ok: boolean; stdout: strin
 export function linuxStatus(): Promise<LinuxGuestStatus | null> {
   if (!bridge) return Promise.resolve(null)
   return bridge.linuxStatus()
+}
+
+/**
+ * Uncached guest status (walks the rootfs for a live size). The periodic
+ * Settings poll must use linuxStatus(): computing size_mb means stat()ing
+ * every file of a full Ubuntu rootfs — seconds of GIL-hot Python inside the
+ * app process, every poll, which starved the gateway loop and the JS thread
+ * during sessions. Live walks are for the install wizard's progress display
+ * only, where the rootfs is actually growing.
+ */
+export function linuxStatusLive(): Promise<LinuxGuestStatus | null> {
+  if (!bridge) return Promise.resolve(null)
+  return bridge.linuxStatusLive()
 }

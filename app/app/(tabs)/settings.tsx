@@ -39,7 +39,11 @@ function LinuxSectionRows() {
     let alive = true
     const tick = () => { linuxStatus().then((x) => { if (alive) setSt(x) }).catch(() => {}) }
     tick()
-    const t = setInterval(tick, 5000)
+    // linuxStatus() serves a Python-side cache (a real size walk stat()s every
+    // rootfs file — seconds of GIL inside the shared app process, which used
+    // to fire here every 5s and starve sessions). 60s is plenty: install and
+    // reset both refresh the cache when they change the tree.
+    const t = setInterval(tick, 60_000)
     return () => { alive = false; clearInterval(t) }
   }, [])
   const installed = !!st?.bootstrapped

@@ -11,7 +11,7 @@ import {
   newChat,
   forgetSession,
   activeStoredId,
-  busyStoredIds,
+  busyStoredKey,
   pendingCount,
 } from '../../src/lib/chat'
 import { C, useStyles } from '../../src/lib/theme'
@@ -67,7 +67,10 @@ function SessionsInner() {
   const error = useStore(sessionListError)
   const online = useStore(isConnectedAtom)
   const currentStored = useStore(activeStoredId)
-  const busy = useStore(busyStoredIds)
+  // Flush-stable busy set (string key — see lib/chat summary keys): this list
+  // re-renders at turn edges, not per 33ms stream flush.
+  const busyKey = useStore(busyStoredKey)
+  const busy = useMemo(() => (busyKey ? busyKey.split(',') : []), [busyKey])
   const attention = useStore(attentionById)
   const pending = useStore(pendingCount)
 

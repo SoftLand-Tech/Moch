@@ -150,6 +150,30 @@ class HermesBridgeModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  /**
+   * Uncached status (walk=True): recomputes size_mb by stat()ing the whole
+   * rootfs — seconds of GIL-hot Python. Install-wizard progress only; the
+   * Settings poll uses the cached [linuxStatus]. Threaded like linuxExec so
+   * the walk never occupies the native-module call path.
+   */
+  @ReactMethod
+  fun linuxStatusLive(promise: Promise) {
+    Thread {
+      try {
+        val py = com.chaquo.python.Python.getInstance()
+        val result = py.getModule("moch.linux_env").callAttr("status", true).toString()
+        val obj = org.json.JSONObject(result)
+        val map = Arguments.createMap()
+        map.putBoolean("bootstrapped", obj.optBoolean("bootstrapped", false))
+        map.putDouble("sizeMb", obj.optDouble("size_mb", 0.0))
+        map.putString("distro", obj.optString("distro", ""))
+        promise.resolve(map)
+      } catch (e: Exception) {
+        promise.reject("linux_status_live", e.message, e)
+      }
+    }.start()
+  }
+
   @ReactMethod
   fun linuxReset(promise: Promise) {
     try {

@@ -93,6 +93,14 @@ FAKE_UTSNAME = (
 )
 PROOT_PARITY_FLAGS = ["--link2symlink", "--sysvipc", "-L", f"--kernel-release={FAKE_UTSNAME}"]
 
+# Cached rootfs size in MB for status(): computing it means stat()ing every
+# file of a full Ubuntu rootfs — seconds of GIL-hot Python inside the shared
+# app process, which starved the gateway loop and the RN JS thread when the
+# Settings tab polled for it every few seconds. Periodic pollers serve this
+# cache; only the install wizard's progress display (status(walk=True)) and
+# a successful bootstrap()/reset() touch the real number.
+_SIZE_MB_CACHE: float | None = None
+
 # ubuntu-base ships an EMPTY /etc/resolv.conf — apt/pacman cannot resolve
 # anything until it is seeded. proot-distro writes the host's resolv.conf
 # at install time; Android has none to copy, so seed public resolvers.
@@ -518,6 +526,11 @@ def bootstrap(distro: str = "ubuntu-24.04") -> dict:
     step("stamp", lambda: _write_stamp(linux_dir, distro))
 
     report["ok"] = True
+    # The rootfs changed under whatever cache status() holds — refresh it so
+    # the periodic Settings poll reports the new install immediately instead
+    # of serving a pre-bootstrap snapshot until the next app launch.
+    global _SIZE_MB_CACHE
+    _SIZE_MB_CACHE = _rootfs_size_mb(rootfs)
     # Mid-session provisioning (setup wizard, same live process): the agent's
     # shell execs must go through /system/bin/sh from the very next command —
     # hermes_boot._prepare_home ran before the guest existed (§4.5.1).
@@ -543,8 +556,22 @@ def exec_in_guest(command: str, timeout_s: int = 30) -> dict:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
-def status() -> dict:
-    """Guest state for the bridge."""
+def _rootfs_size_mb(rootfs: Path) -> float:
+    """Full walk of the rootfs — expensive (stat() per file); cache callers."""
+    if not rootfs.exists():
+        return 0.0
+    return round(sum(f.stat().st_size for f in rootfs.rglob("*") if f.is_file()) / 1e6, 1)
+
+
+def status(walk: bool = False) -> dict:
+    """Guest state for the bridge.
+
+    size_mb is served from a process-wide cache unless walk=True: the walk
+    stat()s every file of the rootfs (seconds under the shared GIL), so
+    periodic pollers must take the cached number. Only the install wizard's
+    live progress display passes walk=True.
+    """
+    global _SIZE_MB_CACHE
     linux_dir = _linux_dir()
     proot = linux_dir / "bin" / "proot"
     rootfs = linux_dir / "rootfs"
@@ -562,17 +589,25 @@ def status() -> dict:
         loader_ok = loader_path().exists()
     except Exception:  # noqa: BLE001 — java bridge not ready (early probe)
         loader_ok = False
+    if walk or _SIZE_MB_CACHE is None:
+        # Store even the rootfs-missing result (0.0): bootstrap() refreshes
+        # the cache when it creates the tree, and reset() invalidates it.
+        _SIZE_MB_CACHE = _rootfs_size_mb(rootfs)
     return {
         "bootstrapped": proot.exists() and rootfs.exists(),
         "rootfs_exists": rootfs.exists(),
         "distro": distro,
         "loader_ok": loader_ok,
-        "size_mb": round(sum(f.stat().st_size for f in rootfs.rglob("*") if f.is_file()) / 1e6, 1) if rootfs.exists() else 0,
+        "size_mb": _SIZE_MB_CACHE,
     }
 
 
 def reset() -> dict:
     """Remove the whole guest tree (Settings → Reset)."""
+    global _SIZE_MB_CACHE
+    # Invalidate first: even a failed reset may have deleted part of the tree,
+    # and a stale cached size must never outlive the guest it described.
+    _SIZE_MB_CACHE = None
     linux_dir = _linux_dir()
     try:
         if linux_dir.exists():
