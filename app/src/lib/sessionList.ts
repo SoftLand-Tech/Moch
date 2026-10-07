@@ -35,6 +35,10 @@ const liveIds = atom<Record<string, string>>({})
 export const sessionRows = atom<SessionRow[]>([])
 export const sessionListLoading = atom(false)
 export const sessionListError = atom<string | null>(null)
+/** True when the last successful fetch was NOT truncated by the limit —
+ *  only a complete list proves a session's ABSENCE (BUG-025 reconciliation
+ *  must not prune chats that a truncated fetch simply didn't include). */
+export const sessionListComplete = atom(false)
 
 /** `started_at` is fractional seconds; be defensive about the unit. */
 export function toMs(ts?: number | null): number {
@@ -83,6 +87,8 @@ export function loadSessions(opts?: { force?: boolean }): Promise<SessionRow[]> 
       if (gen !== loadGen) return sessionRows.get()
       const rows = sortSessions(res?.sessions ?? [])
       sessionRows.set(rows)
+      // BUG-025: only a non-truncated list proves absence elsewhere.
+      sessionListComplete.set(rows.length < LIST_LIMIT)
       return rows
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Could not load chats'
@@ -121,6 +127,7 @@ export function resetSessionList() {
   sessionRows.set([])
   liveIds.set({})
   sessionListError.set(null)
+  sessionListComplete.set(false)
 }
 
 /**
