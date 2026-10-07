@@ -1045,7 +1045,7 @@ const makeS = () => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  badgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  badgeText: { color: C.onAccent, fontSize: 11, fontWeight: '800' },
   // Mini Mochi run-counter next to "Automations": up to three overlapping
   // faces, then a +N suffix.
   mochiRunRow: { flexDirection: 'row', alignItems: 'center' },

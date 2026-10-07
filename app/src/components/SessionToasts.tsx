@@ -70,7 +70,8 @@ function ToastCard({ t }: { t: SessionToast }) {
         accessibilityLabel={`${t.title}. ${t.body}. Open conversation${t.chatTitle ? ` ${t.chatTitle}` : ''}`}
       >
         <View style={[s.iconWrap, { backgroundColor: meta.color() }]}>
-          <Icon name={meta.icon} size={17} color="#081114" />
+          {/* BUG-080: token ink — the literal was a frozen Mocheme value. */}
+          <Icon name={meta.icon} size={17} color={C.onAccent} />
         </View>
         <View style={s.textWrap}>
           {t.chatTitle ? <Text style={s.kicker} numberOfLines={1}>{t.chatTitle}</Text> : null}

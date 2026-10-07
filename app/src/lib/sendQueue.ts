@@ -121,7 +121,13 @@ export function enqueueSend(
     return null
   }
   const item: QueuedSend = { id: `q${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, text, ts: Date.now() }
-  const next = { ...sendQueue.get(), [storedId]: [...cur, item] }
+  // BUG-065: delete-then-set refreshes the chat's insertion-order slot, so
+  // the eviction cap drops the LEAST-RECENTLY-active chat's queue, not
+  // whichever chat happened to enqueue first.
+  const map = sendQueue.get()
+  const next = { ...map }
+  delete next[storedId]
+  next[storedId] = [...cur, item]
   pruneChats(next)
   sendQueue.set(next)
   persist()
