@@ -17,11 +17,12 @@ import {
   connect, gatewayError, retryNow, disconnect, reconnectAttempt, onForeground, redactedUrl,
   servers as serversStore, activeServerId, refreshServers, switchToServer,
   forgetActiveServer, mostRecentServer, onDialConfig, type SavedServer,
+  everConnected,
 } from '../src/lib/gateway'
 import { hookChatEvents, loadOutbox, switchToSession } from '../src/lib/chat'
 import { loadAttention, pendingOpenStoredId, requestOpenSession } from '../src/lib/attention'
-import { loadDrafts } from '../src/lib/drafts'
-import { loadSendQueue } from '../src/lib/sendQueue'
+import { flushDrafts, loadDrafts } from '../src/lib/drafts'
+import { flushSendQueue, loadSendQueue } from '../src/lib/sendQueue'
 import { initShareIn, deliverSharedNow, shareInInbox } from '../src/lib/shareIn'
 import { syncBackendIdentity } from '../src/lib/backendIdentity'
 import { parseConnectUrl } from '../src/lib/pairing'
@@ -156,6 +157,13 @@ export default function RootLayout() {
         // A share received while backgrounded may have missed the native
         // event (the process was suspended) — re-pull on foreground.
         deliverSharedNow()
+      } else if (s === 'background') {
+        // BUG-035: the queue/draft writes are debounced ~400ms and Android
+        // can freeze the process right after backgrounding with no further
+        // JS callback — a just-typed draft or just-queued message would be
+        // lost. Flush the pending writes NOW, while there's still a tick.
+        void flushSendQueue().catch(() => {})
+        void flushDrafts().catch(() => {})
       }
     })
 
@@ -199,7 +207,12 @@ export default function RootLayout() {
   useEffect(() => {
     if (!pendingOpen || !online) return
     pendingOpenStoredId.set(null)
-    if (Date.now() - pendingOpen.at > 60_000) return
+    if (Date.now() - pendingOpen.at > 60_000) {
+      // BUG-029: a stale tap used to be dropped SILENTLY — the user tapped a
+      // notification and nothing happened, with no hint why.
+      setLinkMsg("That chat couldn't be opened — the connection took too long. Try the notification again.")
+      return
+    }
     try { router.navigate('/(tabs)/chat') } catch {}
     void switchToSession(pendingOpen.storedId).catch(() => {})
   }, [pendingOpen, online, router])
@@ -230,6 +243,13 @@ export default function RootLayout() {
 
   const failed = !online && (state === 'error' || state === 'closed')
   const connecting = !online && state === 'connecting'
+  // BUG-005: the full-screen veil only owns the screen BEFORE the first
+  // successful connect of this run (boot / boot-failure). Once the app has
+  // been connected, a mid-session drop must degrade to the chat screen's
+  // own banner — cached history, drafts and the queue strip stay usable
+  // instead of hiding behind an opaque overlay.
+  const everOpen = useStore(everConnected)
+  const bootStruggling = !everOpen
 
   return (
     <KeyboardProvider>
@@ -248,14 +268,16 @@ export default function RootLayout() {
         <Stack.Screen name="add-computer" options={{ headerShown: false, presentation: 'modal' }} />
         <Stack.Screen name="setup" options={{ headerShown: false, presentation: 'modal' }} />
       </Stack>
-      {!online && state !== 'idle' ? (
+      {!online && state !== 'idle' && bootStruggling ? (
         <View style={s.overlay}>
           {/* Mochi inside the veil — made VISIBLE so the connecting/offline
               states actually show. The overlay instance mounts cold per
               disconnect (~200-500ms low-end), so the status text below lands
               first and Mochi fades in a beat later. Connecting uses the
               patient waiting loop (rock + wandering gaze) — the connecting
-              pose itself ships static, so waiting IS the loading animation. */}
+              pose itself ships static, so waiting IS the loading animation.
+              BUG-005: boot-only — once this run has connected, outages
+              degrade to the chat screen's banner instead of this overlay. */}
           <MochiStage state={connecting ? 'mochi-waiting' : 'mochi-offline'} size={168} />
           {failed ? (
             <>
