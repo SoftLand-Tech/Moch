@@ -180,7 +180,14 @@ export const activeSessionId = computed(activeSession, id => (id && sessionsById
 /** Server requests awaiting an answer, grouped by the session they block. */
 const pendingBySession = atom<Record<string, PendingRequest[]>>({})
 /** Queued prompts that could not be sent yet (offline). */
-export const outbox = atom<string[]>([])
+/** One outbox entry: text composed offline, pinned to the chat it was
+ *  composed for (BUG-008). `storedId: ''` = legacy unpinned entry from an
+ *  older install — flushed with the old active-chat contract. */
+export interface OutboxItem {
+  storedId: string
+  text: string
+}
+export const outbox = atom<OutboxItem[]>([])
 
 const view = computed([sessionsById, activeSession], (map, id): SessionState =>
   (id && map[id]) || EMPTY,
@@ -362,7 +369,10 @@ function patchActive(patch: Partial<SessionState>) {
   sessionsById.set({ ...map, [id]: { ...cur, ...patch } })
 }
 
-function patchSession(id: string, patch: Partial<SessionState>) {
+// Exported for the drawer's rename flow (BUG-006): a successful manual
+// rename patches the open chat's in-memory title so the header updates
+// without waiting for an event echo or the next list poll.
+export function patchSession(id: string, patch: Partial<SessionState>) {
   const map = sessionsById.get()
   const cur = map[id]
   if (!cur) return
@@ -761,8 +771,8 @@ async function persistOutbox() {
   }
 }
 
-function enqueueOffline(text: string) {
-  outbox.set([...outbox.get(), text].slice(0, MAX_OUTBOX))
+function enqueueOffline(text: string, storedId = '') {
+  outbox.set([...outbox.get(), { storedId, text }].slice(0, MAX_OUTBOX))
   void persistOutbox()
 }
 
@@ -770,27 +780,91 @@ export async function loadOutbox() {
   try {
     const raw = await AsyncStorage.getItem(OUTBOX_KEY)
     if (raw) {
-      const list = JSON.parse(raw) as string[]
-      if (Array.isArray(list)) outbox.set(list.filter((x) => typeof x === 'string').slice(0, MAX_OUTBOX))
+      const list = JSON.parse(raw) as unknown
+      if (Array.isArray(list)) {
+        // Accept both shapes: legacy `string[]` entries (storedId '') and
+        // pinned `OutboxItem[]` entries.
+        const items: OutboxItem[] = []
+        for (const x of list) {
+          if (typeof x === 'string') items.push({ storedId: '', text: x })
+          else if (x && typeof x === 'object' && typeof (x as { text?: unknown }).text === 'string') {
+            const rawStored = (x as { storedId?: unknown }).storedId
+            items.push({ storedId: typeof rawStored === 'string' ? rawStored : '', text: (x as { text: string }).text })
+          }
+        }
+        outbox.set(items.slice(0, MAX_OUTBOX))
+      }
     }
   } catch {
     /* best effort */
   }
 }
 
-export async function flushOutbox(): Promise<void> {
-  const q = outbox.get()
-  if (!q.length) return
+/** BUG-019: clear the in-memory outbox WITHOUT touching storage — the
+ *  backend-identity switch runs this before re-reading, so a previous
+ *  machine's unsent texts never survive into the new pairing (a failed
+ *  shelf reload must not leave the old machine's texts live in the atom). */
+export function resetOutbox() {
   outbox.set([])
-  await persistOutbox()
-  for (const text of q) {
+}
+
+export async function flushOutbox(): Promise<void> {
+  // BUG-002: send one at a time and remove each item BEFORE its send — the
+  // old clear-then-iterate dropped every item after the first failure (its
+  // catch re-enqueued only the failing text; the caller swallows the throw).
+  // Items after a failure now simply stay queued. Single enqueue layer
+  // (BUG-008): a failed send is re-enqueued by sendPrompt's own offline
+  // path, never re-added here.
+  while (outbox.get().length) {
+    const [item, ...rest] = outbox.get()
+    outbox.set(rest)
+    await persistOutbox()
     try {
-      await sendPrompt(text)
+      if (item.storedId) {
+        // Pinned (BUG-008): deliver to the chat it was composed for, never
+        // to whichever chat happens to be active at flush time.
+        const live = Object.values(sessionsById.get()).find((s) => s.storedId === item.storedId)?.id
+        if (live) {
+          await sendPrompt(item.text, { session: live })
+        } else {
+          // Not tracked (cold boot / evicted handle): a quiet resume brings
+          // the handle back; a not-found answer means the chat is gone.
+          try {
+            const fresh = await resumeShared(item.storedId)
+            await sendPrompt(item.text, { session: fresh.sessionId })
+          } catch (resumeErr) {
+            if (!isSessionNotFound(resumeErr)) throw resumeErr
+            log('warn', 'chat', `outbox item dropped — chat ${item.storedId} no longer exists`)
+          }
+        }
+      } else {
+        await sendPrompt(item.text)
+      }
+      // The stale 'failed' row from the original offline failure would
+      // duplicate the freshly delivered message — drop it (BUG-008).
+      dropMatchingFailedRow(item.storedId, item.text)
     } catch (err) {
-      enqueueOffline(text)
+      // sendPrompt's offline path re-enqueued the failed item; if it threw
+      // for a reason that did NOT re-enqueue (e.g. the pinned guard), put
+      // it back so nothing is lost. Either way, stop — remaining items
+      // stay queued for the next flush.
+      if (!outbox.get().some((x) => x.text === item.text && x.storedId === item.storedId)) {
+        outbox.set([...outbox.get(), item].slice(0, MAX_OUTBOX))
+        void persistOutbox()
+      }
       throw err
     }
   }
+}
+
+/** Remove the first failed user row matching a just-flushed outbox item so
+ *  the transcript doesn't show the text twice (failed row + sent row). */
+function dropMatchingFailedRow(storedId: string, text: string) {
+  const entry = Object.values(sessionsById.get()).find((s) => s.storedId === storedId)
+  if (!entry) return
+  const idx = entry.messages.findIndex((m) => m.role === 'user' && m.status === 'failed' && m.text === text)
+  if (idx < 0) return
+  patchSession(entry.id, { messages: entry.messages.filter((_, i) => i !== idx) })
 }
 
 // ── Queued attachments (memory-only) ───────────────────────────────────────
@@ -1040,7 +1114,11 @@ const inflightResumes = new Map<string, Promise<ResumeResult>>()
 
 /** Shared, deduped resume core — the one primitive every path that needs a
  *  live handle for a stored id goes through. */
-function resumeShared(storedId: string): Promise<ResumeResult> {
+/** Shared, deduped resume core — the one primitive every path that needs a
+ *  live handle for a stored id goes through. Exported for surface-agnostic
+ *  callers that must resolve a live id before a live-session RPC (BUG-006
+ *  rename). */
+export function resumeShared(storedId: string): Promise<ResumeResult> {
   const inflight = inflightResumes.get(storedId)
   if (inflight) return inflight
   const p = runResume(storedId).finally(() => {
@@ -1072,7 +1150,12 @@ async function withBootPaint(stored: string): Promise<ResumeResult> {
 }
 
 /** Boot: restore the last session, or create one. Safe to call repeatedly. */
-export async function ensureSession(): Promise<string> {
+export async function ensureSession(opts?: { create?: boolean }): Promise<string> {
+  // BUG-013: look-only surfaces (the Models tab) pass create:false — merely
+  // VISITING them must not mint a server-side session for an unsent chat
+  // (the local-only invariant the chat screen deliberately upholds). They
+  // get the provisional/live id or '' and skip session-scoped reads.
+  const create = opts?.create !== false
   const current = activeSession.get()
   if (current) {
     const state = sessionsById.get()[current]
@@ -1080,6 +1163,7 @@ export async function ensureSession(): Promise<string> {
     // real action (send / model pick) — an unsent chat never exists on the
     // server and never shows in the saved list.
     if (state?.provisional) {
+      if (!create) return current
       if (inflightCreate) return await inflightCreate
       const tempId = current
       const pseudo = state.storedId
@@ -1099,10 +1183,14 @@ export async function ensureSession(): Promise<string> {
         if (activeStoredId.get() === r.storedId) activeSession.set(r.sessionId)
         return r.sessionId
       } catch (err) {
+        // BUG-014: reattach failed (dead stored id after a serve reinstall,
+        // or a resume-specific error). Silently minting a fresh session and
+        // switching to it HIJACKED the screen mid-look AND rerouted the
+        // in-flight send into an empty chat with the real error swallowed.
+        // Fail loudly instead: sendPrompt's catch marks the user row failed
+        // with THIS error and the user stays on the chat they were reading.
         log('warn', 'chat', `could not reattach released session: ${String(err)}`)
-        const fresh = await createSession()
-        activeSession.set(fresh.sessionId)
-        return fresh.sessionId
+        throw err instanceof Error ? err : new Error(String(err))
       }
     }
     return current
@@ -1122,6 +1210,9 @@ export async function ensureSession(): Promise<string> {
       /* fall through to a fresh chat */
     }
   }
+  // BUG-013: nothing active and creating is off — report "none" instead of
+  // minting a session for a surface that was merely visited.
+  if (!create) return ''
   const r = await createSession()
   activeSession.set(r.sessionId)
   return r.sessionId
@@ -1447,10 +1538,13 @@ export async function resetSessionCaches(): Promise<void> {
 /** Append a message the app produced itself (e.g. slash command output).
  *  `cmd` labels a command-output card; it rides the message object (and the
  *  persistence envelope, which stores whole messages) write-once. */
-export function pushLocalMessage(text: string, role: 'user' | 'assistant' = 'assistant', cmd?: CommandMeta) {
+export function pushLocalMessage(text: string, role: 'user' | 'assistant' = 'assistant', cmd?: CommandMeta, targetSid?: string) {
   const t = text.trim()
   if (!t) return
-  const sid = activeSession.get()
+  // BUG-015: an explicit target wins — the active chat may have changed
+  // while the command's RPC was in flight, and the output card belongs to
+  // the chat the command ran against.
+  const sid = targetSid ?? activeSession.get()
   if (!sid) return
   const s = sessionsById.get()[sid]
   if (!s) return
@@ -1543,7 +1637,22 @@ export async function sendPrompt(
   }
   const lockKey = pinned ?? activeSession.get() ?? '_boot'
   if (sendingSessions.has(lockKey)) {
-    enqueueOffline(text)
+    // BUG-003: the composer is already cleared and no bubble exists — the
+    // old silent outbox park made the text invisible (the outbox only
+    // flushes on an offline→online edge) and a later flush would deliver
+    // it to whichever chat is active. Park it on the chat's VISIBLE
+    // busy-queue instead: the strip shows it immediately and
+    // maybeFlushQueue delivers it when this chat's turn ends.
+    const lockedStored = sessionsById.get()[lockKey]?.storedId
+    if (lockedStored) {
+      const queuedItem = enqueueSend(lockedStored, text, { allowEmpty: attachments.length > 0 })
+      if (queuedItem) {
+        if (attachments.length) setQueuedAttachments(queuedItem.id, attachments)
+        return
+      }
+      // Queue full — fall through to the outbox so the text still survives.
+    }
+    enqueueOffline(text, lockedStored ?? '')
     return
   }
   sendingSessions.add(lockKey)
@@ -1602,7 +1711,9 @@ export async function sendPrompt(
         })
         mochiMoment.set({ kind: 'error', sid: target!, at: Date.now() })
       }
-      enqueueOffline(text)
+      // BUG-008: re-enqueue pinned to the chat the send was bound for, so a
+      // later flush delivers it HERE and not to whichever chat is active.
+      enqueueOffline(text, t0?.storedId ?? '')
       throw err
     }
 
@@ -1703,7 +1814,16 @@ export async function retryMessage(id: string) {
   // re-picked from here, so a text-only retry would silently drop them.
   if (m.segments?.some((seg) => seg.kind === 'media')) return
   patchSession(sid, { messages: messages.get().filter((x) => x.id !== id) })
-  await sendPrompt(m.text)
+  // BUG-008: drop this chat's outbox copy of the same text first — the old
+  // code resent while the outbox entry survived, so the reconnect flush
+  // delivered the message a second time. If the retry fails, sendPrompt's
+  // offline path re-enqueues it, so exactly one copy always remains.
+  const retryStored = sessionsById.get()[sid]?.storedId ?? ''
+  outbox.set(outbox.get().filter((x) => !(x.text === m.text && (x.storedId === retryStored || x.storedId === ''))))
+  void persistOutbox()
+  // Pinned to THIS chat: a retry must never land in whichever chat is
+  // active by the time the RPC resolves.
+  await sendPrompt(m.text, { session: sid })
 }
 
 export async function stopRun() {
@@ -1726,6 +1846,12 @@ export async function steerRun(text: string) {
   const t = text.trim().slice(0, 4000)
   if (!sid || !t) return
   const userRow = { id: nid(), role: 'user' as const, text: t, ts: Date.now() }
+  // BUG-015: the user row belongs to `sid` — read THAT session's messages
+  // from the map at patch time, never the computed ACTIVE view. The old
+  // `messages.get()` resolved to whichever chat was active after the RPC:
+  // switching mid-steer grafted — or wholesale replaced — the WRONG chat's
+  // transcript while the steer bubble appeared nowhere.
+  const targetMessages = () => sessionsById.get()[sid]?.messages ?? []
   // Prefer a true interrupt: `session.redirect` cancels the in-flight model
   // request (completed work + partial reasoning stay as context), appends the
   // text as a real user message, and the agent loop retries NOW — so a steer
@@ -1735,7 +1861,7 @@ export async function steerRun(text: string) {
   try {
     const r = await rpc<{ status?: string }>('session.redirect', { session_id: sid, text: t })
     if (r?.status === 'redirected' || r?.status === 'queued') {
-      patchSession(sid, { messages: [...messages.get(), userRow] })
+      patchSession(sid, { messages: [...targetMessages(), userRow] })
       return
     }
   } catch {
@@ -1744,7 +1870,7 @@ export async function steerRun(text: string) {
   // Fallback: buffer for the next tool-batch boundary. Works WHILE busy —
   // separate path from sendPrompt.
   await rpc('session.steer', { session_id: sid, text: t })
-  patchSession(sid, { messages: [...messages.get(), userRow] })
+  patchSession(sid, { messages: [...targetMessages(), userRow] })
 }
 
 // ── Busy-queue flush ───────────────────────────────────────────────────────
@@ -2328,7 +2454,18 @@ export function hookChatEvents() {
         const list = [...cur.messages]
         const last = list[list.length - 1]
         if (last?.streaming) {
-          list[list.length - 1] = freezeThoughts({ ...last, streaming: false, text: last.text || msg })
+          list[list.length - 1] = freezeThoughts({
+            ...last,
+            streaming: false,
+            // BUG-010: keep any partial text but MARK the failure — the old
+            // code silently discarded the error (a half-answered turn looked
+            // complete: no failed marker, no error surface) or, on an empty
+            // bubble, rendered the raw error string as the agent's answer
+            // with copy/Listen buttons attached.
+            ...(last.text ? {} : { text: msg }),
+            status: 'failed',
+            error: msg,
+          })
         } else {
           list.push({ id: nid(), role: 'assistant', text: msg, ts: Date.now(), status: 'failed', error: msg })
         }
