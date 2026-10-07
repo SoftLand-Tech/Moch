@@ -78,6 +78,11 @@ export const mcpServers = atom<McpServer[]>([])
 export const mcpRuntime = atom<Record<string, McpRuntime>>({})
 export const mcpCatalog = atom<McpCatalogEntry[]>([])
 /**
+ * Last `mcp.servers.list` failure message (non-`-32601`), so the screen can
+ * show an error banner with Retry instead of a silent empty list.
+ */
+export const mcpListError = atom<string | null>(null)
+/**
  * True once the gateway answered -32601 for an mcp.* call — the connected
  * hermes predates the connector RPCs, so the screen shows an upgrade hint
  * instead of a bare error.
@@ -105,15 +110,34 @@ export async function loadMcpServers(): Promise<void> {
     mcpServers.set(servers)
     mcpRuntime.set(runtime)
     mcpUnsupported.set(false)
+    mcpListError.set(null)
   } catch (err) {
     if (isMethodNotFound(err)) {
       mcpUnsupported.set(true)
       mcpServers.set([])
+      mcpListError.set(null)
     } else {
       log('warn', 'mcp', `mcp.servers.list failed: ${String(err)}`)
+      mcpListError.set(err instanceof Error ? err.message : String(err))
     }
   } finally {
     mcpLoading.set(false)
+  }
+}
+
+/**
+ * Runtime-only refresh — one `mcp.servers.status` RPC (cached state, never a
+ * probe), so a mounted screen can poll it cheaply to keep statuses live.
+ */
+export async function refreshMcpRuntime(): Promise<void> {
+  if (!isConnected.get()) return
+  try {
+    const status = await rpc<{ servers?: McpRuntime[] }>('mcp.servers.status', {})
+    const runtime: Record<string, McpRuntime> = {}
+    for (const row of status?.servers ?? []) runtime[row.name] = row
+    mcpRuntime.set(runtime)
+  } catch (err) {
+    log('warn', 'mcp', `mcp.servers.status failed: ${String(err)}`)
   }
 }
 
@@ -224,6 +248,42 @@ export async function testMcpServer(name: string): Promise<McpTestResult> {
 /** Write an API key into the machine's .env and wire the config reference. */
 export async function saveMcpApiKey(name: string, value: string): Promise<void> {
   await rpc('mcp.servers.set_api_key', { name, value })
+}
+
+// ── OAuth sign-in (session-backed PKCE) ─────────────────────────────────────
+
+/** `mcp.servers.oauth.start` → `{session_id, auth_url, flow: "pkce"}`. */
+export interface McpOauthStart {
+  session_id: string
+  auth_url: string
+  flow: string
+}
+
+/** `mcp.servers.oauth.poll` → `{status: pending|approved|error, ...}`. */
+export interface McpOauthPoll {
+  status: 'pending' | 'approved' | 'error'
+  error?: string
+}
+
+/**
+ * Begin the gateway's session-backed OAuth flow for a server: the phone
+ * opens `auth_url` in its own browser, the gateway's loopback callback
+ * catches the redirect on the same machine, and the client polls until the
+ * flow resolves. (Remote-desktop flows via `client_redirect_uri` relay are
+ * deliberately not used here — the embedded gateway is same-device.)
+ */
+export async function startMcpOauth(name: string): Promise<McpOauthStart> {
+  return rpc<McpOauthStart>('mcp.servers.oauth.start', { name })
+}
+
+/** Poll an OAuth flow started for this server. */
+export async function pollMcpOauth(name: string, oauthSessionId: string): Promise<McpOauthPoll> {
+  return rpc<McpOauthPoll>('mcp.servers.oauth.poll', { name, session_id: oauthSessionId })
+}
+
+/** Cancel an in-flight OAuth flow, waking the gateway's callback worker. */
+export async function cancelMcpOauth(name: string, oauthSessionId: string): Promise<void> {
+  await rpc('mcp.servers.oauth.cancel', { name, session_id: oauthSessionId })
 }
 
 /**
