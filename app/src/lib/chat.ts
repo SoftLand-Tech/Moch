@@ -2110,6 +2110,14 @@ export function hookChatEvents() {
             `Hermes closed this session (${String(p.reason ?? 'idle')}). It will reconnect when you send.`,
             { screen: 'chat' },
           )
+        } else {
+          // BUG-088: a mid-turn release ends the turn SILENTLY when the user
+          // is elsewhere — no pulse, no dot, nothing. Mark the row so the
+          // chat isn't a dead end.
+          flagAttention(eSid, 'done', {
+            title: 'Session released',
+            body: `Hermes closed this session (${String(p.reason ?? 'idle')}). Send a message to reconnect.`,
+          })
         }
         break
       }
