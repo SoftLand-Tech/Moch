@@ -20,8 +20,8 @@ import {
 } from '../src/lib/gateway'
 import { hookChatEvents, loadOutbox, switchToSession } from '../src/lib/chat'
 import { loadAttention, pendingOpenStoredId, requestOpenSession } from '../src/lib/attention'
-import { loadDrafts } from '../src/lib/drafts'
-import { loadSendQueue } from '../src/lib/sendQueue'
+import { flushDrafts, loadDrafts } from '../src/lib/drafts'
+import { flushSendQueue, loadSendQueue } from '../src/lib/sendQueue'
 import { initShareIn, deliverSharedNow, shareInInbox } from '../src/lib/shareIn'
 import { syncBackendIdentity } from '../src/lib/backendIdentity'
 import { parseConnectUrl } from '../src/lib/pairing'
@@ -156,6 +156,13 @@ export default function RootLayout() {
         // A share received while backgrounded may have missed the native
         // event (the process was suspended) — re-pull on foreground.
         deliverSharedNow()
+      } else if (s === 'background') {
+        // BUG-035: the queue/draft writes are debounced ~400ms and Android
+        // can freeze the process right after backgrounding with no further
+        // JS callback — a just-typed draft or just-queued message would be
+        // lost. Flush the pending writes NOW, while there's still a tick.
+        void flushSendQueue().catch(() => {})
+        void flushDrafts().catch(() => {})
       }
     })
 
