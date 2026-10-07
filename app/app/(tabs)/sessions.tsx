@@ -13,6 +13,7 @@ import {
   activeStoredId,
   busyStoredKey,
   pendingCount,
+  pendingStoredIds,
 } from '../../src/lib/chat'
 import { C, useStyles } from '../../src/lib/theme'
 import { attentionById, rowStatus } from '../../src/lib/attention'
@@ -73,6 +74,9 @@ function SessionsInner() {
   const busy = useMemo(() => (busyKey ? busyKey.split(',') : []), [busyKey])
   const attention = useStore(attentionById)
   const pending = useStore(pendingCount)
+  // BUG-085: unanswered questions keep their row dot even after the chat was
+  // opened (opening clears the event-driven mark; the question still blocks).
+  const pendingStored = useStore(pendingStoredIds)
 
   // The store is shared with the drawer, so both show the same list in the
   // same order. `search` is not a valid RPC param (extra="forbid"), so the
@@ -164,7 +168,13 @@ function SessionsInner() {
       {pending > 0 ? (
         <Pressable
           style={({ pressed }) => [s.alertRow, pressed && s.btnPressed]}
-          onPress={() => router.navigate('/(tabs)/chat')}
+          onPress={() => {
+            // BUG-023: land on the blocking chat itself, not whatever chat
+            // happens to be active.
+            const first = pendingStored[0]
+            router.navigate('/(tabs)/chat')
+            if (first) void switchToSession(first).catch(() => {})
+          }}
         >
           <Text style={s.alertText}>
             {pending} question{pending > 1 ? 's' : ''} waiting on you — tap to answer
@@ -192,7 +202,7 @@ function SessionsInner() {
           // `session.list` yields stored ids; all our per-session state is
           // keyed by the same stored id, so compare in that space.
           const isCurrent = !!currentStored && currentStored === item.id
-          const status = rowStatus(busy.includes(item.id), attention[item.id])
+          const status = rowStatus(busy.includes(item.id), attention[item.id], pendingStored.includes(item.id))
           const label = item.title || item.preview?.slice(0, 80) || 'Untitled'
           return (
             <Pressable
