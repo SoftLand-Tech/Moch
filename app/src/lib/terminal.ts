@@ -29,19 +29,87 @@ export const TERM_TEXT_CAP = 200_000
 /** Bytes of base64 the drain loop pulls per tick before yielding. */
 export const TERM_TICK_CHUNK_CAP = 40
 
+// ── Composer field mapping (BUG-095) ────────────────────────────────────────
+
 /**
- * Bytes to forward to the PTY when the composer field changes prev → next
- * (BUG-092). The PTY echoes (termios ECHO), so we send the delta, never
- * local text. Appends (typing, paste, suggestion completion) go as-is in
- * one write; pure tail deletions become one DEL (\x7f) per removed char;
- * any non-prefix rewrite (autocorrect, swipe correction, paste over a
- * selection) rebuilds the line — DEL the whole previous text, then the new.
+ * The hidden composer field is NEVER empty: its value is a zero-width
+ * space + the logical text. GBoard deletes via
+ * InputConnection.deleteSurroundingText, which produces NO onChangeText
+ * on a truly empty field — the classic dead backspace after Enter. With
+ * the sentinel there is always one deletable char, so every backspace
+ * produces a change event; the sentinel itself is never sent to the PTY
+ * (bytes are only ever derived here).
  */
-export function diffKeystrokes(prev: string, next: string): string {
-  if (next === prev) return ''
-  if (next.length > prev.length && next.startsWith(prev)) return next.slice(prev.length)
-  if (prev.startsWith(next)) return '\x7f'.repeat(prev.length - next.length)
-  return '\x7f'.repeat(prev.length) + next
+export const FIELD_SENTINEL = '\u200b'
+
+export type FieldChange =
+  | { type: 'append'; text: string } // forward text
+  | { type: 'delete'; count: number } // forward count DELs
+  | { type: 'rewrite'; count: number; text: string } // forward count DELs + text
+  | { type: 'noop' } // no PTY bytes, logical text unchanged
+  | { type: 'resync' } // IME dropped the sentinel / stale composing: send NOTHING, restore field
+
+export function mapFieldChange(prevLogical: string, raw: string): FieldChange {
+  if (raw.startsWith(FIELD_SENTINEL)) {
+    const next = raw.slice(1)
+    if (next === prevLogical) return { type: 'noop' }
+    if (next.startsWith(prevLogical)) return { type: 'append', text: next.slice(prevLogical.length) }
+    if (prevLogical.startsWith(next)) return { type: 'delete', count: prevLogical.length - next.length }
+    return { type: 'rewrite', count: prevLogical.length, text: next }
+  }
+  // Sentinel gone: the IME deleted it (backspace past field start) — but
+  // only trust that when the field came back EMPTY. Anything else is an
+  // IME rewriting the field without the sentinel (hostile autocorrect);
+  // re-anchor silently rather than guess bytes.
+  if (raw === '' && prevLogical === '') return { type: 'delete', count: 1 }
+  return { type: 'resync' }
+}
+
+export interface FieldState {
+  /** Logical composer text (sentinel excluded). */
+  logical: string
+  /** Backspace key events sent to the PTY that are awaiting their change event. */
+  pendingKeys: number
+}
+
+/**
+ * Pure composer state machine (BUG-095): maps one onChangeText payload
+ * against the previous field state, pairing the change with any key-event
+ * DEL already sent (Android dispatches onKeyPress BEFORE the text change,
+ * so empty-field backspaces legitimately produce both channels — pairing
+ * by counting keeps exactly one DEL per press without wall-clock windows).
+ * Any non-delete change invalidates pending pairs.
+ */
+export function applyFieldChange(prev: FieldState, raw: string): { bytes: string; next: FieldState } {
+  const r = mapFieldChange(prev.logical, raw)
+  let logical = prev.logical
+  let bytes = ''
+  let pendingKeys = prev.pendingKeys
+  switch (r.type) {
+    case 'append':
+      logical = prev.logical + r.text
+      bytes = r.text
+      pendingKeys = 0
+      break
+    case 'delete':
+      logical = prev.logical.slice(0, Math.max(0, prev.logical.length - r.count))
+      if (pendingKeys > 0) {
+        pendingKeys -= 1
+      } else {
+        bytes = '\x7f'.repeat(r.count)
+      }
+      break
+    case 'rewrite':
+      logical = r.text
+      bytes = (pendingKeys > 0 ? '' : '\x7f'.repeat(r.count)) + r.text
+      if (pendingKeys > 0) pendingKeys -= 1
+      break
+    case 'noop':
+    case 'resync':
+      pendingKeys = 0
+      break
+  }
+  return { bytes, next: { logical, pendingKeys } }
 }
 
 // ── base64 (dependency-free: node Buffer AND Hermes-safe) ───────────────────
@@ -160,7 +228,35 @@ export function appendCapped(prev: string, add: string, cap = TERM_TEXT_CAP): st
     }
   }
   out += buf
-  return out.length > cap ? out.slice(out.length - cap) : out
+  if (out.length <= cap) return out
+  // Keep the tail. Never start on a trailing surrogate: back up onto the
+  // code point head so the buffer never stores a broken pair.
+  let start = out.length - cap
+  if (out.charCodeAt(start) >= 0xdc00 && out.charCodeAt(start) <= 0xdfff) start--
+  return out.slice(start)
+}
+
+/**
+ * Render only the tail of the scrollback (BUG-094): the screen re-renders
+ * this string on every drain tick, and Android rebuilds the whole
+ * TextView layout per change — O(scrollback) renders starve the JS
+ * thread. The controller keeps its 200k buffer; the screen shows the
+ * last `keep` chars behind a marker.
+ */
+export const TERM_RENDER_TAIL = 12_000
+export const TERM_TRIM_MARKER = '⋯ earlier output trimmed ⋯\n'
+
+export function renderTail(text: string, keep = TERM_RENDER_TAIL): string {
+  if (text.length <= keep) return text
+  let start = text.length - keep
+  // Never start on a trailing surrogate (see appendCapped).
+  const c = text.charCodeAt(start)
+  if (c >= 0xdc00 && c <= 0xdfff) start--
+  // Resume at a line boundary (bounded scan) so the marker doesn't glue
+  // onto a partial line.
+  const nl = text.lastIndexOf('\n', start)
+  if (nl !== -1 && start - nl < 256) start = nl + 1
+  return TERM_TRIM_MARKER + text.slice(start)
 }
 
 // ── Controller ───────────────────────────────────────────────────────────────

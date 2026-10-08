@@ -17,7 +17,16 @@ import {
   linuxTermResize,
   linuxTermKill,
 } from '../../src/lib/hermesRuntime'
-import { TerminalController, TERM_KEYS, diffKeystrokes, type TermState } from '../../src/lib/terminal'
+import {
+  FIELD_SENTINEL,
+  TERM_KEYS,
+  TERM_RENDER_TAIL,
+  TerminalController,
+  applyFieldChange,
+  renderTail,
+  type FieldState,
+  type TermState,
+} from '../../src/lib/terminal'
 
 type Gate = 'checking' | 'noprobe' | 'noguest' | 'nopty' | 'ready' | 'failed'
 
@@ -87,16 +96,25 @@ function TerminalInner() {
   // stayed behind the IME; no coordinate math survives this host.
   const kb = useReanimatedKeyboardAnimation()
   const kbPad = useAnimatedStyle(() => ({ paddingBottom: -kb.height.value }))
-  // RN focus tracking of the hidden input — blink driver only; IME truth is
-  // keyboard.isVisible (Android keeps RN focus after the IME hides).
-  const [focused, setFocused] = useState(false)
-  const [caretOn, setCaretOn] = useState(true)
-  const dead = snap.state === 'dead'
+  // Composer state machine (BUG-095): logical text + backspace key events
+  // awaiting their change event. The field value is FIELD_SENTINEL + logical.
+  const fieldRef = useRef<FieldState>({ logical: '', pendingKeys: 0 })
   const scrollRef = useRef<ScrollView>(null)
   const inputRef = useRef<TextInput>(null)
-  // Last value of the hidden composer field — diffed per change to derive
-  // the exact keystrokes to forward to the PTY.
-  const prevHiddenRef = useRef('')
+  const dead = snap.state === 'dead'
+  // BUG-094: render only the tail of the buffer — Android rebuilds the
+  // whole TextView layout on every Text change, so O(scrollback) renders
+  // starve the JS thread (visible at 2Hz with the old caret blink; the
+  // blink is gone, the caret is steady). Memoized on snap.text only: the
+  // per-keystroke setHidden re-renders must not pay O(window) slices.
+  const shown = useMemo(
+    () => (snap.text ? renderTail(snap.text, TERM_RENDER_TAIL) : snap.state === 'starting' ? 'booting shell…' : ''),
+    [snap.text, snap.state],
+  )
+  // Pin-to-bottom bookkeeping: scroll only while the user is at the bottom
+  // and the tail actually grew (a shrink clamps naturally).
+  const atBottomRef = useRef(true)
+  const lastLenRef = useRef(0)
 
   const ctl = useMemo(
     () =>
@@ -154,23 +172,20 @@ function TerminalInner() {
   // Session survives unmount (app holds the process) — stop polling only.
   useEffect(() => ctl.destroy.bind(ctl), [ctl])
 
-  // Pin to bottom on new output (unless the user scrolled up — v1 keeps it simple).
+  // Pin to bottom on new output (unless the user scrolled up). Only fires
+  // when the tail grew and the user is near the bottom — every call is a
+  // native scroll + draw during output streams.
   useEffect(() => {
-    scrollRef.current?.scrollToEnd({ animated: false })
+    if (snap.text.length > lastLenRef.current && atBottomRef.current) {
+      scrollRef.current?.scrollToEnd({ animated: false })
+    }
+    lastLenRef.current = snap.text.length
   }, [snap.text])
 
-  // 500ms caret blink while the IME is up AND the field holds RN focus;
-  // steady block caret otherwise — the user must always see where typing
-  // lands (BUG-090). Android keeps RN focus after the IME hides, so the
-  // blink gates on real keyboard visibility, not focus alone.
-  useEffect(() => {
-    if (!focused || dead || !keyboard.isVisible) {
-      setCaretOn(true)
-      return
-    }
-    const id = setInterval(() => setCaretOn((v) => !v), 500)
-    return () => clearInterval(id)
-  }, [focused, dead, keyboard.isVisible])
+  const onScroll = useCallback((e: { nativeEvent: { contentSize: { height: number }; layoutMeasurement: { height: number }; contentOffset: { y: number } } }) => {
+    atBottomRef.current =
+      e.nativeEvent.contentSize.height - e.nativeEvent.layoutMeasurement.height - e.nativeEvent.contentOffset.y < 48
+  }, [])
 
   const send = useCallback(
     (raw: string) => {
@@ -181,15 +196,18 @@ function TerminalInner() {
   )
 
   // Direct PTY typing: the PTY has ECHO ON, so the drained output is the
-  // display — forward the diff (diffKeystrokes) and never render local
-  // input (no double echo). Empty-field backspace never produces a change
-  // event — handled by onKeyPress below.
+  // display — forward only what the field state machine derives
+  // (applyFieldChange) and never render local input (no double echo).
+  // The field value is FIELD_SENTINEL + logical, so a backspace always
+  // has a char to delete (BUG-095): deleting the sentinel is "DEL past
+  // field start"; the key-event channel is paired by counting, so IMEs
+  // that emit both events can't double-delete.
   const onHiddenChange = useCallback(
-    (t: string) => {
-      const bytes = diffKeystrokes(prevHiddenRef.current, t)
+    (raw: string) => {
+      const { bytes, next } = applyFieldChange(fieldRef.current, raw)
+      fieldRef.current = next
       if (bytes) send(bytes)
-      prevHiddenRef.current = t
-      setHidden(t)
+      setHidden(next.logical)
     },
     [send],
   )
@@ -212,7 +230,7 @@ function TerminalInner() {
 
   const submitLine = useCallback(() => {
     send(TERM_KEYS.ENTER)
-    prevHiddenRef.current = ''
+    fieldRef.current = { logical: '', pendingKeys: 0 }
     setHidden('')
   }, [send])
 
@@ -282,13 +300,17 @@ function TerminalInner() {
           contentContainerStyle={s.outputInner}
           showsVerticalScrollIndicator
           keyboardShouldPersistTaps="always"
+          onScroll={onScroll}
+          scrollEventThrottle={16}
         >
-          {/* Caveat: ←/→ move the real PTY cursor inside the echo, but this
-              ▍ stays pinned at the tail — a single Text node can't place a
-              caret mid-stream. Resolved by the planned xterm.js renderer. */}
+          {/* BUG-094: `shown` is the memoized tail window (steady between
+              drain ticks — no blink, every blink rebuilt this whole Text).
+              Caveat: ←/→ move the real PTY cursor inside the echo, but this
+              ▍ stays pinned at the tail — resolved by the planned xterm.js
+              renderer. */}
           <Text selectable style={[s.mono, { fontSize }]}>
-            {snap.text || (snap.state === 'starting' ? 'booting shell…' : '')}
-            {!dead && caretOn ? '▍' : ''}
+            {shown}
+            {!dead ? '▍' : ''}
           </Text>
           {dead ? (
             <>
@@ -309,20 +331,21 @@ function TerminalInner() {
           (the PTY echo in the drained output is the display). */}
       <TextInput
         ref={inputRef}
-        value={hidden}
+        value={FIELD_SENTINEL + hidden}
         onChangeText={onHiddenChange}
-        /* Backspace on an EMPTY field is the diff's dead zone: the value is
-           cleared after every submit, so there is no text to remove and no
-           onChangeText ever fires — but key events still do. Send DEL only
-           while the field is empty; once it holds text the removal branch of
-           onHiddenChange already emits \x7f, and firing both would delete
-           two characters per keypress. */
+        /* Backspace key events: Android dispatches onKeyPress BEFORE the
+           text change. Only the logically-empty field needs this channel
+           (GBoard's delete on the bare sentinel deletes it and fires the
+           change too — applyFieldChange pairs the two so exactly one DEL
+           goes out; IMEs that emit the key without the change are covered
+           because the DEL is sent HERE). With text in the field the change
+           event's diff is authoritative — don't double-send. */
         onKeyPress={(e) => {
-          if (e.nativeEvent.key === 'Backspace' && prevHiddenRef.current === '') send('\x7f')
+          if (e.nativeEvent.key !== 'Backspace' || fieldRef.current.logical !== '') return
+          fieldRef.current = { ...fieldRef.current, pendingKeys: fieldRef.current.pendingKeys + 1 }
+          send('\x7f')
         }}
         onSubmitEditing={submitLine}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
         style={s.hiddenInput}
         autoFocus
         autoCorrect={false}
