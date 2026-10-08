@@ -74,30 +74,69 @@ async function main() {
   check('lone \r overwrites the current line (CR artifact fix)', m.appendCapped('hello', '\rbye') === 'bye')
   check('CR then newline still breaks lines', m.appendCapped('hello', '\rbye\nok') === 'bye\nok')
 
-  // ── diffKeystrokes (BUG-092) ──────────────────────────────────────────
-  check('typing appends as-is', m.diffKeystrokes('ls', 'ls ') === ' ')
-  check('paste appends in one run', m.diffKeystrokes('l', 'ls -la | wc') === 's -la | wc')
-  check('backspace diffs to DEL', m.diffKeystrokes('ls ', 'ls') === '\x7f')
-  check('empty-field no-op', m.diffKeystrokes('', '') === '')
-  check('clear after Enter → full DEL storm', m.diffKeystrokes('ls -la', '') === '\x7f'.repeat(6))
-  // Non-prefix rewrite (autocorrect / swipe correction): rebuild the line.
+  // ── mapFieldChange (BUG-095 sentinel field) ───────────────────────────
+  const S = m.FIELD_SENTINEL
+  check('empty → empty: DEL past field start', JSON.stringify(m.mapFieldChange('', '')) === JSON.stringify({ type: 'delete', count: 1 }))
+  check('bare sentinel back = noop', m.mapFieldChange('', S).type === 'noop')
+  check('typing appends', m.mapFieldChange('', S + 'ls').type === 'append' && m.mapFieldChange('', S + 'ls').type === 'append')
   check(
-    'autocorrect rebuilds: DEL prev + new text',
-    m.diffKeystrokes('teh', 'the') === '\x7f\x7f\x7fthe',
+    'append text payload',
+    JSON.stringify(m.mapFieldChange('l', S + 'ls')) === JSON.stringify({ type: 'append', text: 's' }),
   )
   check(
-    'autocapitalize rebuilds same-length rewrite',
-    m.diffKeystrokes('ls', 'Ls') === '\x7f\x7fLs',
+    'mid-text backspace: one DEL',
+    JSON.stringify(m.mapFieldChange('ls', S + 'l')) === JSON.stringify({ type: 'delete', count: 1 }),
   )
   check(
-    'prefix completion is a pure append (suggestion bar)',
-    m.diffKeystrokes('Doc', 'Documents') === 'uments',
+    'clear-line backspaces: full DEL storm',
+    JSON.stringify(m.mapFieldChange('ls -la', S)) === JSON.stringify({ type: 'delete', count: 6 }),
   )
   check(
-    'shorter non-prefix edit still rebuilds',
-    m.diffKeystrokes('abcd', 'ax') === '\x7f'.repeat(4) + 'ax',
+    'autocorrect rewrite rebuilds',
+    JSON.stringify(m.mapFieldChange('teh', S + 'the')) === JSON.stringify({ type: 'rewrite', count: 3, text: 'the' }),
   )
-  check('same value → nothing', m.diffKeystrokes('ls', 'ls') === '')
+  check(
+    'autocapitalize same-length rewrite',
+    JSON.stringify(m.mapFieldChange('ls', S + 'Ls')) === JSON.stringify({ type: 'rewrite', count: 2, text: 'Ls' }),
+  )
+  check(
+    'prefix completion is pure append',
+    JSON.stringify(m.mapFieldChange('Doc', S + 'Documents')) === JSON.stringify({ type: 'append', text: 'uments' }),
+  )
+  check('sentinel dropped, text same → resync (no bytes)', m.mapFieldChange('ls', 'ls').type === 'resync')
+  check('stale composing after Enter → resync (no bytes)', m.mapFieldChange('', 'l').type === 'resync')
+
+  // ── applyFieldChange pairing (BUG-095 dual channel) ───────────────────
+  // Key event first (Android dispatches onKeyPress BEFORE the change):
+  // the key handler sends DEL + stamps pendingKeys; the paired change must
+  // send NOTHING more.
+  const keyed = m.applyFieldChange({ logical: '', pendingKeys: 1 }, '')
+  check('empty-field backspace: key+change → exactly one DEL', keyed.bytes === '')
+  check('pairing consumes the pending key', keyed.next.pendingKeys === 0)
+  const changeOnly = m.applyFieldChange({ logical: '', pendingKeys: 0 }, '')
+  check('empty-field backspace: change-only IME → one DEL', changeOnly.bytes === '\x7f')
+  const dbl = m.applyFieldChange(m.applyFieldChange({ logical: '', pendingKeys: 2 }, '').next, '')
+  check('double backspace (key,key,change,change) → 2 DELs, no swallow', dbl.bytes === '' && dbl.next.pendingKeys === 0)
+  const mid = m.applyFieldChange({ logical: 'ab', pendingKeys: 0 }, S + 'a')
+  check('non-empty backspace via change only', mid.bytes === '\x7f' && mid.next.logical === 'a')
+  const typed = m.applyFieldChange({ logical: '', pendingKeys: 1 }, S + 'x')
+  check('keystroke after unpaired key invalidates pending', typed.bytes === 'x' && typed.next.pendingKeys === 0)
+  const seq = m.applyFieldChange({ logical: 'ls', pendingKeys: 0 }, S)
+  check('full storm through pairing', seq.bytes === '\x7f\x7f' && seq.next.logical === '')
+  check('resync sends nothing, keeps logical', m.applyFieldChange({ logical: 'ls', pendingKeys: 0 }, 'ls').bytes === '')
+
+  // ── renderTail (BUG-094 window) ───────────────────────────────────────
+  const small = 'abc'
+  check('under cap: identity', m.renderTail(small, 10) === 'abc')
+  check('exactly at cap: identity', m.renderTail('a'.repeat(12), 12) === 'a'.repeat(12))
+  const big = 'x'.repeat(50) + '\n' + 'y'.repeat(50)
+  const rt = m.renderTail(big, 40)
+  check('over cap: marker + tail', rt.startsWith(m.TERM_TRIM_MARKER) && rt.endsWith('y'.repeat(50)))
+  check('over cap: tail length bounded', rt.length <= m.TERM_TRIM_MARKER.length + 40 + 256)
+  const surrogate = 'a'.repeat(30) + '𝄞' + 'b'.repeat(30) // 𝄞 = surrogate pair
+  const rst = m.renderTail(surrogate, 32)
+  check('never splits a surrogate pair', !/[\ud800-\udbff]$/.test(rst.slice(0, m.TERM_TRIM_MARKER.length).replace(m.TERM_TRIM_MARKER, '').slice(0, 1)) && !rst.includes('\udc00'))
+  check('line-boundary resume', rst.replace(m.TERM_TRIM_MARKER, '').startsWith('𝄞') || rst.replace(m.TERM_TRIM_MARKER, '').startsWith('\n'))
 
   // ── controller: start banks replay + tick banks drain ─────────────────
   const rep = b64('\x1b[1mroot@moch\x1b[0m:~# ')
