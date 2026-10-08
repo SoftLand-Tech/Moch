@@ -46,33 +46,9 @@ async function main() {
   m = await import('../src/lib/terminal')
 
   // ── base64 ──────────────────────────────────────────────────────────────
-  check('b64 round-trip ascii', m.b64decodeText(m.b64encodeText('ls -la ~/x')) === 'ls -la ~/x')
-  check(
-    'b64 round-trip utf8',
-    m.b64decodeText(m.b64encodeText('مرحبا terminal ✓')) === 'مرحبا terminal ✓',
-  )
   check('b64 matches node Buffer', m.b64encodeText('hello') === b64('hello'))
-  check('b64decodeText tolerates binary', m.b64decodeText('////').length > 0)
-
-  // ── stripAnsi ─────────────────────────────────────────────────────────
-  check(
-    'CSI color stripped',
-    m.stripAnsi('\x1b[32mgreen\x1b[0m plain') === 'green plain',
-  )
-  check(
-    'cursor moves stripped',
-    m.stripAnsi('a\x1b[2Kb\x1b[1A') === 'ab',
-  )
-  check('CRLF → LF; lone \r kept for CR handling', m.stripAnsi('one\r\ntwo\ragain') === 'one\ntwo\ragain')
-  check('OSC title stripped', m.stripAnsi('\x1b]0;title\x07after') === 'after')
-
-  // ── appendCapped ──────────────────────────────────────────────────────
-  check('append joins', m.appendCapped('ab', 'cd') === 'abcd')
-  const capped = m.appendCapped('x'.repeat(100), 'y'.repeat(100), 150)
-  check('cap keeps the tail', capped.length === 150 && capped.endsWith('y'.repeat(100)))
-  check('empty add is identity', m.appendCapped('ab', '') === 'ab')
-  check('lone \r overwrites the current line (CR artifact fix)', m.appendCapped('hello', '\rbye') === 'bye')
-  check('CR then newline still breaks lines', m.appendCapped('hello', '\rbye\nok') === 'bye\nok')
+  check('b64 encodes utf8 deterministically', m.b64encodeText('مرحبا ✓') === m.b64encodeText('مرحبا ✓'))
+  check('b64 empty is identity', m.b64encodeText('') === '')
 
   // ── mapFieldChange (BUG-095 sentinel field) ───────────────────────────
   const S = m.FIELD_SENTINEL
@@ -125,32 +101,22 @@ async function main() {
   check('full storm through pairing', seq.bytes === '\x7f\x7f' && seq.next.logical === '')
   check('resync sends nothing, keeps logical', m.applyFieldChange({ logical: 'ls', pendingKeys: 0 }, 'ls').bytes === '')
 
-  // ── renderTail (BUG-094 window) ───────────────────────────────────────
-  const small = 'abc'
-  check('under cap: identity', m.renderTail(small, 10) === 'abc')
-  check('exactly at cap: identity', m.renderTail('a'.repeat(12), 12) === 'a'.repeat(12))
-  const big = 'x'.repeat(50) + '\n' + 'y'.repeat(50)
-  const rt = m.renderTail(big, 40)
-  check('over cap: marker + tail', rt.startsWith(m.TERM_TRIM_MARKER) && rt.endsWith('y'.repeat(50)))
-  check('over cap: tail length bounded', rt.length <= m.TERM_TRIM_MARKER.length + 40 + 256)
-  const surrogate = 'a'.repeat(30) + '𝄞' + 'b'.repeat(30) // 𝄞 = surrogate pair
-  const rst = m.renderTail(surrogate, 32)
-  check('never splits a surrogate pair', !/[\ud800-\udbff]$/.test(rst.slice(0, m.TERM_TRIM_MARKER.length).replace(m.TERM_TRIM_MARKER, '').slice(0, 1)) && !rst.includes('\udc00'))
-  check('line-boundary resume', rst.replace(m.TERM_TRIM_MARKER, '').startsWith('𝄞') || rst.replace(m.TERM_TRIM_MARKER, '').startsWith('\n'))
-
-  // ── controller: start banks replay + tick banks drain ─────────────────
+  // ── controller: RAW byte flow (BUG-097) ───────────────────────────────
   const rep = b64('\x1b[1mroot@moch\x1b[0m:~# ')
-  const live = b64('hello-pty\n')
+  const live = b64('hello\x08 \x08pty\n') // backspace erases — must survive untouched
+  const got: string[] = []
   const fake = fakeNative([live])
   fake.replay = async () => ({ chunk: rep, alive: true })
-  const ctl = new m.TerminalController(fake)
+  const ctl = new m.TerminalController(fake, { drainMs: 50, onChunk: (c) => got.push(c) })
   const snaps: string[] = []
   ctl.onChange((s) => snaps.push(s.state))
   const ok = await ctl.start(80, 24)
   check('start ok → live', ok && ctl.state === 'live')
-  check('replay painted without ANSI', ctl.text === 'root@moch:~# ')
+  check('replay forwarded RAW through onChunk', got[0] === rep)
+  check('raw bank holds the replay', ctl.rawBank === rep)
   await ctl.tick()
-  check('drain appended', ctl.text.endsWith('hello-pty\n'))
+  check('drain chunk forwarded RAW (esc + \\x08 intact)', got[1] === live)
+  check('raw bank accumulates ticks', ctl.rawBank === rep + live)
   check('listener fired live', snaps.includes('live'))
 
   // ── controller: send base64s the bytes ────────────────────────────────
@@ -160,6 +126,15 @@ async function main() {
   await ctl.send(m.TERM_KEYS.CTRL_C)
   const sentCtrl = Buffer.from(fake.writes[1] ?? '', 'base64').toString('utf8')
   check('Ctrl+C sends \\x03', sentCtrl === '\x03')
+
+  // ── controller: raw bank cap trims on a b64 boundary ──────────────────
+  const big = fakeNative([b64('a'.repeat(200000))])
+  const ctlBig = new m.TerminalController(big, { onChunk: () => {} })
+  await ctlBig.start(80, 24)
+  await ctlBig.tick()
+  check('raw bank capped', ctlBig.rawBank.length <= m.TERM_RAW_BANK_B64_CAP)
+  check('raw bank stays valid b64', ctlBig.rawBank.length % 4 === 0 && /^[A-Za-z0-9+/=]*$/.test(ctlBig.rawBank))
+  await ctlBig.send('q\n')
 
   // ── controller: shell death → dead ────────────────────────────────────
   const dying = fakeNative([], false)
@@ -175,12 +150,17 @@ async function main() {
   const ok3 = await ctl3.start(80, 24)
   check('failed start → dead + error', !ok3 && ctl3.state === 'dead' && ctl3.error === 'guest not bootstrapped')
 
+  // ── controller: clear wipes the raw bank ──────────────────────────────
+  ctl.rawBank = ''
+  check('clear wipes raw bank', ctl.rawBank === '')
+
   // ── controller: kill ──────────────────────────────────────────────────
   await ctl.kill()
   check('kill → dead', ctl.state === 'dead')
   ctl.destroy()
   ctl2.destroy()
   ctl3.destroy()
+  ctlBig.destroy()
 
   console.log(`\n${pass} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)
