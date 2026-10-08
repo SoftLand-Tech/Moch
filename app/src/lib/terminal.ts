@@ -29,6 +29,21 @@ export const TERM_TEXT_CAP = 200_000
 /** Bytes of base64 the drain loop pulls per tick before yielding. */
 export const TERM_TICK_CHUNK_CAP = 40
 
+/**
+ * Bytes to forward to the PTY when the composer field changes prev → next
+ * (BUG-092). The PTY echoes (termios ECHO), so we send the delta, never
+ * local text. Appends (typing, paste, suggestion completion) go as-is in
+ * one write; pure tail deletions become one DEL (\x7f) per removed char;
+ * any non-prefix rewrite (autocorrect, swipe correction, paste over a
+ * selection) rebuilds the line — DEL the whole previous text, then the new.
+ */
+export function diffKeystrokes(prev: string, next: string): string {
+  if (next === prev) return ''
+  if (next.length > prev.length && next.startsWith(prev)) return next.slice(prev.length)
+  if (prev.startsWith(next)) return '\x7f'.repeat(prev.length - next.length)
+  return '\x7f'.repeat(prev.length) + next
+}
+
 // ── base64 (dependency-free: node Buffer AND Hermes-safe) ───────────────────
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'

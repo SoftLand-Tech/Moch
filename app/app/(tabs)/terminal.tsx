@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, Pressable, ScrollView, StyleSheet, TextInput, ActivityIndicator } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { KeyboardAvoidingView, useKeyboardState } from 'react-native-keyboard-controller'
+import { useKeyboardState, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
+import Animated, { useAnimatedStyle } from 'react-native-reanimated'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
 import { Icon } from '../../src/components/Icon'
@@ -16,17 +17,18 @@ import {
   linuxTermResize,
   linuxTermKill,
 } from '../../src/lib/hermesRuntime'
-import { TerminalController, TERM_KEYS, type TermState } from '../../src/lib/terminal'
+import { TerminalController, TERM_KEYS, diffKeystrokes, type TermState } from '../../src/lib/terminal'
 
 type Gate = 'checking' | 'noprobe' | 'noguest' | 'nopty' | 'ready' | 'failed'
 
 export default function Terminal() {
   const s = useStyles(makeS)
-  // Drop the bottom safe-area edge while the keyboard is open so the lift
-  // below doesn't double-count the inset.
-  const keyboard = useKeyboardState()
+  // BUG-093: the bottom edge stays STATIC. The keyboard lift is the chat
+  // pattern's animated negative paddingBottom (TerminalInner); swapping the
+  // edge per keyboard state re-lays-out the whole frame mid-animation for
+  // nothing (and sank the lift back by the inset in the KAV attempt).
   return (
-    <SafeAreaView style={s.frame} edges={keyboard.isVisible ? [] : ['bottom']}>
+    <SafeAreaView style={s.frame} edges={['bottom']}>
       <ScreenShell
         title="Terminal"
         right={<TerminalMenu onKill={() => killRef.current?.()} onClear={() => clearRef.current?.()} />}
@@ -67,6 +69,8 @@ function TerminalMenu({ onKill, onClear }: { onKill: () => void; onClear: () => 
 
 function TerminalInner() {
   const s = useStyles(makeS)
+  // IME visibility truth (RN focus lies on Android — see focusInput).
+  const keyboard = useKeyboardState()
   const [gate, setGate] = useState<Gate>('checking')
   const [gateMsg, setGateMsg] = useState('')
   const [snap, setSnap] = useState<{ state: TermState; text: string; alive: boolean }>({
@@ -76,6 +80,18 @@ function TerminalInner() {
   })
   const [hidden, setHidden] = useState('')
   const [fontSize, setFontSize] = useState(13)
+  // BUG-093 lift: same driver as the chat screen (chat.tsx BUG-037 fix) —
+  // the reanimated keyboard height as a negative bottom pad. The
+  // KeyboardAvoidingView computed its pad from parent-relative coords and
+  // ran short by status-bar + header height, so the key row and composer
+  // stayed behind the IME; no coordinate math survives this host.
+  const kb = useReanimatedKeyboardAnimation()
+  const kbPad = useAnimatedStyle(() => ({ paddingBottom: -kb.height.value }))
+  // RN focus tracking of the hidden input — blink driver only; IME truth is
+  // keyboard.isVisible (Android keeps RN focus after the IME hides).
+  const [focused, setFocused] = useState(false)
+  const [caretOn, setCaretOn] = useState(true)
+  const dead = snap.state === 'dead'
   const scrollRef = useRef<ScrollView>(null)
   const inputRef = useRef<TextInput>(null)
   // Last value of the hidden composer field — diffed per change to derive
@@ -143,6 +159,19 @@ function TerminalInner() {
     scrollRef.current?.scrollToEnd({ animated: false })
   }, [snap.text])
 
+  // 500ms caret blink while the IME is up AND the field holds RN focus;
+  // steady block caret otherwise — the user must always see where typing
+  // lands (BUG-090). Android keeps RN focus after the IME hides, so the
+  // blink gates on real keyboard visibility, not focus alone.
+  useEffect(() => {
+    if (!focused || dead || !keyboard.isVisible) {
+      setCaretOn(true)
+      return
+    }
+    const id = setInterval(() => setCaretOn((v) => !v), 500)
+    return () => clearInterval(id)
+  }, [focused, dead, keyboard.isVisible])
+
   const send = useCallback(
     (raw: string) => {
       if (!raw) return
@@ -152,21 +181,34 @@ function TerminalInner() {
   )
 
   // Direct PTY typing: the PTY has ECHO ON, so the drained output is the
-  // display — forward each keystroke and never render local input (no
-  // double echo). Added chars go as-is; removals become DEL (\x7f).
+  // display — forward the diff (diffKeystrokes) and never render local
+  // input (no double echo). Empty-field backspace never produces a change
+  // event — handled by onKeyPress below.
   const onHiddenChange = useCallback(
     (t: string) => {
-      const prev = prevHiddenRef.current
-      if (t.length > prev.length && t.startsWith(prev)) {
-        for (const ch of t.slice(prev.length)) send(ch)
-      } else {
-        for (let i = 0; i < prev.length - t.length; i++) send('\x7f')
-      }
+      const bytes = diffKeystrokes(prevHiddenRef.current, t)
+      if (bytes) send(bytes)
       prevHiddenRef.current = t
       setHidden(t)
     },
     [send],
   )
+
+  // Re-raising a dismissed IME needs a REAL native focus transition: when
+  // the user hides the keyboard, Android silently keeps the input focused,
+  // and showSoftInput off an already-focused view is dropped by the IMMS
+  // (BUG-091 — plain focus() did nothing; selecting output text was the
+  // only thing that blurred the field for real). blur() then refocus a
+  // frame later supplies the transition. While the IME is up this is
+  // skipped — no point tearing focus on every output tap. Touch-CANCEL is
+  // deliberately NOT wired: long-press text selection ends there and must
+  // not be torn down.
+  const focusInput = useCallback(() => {
+    const el = inputRef.current
+    if (!el || keyboard.isVisible) return
+    el.blur()
+    requestAnimationFrame(() => el.focus())
+  }, [keyboard.isVisible])
 
   const submitLine = useCallback(() => {
     send(TERM_KEYS.ENTER)
@@ -229,21 +271,24 @@ function TerminalInner() {
     )
   }
 
-  const dead = snap.state === 'dead'
-
   return (
-    <KeyboardAvoidingView style={s.root} behavior="padding">
-      {/* Touching the output area focuses the hidden input so the caret +
-          keyboard appear; touches bubble from the ScrollView to this View. */}
-      <View style={s.outputWrap} onTouchEnd={() => inputRef.current?.focus()}>
+    <Animated.View style={[s.root, kbPad]}>
+      {/* Tapping the output re-raises the IME when it's down (blur + refocus
+          — see focusInput); touches bubble from the ScrollView to this View. */}
+      <View style={s.outputWrap} onTouchEnd={focusInput}>
         <ScrollView
           ref={scrollRef}
           style={s.output}
           contentContainerStyle={s.outputInner}
           showsVerticalScrollIndicator
+          keyboardShouldPersistTaps="always"
         >
+          {/* Caveat: ←/→ move the real PTY cursor inside the echo, but this
+              ▍ stays pinned at the tail — a single Text node can't place a
+              caret mid-stream. Resolved by the planned xterm.js renderer. */}
           <Text selectable style={[s.mono, { fontSize }]}>
             {snap.text || (snap.state === 'starting' ? 'booting shell…' : '')}
+            {!dead && caretOn ? '▍' : ''}
           </Text>
           {dead ? (
             <>
@@ -266,7 +311,18 @@ function TerminalInner() {
         ref={inputRef}
         value={hidden}
         onChangeText={onHiddenChange}
+        /* Backspace on an EMPTY field is the diff's dead zone: the value is
+           cleared after every submit, so there is no text to remove and no
+           onChangeText ever fires — but key events still do. Send DEL only
+           while the field is empty; once it holds text the removal branch of
+           onHiddenChange already emits \x7f, and firing both would delete
+           two characters per keypress. */
+        onKeyPress={(e) => {
+          if (e.nativeEvent.key === 'Backspace' && prevHiddenRef.current === '') send('\x7f')
+        }}
         onSubmitEditing={submitLine}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         style={s.hiddenInput}
         autoFocus
         autoCorrect={false}
@@ -290,7 +346,7 @@ function TerminalInner() {
           <Text style={s.aa}>A+</Text>
         </Pressable>
       </View>
-    </KeyboardAvoidingView>
+    </Animated.View>
   )
 }
 
