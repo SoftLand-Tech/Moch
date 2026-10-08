@@ -74,6 +74,31 @@ async function main() {
   check('lone \r overwrites the current line (CR artifact fix)', m.appendCapped('hello', '\rbye') === 'bye')
   check('CR then newline still breaks lines', m.appendCapped('hello', '\rbye\nok') === 'bye\nok')
 
+  // ── diffKeystrokes (BUG-092) ──────────────────────────────────────────
+  check('typing appends as-is', m.diffKeystrokes('ls', 'ls ') === ' ')
+  check('paste appends in one run', m.diffKeystrokes('l', 'ls -la | wc') === 's -la | wc')
+  check('backspace diffs to DEL', m.diffKeystrokes('ls ', 'ls') === '\x7f')
+  check('empty-field no-op', m.diffKeystrokes('', '') === '')
+  check('clear after Enter → full DEL storm', m.diffKeystrokes('ls -la', '') === '\x7f'.repeat(6))
+  // Non-prefix rewrite (autocorrect / swipe correction): rebuild the line.
+  check(
+    'autocorrect rebuilds: DEL prev + new text',
+    m.diffKeystrokes('teh', 'the') === '\x7f\x7f\x7fthe',
+  )
+  check(
+    'autocapitalize rebuilds same-length rewrite',
+    m.diffKeystrokes('ls', 'Ls') === '\x7f\x7fLs',
+  )
+  check(
+    'prefix completion is a pure append (suggestion bar)',
+    m.diffKeystrokes('Doc', 'Documents') === 'uments',
+  )
+  check(
+    'shorter non-prefix edit still rebuilds',
+    m.diffKeystrokes('abcd', 'ax') === '\x7f'.repeat(4) + 'ax',
+  )
+  check('same value → nothing', m.diffKeystrokes('ls', 'ls') === '')
+
   // ── controller: start banks replay + tick banks drain ─────────────────
   const rep = b64('\x1b[1mroot@moch\x1b[0m:~# ')
   const live = b64('hello-pty\n')
