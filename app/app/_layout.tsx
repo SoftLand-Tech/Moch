@@ -42,6 +42,13 @@ export default function RootLayout() {
   const err = useStore(gatewayError)
   const attempt = useStore(reconnectAttempt)
   const online = useStore(isConnectedAtom)
+  // BUGFIX (launch crash: "Rendered more hooks than the previous render"):
+  // this subscription MUST run on every render. It used to sit below the
+  // `if (!cfg)` early return, so the first render (saved config still
+  // loading, cfg === null) skipped it — and the moment connConfig
+  // hydrated, the next render ran one hook MORE than the last → fatal
+  // React invariant, app dead at cold open for every paired user.
+  const everOpen = useStore(everConnected)
   const [linkMsg, setLinkMsg] = useState<string | null>(null)
   const [showServers, setShowServers] = useState(false)
   const savedServers = useStore(serversStore)
@@ -261,7 +268,8 @@ export default function RootLayout() {
   // been connected, a mid-session drop must degrade to the chat screen's
   // own banner — cached history, drafts and the queue strip stay usable
   // instead of hiding behind an opaque overlay.
-  const everOpen = useStore(everConnected)
+  // (useStore(everConnected) moved up to the unconditional hook block — see
+  // BUGFIX note there. No hook may ever live below the !cfg early return.)
   const bootStruggling = !everOpen
 
   return (
@@ -366,6 +374,35 @@ export default function RootLayout() {
     </View>
     {splash}
     </KeyboardProvider>
+  )
+}
+
+/**
+ * Root error boundary — expo-router wraps the ROOT LAYOUT itself in its
+ * `Try` boundary ONLY when this module exports `ErrorBoundary` (layouts
+ * are otherwise excluded). Without this export, ANY render error thrown
+ * by RootLayout — like the launch-crashing "Rendered more hooks than the
+ * previous render" fixed above — is uncaught: the app dies natively and
+ * MIUI shows the crash-report dialog. With it, the same error degrades
+ * to this screen and Retry remounts the layout fresh.
+ */
+export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
+  return (
+    <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: 30 }}>
+      <StatusBar style="light" />
+      <Text style={{ color: C.red, fontSize: 19, fontWeight: '800', marginBottom: 12 }}>Something went wrong</Text>
+      <Text style={{ color: C.textDim, fontSize: 13, textAlign: 'center', marginBottom: 24, lineHeight: 19 }}>
+        {error?.message ?? 'Unexpected render error'}
+      </Text>
+      <Pressable
+        style={({ pressed }) => [{ backgroundColor: C.accent, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 28 }, pressed && { opacity: 0.6 }]}
+        onPress={retry}
+        accessibilityRole="button"
+        accessibilityLabel="Retry"
+      >
+        <Text style={{ color: C.onAccent, fontSize: 15, fontWeight: '800' }}>Retry</Text>
+      </Pressable>
+    </View>
   )
 }
 

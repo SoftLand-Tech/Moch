@@ -29,7 +29,9 @@ export function AudioBubble({ seg }: { seg: ChatSegment }) {
 
   useEffect(() => {
     if (localUri && pendingPlay.current) {
-  const s = useStyles(makeS)
+      // BUGFIX: a stray `useStyles(makeS)` used to sit here — a hook call
+      // inside an effect callback. It would throw "Invalid hook call" the
+      // first time a downloaded voice note auto-played (latent crash).
       pendingPlay.current = false
       player.play()
     }

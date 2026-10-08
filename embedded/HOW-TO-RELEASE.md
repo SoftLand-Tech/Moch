@@ -12,6 +12,12 @@ bash app/android/gradlew --project-dir app/android assembleRelease
 # equivalent: cd app/android && ./gradlew assembleRelease
 ```
 
+**Gradle home**: this project keeps its Gradle caches in `.gradle-home/`
+at the repo root (NOT `~/.gradle` — that one belongs to other projects).
+Always build with `GRADLE_USER_HOME=$PWD/.gradle-home` or you re-download
+the world into a second cache. See the EDQUOT bullet below for the full
+env trio that works on this machine.
+
 Output: `app/android/app/build/outputs/apk/release/app-release.apk`.
 
 **Signing**: if `app/android/keystore.properties` exists, the release build
@@ -76,6 +82,17 @@ expected your change in — you probably edited the wrong tree.
   worker count. Retry with `--max-workers=2`. A background build that dies
   early leaves an empty log and no notification — always re-check the APK
   mtime/size before handing over.
+- **`/tmp` is a 3.8G tmpfs that fills up** (dsh session snapshots alone
+  take ~3G): the prefab CLI dies with `java.io.IOException: Disk quota
+  exceeded` even though `/` has 30G+ free, and Gradle prints it as a
+  cryptic `prefab_command ... non-zero exit value 1`. Fix: point every
+  JVM and node at a temp dir on `/` and rebuild:
+  ```bash
+  mkdir -p .gradle-home/tmp
+  GRADLE_USER_HOME=$PWD/.gradle-home TMPDIR=$PWD/.gradle-home/tmp \
+  JAVA_TOOL_OPTIONS="-Djava.io.tmpdir=$PWD/.gradle-home/tmp" \
+  bash app/android/gradlew --project-dir app/android assembleRelease --max-workers=2
+  ```
 - **`NODE_ENV` warning** in build output: cosmetic, ignore.
 - **Never run `npx expo prebuild`** — it regenerates `app/android/` and
   deletes the Chaquopy wiring this project depends on.
