@@ -41,25 +41,47 @@ Terminal screen ──poll drain(120ms)──▶ HermesBridge ──▶ moch/ter
   Replay,Resize,Kill}` — promise-only, threaded like `linuxExec`. JS polls
   `drain()`; no native event emitter (v1).
 - **TS** `src/lib/hermesRuntime.ts` (wrappers) + `src/lib/terminal.ts`
-  (new, node-safe like `shareIn.ts`: dependency-free base64, ANSI strip,
-  capped scrollback, `TerminalController` state machine, injectable fakes).
-- **UI** `app/(tabs)/terminal.tsx` (new): `ScreenShell` screen, gated on
-  `linuxStatus().bootstrapped` + `linuxTermProbe()` (pty/shell), RN-native
-  scrollback (monospace) + composer + key row. Drawer entry in
-  `ScreenShell.tsx` nav (`terminal-outline`), route in `go()`, tab in
-  `(tabs)/_layout.tsx`.
-- **Tests**: `scripts/test-terminal.ts` (20 checks, wired as `test:terminal`
-  in `npm run verify`) + `app/python-runtime/tests/test_terminal.py`
+  (new, node-safe like `shareIn.ts`: dependency-free base64 encode, raw
+  base64 bank, `TerminalController` state machine, sentinel composer
+  field machine, injectable fakes).
+- **UI** `app/(tabs)/terminal.tsx`: `ScreenShell` screen, gated on
+  `linuxStatus().bootstrapped` + `linuxTermProbe()` (pty/shell),
+  **xterm.js 5.5.0 in a local-asset WebView** (single self-contained
+  `app/android/app/src/main/assets/term/index.html`, MIT licenses
+  intact) + hidden sentinel-typing input + two-row extra-keys pad +
+  composer. Drawer entry in `ScreenShell.tsx` nav (`terminal-outline`),
+  route in `go()`, tab in `(tabs)/_layout.tsx`.
+- **Tests**: `scripts/test-terminal.ts` (wired as `test:terminal`
+  in `npm run verify`: raw byte-flow, bank cap, sentinel field machine)
+  + `app/python-runtime/tests/test_terminal.py`
   (5 tests: probe round-trip, echo, Ctrl+C interrupt, replay/resize,
   kill/restart).
 
-## Deliberately v1
+## Renderer (v1.5 — xterm.js)
 
-- Renderer is RN-native with stripped ANSI — colors/cursor-addressing are
-  approximated. The **xterm.js WebView** upgrade swaps only the renderer;
-  the byte flow (base64 chunks ⇄ controller) is already xterm-shaped.
-  `vim` smoke is the acceptance test for that upgrade.
-- Single session (no tabs/splits). 200k-char scrollback cap. 120ms poll.
+- The screen renders through a real VT emulator: raw PTY bytes flow
+  `drain → onChunk → injectJavaScript → window.__tq → atob →
+  xterm.write` (per-frame flush). Erases, colors, cursor addressing and
+  5000-line scrollback are real — BUG-097 (erase-blind Text renderer)
+  and BUG-094 (whole-buffer re-renders) classes are gone by design.
+- The WebView is `pointerEvents: none`: taps bubble to the RN wrapper
+  (tap-to-focus re-raises the IME), and typing stays on the proven
+  hidden sentinel input (BUG-095) — bytes go bridge-direct, display
+  comes back through the drain. KeyRow writes bypass the WebView.
+- Fit: WebView `onLayout` → throttled `__fit` → xterm resize ack →
+  `TIOCSWINSIZE` with real cols/rows (v1 was fixed 80×24).
+- Poll: 50ms while the screen is mounted (`TERM_DRAIN_FAST_MS`), the
+  agent exec path stays 120ms.
+- Known tradeoff: touch-scrolling the xterm viewport is disabled by
+  `pointerEvents: none` (v1.5); scrollback browsing needs a future
+  affordance (scroll-mode keys or selectable WebView).
+
+## Deliberately unchanged
+
+- Single session (no tabs/splits). Raw replay bank capped at ~196KB for
+  WebView reloads/renderer-death. Typing never renders local text (PTY
+  echo is the display — no double echo). `vim` smoke is still the
+  acceptance test for the renderer.
 
 ## In-app test procedure (needs a dev APK — native bridge changed)
 
