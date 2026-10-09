@@ -292,6 +292,11 @@ html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hi
       if (d && (d.cols !== term.cols || d.rows !== term.rows)) fit.fit();
     } catch (e) {}
   };
+  // BUG-100 safety net: if the WebView ever holds focus, the Android IME
+  // types into xterm's internal textarea — forward keys to RN instead of
+  // dropping them (RN writes them to the PTY; the two input channels are
+  // mutually exclusive — Android has one focused view at a time).
+  term.onData(function (d) { say({ type: 'key', data: d }); });
   term.onResize(function (sz) { say({ type: 'fit', cols: sz.cols, rows: sz.rows }); });
   say({ type: 'ready', cols: term.cols, rows: term.rows });
 })();
