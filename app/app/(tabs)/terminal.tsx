@@ -142,9 +142,17 @@ function TerminalInner() {
     [pushChunk],
   )
 
+  const send = useCallback(
+    (raw: string) => {
+      if (!raw) return
+      void ctl.send(raw)
+    },
+    [ctl],
+  )
+
   const handleWebMsg = useCallback(
     (e: { nativeEvent: { data: string } }) => {
-      let msg: { type?: string; cols?: number; rows?: number }
+      let msg: { type?: string; cols?: number; rows?: number; data?: string }
       try {
         msg = JSON.parse(e.nativeEvent.data)
       } catch {
@@ -161,9 +169,16 @@ function TerminalInner() {
         inject('window.__fit();void 0;')
       } else if (msg.type === 'fit' && msg.cols && msg.rows) {
         void ctl.resize(msg.cols, msg.rows)
+      } else if (msg.type === 'key' && typeof msg.data === 'string' && msg.data) {
+        // BUG-100 safety net: if the WebView ever holds focus, the Android
+        // IME types into xterm's internal textarea — forward those bytes
+        // instead of dropping them. Android has exactly one focused view,
+        // so this channel and the hidden sentinel input are mutually
+        // exclusive; no double-send is possible.
+        send(msg.data)
       }
     },
-    [ctl, inject],
+    [ctl, inject, send],
   )
 
   // Refit on layout changes (keyboard lift, font bump) — trailing throttle
@@ -217,14 +232,6 @@ function TerminalInner() {
 
   // Session survives unmount (app holds the process) — stop polling only.
   useEffect(() => ctl.destroy.bind(ctl), [ctl])
-
-  const send = useCallback(
-    (raw: string) => {
-      if (!raw) return
-      void ctl.send(raw)
-    },
-    [ctl],
-  )
 
   // Sticky pad modifiers (BUG-099): Ctrl/Alt arm and compose with the NEXT
   // key — a pad key sends its ctrlSeq; a typed char gets Ctrl→\x03-class
@@ -366,23 +373,28 @@ function TerminalInner() {
   return (
     <Animated.View style={[s.root, kbPad]}>
       {/* Tapping the output re-raises the IME when it's down (blur + refocus
-          — see focusInput). The WebView is pointerEvents:none, so touches
-          bubble here instead of being eaten by the terminal. */}
-      <View style={s.outputWrap} onTouchEnd={focusInput} onLayout={scheduleFit}>
-        <WebView
-          ref={wvRef}
-          source={{ uri: 'file:///android_asset/term/index.html' }}
-          javaScriptEnabled
-          allowFileAccess
-          pointerEvents="none"
-          onMessage={handleWebMsg}
-          style={s.output}
-          onRenderProcessGone={() => {
-            // Android WebView renderer died — a reload replays from rawBank.
-            out.current.ready = false
-            inject('window.location.reload();void 0;')
-          }}
-        />
+          — see focusInput). BUG-100: Android enforces pointerEvents only on
+          ReactViewGroup containers — on the WebView itself it's a no-op, so
+          the WebView ate every tap and the IME typed into xterm's internal
+          textarea, never reaching the PTY. The box-only wrapper intercepts
+          touches BEFORE the WebView and is itself the tap target; the dead
+          overlay stays a sibling so Retry remains tappable. */}
+      <View style={s.outputWrap} onLayout={scheduleFit}>
+        <View style={s.outputHit} pointerEvents="box-only" onTouchEnd={focusInput}>
+          <WebView
+            ref={wvRef}
+            source={{ uri: 'file:///android_asset/term/index.html' }}
+            javaScriptEnabled
+            allowFileAccess
+            onMessage={handleWebMsg}
+            style={s.output}
+            onRenderProcessGone={() => {
+              // Android WebView renderer died — a reload replays from rawBank.
+              out.current.ready = false
+              inject('window.location.reload();void 0;')
+            }}
+          />
+        </View>
         {dead ? (
           <View style={s.deadWrap} pointerEvents="box-none">
             <Text style={[s.mono, s.deadLine]}>[session ended]</Text>
@@ -516,8 +528,9 @@ const makeS = () =>
     root: { flex: 1 },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, padding: 24 },
     dim: { color: C.textDim, fontSize: 14, textAlign: 'center' },
-    output: { flex: 1, backgroundColor: '#000', marginHorizontal: 10, borderRadius: 12, borderWidth: 1, borderColor: C.border },
+    output: { flex: 1, backgroundColor: '#000', borderRadius: 12, borderWidth: 1, borderColor: C.border },
     outputWrap: { flex: 1 },
+    outputHit: { flex: 1, marginHorizontal: 10 },
     mono: { color: '#E8E8E8', fontFamily: 'monospace' },
     deadWrap: { position: 'absolute', top: 14, left: 0, right: 0, alignItems: 'center' },
     deadLine: { color: C.amber ?? '#E5A50A', marginTop: 8 },

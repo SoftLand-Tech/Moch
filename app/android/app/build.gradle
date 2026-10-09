@@ -111,8 +111,8 @@ android {
         // See embedded/EXEC-DESIGN.md §1/§4.2. The raise and the loader
         // fix ship together in this versionCode.
         targetSdkVersion 36
-        versionCode 9
-        versionName "1.0.6"
+        versionCode 13
+        versionName "1.0.10"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
