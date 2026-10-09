@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { View, Text, Pressable, ScrollView, StyleSheet, TextInput, ActivityIndicator } from 'react-native'
+import { View, Text, Pressable, StyleSheet, TextInput, ActivityIndicator } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { KeyboardAvoidingView, useKeyboardState } from 'react-native-keyboard-controller'
+import { useKeyboardState, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
+import Animated, { useAnimatedStyle } from 'react-native-reanimated'
+import { WebView } from 'react-native-webview'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
 import { Icon } from '../../src/components/Icon'
@@ -16,17 +18,27 @@ import {
   linuxTermResize,
   linuxTermKill,
 } from '../../src/lib/hermesRuntime'
-import { TerminalController, TERM_KEYS, type TermState } from '../../src/lib/terminal'
+import {
+  FIELD_SENTINEL,
+  TERM_DRAIN_FAST_MS,
+  TERM_KEYS,
+  TERM_CTRL_KEYS,
+  TerminalController,
+  applyFieldChange,
+  type FieldState,
+  type TermState,
+} from '../../src/lib/terminal'
 
 type Gate = 'checking' | 'noprobe' | 'noguest' | 'nopty' | 'ready' | 'failed'
 
 export default function Terminal() {
   const s = useStyles(makeS)
-  // Drop the bottom safe-area edge while the keyboard is open so the lift
-  // below doesn't double-count the inset.
-  const keyboard = useKeyboardState()
+  // BUG-093: the bottom edge stays STATIC. The keyboard lift is the chat
+  // pattern's animated negative paddingBottom (TerminalInner); swapping the
+  // edge per keyboard state re-lays-out the whole frame mid-animation for
+  // nothing (and sank the lift back by the inset in the KAV attempt).
   return (
-    <SafeAreaView style={s.frame} edges={keyboard.isVisible ? [] : ['bottom']}>
+    <SafeAreaView style={s.frame} edges={['bottom']}>
       <ScreenShell
         title="Terminal"
         right={<TerminalMenu onKill={() => killRef.current?.()} onClear={() => clearRef.current?.()} />}
@@ -67,33 +79,101 @@ function TerminalMenu({ onKill, onClear }: { onKill: () => void; onClear: () => 
 
 function TerminalInner() {
   const s = useStyles(makeS)
+  // IME visibility truth (RN focus lies on Android — see focusInput).
+  const keyboard = useKeyboardState()
   const [gate, setGate] = useState<Gate>('checking')
   const [gateMsg, setGateMsg] = useState('')
-  const [snap, setSnap] = useState<{ state: TermState; text: string; alive: boolean }>({
-    state: 'idle',
-    text: '',
-    alive: false,
-  })
+  const [snap, setSnap] = useState<{ state: TermState; alive: boolean }>({ state: 'idle', alive: false })
   const [hidden, setHidden] = useState('')
   const [fontSize, setFontSize] = useState(13)
-  const scrollRef = useRef<ScrollView>(null)
+  // BUG-093 lift: same driver as the chat screen (chat.tsx BUG-037 fix) —
+  // the reanimated keyboard height as a negative bottom pad. The
+  // KeyboardAvoidingView computed its pad from parent-relative coords and
+  // ran short by status-bar + header height, so the key row and composer
+  // stayed behind the IME; no coordinate math survives this host.
+  const kb = useReanimatedKeyboardAnimation()
+  const kbPad = useAnimatedStyle(() => ({ paddingBottom: -kb.height.value }))
+  // Composer state machine (BUG-095): logical text + backspace key events
+  // awaiting their change event. The field value is FIELD_SENTINEL + logical.
+  const fieldRef = useRef<FieldState>({ logical: '', pendingKeys: 0 })
   const inputRef = useRef<TextInput>(null)
-  // Last value of the hidden composer field — diffed per change to derive
-  // the exact keystrokes to forward to the PTY.
-  const prevHiddenRef = useRef('')
+  const dead = snap.state === 'dead'
+  // BUG-097 renderer: xterm.js lives in a local-asset WebView. Raw PTY
+  // bytes flow controller → injectJavaScript → window.__tq → xterm.write;
+  // the WebView answers with {ready|fit} JSON on postMessage.
+  const wvRef = useRef<WebView>(null)
+  const out = useRef({ ready: false, buf: [] as string[], bytes: 0 })
+  const inject = useCallback((js: string) => {
+    wvRef.current?.injectJavaScript(js)
+  }, [])
+  const pushChunk = useCallback(
+    (b64: string) => {
+      const o = out.current
+      if (!o.ready) {
+        // WebView still loading — buffer, dropping the OLDEST bytes past
+        // 4MB (a `cat huge` before load isn't worth memory).
+        o.buf.push(b64)
+        o.bytes += b64.length
+        while (o.bytes > 4_000_000 && o.buf.length > 1) {
+          const head = o.buf[0] ?? ''
+          o.bytes -= head.length
+          o.buf.shift()
+        }
+        return
+      }
+      inject(`window.__tq(${JSON.stringify(b64)});void 0;`)
+    },
+    [inject],
+  )
 
   const ctl = useMemo(
     () =>
-      new TerminalController({
-        start: (c, r) => linuxTermStart(c, r),
-        write: (b) => linuxTermWrite(b),
-        drain: () => linuxTermDrain(),
-        replay: () => linuxTermReplay(),
-        resize: (c, r) => linuxTermResize(c, r),
-        kill: () => linuxTermKill(),
-      }),
-    [],
+      new TerminalController(
+        {
+          start: (c, r) => linuxTermStart(c, r),
+          write: (b) => linuxTermWrite(b),
+          drain: () => linuxTermDrain(),
+          replay: () => linuxTermReplay(),
+          resize: (c, r) => linuxTermResize(c, r),
+          kill: () => linuxTermKill(),
+        },
+        { drainMs: TERM_DRAIN_FAST_MS, onChunk: pushChunk },
+      ),
+    [pushChunk],
   )
+
+  const handleWebMsg = useCallback(
+    (e: { nativeEvent: { data: string } }) => {
+      let msg: { type?: string; cols?: number; rows?: number }
+      try {
+        msg = JSON.parse(e.nativeEvent.data)
+      } catch {
+        return
+      }
+      if (msg.type === 'ready') {
+        out.current.ready = true
+        // The controller's raw bank is authoritative — it contains the
+        // replay AND every chunk (including ones buffered while loading).
+        const bank = ctl.rawBank
+        if (bank) inject(`window.__tq(${JSON.stringify(bank)});void 0;`)
+        out.current.buf = []
+        out.current.bytes = 0
+        inject('window.__fit();void 0;')
+      } else if (msg.type === 'fit' && msg.cols && msg.rows) {
+        void ctl.resize(msg.cols, msg.rows)
+      }
+    },
+    [ctl, inject],
+  )
+
+  // Refit on layout changes (keyboard lift, font bump) — trailing throttle
+  // so the RNKC animation frames don't storm fit/resize.
+  const fitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scheduleFit = useCallback(() => {
+    clearTimeout(fitTimer.current)
+    fitTimer.current = setTimeout(() => inject('window.__fit();void 0;'), 120)
+  }, [inject])
+  useEffect(() => () => clearTimeout(fitTimer.current), [])
 
   useEffect(() => {
     const off = ctl.onChange(setSnap)
@@ -138,11 +218,6 @@ function TerminalInner() {
   // Session survives unmount (app holds the process) — stop polling only.
   useEffect(() => ctl.destroy.bind(ctl), [ctl])
 
-  // Pin to bottom on new output (unless the user scrolled up — v1 keeps it simple).
-  useEffect(() => {
-    scrollRef.current?.scrollToEnd({ animated: false })
-  }, [snap.text])
-
   const send = useCallback(
     (raw: string) => {
       if (!raw) return
@@ -151,26 +226,77 @@ function TerminalInner() {
     [ctl],
   )
 
+  // Sticky pad modifiers (BUG-099): Ctrl/Alt arm and compose with the NEXT
+  // key — a pad key sends its ctrlSeq; a typed char gets Ctrl→\x03-class
+  // or Alt→ESC-prefix treatment. One-shot: consumed or disarmed.
+  const [armed, setArmed] = useState<'ctrl' | 'alt' | null>(null)
+  const armedRef = useRef<'ctrl' | 'alt' | null>(null)
+  const consumeArmed = useCallback(() => {
+    const m = armedRef.current
+    armedRef.current = null
+    setArmed(null)
+    return m
+  }, [])
+  const onPadKey = useCallback(
+    (seq: string) => {
+      const m = consumeArmed()
+      // An armed Alt prefixes; an armed Ctrl over a plain pad key falls
+      // back to the unmodified seq (the pad's ctrlSeq handled Ctrl already).
+      send(m === 'alt' ? TERM_KEYS.ESC + seq : seq)
+    },
+    [consumeArmed, send],
+  )
+
   // Direct PTY typing: the PTY has ECHO ON, so the drained output is the
-  // display — forward each keystroke and never render local input (no
-  // double echo). Added chars go as-is; removals become DEL (\x7f).
+  // display — forward only what the field state machine derives
+  // (applyFieldChange) and never render local input (no double echo).
+  // The field value is FIELD_SENTINEL + logical, so a backspace always
+  // has a char to delete (BUG-095): deleting the sentinel is "DEL past
+  // field start"; the key-event channel is paired by counting, so IMEs
+  // that emit both events can't double-delete. Armed pad modifiers
+  // (BUG-099) compose with the typed char instead of applying the field.
   const onHiddenChange = useCallback(
-    (t: string) => {
-      const prev = prevHiddenRef.current
-      if (t.length > prev.length && t.startsWith(prev)) {
-        for (const ch of t.slice(prev.length)) send(ch)
-      } else {
-        for (let i = 0; i < prev.length - t.length; i++) send('\x7f')
+    (raw: string) => {
+      const m = armedRef.current
+      if (m && raw.length >= 1) {
+        const appended = raw.startsWith(FIELD_SENTINEL) ? raw.slice(1) : raw
+        const ch = appended.slice(fieldRef.current.logical.length)
+        if (ch.length === 1 && ch >= ' ' && ch !== '\x7f') {
+          armedRef.current = null
+          setArmed(null)
+          send(m === 'ctrl' ? String.fromCharCode(ch.toUpperCase().charCodeAt(0) - 64) : TERM_KEYS.ESC + ch)
+          // Leave the field untouched: the composed byte never entered it.
+          setHidden(fieldRef.current.logical)
+          return
+        }
       }
-      prevHiddenRef.current = t
-      setHidden(t)
+      const { bytes, next } = applyFieldChange(fieldRef.current, raw)
+      fieldRef.current = next
+      if (bytes) send(bytes)
+      setHidden(next.logical)
     },
     [send],
   )
 
+  // Re-raising a dismissed IME needs a REAL native focus transition: when
+  // the user hides the keyboard, Android silently keeps the input focused,
+  // and showSoftInput off an already-focused view is dropped by the IMMS
+  // (BUG-091 — plain focus() did nothing; selecting output text was the
+  // only thing that blurred the field for real). blur() then refocus a
+  // frame later supplies the transition. While the IME is up this is
+  // skipped — no point tearing focus on every output tap. Touch-CANCEL is
+  // deliberately NOT wired: long-press text selection ends there and must
+  // not be torn down.
+  const focusInput = useCallback(() => {
+    const el = inputRef.current
+    if (!el || keyboard.isVisible) return
+    el.blur()
+    requestAnimationFrame(() => el.focus())
+  }, [keyboard.isVisible])
+
   const submitLine = useCallback(() => {
     send(TERM_KEYS.ENTER)
-    prevHiddenRef.current = ''
+    fieldRef.current = { logical: '', pendingKeys: 0 }
     setHidden('')
   }, [send])
 
@@ -188,9 +314,17 @@ function TerminalInner() {
   }, [ctl])
 
   clearRef.current = useCallback(() => {
-    ctl.text = ''
-    setSnap({ state: snap.state, text: '', alive: snap.alive })
-  }, [ctl, snap.state, snap.alive])
+    // Wipe the xterm viewport AND the replay bank, so a WebView reload
+    // doesn't resurrect cleared output.
+    ctl.rawBank = ''
+    inject('window.__reset();void 0;')
+  }, [ctl, inject])
+
+  // Font size lives in xterm now — push it on change (13 on mount is the
+  // HTML default; subsequent bumps arrive live).
+  useEffect(() => {
+    inject(`window.__tsize(${fontSize});void 0;`)
+  }, [fontSize, inject])
 
   if (gate === 'checking') {
     return (
@@ -229,43 +363,58 @@ function TerminalInner() {
     )
   }
 
-  const dead = snap.state === 'dead'
-
   return (
-    <KeyboardAvoidingView style={s.root} behavior="padding">
-      {/* Touching the output area focuses the hidden input so the caret +
-          keyboard appear; touches bubble from the ScrollView to this View. */}
-      <View style={s.outputWrap} onTouchEnd={() => inputRef.current?.focus()}>
-        <ScrollView
-          ref={scrollRef}
+    <Animated.View style={[s.root, kbPad]}>
+      {/* Tapping the output re-raises the IME when it's down (blur + refocus
+          — see focusInput). The WebView is pointerEvents:none, so touches
+          bubble here instead of being eaten by the terminal. */}
+      <View style={s.outputWrap} onTouchEnd={focusInput} onLayout={scheduleFit}>
+        <WebView
+          ref={wvRef}
+          source={{ uri: 'file:///android_asset/term/index.html' }}
+          javaScriptEnabled
+          allowFileAccess
+          pointerEvents="none"
+          onMessage={handleWebMsg}
           style={s.output}
-          contentContainerStyle={s.outputInner}
-          showsVerticalScrollIndicator
-        >
-          <Text selectable style={[s.mono, { fontSize }]}>
-            {snap.text || (snap.state === 'starting' ? 'booting shell…' : '')}
-          </Text>
-          {dead ? (
-            <>
-              <Text style={[s.mono, s.deadLine, { fontSize }]}>[session ended]</Text>
-              <Pressable
-                style={({ pressed }) => [s.retry, pressed && s.pressed]}
-                onPress={() => void ctl.start(80, 24)}
-                accessibilityLabel="Restart shell"
-              >
-                <Text style={s.retryText}>Retry</Text>
-              </Pressable>
-            </>
-          ) : null}
-        </ScrollView>
+          onRenderProcessGone={() => {
+            // Android WebView renderer died — a reload replays from rawBank.
+            out.current.ready = false
+            inject('window.location.reload();void 0;')
+          }}
+        />
+        {dead ? (
+          <View style={s.deadWrap} pointerEvents="box-none">
+            <Text style={[s.mono, s.deadLine]}>[session ended]</Text>
+            <Pressable
+              style={({ pressed }) => [s.retry, pressed && s.pressed]}
+              onPress={() => void ctl.start(80, 24)}
+              accessibilityLabel="Restart shell"
+            >
+              <Text style={s.retryText}>Retry</Text>
+            </Pressable>
+          </View>
+        ) : null}
       </View>
 
       {/* Invisible direct-typing field: zero-size, never rendered as text
           (the PTY echo in the drained output is the display). */}
       <TextInput
         ref={inputRef}
-        value={hidden}
+        value={FIELD_SENTINEL + hidden}
         onChangeText={onHiddenChange}
+        /* Backspace key events: Android dispatches onKeyPress BEFORE the
+           text change. Only the logically-empty field needs this channel
+           (GBoard's delete on the bare sentinel deletes it and fires the
+           change too — applyFieldChange pairs the two so exactly one DEL
+           goes out; IMEs that emit the key without the change are covered
+           because the DEL is sent HERE). With text in the field the change
+           event's diff is authoritative — don't double-send. */
+        onKeyPress={(e) => {
+          if (e.nativeEvent.key !== 'Backspace' || fieldRef.current.logical !== '') return
+          fieldRef.current = { ...fieldRef.current, pendingKeys: fieldRef.current.pendingKeys + 1 }
+          send('\x7f')
+        }}
         onSubmitEditing={submitLine}
         style={s.hiddenInput}
         autoFocus
@@ -277,7 +426,7 @@ function TerminalInner() {
         accessibilityLabel="Terminal input"
       />
 
-      <KeyRow onKey={send} />
+      <KeyRow onKey={onPadKey} armed={armed} onArm={(m) => { armedRef.current = m; setArmed(m) }} />
 
       <View style={s.composer}>
         <Text style={s.prompt}>{dead ? 'session ended' : '$ touch output to type'}</Text>
@@ -290,35 +439,72 @@ function TerminalInner() {
           <Text style={s.aa}>A+</Text>
         </Pressable>
       </View>
-    </KeyboardAvoidingView>
+    </Animated.View>
   )
 }
 
-const KEYS: { label: string; seq: string; hint: string }[] = [
-  { label: 'Tab', seq: TERM_KEYS.TAB, hint: 'Autocomplete' },
-  { label: '←', seq: TERM_KEYS.LEFT, hint: 'Cursor left' },
-  { label: '→', seq: TERM_KEYS.RIGHT, hint: 'Cursor right' },
-  { label: '↑', seq: TERM_KEYS.UP, hint: 'History back' },
-  { label: '↓', seq: TERM_KEYS.DOWN, hint: 'History forward' },
-  { label: '^C', seq: TERM_KEYS.CTRL_C, hint: 'Interrupt' },
-  { label: '^D', seq: TERM_KEYS.CTRL_D, hint: 'Logout / EOF' },
-  { label: 'Esc', seq: TERM_KEYS.ESC, hint: 'Escape' },
+/** Pad keys: seq sent as-is; ctrlSeq = Ctrl+key form; hint = a11y label. */
+const PAD_ROWS: { label: string; seq?: string; ctrlSeq?: string; modifier?: 'ctrl' | 'alt'; hint: string }[][] = [
+  [
+    { label: 'Esc', seq: TERM_KEYS.ESC, hint: 'Escape' },
+    { label: 'Tab', seq: TERM_KEYS.TAB, hint: 'Autocomplete' },
+    { label: 'Ctrl', modifier: 'ctrl', hint: 'Ctrl modifier for the next key' },
+    { label: '↑', seq: TERM_KEYS.UP, ctrlSeq: TERM_CTRL_KEYS.UP, hint: 'History back' },
+    { label: '↓', seq: TERM_KEYS.DOWN, ctrlSeq: TERM_CTRL_KEYS.DOWN, hint: 'History forward' },
+    { label: '^C', seq: TERM_KEYS.CTRL_C, hint: 'Interrupt' },
+    { label: '^D', seq: TERM_KEYS.CTRL_D, hint: 'Logout / EOF' },
+  ],
+  [
+    { label: 'Alt', modifier: 'alt', hint: 'Alt modifier for the next key' },
+    { label: '←', seq: TERM_KEYS.LEFT, ctrlSeq: TERM_CTRL_KEYS.LEFT, hint: 'Cursor left' },
+    { label: '→', seq: TERM_KEYS.RIGHT, ctrlSeq: TERM_CTRL_KEYS.RIGHT, hint: 'Cursor right' },
+    { label: 'Home', seq: TERM_KEYS.HOME, ctrlSeq: TERM_CTRL_KEYS.HOME, hint: 'Line start' },
+    { label: 'End', seq: TERM_KEYS.END, ctrlSeq: TERM_CTRL_KEYS.END, hint: 'Line end' },
+    { label: 'PgUp', seq: TERM_KEYS.PGUP, hint: 'Page up' },
+    { label: 'PgDn', seq: TERM_KEYS.PGDN, hint: 'Page down' },
+  ],
 ]
 
-function KeyRow({ onKey }: { onKey: (seq: string) => void }) {
+function KeyRow({
+  onKey,
+  armed,
+  onArm,
+}: {
+  onKey: (seq: string) => void
+  armed: 'ctrl' | 'alt' | null
+  onArm: (m: 'ctrl' | 'alt' | null) => void
+}) {
   const s = useStyles(makeS)
   return (
-    <View style={s.keyRow}>
-      {KEYS.map((k) => (
-        <Pressable
-          key={k.label}
-          style={({ pressed }) => [s.key, pressed && s.pressed]}
-          onPress={() => onKey(k.seq)}
-          hitSlop={4}
-          accessibilityLabel={k.hint}
-        >
-          <Text style={s.keyText}>{k.label}</Text>
-        </Pressable>
+    <View style={s.padWrap}>
+      {PAD_ROWS.map((row, i) => (
+        <View key={i} style={s.keyRow}>
+          {row.map((k) => {
+            const isModifier = k.modifier != null
+            const isArmed = k.modifier != null && armed === k.modifier
+            return (
+              <Pressable
+                key={k.label}
+                style={({ pressed }) => [s.key, isArmed && s.keyArmed, pressed && s.pressed]}
+                onPress={() => {
+                  if (isModifier) {
+                    // Sticky modifier: arms, disarms on re-tap; consumed by
+                    // the next pad key (ctrlSeq) or the next typed char.
+                    onArm(armed === k.modifier ? null : (k.modifier ?? null))
+                    return
+                  }
+                  onKey(k.ctrlSeq && armed === 'ctrl' ? k.ctrlSeq : (k.seq ?? ''))
+                  if (armed) onArm(null)
+                }}
+                hitSlop={2}
+                accessibilityLabel={k.hint}
+                accessibilityState={isModifier ? { selected: isArmed } : undefined}
+              >
+                <Text style={[s.keyText, isArmed && s.keyTextArmed]}>{k.label}</Text>
+              </Pressable>
+            )
+          })}
+        </View>
       ))}
     </View>
   )
@@ -332,21 +518,24 @@ const makeS = () =>
     dim: { color: C.textDim, fontSize: 14, textAlign: 'center' },
     output: { flex: 1, backgroundColor: '#000', marginHorizontal: 10, borderRadius: 12, borderWidth: 1, borderColor: C.border },
     outputWrap: { flex: 1 },
-    outputInner: { padding: 10, paddingBottom: 16 },
     mono: { color: '#E8E8E8', fontFamily: 'monospace' },
+    deadWrap: { position: 'absolute', top: 14, left: 0, right: 0, alignItems: 'center' },
     deadLine: { color: C.amber ?? '#E5A50A', marginTop: 8 },
     hiddenInput: { position: 'absolute', width: 1, height: 1, opacity: 0 },
-    keyRow: { flexDirection: 'row', gap: 6, paddingHorizontal: 10, paddingTop: 8 },
+    keyRow: { flexDirection: 'row', gap: 5, paddingHorizontal: 10, paddingTop: 6 },
+    padWrap: { paddingBottom: 2 },
     key: {
       flex: 1,
       alignItems: 'center',
-      paddingVertical: 8,
+      paddingVertical: 7,
       backgroundColor: C.bgCard,
       borderRadius: 8,
       borderWidth: 1,
       borderColor: C.borderSoft,
     },
-    keyText: { color: C.text, fontSize: 13, fontWeight: '600' },
+    keyArmed: { backgroundColor: C.bgElev, borderColor: C.accent ?? C.text },
+    keyText: { color: C.text, fontSize: 12, fontWeight: '600' },
+    keyTextArmed: { color: C.accent ?? C.text },
     composer: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 10 },
     prompt: { color: C.textDim, fontSize: 16, fontWeight: '700' },
     send: {

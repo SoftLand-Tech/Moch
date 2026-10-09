@@ -21,13 +21,112 @@ export const TERM_KEYS = {
   DOWN: '\x1b[B',
   LEFT: '\x1b[D',
   RIGHT: '\x1b[C',
+  HOME: '\x1b[H',
+  END: '\x1b[F',
+  PGUP: '\x1b[5~',
+  PGDN: '\x1b[6~',
+} as const
+
+/** Ctrl+arrow/readline sequences (CSI 1;5~… — the modifier form terminals send). */
+export const TERM_CTRL_KEYS = {
+  UP: '\x1b[1;5A',
+  DOWN: '\x1b[1;5B',
+  LEFT: '\x1b[1;5D',
+  RIGHT: '\x1b[1;5C',
+  HOME: '\x1b[1;5H',
+  END: '\x1b[1;5F',
 } as const
 
 export const TERM_DRAIN_MS = 120
-/** Cap the rendered scrollback (chars) so a `cat huge` can't OOM the JS thread. */
-export const TERM_TEXT_CAP = 200_000
+/** Poll cadence while the terminal screen is mounted (BUG-098: 120ms is most of the keystroke-to-photon floor). */
+export const TERM_DRAIN_FAST_MS = 50
 /** Bytes of base64 the drain loop pulls per tick before yielding. */
 export const TERM_TICK_CHUNK_CAP = 40
+/** Cap of the RAW replay bank in base64 chars (~196KB of PTY bytes) — refills a freshly reloaded xterm. */
+export const TERM_RAW_BANK_B64_CAP = 262_144
+
+// ── Composer field mapping (BUG-095) ────────────────────────────────────────
+
+/**
+ * The hidden composer field is NEVER empty: its value is a zero-width
+ * space + the logical text. GBoard deletes via
+ * InputConnection.deleteSurroundingText, which produces NO onChangeText
+ * on a truly empty field — the classic dead backspace after Enter. With
+ * the sentinel there is always one deletable char, so every backspace
+ * produces a change event; the sentinel itself is never sent to the PTY
+ * (bytes are only ever derived here).
+ */
+export const FIELD_SENTINEL = '\u200b'
+
+export type FieldChange =
+  | { type: 'append'; text: string } // forward text
+  | { type: 'delete'; count: number } // forward count DELs
+  | { type: 'rewrite'; count: number; text: string } // forward count DELs + text
+  | { type: 'noop' } // no PTY bytes, logical text unchanged
+  | { type: 'resync' } // IME dropped the sentinel / stale composing: send NOTHING, restore field
+
+export function mapFieldChange(prevLogical: string, raw: string): FieldChange {
+  if (raw.startsWith(FIELD_SENTINEL)) {
+    const next = raw.slice(1)
+    if (next === prevLogical) return { type: 'noop' }
+    if (next.startsWith(prevLogical)) return { type: 'append', text: next.slice(prevLogical.length) }
+    if (prevLogical.startsWith(next)) return { type: 'delete', count: prevLogical.length - next.length }
+    return { type: 'rewrite', count: prevLogical.length, text: next }
+  }
+  // Sentinel gone: the IME deleted it (backspace past field start) — but
+  // only trust that when the field came back EMPTY. Anything else is an
+  // IME rewriting the field without the sentinel (hostile autocorrect);
+  // re-anchor silently rather than guess bytes.
+  if (raw === '' && prevLogical === '') return { type: 'delete', count: 1 }
+  return { type: 'resync' }
+}
+
+export interface FieldState {
+  /** Logical composer text (sentinel excluded). */
+  logical: string
+  /** Backspace key events sent to the PTY that are awaiting their change event. */
+  pendingKeys: number
+}
+
+/**
+ * Pure composer state machine (BUG-095): maps one onChangeText payload
+ * against the previous field state, pairing the change with any key-event
+ * DEL already sent (Android dispatches onKeyPress BEFORE the text change,
+ * so empty-field backspaces legitimately produce both channels — pairing
+ * by counting keeps exactly one DEL per press without wall-clock windows).
+ * Any non-delete change invalidates pending pairs.
+ */
+export function applyFieldChange(prev: FieldState, raw: string): { bytes: string; next: FieldState } {
+  const r = mapFieldChange(prev.logical, raw)
+  let logical = prev.logical
+  let bytes = ''
+  let pendingKeys = prev.pendingKeys
+  switch (r.type) {
+    case 'append':
+      logical = prev.logical + r.text
+      bytes = r.text
+      pendingKeys = 0
+      break
+    case 'delete':
+      logical = prev.logical.slice(0, Math.max(0, prev.logical.length - r.count))
+      if (pendingKeys > 0) {
+        pendingKeys -= 1
+      } else {
+        bytes = '\x7f'.repeat(r.count)
+      }
+      break
+    case 'rewrite':
+      logical = r.text
+      bytes = (pendingKeys > 0 ? '' : '\x7f'.repeat(r.count)) + r.text
+      if (pendingKeys > 0) pendingKeys -= 1
+      break
+    case 'noop':
+    case 'resync':
+      pendingKeys = 0
+      break
+  }
+  return { bytes, next: { logical, pendingKeys } }
+}
 
 // ── base64 (dependency-free: node Buffer AND Hermes-safe) ───────────────────
 
@@ -52,102 +151,6 @@ export function b64encodeText(s: string): string {
   return out
 }
 
-export function b64decodeText(b64: string): string {
-  const clean = b64.replace(/[^A-Za-z0-9+/=]/g, '')
-  const bytes: number[] = []
-  for (let i = 0; i < clean.length; i += 4) {
-    const sext = [0, 1, 2, 3].map((k) => {
-      const ch = clean[i + k] ?? '='
-      return ch === '=' ? -1 : B64.indexOf(ch)
-    })
-    if (sext[0] < 0 || sext[1] < 0) break
-    const n = (sext[0] << 18) | (sext[1] << 12) | ((sext[2] < 0 ? 0 : sext[2]) << 6) | (sext[3] < 0 ? 0 : sext[3])
-    bytes.push((n >> 16) & 255)
-    if (sext[2] >= 0) bytes.push((n >> 8) & 255)
-    if (sext[3] >= 0) bytes.push(n & 255)
-  }
-  // UTF-8 decode with replacement for stray bytes (binary program output).
-  let out = ''
-  for (let i = 0; i < bytes.length; ) {
-    const b0 = bytes[i]
-    if (b0 < 0x80) {
-      out += String.fromCharCode(b0)
-      i++
-    } else if (b0 >= 0xc2 && b0 < 0xe0 && i + 1 < bytes.length) {
-      out += String.fromCharCode(((b0 & 0x1f) << 6) | (bytes[i + 1] & 0x3f))
-      i += 2
-    } else if (b0 >= 0xe0 && b0 < 0xf0 && i + 2 < bytes.length) {
-      out += String.fromCharCode(
-        ((b0 & 0x0f) << 12) | ((bytes[i + 1] & 0x3f) << 6) | (bytes[i + 2] & 0x3f),
-      )
-      i += 3
-    } else {
-      out += '�'
-      i++
-    }
-  }
-  return out
-}
-
-// ── ANSI ─────────────────────────────────────────────────────────────────────
-
-/** Crude ANSI strip for the v1 RN renderer (xterm replaces this, not the flow). */
-export function stripAnsi(s: string): string {
-  return (
-    s
-      // CSI sequences: ESC [ ... final byte
-      .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
-      // OSC sequences: ESC ] ... BEL or ESC \
-      .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-      // CRLF → LF. A lone \r is KEPT: appendCapped interprets it as
-      // "reset to line start" so CR-overwrites (progress bars, tab
-      // rewrites) replace the current line instead of stacking.
-      // NOTE: this is intentionally minimal — full VT100 semantics
-      // (cursor moves, EL/ED, …) are the planned xterm.js renderer.
-      .replace(/\r\n/g, '\n')
-      // leftover control chars except \n \t \r (handled above/by appendCapped)
-      // eslint-disable-next-line no-control-regex
-      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
-  )
-}
-
-// ── Scrollback buffer ────────────────────────────────────────────────────────
-
-/**
- * Append-only capped text buffer shared by the screen and tests.
- *
- * Consumes stripAnsi output. A lone \r (not followed by \n) means
- * "carriage return: back to column 0" — everything up to the last \n is
- * rewritten by the text that follows, so CR-overwrites replace the
- * current line instead of stacking extra lines. Deterministic and
- * streaming-safe per call; full VT100 semantics = the planned xterm.js
- * renderer (see file header).
- */
-export function appendCapped(prev: string, add: string, cap = TERM_TEXT_CAP): string {
-  if (!add) return prev
-  let out = prev
-  let overwrote = false
-  let buf = ''
-  for (const ch of add) {
-    if (ch === '\r') {
-      // First CR in this chunk drops prev's current (last) line; later
-      // CRs just reset what we've accumulated since the last newline.
-      if (!overwrote) {
-        out = prev.slice(0, prev.lastIndexOf('\n') + 1)
-        overwrote = true
-      }
-      buf = ''
-    } else if (ch === '\n') {
-      out += buf + '\n'
-      buf = ''
-    } else {
-      buf += ch
-    }
-  }
-  out += buf
-  return out.length > cap ? out.slice(out.length - cap) : out
-}
-
 // ── Controller ───────────────────────────────────────────────────────────────
 
 export type TermState = 'idle' | 'starting' | 'live' | 'dead'
@@ -161,24 +164,45 @@ export interface TermNative {
   kill(): Promise<boolean>
 }
 
-export type TermListener = (snap: { state: TermState; text: string; alive: boolean }) => void
+export type TermListener = (snap: { state: TermState; alive: boolean }) => void
+
+export interface TerminalOptions {
+  /** Poll cadence while live (BUG-098: the screen passes 50ms). */
+  drainMs?: number
+  /**
+   * RAW output channel (BUG-097): called per drain chunk and once with the
+   * replay chunk on start — base64 PTY bytes, never decoded or stripped.
+   * The screen forwards each to xterm (atob → Uint8Array → write).
+   */
+  onChunk?: (b64: string) => void
+}
 
 /**
- * Owns one terminal session: start → poll drain → bank text → notify.
+ * Owns one terminal session: start → poll drain → notify.
  * Construct with fakes in tests; the screen passes the real bridge fns.
+ *
+ * BUG-097: the screen renders through xterm.js, which needs RAW PTY bytes
+ * (erases, cursor moves, colors are the point). `rawBank` keeps the last
+ * TERM_RAW_BANK_B64_CAP of base64 for replaying into a freshly (re)loaded
+ * xterm.
  */
 export class TerminalController {
   state: TermState = 'idle'
-  text = ''
   alive = false
   error: string | null = null
+  /** Raw base64 bank of recent PTY bytes — refills a freshly (re)loaded xterm (BUG-097). */
+  rawBank = ''
   private native: TermNative
   private timer: ReturnType<typeof setInterval> | null = null
   private listeners = new Set<TermListener>()
   private draining = false
+  private drainMs: number
+  private onChunk: ((b64: string) => void) | null
 
-  constructor(native: TermNative) {
+  constructor(native: TermNative, opts: TerminalOptions = {}) {
     this.native = native
+    this.drainMs = opts.drainMs ?? TERM_DRAIN_MS
+    this.onChunk = opts.onChunk ?? null
   }
 
   onChange(fn: TermListener): () => void {
@@ -189,7 +213,7 @@ export class TerminalController {
   }
 
   private emit() {
-    const snap = { state: this.state, text: this.text, alive: this.alive }
+    const snap = { state: this.state, alive: this.alive }
     this.listeners.forEach((fn) => {
       try {
         fn(snap)
@@ -203,6 +227,7 @@ export class TerminalController {
     if (this.state === 'starting' || this.state === 'live') return this.state === 'live'
     this.state = 'starting'
     this.error = null
+    this.rawBank = ''
     this.emit()
     let res: { ok: boolean; alreadyRunning: boolean; error?: string } | null = null
     try {
@@ -216,10 +241,14 @@ export class TerminalController {
       this.emit()
       return false
     }
-    // Reattach paint: replay the last 64KB so a warm session isn't blank.
+    // Reattach paint: bank the RAW replay so a fresh xterm can be refilled,
+    // and hand the same bytes to the live renderer.
     try {
       const rep = await this.native.replay()
-      if (rep?.chunk) this.text = appendCapped(this.text, stripAnsi(b64decodeText(rep.chunk)))
+      if (rep?.chunk) {
+        this.rawBank = rep.chunk.length > TERM_RAW_BANK_B64_CAP ? rep.chunk.slice(rep.chunk.length - TERM_RAW_BANK_B64_CAP) : rep.chunk
+        this.onChunk?.(this.rawBank)
+      }
       this.alive = rep?.alive ?? true
     } catch {
       this.alive = true
@@ -241,11 +270,11 @@ export class TerminalController {
     this.stopPoll()
     this.timer = setInterval(() => {
       void this.tick()
-    }, TERM_DRAIN_MS)
+    }, this.drainMs)
   }
 
   private stopPoll() {
-    if (this.timer) clearInterval(this.timer)
+    clearInterval(this.timer)
     this.timer = null
   }
 
@@ -256,14 +285,20 @@ export class TerminalController {
     try {
       const d = await this.native.drain()
       if (!d) return
-      let dirty = false
       const chunks = d.chunks.slice(0, TERM_TICK_CHUNK_CAP)
       for (const c of chunks) {
-        const piece = stripAnsi(b64decodeText(c))
-        if (piece) {
-          this.text = appendCapped(this.text, piece)
-          dirty = true
+        if (!c) continue
+        // Raw bytes flow to the renderer untouched (erases and cursor moves
+        // are the point — BUG-097). Each chunk is independently padded
+        // base64 of whole bytes, so the bank concatenation stays valid.
+        this.rawBank += c
+        if (this.rawBank.length > TERM_RAW_BANK_B64_CAP) {
+          // Trim on a 4-char boundary so the bank stays valid base64.
+          let cut = this.rawBank.length - TERM_RAW_BANK_B64_CAP
+          cut += (4 - (cut % 4)) % 4
+          this.rawBank = this.rawBank.slice(cut)
         }
+        this.onChunk?.(c)
       }
       const wasAlive = this.alive
       this.alive = d.alive
@@ -271,7 +306,7 @@ export class TerminalController {
         this.state = 'dead'
         this.stopPoll()
       }
-      if (dirty || this.alive !== wasAlive) this.emit()
+      if (this.alive !== wasAlive) this.emit()
     } finally {
       this.draining = false
     }
