@@ -1,0 +1,15 @@
+# p4b_turn_serialization — PASS
+
+## 1. Today's behavior: DM delivery vs user chat at the SAME profile
+PASS  delivery-vs-user-chat OVERLAP (gap demonstrated) — max simultaneous CS entries=2, overlapping pairs=[('dm-delivery', 'user-chat')] — the user-chat turn ran INSIDE the DM delivery's turn window: unserialized (the C1 gap)
+PASS  delivery-vs-cron OVERLAP (gap demonstrated) — max=2 pairs=[('cron-occurrence', 'dm-delivery')] — cron occurrence also runs inside the DM turn window: unserialized
+
+## 2. Control: flock DOES serialize delivery-vs-delivery
+PASS  delivery-vs-delivery SERIALIZED by flock — second delivery got TurnBusyError reason='target_busy' waited=0.30s (waited past its 0.3s queue budget); overlap inside CS pairs=none
+
+## 3. Precise doc claim
+PASS  claim verified — flock serializes delivery-vs-delivery, but NOT delivery-vs-user-chat nor delivery-vs-cron — user/cron turns take no per-profile lock today
+
+## 4. Regreen simulation — shared threading.Lock as the M9.1a turn gate stand-in
+PASS  regreen simulation — NO overlap with the shared gate — max simultaneous CS entries=1, pairs=none — a single per-profile gate covering all three turn paths serializes them (M9.1a contract holds)
+NOTE  VERDICT: GAP CONFIRMED — M9.1a turn gate required (probe PASS = gap documented per the fail-then-regreen plan; must regreen after M9.1a)
