@@ -233,7 +233,7 @@ export async function prepareImageForUpload(
 function rpcError(err: unknown): Error {
   // -32601 = the gateway predates the attachment methods (§6 degrade).
   if (err instanceof JsonRpcGatewayError && err.code === -32601) {
-    return new Error('This gateway does not support attachments — update the Hermes server')
+    return new Error('This gateway does not support attachments — update the Mochi server')
   }
   return err instanceof Error ? err : new Error(String(err))
 }

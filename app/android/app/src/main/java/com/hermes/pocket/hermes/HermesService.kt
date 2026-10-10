@@ -93,8 +93,8 @@ class HermesService : Service() {
     val nm = getSystemService(NotificationManager::class.java)
     if (nm.getNotificationChannel(CHANNEL_ID) == null) {
       nm.createNotificationChannel(
-          NotificationChannel(CHANNEL_ID, "Agent runtime", NotificationManager.IMPORTANCE_LOW).apply {
-            description = "Keeps the on-phone agent and its automations running"
+          NotificationChannel(CHANNEL_ID, "Mochi runtime", NotificationManager.IMPORTANCE_LOW).apply {
+            description = "Keeps Mochi and its automations running"
             setShowBadge(false)
           })
     }
@@ -144,8 +144,8 @@ class HermesService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     return NotificationCompat.Builder(this, CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification)
-        .setContentTitle("Moch agent is running")
-        .setContentText("On-phone agent active — automations and tasks keep working.")
+        .setContentTitle("Mochi is running")
+        .setContentText("Mochi is awake on this phone — automations and tasks keep working.")
         .setOngoing(true)
         .setContentIntent(open)
         .addAction(0, "Stop", stop)

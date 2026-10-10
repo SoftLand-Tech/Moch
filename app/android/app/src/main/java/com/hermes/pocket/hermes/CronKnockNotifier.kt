@@ -32,8 +32,8 @@ class CronKnockNotifier(private val context: Context) {
       if (nm.getNotificationChannel(KNOCK_CHANNEL) == null) {
         nm.createNotificationChannel(
             NotificationChannel(
-                KNOCK_CHANNEL, "Agent knocks", NotificationManager.IMPORTANCE_DEFAULT)
-                .apply { description = "Automations and agent activity on this phone" })
+                KNOCK_CHANNEL, "Mochi knocks", NotificationManager.IMPORTANCE_DEFAULT)
+                .apply { description = "Automations and Mochi activity on this phone" })
       }
       val open =
           PendingIntent.getActivity(

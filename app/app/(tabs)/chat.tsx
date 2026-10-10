@@ -1165,7 +1165,7 @@ export default function Chat() {
             <View style={s.sheet}>
               <View style={s.sheetHead}>
                 <Icon name="help-circle-outline" size={15} color={C.accent} />
-                <Text style={s.sheetTitle}>Hermes needs you</Text>
+                <Text style={s.sheetTitle}>Mochi needs you</Text>
               </View>
               {isBatchClarify ? (
                 <>

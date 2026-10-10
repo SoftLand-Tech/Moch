@@ -196,7 +196,7 @@ export default function Connectors() {
           <View style={s.center}>
             <Text style={s.emptyTitle}>Not available on this machine</Text>
             <Text style={s.emptyBody}>
-              The connected hermes doesn't expose connector management yet. Update hermes on that
+              The connected Mochi doesn't expose connector management yet. Update Mochi on that
               machine, then reconnect.
             </Text>
           </View>

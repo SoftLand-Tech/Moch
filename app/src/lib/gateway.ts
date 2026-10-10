@@ -4,7 +4,7 @@ import * as SecureStore from 'expo-secure-store'
 import { JsonRpcGatewayClient, type GatewayEvent, type ConnectionState, type ServerRequest } from '../protocol/json-rpc-gateway'
 import { RnWebSocketAdapter } from '../protocol/rn-socket'
 import { log } from './log'
-import { getEmbeddedGateway } from './hermesRuntime'
+import { getEmbeddedGateway } from './mochiRuntime'
 
 export interface ConnConfig {
   host: string // "127.0.0.1:9119" or "myserver.tailnet.ts.net:443"

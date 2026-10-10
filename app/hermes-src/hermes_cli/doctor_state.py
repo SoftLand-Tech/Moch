@@ -129,11 +129,11 @@ def _check_directory_structure(should_fix: bool, f: Finding) -> None:
         else:  # template comments only (no real content)
             check_info(f"{_DHH}/SOUL.md exists but is empty — edit it to customize personality")
     else:
-        check_warn(f"{_DHH}/SOUL.md not found", "(create it to give Hermes a custom personality)")
+        check_warn(f"{_DHH}/SOUL.md not found", "(create it to give Mochi a custom personality)")
         if should_fix:
             soul_path.parent.mkdir(parents=True, exist_ok=True)
-            soul_path.write_text("# Hermes Agent Persona\n\n<!-- Edit this file to customize how Hermes communicates. -->\n\n"
-                                 "You are Hermes, a helpful AI assistant.\n", encoding="utf-8")
+            soul_path.write_text("# Mochi Persona\n\n<!-- Edit this file to customize how Mochi communicates. -->\n\n"
+                                 "You are Mochi, a helpful AI assistant.\n", encoding="utf-8")
             check_ok(f"Created {_DHH}/SOUL.md with basic template")
             f.fixed += 1
     # Only enabled built-in stores: users can disable either legacy file target, and stale migration files
