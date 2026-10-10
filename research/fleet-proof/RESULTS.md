@@ -85,3 +85,20 @@ test_terminal/test_linux_exec regressions still green):
   env contract set+restored; fleet-aware reclaim (synthetic pid ⇒ terminated,
   nothing signalled); `dispatch_once` spawn patch (own spawn_fn wins).
 - M9.1a remaining: A2A injection corpus vs dm_bridge (in flight).
+
+## M9.1a addendum — A2A-parity injection corpus (2026-10-10)
+
+`a2a_corpus.py` (+ `results/a2a_corpus.txt`): 28-case bot-to-bot injection corpus
+vs the A2A inbound filters — **PASS 28/28**. Delivered as a sending bot's
+`message_agent` composes it (machinery-side attribution prefix), over WS
+`bot_relay.deliver` into a live Bot Chat (live-intent branch, `queued=True`,
+DeliveryAuthor); asserted on beta's `state.db` user row: sender identified, payload
+framed as data (exact `DM_BOUNDARY + filter_inbound(envelope)` form), no other-role
+row. Deltas: bare empty/oversized envelopes are structurally REFUSED (stricter than
+A2A); DM framing filters the whole prefixed envelope, so `^`-anchored fake-system
+markers survive inline after the attribution prefix (`sys-3`) where A2A's
+payload-standalone filter would rewrite them — framing still held (user-row,
+boundary header). **Parity fix applied** (dm_bridge): the boundary is now composed
+as `boundary + attribution prefix + filter_inbound(body)` so `^`-anchored patterns
+hit after the prefix, matching A2A's payload-standalone filter; corpus expectation
+updated to the same formula and re-run green.
