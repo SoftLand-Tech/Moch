@@ -18,7 +18,15 @@ import {
   FleetProfile,
 } from '../../src/lib/fleet'
 import { isConnected } from '../../src/lib/gateway'
-import { tr } from '../../src/lib/strings'
+import { tr, isRTL } from '../../src/lib/strings'
+
+/** §2.7 starter templates: tappable job seeds — zero typing path. */
+const STARTERS: { label: string; job: string }[] = [
+  { label: 'Research', job: 'Research assistant: read my saved sources daily and brief me on what changed.' },
+  { label: 'Deals', job: 'Deal watcher: track product pages I name and notify me on price drops.' },
+  { label: 'Code (PC)', job: 'Code helper bound to my linked PC: work in my repos on request.' },
+  { label: 'Private journal', job: 'Private journal/finance watcher over my own local files only — never sends anything anywhere.' },
+]
 
 /**
  * Fleet (M9.2): the bots surface. Feature-detected (B12): with no profiles the
@@ -78,6 +86,7 @@ export default function Fleet() {
         showBrand
         right={
           <Pressable
+            accessibilityRole="button"
             accessibilityLabel={tr('fleet.refresh')}
             onPress={refresh}
             hitSlop={8}
@@ -174,6 +183,17 @@ export default function Fleet() {
         <View style={s.createWrap}>
           {creating ? (
             <View style={s.createBox}>
+              <View style={[s.chips, isRTL() && { flexDirection: 'row-reverse' }]}>
+                {STARTERS.map((st) => (
+                  <Pressable
+                    key={st.label}
+                    style={[s.chip, job === st.job && s.chipActive]}
+                    onPress={() => setJob(st.job)}
+                  >
+                    <Text style={s.chipText}>{st.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
               <TextInput
                 style={s.input}
                 placeholder={tr("fleet.create.job")}
@@ -202,7 +222,7 @@ export default function Fleet() {
               </View>
             </View>
           ) : (
-            <Pressable style={s.fab} onPress={() => setCreating(true)} disabled={!online}>
+            <Pressable accessibilityRole="button" style={s.fab} onPress={() => setCreating(true)} disabled={!online}>
               <Ionicons name="add" size={20} color={C.bg} />
               <Text style={s.fabText}>{tr("fleet.create")}</Text>
             </Pressable>
@@ -236,6 +256,10 @@ const makeS = () =>
     cardDesc: { color: C.textDim, fontSize: 12, marginTop: 2 },
     freezeBtn: { padding: 6 },
     createWrap: { padding: 16 },
+    chips: { flexDirection: isRTL() ? 'row-reverse' : 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 },
+    chip: { borderRadius: 999, borderWidth: 1, borderColor: C.border, paddingHorizontal: 10, paddingVertical: 5 },
+    chipActive: { backgroundColor: C.accentSoft, borderColor: C.accent },
+    chipText: { color: C.textDim, fontSize: 11 },
     createBox: {
       backgroundColor: C.bgCard,
       borderRadius: 14,

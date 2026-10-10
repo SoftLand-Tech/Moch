@@ -98,6 +98,7 @@ def _run_server(port: int) -> None:
                 from tools import bot_mode_dm as _bot_dm
                 from moch import dm_bridge as _dm_bridge
                 _dm_bridge.install_dm_bridge(_bot_dm)
+                _dm_bridge.install_deliver_framing(_tg_server)
                 from moch import rpc_fleet as _rpc_fleet
                 _rpc_fleet.install(_tg_server)
                 # M9.1b: in-process kanban worker (FleetWorker) replaces the

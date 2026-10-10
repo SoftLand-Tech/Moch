@@ -7,7 +7,7 @@ import { ScreenShell } from '../src/components/ScreenShell'
 import { C, useStyles } from '../src/lib/theme'
 import { rpc } from '../src/lib/gateway'
 import { refreshFleet, setActiveBot } from '../src/lib/fleet'
-import { tr } from '../src/lib/strings'
+import { tr, isRTL } from '../src/lib/strings'
 
 /**
  * Bot detail (M9.2): SOUL viewer/editor, description, freeze, chat hand-off,
@@ -110,7 +110,7 @@ export default function BotDetail() {
 
             <View style={s.rowBtns}>
               {savedAt ? <Text style={s.saved}>{tr("bot.saved")}</Text> : null}
-              <Pressable style={[s.btn, saving && s.disabled]} onPress={save} disabled={saving}>
+              <Pressable accessibilityRole="button" style={[s.btn, saving && s.disabled]} onPress={save} disabled={saving}>
                 {saving ? <ActivityIndicator size="small" /> : <Text style={s.btnText}>{tr("bot.save")}</Text>}
               </Pressable>
             </View>
@@ -119,6 +119,7 @@ export default function BotDetail() {
               <Text style={s.dangerTitle}>{tr("bot.delete.title")}</Text>
               <Text style={s.dangerBody}>{tr("bot.delete.body")}</Text>
               <Pressable
+                accessibilityRole="button"
                 style={[s.deleteBtn, confirmDelete > 0 && s.deleteArmed]}
                 onPress={() => {
                   if (confirmDelete === 0) { setConfirmDelete(1); return }
@@ -147,7 +148,7 @@ const makeS = () =>
     safe: { flex: 1, backgroundColor: C.bg },
     spin: { marginTop: 24 },
     body: { padding: 16, paddingBottom: 40 },
-    backRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
+    backRow: { flexDirection: isRTL() ? 'row-reverse' : 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
     backText: { color: C.textDim, fontSize: 13 },
     label: { color: C.textDim, fontSize: 12, marginTop: 14, marginBottom: 6 },
     input: {
@@ -159,7 +160,7 @@ const makeS = () =>
       fontSize: 14,
     },
     soulInput: { minHeight: 180, textAlignVertical: 'top', lineHeight: 19 },
-    rowBtns: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginTop: 12 },
+    rowBtns: { flexDirection: isRTL() ? 'row-reverse' : 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginTop: 12 },
     saved: { color: C.green, fontSize: 12 },
     btn: { backgroundColor: C.accent, borderRadius: 10, paddingHorizontal: 18, paddingVertical: 9 },
     disabled: { opacity: 0.5 },
