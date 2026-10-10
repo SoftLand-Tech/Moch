@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useStore } from '@nanostores/react'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { C, useStyles } from '../../src/lib/theme'
+import { useRouter } from 'expo-router'
 import {
   createProfile,
   fleetError,
@@ -25,6 +26,7 @@ import { isConnected } from '../../src/lib/gateway'
  */
 export default function Fleet() {
   const s = useStyles(makeS)
+  const router = useRouter()
   const online = useStore(isConnected)
   const profiles = useStore(fleetProfiles)
   const status = useStore(fleetStatusAtom)
@@ -134,6 +136,17 @@ export default function Fleet() {
                         </Text>
                       )}
                     </View>
+                    <Pressable
+                      accessibilityLabel={`Chat with ${item.name}`}
+                      onPress={() => router.navigate({
+                        pathname: '/(tabs)/chat',
+                        params: { botProfile: item.name },
+                      } as never)}
+                      style={s.freezeBtn}
+                      hitSlop={6}
+                    >
+                      <Ionicons name="chatbubble-outline" size={18} color={C.textDim} />
+                    </Pressable>
                     <Pressable
                       accessibilityLabel={frozen ? `Unfreeze ${item.name}` : `Freeze ${item.name}`}
                       onPress={() => toggleFreeze(item)}

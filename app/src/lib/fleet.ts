@@ -8,7 +8,39 @@
  * (B12: zero profiles ⇒ this surface is just a friendly entry point).
  */
 import { atom } from 'nanostores'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { rpc } from './gateway'
+
+const ACTIVE_BOT_KEY = 'hermes.fleet.activeBot.v1'
+
+/**
+ * The bot whose identity new chats take (M9.2). Null = the default "Moch"
+ * experience (B12). Persisted so kill/reopen keeps talking to the same bot.
+ */
+export const activeBotAtom = atom<string | null>(null)
+
+export async function loadActiveBot(): Promise<void> {
+  try {
+    const saved = await AsyncStorage.getItem(ACTIVE_BOT_KEY)
+    if (saved) activeBotAtom.set(saved)
+  } catch {
+    // storage failure = default bot; harmless
+  }
+}
+
+export async function setActiveBot(name: string | null): Promise<void> {
+  activeBotAtom.set(name)
+  try {
+    if (name) await AsyncStorage.setItem(ACTIVE_BOT_KEY, name)
+    else await AsyncStorage.removeItem(ACTIVE_BOT_KEY)
+  } catch {
+    // best-effort persistence
+  }
+}
+
+export function getActiveBot(): string | null {
+  return activeBotAtom.get()
+}
 
 export interface FleetProfile {
   name: string

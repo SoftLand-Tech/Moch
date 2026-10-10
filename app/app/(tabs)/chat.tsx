@@ -62,6 +62,7 @@ import { AttachmentChip } from '../../src/components/media/AttachmentChip'
 import { AttachSheet } from '../../src/components/media/AttachSheet'
 import { chatTabFocused } from '../../src/lib/attention'
 import { draftFor, setDraft } from '../../src/lib/drafts'
+import { setActiveBot } from '../../src/lib/fleet'
 import { shareInInbox, ackShareIn, applySharedToDraft, type SharedFile } from '../../src/lib/shareIn'
 import { isConnected as isConnectedAtom, connectionState, gatewayError, retryNow } from '../../src/lib/gateway'
 import { completeSlash, loadCatalog, runCommand, parseSlashCommand, canonicalName, interactiveTarget, describeCommand, subsFor, argumentModeFor, slashLabel, localCompleteSync, isKnownSlashCommand, type CompletionItem, type SlashOutcome } from '../../src/lib/slash'
@@ -207,7 +208,16 @@ export default function Chat() {
   )
 
   // The Skills screen hands over a command to pre-fill (`/model ` etc).
-  const { draft } = useLocalSearchParams<{ draft?: string }>()
+  // The Fleet screen hands over a bot identity: set active + fresh bot chat.
+  const { draft, botProfile } = useLocalSearchParams<{ draft?: string; botProfile?: string }>()
+  const lastBotProfile = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (!botProfile) return
+    void (async () => {
+      await setActiveBot(botProfile)
+      void newChat().catch((e) => showAlert('New chat failed', e instanceof Error ? e.message : String(e)))
+    })()
+  }, [botProfile])
   const lastDraft = useRef<string | undefined>(undefined)
 
   // ── Per-chat composer drafts ─────────────────────────────────────────────
