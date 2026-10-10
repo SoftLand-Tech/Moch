@@ -128,11 +128,11 @@ def boot_gateway(probe: Probe, home_tag: str, multiplex: bool | None = True) -> 
 
     def _run() -> None:
         try:
-            from tui_gateway import server as tg_server
-            from moch.slash_worker_bridge import InProcessSlashWorker
-            tg_server._SlashWorker = InProcessSlashWorker
-            from hermes_cli.web_server import start_server
-            start_server(host="127.0.0.1", port=port, open_browser=False, headless=True)
+            # Production boot path (single source of truth): moch.gateway_server
+            # imports tui_gateway, swaps InProcessSlashWorker, installs the
+            # M9 fleet runtime (flag-gated) and starts the serve backend.
+            from moch import gateway_server as mgs
+            mgs._run_server(port)
         except BaseException:  # noqa: BLE001
             err.append(traceback.format_exc(limit=8))
 

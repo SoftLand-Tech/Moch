@@ -1,0 +1,36 @@
+# accept_m91a_dm — PASS
+PASS  gateway up — port=36687 home=/tmp/moch-fleet-proof/m91a/home
+
+## 1. flag-on boot: gate + bridge + moch.* installed
+NOTE  main-thread fleet_enabled=True gate_installed=True dispatch_name=gated_dispatch
+PASS  dispatch gate installed
+PASS  dm_bridge swapped for _run_local_turn
+PASS  moch.fleet.status registered
+PASS  moch.fleet.freeze registered
+PASS  moch.fleet.budgets registered
+
+## 2. profiles alpha + beta
+
+## 3a. alpha DMs beta over bot_relay.deliver (live-intent path, E2E)
+PASS  deliver → turn ran in-process, failed at provider (expected, no key)
+
+## 3b. dm_bridge cold path directly (bdm._run_local_turn swapped)
+PASS  bridge cold path delivered (rc=0, empty reply w/o provider)
+
+## 4. message landed in beta's transcript
+PASS  DM text found in beta state.db
+
+## 5. moch.fleet.* + freeze refusal (bridge contract)
+PASS  moch.fleet.status fleetEnabled
+PASS  freeze accepted
+PASS  delivery to frozen bot refused (target_frozen, rc=1) — {"error": "@beta is frozen (fleet kill switch)", "reason": "target_frozen"}
+
+PASS  unfreeze ok
+
+## 6. fleet audit jsonl
+PASS  audit vocabulary present — ['dm.refused', 'dm.reply', 'dm.send', 'freeze', 'unfreeze']
+NOTE  audit events so far: ['dm.refused', 'dm.reply', 'dm.send', 'freeze', 'unfreeze']
+
+## 7. flag-off control (subprocess gateway): nothing installed
+PASS  subprocess gateway up — port=36365 home=/tmp/moch-fleet-proof/m91a-flagoff/home
+PASS  moch.* absent with flag off (unknown method)
