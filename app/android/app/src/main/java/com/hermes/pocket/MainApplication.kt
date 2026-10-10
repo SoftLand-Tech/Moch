@@ -10,6 +10,7 @@ import com.facebook.react.ReactPackage
 import com.facebook.react.ReactHost
 import com.facebook.react.common.ReleaseLevel
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint
+import com.hermes.pocket.hermes.BrowserRelayPackage
 import com.hermes.pocket.hermes.HermesBridgePackage
 import com.hermes.pocket.hermes.HermesRuntime
 import com.hermes.pocket.sharein.ShareInPackage
@@ -28,6 +29,7 @@ class MainApplication : Application(), ReactApplication {
           // add(MyReactNativePackage())
           add(HermesBridgePackage())
           add(ShareInPackage())
+          add(BrowserRelayPackage())
         }
     )
   }

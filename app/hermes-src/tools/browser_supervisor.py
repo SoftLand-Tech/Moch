@@ -221,8 +221,9 @@ class CDPSupervisor(DialogSupervisionMixin, FrameTrackingMixin):
             active, session_id = self._active, self._page_session_id
         if not active:
             return _fail("supervisor is not active")
-        if not session_id:
-            return _fail("supervisor has no attached page session")
+        # session_id None = per-page (WebView) mode: frames omit sessionId and
+        # land on the socket's single attached page. Browser-level mode always
+        # has a session id; nothing else changes.
 
         def _run_eval(by_value: bool) -> Dict[str, Any]:
             # userGesture: clipboard / fullscreen APIs need user activation.
@@ -262,6 +263,30 @@ class CDPSupervisor(DialogSupervisionMixin, FrameTrackingMixin):
             # Non-serializable (functions, DOM nodes…) — give the model the browser's description.
             value = result_obj.get("description") or result_obj.get("unserializableValue")
         return {"ok": True, "result": value, "result_type": result_type}
+
+    def cdp_call(self, method: str, params: Optional[Dict[str, Any]] = None, *,
+                 timeout: float = 10.0) -> Dict[str, Any]:
+        """Run ONE CDP command on the attached page and return the raw response.
+
+        Sync bridge onto the supervisor loop (same shape as evaluate_runtime /
+        respond_to_dialog). In per-page (WebView) mode the session id is None —
+        frames omit ``sessionId`` and land on the socket's single page; in
+        browser-level mode it is the attached page session. This is the
+        Moch webview backend's ONLY execution surface (tools/browser_webview.py).
+        """
+        loop = self._loop
+        if loop is None or not loop.is_running():
+            return _fail("supervisor loop is not running")
+        with self._state_lock:
+            active, session_id = self._active, self._page_session_id
+        if not active:
+            return _fail("supervisor is not active")
+        try:
+            return _schedule(self._cdp(method, params, session_id=session_id, timeout=timeout), loop, timeout=timeout + 1)
+        except _LoopUnavailable as e:
+            return _fail(str(e))
+        except Exception as e:  # noqa: BLE001 — callers get a structured error, never a raise
+            return _err(e)
 
     def focus_page(self, origin: str, *, accept: Optional[str] = None, timeout: float = 10.0) -> Dict[str, Any]:
         """Re-attach the supervisor's page session to an open page target on ``origin``
@@ -430,7 +455,65 @@ class CDPSupervisor(DialogSupervisionMixin, FrameTrackingMixin):
             backoff = min(backoff * 2, 10.0)
 
     async def _attach_initial_page(self) -> None:
-        """Find (or create) a page target, attach flattened, enable domains, install dialog bridge."""
+        """Find (or create) a page target, attach flattened, enable domains, install dialog bridge.
+
+        Two attach modes, chosen proactively from a ``/json/version`` probe (never by
+        exception shape):
+
+        - **Browser-level** (desktop Chromium/agent-browser, and any endpoint not
+          advertising ``Moch-Browser-Level: false``): the supervisor ws is the browser
+          endpoint, page sessions come from ``Target.attachToTarget`` — stock behavior,
+          byte-identical when the field is absent/true.
+        - **Per-page** (Moch's embedded WebView): the endpoint has no browser-level
+          target, so the Moch relay already tunnels the supervisor's ws to the ACTIVE
+          page target's own socket (its ``/json/list`` filter picks the visible tab)
+          and strips the ``sessionId`` concept entirely — commands/events flow
+          sessionless (``_cdp`` omits ``sessionId`` when none; dialog responses fall
+          back the same way). This branch only enables domains + the dialog bridge
+          sessionless; ``Target.*`` calls are skipped (WebView lacks them).
+
+        ``MOCH_BROWSER_FORCE_PER_PAGE=1`` forces the per-page branch against a
+        browser-level endpoint (PC verification of the WebView mode — point
+        ``BROWSER_CDP_URL`` at a real page-target ws for a faithful test).
+        """
+        import os
+
+        import requests
+
+        from agent.proxy_bypass import loopback_request_kwargs
+
+        force_per_page = os.environ.get("MOCH_BROWSER_FORCE_PER_PAGE", "").strip() == "1"
+        relay_browser_level: Optional[bool] = None
+        if not force_per_page:
+            try:
+                version_url = self.cdp_url.split("/devtools/", 1)[0] + "/json/version"
+                response = await asyncio.to_thread(
+                    requests.get, version_url, timeout=5, **loopback_request_kwargs(version_url)
+                )
+                payload = response.json() or {}
+                # A Moch relay always advertises a (proxied) browser ws but flags
+                # whether the UPSTREAM truly has one; real Chromium doesn't set the
+                # flag at all -> None -> browser-level, exactly as before.
+                flag = payload.get("Moch-Browser-Level")
+                relay_browser_level = None if flag is None else bool(flag)
+            except Exception as e:  # noqa: BLE001 — probe is advisory; default to stock
+                logger.debug("CDP supervisor %s: /json/version probe failed: %s", self.task_id, e)
+
+        if relay_browser_level is False:
+            list_url = self.cdp_url.split("/devtools/", 1)[0] + "/json/list"
+            response = await asyncio.to_thread(requests.get, list_url, timeout=5, **loopback_request_kwargs(list_url))
+            targets = response.json() or []
+            page = next((t for t in targets if t.get("type") == "page"), None)
+            if page is None:
+                raise RuntimeError("no page targets: the Moch browser screen has no live tab to attach to")
+            # The supervisor ws is ALREADY the page socket (the relay tunneled it);
+            # per-page mode is sessionless end to end.
+            self._page_session_id = None
+            logger.info("CDP supervisor %s: per-page attach (WebView mode) -> %s", self.task_id, str(page.get("url", ""))[:120])
+            await self._enable_page_domains(None, timeout=10.0)
+            await self._install_dialog_bridge(None)
+            return
+
         targets = (await self._cdp("Target.getTargets")).get("result", {}).get("targetInfos", [])
         page_target = next((t for t in targets if t.get("type") == "page"), None)
         if page_target is None:

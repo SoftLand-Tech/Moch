@@ -127,6 +127,24 @@ def _prepare_home(home: Path) -> None:
     scratch.mkdir(parents=True, exist_ok=True)
     os.environ["TMPDIR"] = str(scratch)
     os.environ.setdefault("HERMES_SCRATCH_DIR", str(scratch))
+    # Moch Browser: the Kotlin CdpRelay publishes its endpoint to
+    # <home>/browser/relay.json. When present, point the stock browser tools
+    # at it — no config edit, no schema change; the supervisor's
+    # Moch-Browser-Level probe picks per-page (WebView) mode automatically.
+    # Absent file ⇒ feature off, everything else unchanged (rollback = the
+    # Browser screen simply never starts the relay).
+    try:
+        relay_state = home / "browser" / "relay.json"
+        if relay_state.exists():
+            import json as _json
+
+            relay = _json.loads(relay_state.read_text(encoding="utf-8"))
+            _port, _token = int(relay.get("port") or 0), str(relay.get("token") or "")
+            if _port > 0 and _token:
+                os.environ["BROWSER_CDP_URL"] = f"http://127.0.0.1:{_port}/{_token}"
+                os.environ.setdefault("MOCH_BROWSER_RELAY", "1")
+    except Exception:  # noqa: BLE001 — never let the browser feature break boot
+        pass
     tempfile.tempdir = None
 
 
