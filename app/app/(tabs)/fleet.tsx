@@ -121,7 +121,10 @@ export default function Fleet() {
             renderItem={({ item }) => {
               const frozen = frozenSet.has(item.name)
               return (
-                <View style={s.card}>
+                <Pressable
+                  style={s.card}
+                  onPress={() => router.push({ pathname: '/bot', params: { name: item.name } } as never)}
+                >
                   <View style={s.cardHead}>
                     <Ionicons
                       name={frozen ? 'snow-outline' : 'person-circle-outline'}
@@ -165,7 +168,7 @@ export default function Fleet() {
                       )}
                     </Pressable>
                   </View>
-                </View>
+                </Pressable>
               )
             }}
           />

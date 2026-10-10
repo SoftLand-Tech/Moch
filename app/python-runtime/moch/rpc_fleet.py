@@ -77,6 +77,26 @@ def _install(tg_server) -> bool:
             },
         })
 
+    def moch_profiles_delete(rid, params):
+        """Tombstone a named profile (never the default). The cron ticker stops a
+        tombstoned profile by construction (profiles_to_serve excludes it), so its
+        scheduled jobs stop firing; kanban task reassignment lands with the M9.4
+        crew board."""
+        name = str(params.get("profile") or "").strip()
+        if not name or name == "default":
+            return _err(rid, 4061, "a non-default profile is required")
+        if not params.get("confirm"):
+            return _err(rid, 4090, "confirm required")
+        try:
+            from hermes_cli.profiles import delete_profile
+            delete_profile(name, yes=True)
+        except FileNotFoundError as exc:
+            return _err(rid, 4063, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(rid, 5064, f"delete failed: {exc}")
+        audit.record("profile.deleted", profile=name)
+        return _ok(rid, {"deleted": name})
+
     def moch_runs_timeline(rid, params):
         # M9.4 merges the delegation ledger + cron executions + kanban claims.
         # Stage-2 minimal honest shape: not built yet.
@@ -84,6 +104,7 @@ def _install(tg_server) -> bool:
 
     registry = {
         "moch.fleet.status": moch_fleet_status,
+        "moch.profiles.delete": moch_profiles_delete,
         "moch.fleet.freeze": moch_fleet_freeze,
         "moch.fleet.budgets": moch_fleet_budgets,
         "moch.runs.timeline": moch_runs_timeline,
