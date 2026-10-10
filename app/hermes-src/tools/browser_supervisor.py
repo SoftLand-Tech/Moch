@@ -74,6 +74,24 @@ def _err(exc: BaseException) -> Dict[str, Any]:
     return _fail(f"{type(exc).__name__}: {exc}")
 
 
+def _http_probe_root(cdp_url: str) -> str:
+    """HTTP root for ``/json/*`` probes derived from a (possibly ws://) CDP URL.
+
+    CDP discovery (``browser_tool_cdp._resolve_cdp_override``) hands the supervisor a
+    ``ws://host:port/<token>/devtools/browser``-style URL, but the attach probes run
+    through ``requests``, which has no ws:// adapter — deriving probe URLs from the ws
+    form raised InvalidSchema every time and silently disabled Moch's per-page
+    auto-detect (BUG-104). Rewrite the scheme at the same authority; non-ws inputs
+    pass through unchanged.
+    """
+    root = (cdp_url or "").split("/devtools/", 1)[0].strip()
+    if root.lower().startswith("ws://"):
+        return "http://" + root[len("ws://"):]
+    if root.lower().startswith("wss://"):
+        return "https://" + root[len("wss://"):]
+    return root
+
+
 @dataclass(frozen=True)
 class SupervisorSnapshot:
     """Read-only snapshot of supervisor state for tool handlers."""
@@ -472,9 +490,17 @@ class CDPSupervisor(DialogSupervisionMixin, FrameTrackingMixin):
           back the same way). This branch only enables domains + the dialog bridge
           sessionless; ``Target.*`` calls are skipped (WebView lacks them).
 
-        ``MOCH_BROWSER_FORCE_PER_PAGE=1`` forces the per-page branch against a
-        browser-level endpoint (PC verification of the WebView mode — point
+        ``MOCH_BROWSER_FORCE_PER_PAGE=1`` forces the per-page branch selection even when
+        the probe is inconclusive (PC verification of the WebView mode — point
         ``BROWSER_CDP_URL`` at a real page-target ws for a faithful test).
+
+        Failure defaults (BUG-104): a failed probe falls back to browser-level EXCEPT
+        when the Moch relay is the configured backend (``MOCH_BROWSER_RELAY=1``) — by
+        probe time the supervisor ws dial has ALREADY succeeded through the relay, and
+        that dial only completes when the relay tunneled to a LIVE page target (it 503s
+        otherwise), so "socket connected but probe failed" is exactly the webview case.
+        Guessing browser-level there sends ``Target.*`` into a page socket where they
+        can never succeed; every tool call then dies as "No browser page".
         """
         import os
 
@@ -482,11 +508,14 @@ class CDPSupervisor(DialogSupervisionMixin, FrameTrackingMixin):
 
         from agent.proxy_bypass import loopback_request_kwargs
 
+        # BUG-104: ``cdp_url`` is ws(s):// after discovery and requests cannot speak
+        # ws:// — derive BOTH probe URLs via the http(s) root at the same authority.
+        http_root = _http_probe_root(self.cdp_url)
         force_per_page = os.environ.get("MOCH_BROWSER_FORCE_PER_PAGE", "").strip() == "1"
         relay_browser_level: Optional[bool] = None
         if not force_per_page:
             try:
-                version_url = self.cdp_url.split("/devtools/", 1)[0] + "/json/version"
+                version_url = http_root + "/json/version"
                 response = await asyncio.to_thread(
                     requests.get, version_url, timeout=5, **loopback_request_kwargs(version_url)
                 )
@@ -496,11 +525,16 @@ class CDPSupervisor(DialogSupervisionMixin, FrameTrackingMixin):
                 # flag at all -> None -> browser-level, exactly as before.
                 flag = payload.get("Moch-Browser-Level")
                 relay_browser_level = None if flag is None else bool(flag)
-            except Exception as e:  # noqa: BLE001 — probe is advisory; default to stock
-                logger.debug("CDP supervisor %s: /json/version probe failed: %s", self.task_id, e)
+            except Exception as e:  # noqa: BLE001 — failure default is mode-aware (docstring)
+                if os.environ.get("MOCH_BROWSER_RELAY", "").strip() == "1":
+                    relay_browser_level = False
+                    logger.info("CDP supervisor %s: /json/version probe failed (%s); Moch relay "
+                                "backend — attaching per-page", self.task_id, e)
+                else:
+                    logger.debug("CDP supervisor %s: /json/version probe failed: %s", self.task_id, e)
 
-        if relay_browser_level is False:
-            list_url = self.cdp_url.split("/devtools/", 1)[0] + "/json/list"
+        if relay_browser_level is False or force_per_page:
+            list_url = http_root + "/json/list"
             response = await asyncio.to_thread(requests.get, list_url, timeout=5, **loopback_request_kwargs(list_url))
             targets = response.json() or []
             page = next((t for t in targets if t.get("type") == "page"), None)
@@ -510,7 +544,10 @@ class CDPSupervisor(DialogSupervisionMixin, FrameTrackingMixin):
             # per-page mode is sessionless end to end.
             self._page_session_id = None
             logger.info("CDP supervisor %s: per-page attach (WebView mode) -> %s", self.task_id, str(page.get("url", ""))[:120])
-            await self._enable_page_domains(None, timeout=10.0)
+            # auto_attach=False: Target.setAutoAttach is a browser-level command the
+            # page socket may reject, and nested OOPIF tracking is meaningless without
+            # a browser target to attach through (BUG-104).
+            await self._enable_page_domains(None, timeout=10.0, auto_attach=False)
             await self._install_dialog_bridge(None)
             return
 
