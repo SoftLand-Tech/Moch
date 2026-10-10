@@ -751,6 +751,14 @@ is deliberately allowed to stage.
   existing suite + M8 matrix still green).
 
 ### M9.1b — Kanban in-process FleetWorker (Python side)
+
+**STATUS: stage-2 core LANDED (2026-10-10, commit f7e4031).** `moch/fleet_worker.py`:
+thread-backed spawn_fn (synthetic negative pid), fleet-aware reclaim
+(synthetic ⇒ terminated/no signal), exactly-once via claim-ownership check,
+env contract serialized, freeze→block, `dispatch_once` spawn patch
+(default Popen → FleetWorker, own spawn_fn wins). 5/5 tests green on venv 3.11 +
+system 3.14. Deferred to M9.4 polish: goal-loop judge parity for worker turns
+(v1 = single in-process turn per claimed task).
 - In-process kanban spawn bridge as the FleetWorker adapter: synthetic pid/exit records,
   heartbeat/reclaim safety, dispatch off-ticker; freeze-mid-task exactly-once probe.
 - **Acceptance (PC pytest + device smoke):** kanban claim → work → complete without any

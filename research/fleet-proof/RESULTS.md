@@ -66,3 +66,22 @@ test_terminal/test_linux_exec regressions still green):
 - Stage-2 (next): dm_bridge + spawn_bot + audit jsonl + `moch.*` RPC layer — the
   moch-side turn paths hold the same gate across their whole turn and wait out live
   chat sessions (P4c composition contract).
+
+## M9.1a stage-2 + M9.1b (2026-10-10, later)
+
+- **dm_bridge E2E: 16/16 PASS** (`accept_m91a_dm.py`, `results/accept_m91a_dm.txt`):
+  installs, live-intent E2E (DM admitted, in-process turn, provider-failure expected
+  w/o key), cold-path bridge, transcript landing in beta state.db, freeze refusal
+  (`target_frozen` rc=1), audit vocabulary, flag-off control.
+- **Finding (delivery paths)**: `bot_relay.deliver` for an in-process gateway takes the
+  LIVE-INTENT branch (`_admit_live_dm` → queued prompt.submit) — the cold subprocess
+  path (and thus the dm_bridge swap) only fires for non-live targets. Both paths verified.
+- **spawn_bot + audit**: 21/21 unit tests; admission ladder (fleet-off/frozen/budget/
+  depth/3 caps/approval-required), spawn records + crash recovery + 7-day GC, audit
+  jsonl 2×5MB rotation with `audit.rotate` markers.
+- **M9.1b FleetWorker: 5/5 tests** (venv 3.11 + system 3.14; reclaim test skips w/o
+  hermes imports): negative synthetic pid; claim→work→complete with Popen poisoned;
+  exactly-once on reclaim (claim lost → discarded, never completed); freeze→block;
+  env contract set+restored; fleet-aware reclaim (synthetic pid ⇒ terminated,
+  nothing signalled); `dispatch_once` spawn patch (own spawn_fn wins).
+- M9.1a remaining: A2A injection corpus vs dm_bridge (in flight).
