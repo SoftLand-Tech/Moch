@@ -17,7 +17,7 @@ import {
   linuxTermReplay,
   linuxTermResize,
   linuxTermKill,
-} from '../../src/lib/hermesRuntime'
+} from '../../src/lib/mochiRuntime'
 import {
   FIELD_SENTINEL,
   TERM_DRAIN_FAST_MS,

@@ -22,10 +22,10 @@ export function parseConnectUrl(url: string): PairingInfo {
     return parseQuery(u.replace(/^.*\?/, ''))
   }
   const qi = u.indexOf('?')
-  if (qi < 0) throw new Error('Not a Hermes pairing link.')
+  if (qi < 0) throw new Error('Not a Mochi pairing link.')
   const path = u.slice(0, qi).toLowerCase()
   if (!path.endsWith('/connect') && path !== 'hermes://connect') {
-    throw new Error('Not a Hermes pairing link.')
+    throw new Error('Not a Mochi pairing link.')
   }
   return parseQuery(u.slice(qi + 1))
 }

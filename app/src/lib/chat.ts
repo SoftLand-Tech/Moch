@@ -2,7 +2,7 @@ import { atom, computed } from 'nanostores'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { AppState } from 'react-native'
 import { rpc, onEvent, onServerRequest, getClient, isConnected, connConfig } from './gateway'
-import { getEmbeddedGateway } from './hermesRuntime'
+import { getEmbeddedGateway } from './mochiRuntime'
 import { log } from './log'
 import { notifyLocal, setBadge } from './push'
 import { bindLiveId, liveIdFor, sessionRows, sessionListComplete, toMs, upsertOptimisticRow, patchRowTitle, bumpSessionActivity } from './sessionList'
@@ -2342,7 +2342,7 @@ export function hookChatEvents() {
         if (isShowing(eSid)) {
           void notifyLocal(
             'Session released',
-            `Hermes closed this session (${String(p.reason ?? 'idle')}). It will reconnect when you send.`,
+            `Mochi closed this session (${String(p.reason ?? 'idle')}). It will reconnect when you send.`,
             { screen: 'chat' },
           )
         } else {
@@ -2351,7 +2351,7 @@ export function hookChatEvents() {
           // chat isn't a dead end.
           flagAttention(eSid, 'done', {
             title: 'Session released',
-            body: `Hermes closed this session (${String(p.reason ?? 'idle')}). Send a message to reconnect.`,
+            body: `Mochi closed this session (${String(p.reason ?? 'idle')}). Send a message to reconnect.`,
           })
         }
         break
@@ -2626,7 +2626,7 @@ export function hookChatEvents() {
 
       case 'notice': {
         const msg = String(p.message ?? '')
-        if (msg && isBackgrounded()) void notifyLocal('Hermes', msg.slice(0, 180), { screen: 'chat' })
+        if (msg && isBackgrounded()) void notifyLocal('Mochi', msg.slice(0, 180), { screen: 'chat' })
         break
       }
     }

@@ -156,7 +156,7 @@ export async function initPush(): Promise<void> {
     // CREATE — later calls update mutable fields only, which is fine: these
     // values are the ones we want on first create and never change after.
     const channels: Array<[string, Parameters<typeof n.setNotificationChannelAsync>[1]]> = [
-      [CHANNEL_ID, { name: 'Hermes alerts', importance: n.AndroidImportance.HIGH, vibrationPattern: [0, 250, 250, 250] }],
+      [CHANNEL_ID, { name: 'Mochi alerts', importance: n.AndroidImportance.HIGH, vibrationPattern: [0, 250, 250, 250] }],
       [CHANNEL_APPROVALS, { name: 'Approvals', importance: n.AndroidImportance.HIGH, sound: 'default', enableVibrate: true, vibrationPattern: [0, 250, 250, 250] }],
       [CHANNEL_REPLIES, { name: 'Replies', importance: n.AndroidImportance.DEFAULT }],
       [CHANNEL_MISC, { name: 'Misc', importance: n.AndroidImportance.LOW }],

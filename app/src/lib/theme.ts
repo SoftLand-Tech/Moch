@@ -226,7 +226,7 @@ const RELAY_SHAPE: Shape = {
   drawerRoundedCap: false,
   modelChipTint: false,
   mochiIcons: false,
-  askPlaceholder: 'Ask Hermes',
+  askPlaceholder: 'Ask Mochi',
 }
 
 const PALETTES: Record<ThemeId, Palette> = { mocheme: MOHEME_PALETTE, relay: RELAY_PALETTE }

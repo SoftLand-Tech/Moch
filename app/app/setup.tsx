@@ -10,11 +10,11 @@ import {
   linuxStatusLive,
   requestBatteryExemption,
   type LinuxGuestStatus,
-} from '../src/lib/hermesRuntime'
+} from '../src/lib/mochiRuntime'
 import { ensureNotificationPermission } from '../src/lib/push'
 import { fetchModelOptions, saveProviderKey, modelOptions, rankProviders, type ProviderOption } from '../src/lib/modelState'
 import { connConfig, rpc } from '../src/lib/gateway'
-import { getEmbeddedGateway } from '../src/lib/hermesRuntime'
+import { getEmbeddedGateway } from '../src/lib/mochiRuntime'
 import { useStore } from '@nanostores/react'
 import { ProviderKeyForm } from '../src/components/ProviderKeyForm'
 

@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { Icon } from './Icon'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { connect, normalizeHost } from '../lib/gateway'
-import { getEmbeddedGateway } from '../lib/hermesRuntime'
+import { getEmbeddedGateway } from '../lib/mochiRuntime'
 import { parseConnectUrl } from '../lib/pairing'
 import { ensureNotificationPermission } from '../lib/push'
 import { C, useStyles } from '../lib/theme'
@@ -146,7 +146,7 @@ export function PairForm({ onPaired }: { onPaired: () => void }) {
         <Icon name="phone-portrait-outline" size={22} color={C.text} />
         <Text style={s.localText}>Use this phone</Text>
       </Pressable>
-      <Text style={s.scanHint}>No computer? Run Hermes right here — embedded on this phone.</Text>
+      <Text style={s.scanHint}>No computer? Run Mochi right here — embedded on this phone.</Text>
 
       <Pressable
         style={({ pressed }) => [s.moreToggle, pressed && s.pressed]}

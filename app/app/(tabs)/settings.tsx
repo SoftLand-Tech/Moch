@@ -16,7 +16,7 @@ import { diagLog, logText } from '../../src/lib/log'
 import {
   notificationsEnabled, setNotificationsEnabled, ensureNotificationPermission,
 } from '../../src/lib/push'
-import { getEmbeddedGateway, hermesRuntimeStatus, restartEmbeddedRuntime, stopEmbeddedRuntime, requestBatteryExemption, linuxStatus, linuxReset, linuxBootstrap, type LinuxGuestStatus } from '../../src/lib/hermesRuntime'
+import { getEmbeddedGateway, mochiRuntimeStatus, restartEmbeddedRuntime, stopEmbeddedRuntime, requestBatteryExemption, linuxStatus, linuxReset, linuxBootstrap, type LinuxGuestStatus } from '../../src/lib/mochiRuntime'
 import { C, useStyles, setTheme, THEME_OPTIONS, themeId, type ThemeId } from '../../src/lib/theme'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
@@ -90,7 +90,7 @@ function RuntimeSectionRows() {
     let alive = true
     const tick = () => {
       getEmbeddedGateway().then((g) => { if (alive) setGw(g) }).catch(() => {})
-      hermesRuntimeStatus().then((st) => {
+      mochiRuntimeStatus().then((st) => {
         if (alive) setGw((prev) => prev ? { ...prev, hermesVersion: st.hermesVersion } : { ready: false, port: null, hermesVersion: st.hermesVersion })
       }).catch(() => {})
     }
@@ -105,7 +105,7 @@ function RuntimeSectionRows() {
       <Row
         icon="hardware-chip-outline"
         label={running ? 'Embedded agent — running' : gw ? 'Embedded agent — starting…' : 'Embedded agent — unavailable'}
-        sub={gw?.port ? `hermes ${gw.hermesVersion ?? '—'} · 127.0.0.1:${gw.port}` : 'Bundled Python + hermes runtime on this phone'}
+        sub={gw?.port ? `Mochi ${gw.hermesVersion ?? '—'} · 127.0.0.1:${gw.port}` : 'Bundled Python + Mochi runtime on this phone'}
       />
       <Row
         icon="refresh-outline"
@@ -457,7 +457,7 @@ function SettingsInner() {
           <Row
             icon="information-circle-outline"
             label="Moch v1.0"
-            sub="Mobile client for your self-hosted Hermes agent. Pair from the Add computer screen or your PC's pairing tool."
+            sub="Mobile client for your self-hosted Mochi agent. Pair from the Add computer screen or your PC's pairing tool."
             disabled
           />
         </Section>

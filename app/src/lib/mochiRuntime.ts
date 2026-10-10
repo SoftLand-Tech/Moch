@@ -1,15 +1,19 @@
 /**
- * Local embedded Hermes runtime — TypeScript surface.
+ * Local embedded Mochi runtime — TypeScript surface.
  *
  * Milestone 1 exposes read-only status (is the bundled CPython alive and what
  * version). The full bridge (sendMessage / streaming events / lifecycle) grows
  * here in Milestones 3-4; UI code should depend on this module, never on
  * NativeModules.HermesBridge directly.
+ *
+ * `HermesBridge` below is the NATIVE module name registered on the Kotlin side
+ * (HermesBridgePackage.kt) — it is engine plumbing, pinned; do not rename it
+ * here without renaming it there.
  */
 
 import { NativeModules } from 'react-native'
 
-export interface HermesRuntimeStatus {
+export interface MochiRuntimeStatus {
   running: boolean
   pythonVersion: string | null
   hermesVersion: string | null
@@ -25,7 +29,7 @@ export interface EmbeddedGatewayInfo {
 }
 
 interface HermesBridgeModule {
-  status(): Promise<HermesRuntimeStatus>
+  status(): Promise<MochiRuntimeStatus>
   getGateway(): Promise<EmbeddedGatewayInfo | null>
   stop(): Promise<boolean>
   restart(): Promise<boolean>
@@ -53,7 +57,7 @@ export function stopEmbeddedRuntime(): Promise<void> {
   return bridge.stop().then(() => undefined)
 }
 
-export function hermesRuntimeStatus(): Promise<HermesRuntimeStatus> {
+export function mochiRuntimeStatus(): Promise<MochiRuntimeStatus> {
   if (!bridge) return Promise.resolve({ running: false, pythonVersion: null, hermesVersion: null })
   return bridge.status()
 }

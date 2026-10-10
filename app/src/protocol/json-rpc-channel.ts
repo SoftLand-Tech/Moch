@@ -84,7 +84,7 @@ export const JSON_RPC_METHOD_NOT_FOUND = -32601
 /** JSON-RPC "internal error" — used when a server-request handler throws. */
 export const JSON_RPC_INTERNAL_ERROR = -32603
 
-export function jsonRpcErrorFromFrame(raw: unknown, fallbackMessage = 'Hermes RPC failed'): JsonRpcGatewayError {
+export function jsonRpcErrorFromFrame(raw: unknown, fallbackMessage = 'Mochi RPC failed'): JsonRpcGatewayError {
   const err = (raw && typeof raw === 'object' ? raw : {}) as JsonRpcErrorPayload
 
   return new JsonRpcGatewayError(
