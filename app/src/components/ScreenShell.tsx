@@ -80,6 +80,11 @@ export function ScreenShell({
   // longer on mobile data) read as "offline" to users mid-open.
   const connState = useStore(connectionState)
   const connecting = connState === 'connecting'
+  // Measured width of the tray's right control cluster — the title's safe
+  // inset (see trayTitleAbs below). Ref-latched: the cluster's layout is
+  // stable once laid out, so setState only fires on a real width change,
+  // never per render.
+  const [rightClusterW, setRightClusterW] = useState(0)
 
   // Shell subscriptions are flush-stable by construction (see the summary-key
   // computeds in lib/chat): during a streaming turn this component must NOT
@@ -381,7 +386,12 @@ export function ScreenShell({
         <View style={[s.topBarTray, { marginTop: insets.top + 6, paddingTop: 6 }]}>
           <View
             pointerEvents="none"
-            style={[s.trayTitleAbs, { top: 6, bottom: 6, paddingHorizontal: 64 }]}
+            // Measured, not static: the right cluster (search + new chat +
+            // status ≈ 136dp) is wider than the menu circle, so a hard-coded
+            // inset let long titles ellipsize UNDER the buttons. The row's
+            // own onLayout feeds the real width; 56 floor covers the menu
+            // side (38 circle + 10 card padding + 8 air) for short clusters.
+            style={[s.trayTitleAbs, { top: 6, bottom: 6, paddingHorizontal: Math.max(rightClusterW + 18, 56) }]}
           >
             <View style={s.trayTitleWrap}>
               {showBrand ? <Text style={s.trayBrand}>Moch</Text> : null}
@@ -400,7 +410,13 @@ export function ScreenShell({
               <Icon name="menu" size={20} color={C.text} />
             </Pressable>
             <View style={s.traySpacer} />
-            <View style={s.trayRight}>
+            <View
+              style={s.trayRight}
+              onLayout={(e) => {
+                const w = e.nativeEvent.layout.width
+                setRightClusterW((cur) => (Math.abs(cur - w) < 0.5 ? cur : w))
+              }}
+            >
               {onSearch ? (
                 <Pressable
                   style={({ pressed }) => [s.trayCircle, pressed && s.circlePressed]}
