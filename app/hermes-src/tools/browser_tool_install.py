@@ -15,6 +15,7 @@ from hermes_cli._subprocess_compat import windows_hide_flags
 from hermes_constants import agent_browser_runnable, get_hermes_home, is_termux as _is_termux_environment, node_tool_runnable
 from tools.browser_tool_origin import origin_module as _origin
 from tools import browser_tool_cdp as _cdp
+from tools import browser_webview as _webview
 from tools import browser_tool_cloud as _cloud
 from tools import browser_tool_lifecycle as _lifecycle
 from tools import browser_tool_lightpanda_fallback as _lp
@@ -294,10 +295,18 @@ def _running_in_docker() -> bool:
 def check_browser_requirements() -> bool:
     """Whether the browser tools should be advertised.
 
+    Moch WebView mode (MOCH_BROWSER_RELAY=1) needs nothing but the relay — it
+    IS the browser; advertise unconditionally so the live gate flip
+    (moch.browser_gate.activate) surfaces the tools without any CLI present.
     Local mode needs the ``agent-browser`` CLI plus a Chromium build (except Lightpanda-only text workflows);
     cloud mode needs the CLI plus provider credentials (the provider hosts its own Chromium).
     """
     _bt = _origin()
+    # Moch embedded WebView: the on-device executor. Checked BEFORE the
+    # Browser-Use default (browser-use replaces the whole browser_* surface,
+    # but it is a NODE CLI — it can never run on Android).
+    if _webview.is_webview_mode():
+        return True
     # Browser Use CLI backend: browser_exec replaces the whole browser_* surface (incl. browser_cdp/browser_dialog check_fns).
     if _bt._is_browser_use_cli_mode():
         return False
@@ -335,5 +344,7 @@ def check_browser_vision_requirements() -> bool:
     """
     if not check_browser_requirements():
         return False
+    # WebView mode: browser_vision = captureScreenshot (works); vision itself
+    # rides the configured provider, which check_vision_requirements answers.
     from tools.vision_tools import check_vision_requirements
     return check_vision_requirements()

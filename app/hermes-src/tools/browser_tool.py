@@ -91,12 +91,17 @@ except ImportError:
     # with only ``get_provider``; no mutable registry → constant generation.
     def _browser_registry_generation(*, scope=None):
         return (0, 0)
-# Optional backends: Camofox (CAMOFOX_URL routes everything through its REST API)
-# and the Browser Use CLI.
+# Optional backends: Camofox (CAMOFOX_URL routes everything through its REST API),
+# the Moch embedded WebView (MOCH_BROWSER_RELAY=1 routes everything through the
+# in-process CDP supervisor), and the Browser Use CLI.
 try:
     from tools.browser_camofox import is_camofox_mode as _is_camofox_mode
+    from tools.browser_webview import is_webview_mode as _is_webview_mode
+    from tools import browser_webview as _webview
 except ImportError:
     _is_camofox_mode = lambda: False  # noqa: E731
+    _is_webview_mode = lambda: False  # noqa: E731
+    _webview = None
 try:
     from tools.browser_use_cli import is_browser_use_cli_mode as _is_browser_use_cli_mode
 except ImportError:
@@ -746,6 +751,8 @@ def browser_navigate(url: str, task_id: Optional[str] = None) -> str:
 
     if _is_camofox_mode():
         return _camofox("camofox_navigate", url, task_id)
+    if _webview.is_webview_mode():
+        return _webview.webview_navigate(url, task_id)
 
     if auto_local_this_nav:
         logger.info("browser_navigate: auto-routing %s to local Chromium sidecar (cloud provider %s stays on "
@@ -810,6 +817,8 @@ def browser_snapshot(
     ``user_task`` is deprecated and unused (oversized snapshots always truncate-and-store)."""
     if _is_camofox_mode():
         return _camofox("camofox_snapshot", full, task_id)
+    if _webview.is_webview_mode():
+        return _webview.webview_snapshot(task_id, full)
     effective_task_id = _last_session_key(task_id or "default")
     result = _session._run_browser_command(effective_task_id, "snapshot", [] if full else ["-c"])
     if not result.get("success"):
@@ -876,6 +885,8 @@ def browser_click(ref: str, task_id: Optional[str] = None) -> str:
     """Click the element ``ref`` (e.g. "@e5")."""
     if _is_camofox_mode():
         return _camofox("camofox_click", ref, task_id)
+    if _webview.is_webview_mode():
+        return _webview.webview_click(ref, task_id)
     ref = _at_ref(ref)
     return _guarded_action(task_id, "click", "click", [ref], {"clicked": ref}, f"Failed to click {ref}")
 
@@ -884,6 +895,8 @@ def browser_type(ref: str, text: str, task_id: Optional[str] = None) -> str:
     """Type ``text`` into the element ``ref`` (fill: clears, then types)."""
     if _is_camofox_mode():
         return _camofox("camofox_type", ref, text, task_id)
+    if _webview.is_webview_mode():
+        return _webview.webview_type(ref, text, task_id)
     effective_task_id = _last_session_key(task_id or "default")
     blocked = _blocked_private_page_action(effective_task_id, "type")
     if blocked is not None:
@@ -908,6 +921,8 @@ def browser_scroll(direction: str, task_id: Optional[str] = None) -> str:
     _SCROLL_PIXELS = 500  # ~half a viewport in one call instead of 5x subprocess calls
     if _is_camofox_mode():  # Camofox REST API has no pixel argument; use repeated calls
         return [_camofox("camofox_scroll", direction, task_id) for _ in range(5)][-1]
+    if _webview.is_webview_mode():
+        return _webview.webview_scroll(direction, task_id)
     effective_task_id = _last_session_key(task_id or "default")
     result = _session._run_browser_command(effective_task_id, "scroll", [direction, str(_SCROLL_PIXELS)])
     return _tool_response(result, {"scrolled": direction}, f"Failed to scroll {direction}")
@@ -917,6 +932,8 @@ def browser_back(task_id: Optional[str] = None) -> str:
     """Navigate back in browser history."""
     if _is_camofox_mode():
         return _camofox("camofox_back", task_id)
+    if _webview.is_webview_mode():
+        return _webview.webview_back(task_id)
     effective_task_id = _last_session_key(task_id or "default")
     result = _session._run_browser_command(effective_task_id, "back", [])
     if result.get("success"):
@@ -932,6 +949,8 @@ def browser_press(key: str, task_id: Optional[str] = None) -> str:
     """Press a keyboard key (e.g. "Enter", "Tab")."""
     if _is_camofox_mode():
         return _camofox("camofox_press", key, task_id)
+    if _webview.is_webview_mode():
+        return _webview.webview_press(key, task_id)
     return _guarded_action(task_id, "press", "press", [key], {"pressed": key}, f"Failed to press {key}")
 
 
@@ -974,6 +993,8 @@ def browser_console(clear: bool = False, expression: Optional[str] = None, task_
 
     if _is_camofox_mode():
         return _camofox("camofox_console", clear, task_id)
+    if _webview.is_webview_mode():
+        return _webview.webview_console(clear, task_id)
 
     effective_task_id = _last_session_key(task_id or "default")
     blocked = _blocked_private_page_content(effective_task_id)
@@ -1170,6 +1191,8 @@ def browser_get_images(task_id: Optional[str] = None) -> str:
     """List the page's images (src, alt, natural size), excluding data: URIs."""
     if _is_camofox_mode():
         return _camofox("camofox_get_images", task_id)
+    if _is_webview_mode():
+        return _webview.webview_get_images(task_id)
 
     effective_task_id = _last_session_key(task_id or "default")
     result = _session._run_browser_command(effective_task_id, "eval", [_GET_IMAGES_JS])
@@ -1227,6 +1250,8 @@ def browser_vision(question: str, annotate: bool = False, task_id: Optional[str]
     analysis. The file is kept and its path returned (MEDIA:<path>)."""
     if _is_camofox_mode():
         return _camofox("camofox_vision", question, annotate, task_id)
+    if _is_webview_mode():
+        return _webview.webview_vision(question, annotate, task_id)
 
     import uuid as uuid_mod
     from hermes_constants import get_hermes_dir

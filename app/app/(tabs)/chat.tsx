@@ -229,15 +229,27 @@ export default function Chat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storedId])
 
-  // Reset per-chat state before first paint. The FlatList is inverted and
-  // keyed by storedId, so offset 0 IS the latest message on frame 1 — no
-  // hidden parking pass or scroll-to-end race needed.
+  // BUG-078: useLayoutEffect — the hide/reset must land BEFORE the first
+  // paint of the new chat; a post-paint useEffect leaked a one-frame flash
+  // of the previous chat's top.
   useLayoutEffect(() => {
     setInput(draftFor(storedId))
     setStick(true)
     setShowScrollBtn(false)
     scrollMetrics.current = { y: 0, contentH: 0, viewH: 0 }
-    stickUntil.current = 0
+    // Opening a chat parks at the LATEST message: the remounted list lays
+    // out over several frames, and each content-size event re-anchors to
+    // the end until the first scroll reading confirms we're there.
+    parkAtBottomRef.current = true
+    // …and until that arrival the list stays INVISIBLE: a long transcript
+    // mounts at offset 0 (top) and the eye sees the top-then-jump even with
+    // non-animated scrolls. Gating the reveal hides the parking entirely;
+    // the timer is the safety net — a transcript that never reports arrival
+    // (or a very long one still laying out) reveals at 700ms rather than
+    // leaving a blank chat, which is no worse than the old behavior.
+    setListRevealed(false)
+    const t = setTimeout(() => setListRevealed(true), 700)
+    return () => clearTimeout(t)
   }, [storedId])
 
   const updateInput = useCallback((t: string) => {
@@ -282,27 +294,68 @@ export default function Chat() {
     void fetchReasoningDisplay(sid)
   }, [online, sid])
 
-  // ── Bottom-of-list tracking (inverted coordinates) ─────────────────────
-  // The FlatList is inverted (`data={reversedMsgs}`): offset 0 is the visual
-  // bottom (the newest message, 16px above the composer) and scrolling UP
-  // toward older history increases `y`. Long chats therefore open at the
-  // latest message on frame 1 without measuring or scrolling through older
-  // virtualized batches first.
+  useEffect(() => {
+    if (!stick) return
+    // One frame of defer so the freshly grown content has laid out before we
+    // measure it. Must stay shorter than the 33 ms stream-flush interval, or
+    // the timer is cancelled forever and following stops mid-stream.
+    // Non-animated while streaming: an animated scroll re-fired every flush
+    // fights itself and makes the stream look slower than it is.
+    const t = setTimeout(() => scrollListToEnd(!busy), 16)
+    return () => clearTimeout(t)
+  }, [msgs.length, msgs[msgs.length - 1]?.text, msgs[msgs.length - 1]?.segments?.length, tls.length, stick, busy])
+
+  // ── Bottom-of-list tracking ─────────────────────────────────────────────
+  // One reading of "is the user parked at the bottom" drives both
+  // follow-streaming (`stick`) and the jump-to-latest button. It is
+  // re-checked on drag/momentum end because throttled in-flight events can
+  // leave the last reading short of the true resting offset — that was the
+  // "I'm at the bottom but the button still shows" bug — and on
+  // content-size/layout changes, since a new message landing while scrolled
+  // up fires no scroll event at all (that was the "button never shows" bug).
   const scrollMetrics = useRef({ y: 0, contentH: 0, viewH: 0 })
-  // While a programmatic jump-to-bottom is in flight, intermediate scroll
-  // events and content-size changes must not cancel `stick` mid-flight.
-  const stickUntil = useRef(0)
+  // True from chat-open until the first scroll reading lands near the
+  // bottom: while parking, layout events re-anchor to the end instead of
+  // evaluating "is the user at the bottom" against a not-yet-scrolled
+  // offset (which read as "scrolled up" and threw the jump button on a
+  // freshly opened chat — with the follow killed, it stuck until pressed).
+  const parkAtBottomRef = useRef(true)
+  // The open-chat reveal gate: false while the list is still parking at the
+  // bottom (see the storedId effect) — the FlatList renders opacity 0 so the
+  // top-then-scroll of a long transcript is never on screen. Flips true the
+  // moment parking confirms arrival, or at the 700ms fallback.
+  const [listRevealed, setListRevealed] = useState(true)
+  // Exact end-of-content scroll. FlatList's scrollToEnd undershoots by the
+  // contentContainer's bottom reserve (the mascot clearance): on web it
+  // estimates the target from cell metrics, which never see container
+  // padding — the list lands 162px short, the last line rests behind Moch,
+  // and the 120px at-bottom threshold flips off and kills stream-follow.
+  // contentSize from scroll events DOES include the padding, so target
+  // contentH - viewH directly; fall back to scrollToEnd before the first
+  // scroll event populates the metrics.
   const scrollListToEnd = useCallback((animated: boolean) => {
+    // An animated follow scroll emits its own intermediate scroll events,
+    // each >120px from the end at first — without this guard, evalBottom
+    // would cancel the follow mid-flight and strand the jump button on.
     if (animated) stickUntil.current = Date.now() + 500
-    listRef.current?.scrollToOffset?.({ offset: 0, animated })
+    const { contentH, viewH } = scrollMetrics.current
+    if (viewH > 0 && contentH > viewH) {
+      listRef.current?.scrollToOffset?.({ offset: contentH - viewH, animated })
+    } else {
+      listRef.current?.scrollToEnd?.({ animated })
+    }
   }, [])
+  // While a programmatic jump-to-bottom is in flight, content-size changes
+  // are our own doing — evaluating "is the user at the bottom" mid-jump
+  // would see the not-yet-scrolled offset and cancel the follow.
+  const stickUntil = useRef(0)
   const evalBottom = useCallback(() => {
     const { y, contentH, viewH } = scrollMetrics.current
     if (!viewH) return
     if (Date.now() < stickUntil.current) return
-    // Overscroll past the bottom makes y negative; short chats that fit in
-    // the viewport cannot scroll away from the bottom at all.
-    const distance = contentH > 0 && contentH <= viewH ? 0 : Math.max(0, y)
+    // Overscroll (rubber-band past the end) makes the raw distance negative;
+    // clamping keeps "scrolled too far" counting as at-bottom.
+    const distance = Math.max(0, contentH - viewH - y)
     const nearBottom = distance < 120
     setStick(nearBottom)
     setShowScrollBtn(!nearBottom)
@@ -311,18 +364,14 @@ export default function Chat() {
     const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent
     scrollMetrics.current = { y: contentOffset.y, contentH: contentSize.height, viewH: layoutMeasurement.height }
     evalBottom()
+    // Parked → arrived: the first reading within the at-bottom band ends
+    // the open-chat anchoring; from here the user owns the position.
+    const { y, contentH, viewH } = scrollMetrics.current
+    if (parkAtBottomRef.current && viewH > 0 && Math.max(0, contentH - viewH - y) < 120) {
+      parkAtBottomRef.current = false
+      setListRevealed(true)
+    }
   }, [evalBottom])
-
-  const lastMsgText = msgs[msgs.length - 1]?.text
-  const lastMsgSegs = msgs[msgs.length - 1]?.segments?.length
-  useEffect(() => {
-    // At offset 0, new bubbles and streaming tokens grow directly from the
-    // bottom edge natively; only nudge back to 0 when slightly drifted within
-    // the 120px stick band.
-    if (!stick || scrollMetrics.current.y <= 0 || Date.now() < stickUntil.current) return
-    const t = setTimeout(() => scrollListToEnd(!busy), 16)
-    return () => clearTimeout(t)
-  }, [msgs.length, lastMsgText, lastMsgSegs, tls.length, stick, busy, scrollListToEnd])
 
   /** Force the view to the newest message — every send dispatch and the
    *  jump-to-latest button. Sending while scrolled up must never leave the
@@ -787,9 +836,6 @@ export default function Chat() {
     ),
     [onRetryMsg, onEffortPress, curEffort, onCommandInsert, onOpenCatalog, showThinking],
   )
-  // Inverted FlatList places index 0 at offset 0 (the visual bottom above
-  // the composer), so the newest messages mount first on open.
-  const reversedMsgs = useMemo(() => [...msgs].reverse(), [msgs])
   // FlatList contract: with a stable renderItem, memoized cells only
   // re-evaluate when `extraData` changes. Without this, streaming updates
   // never reach the rows on Fabric — text piles up invisibly until the turn
@@ -906,44 +952,58 @@ export default function Chat() {
             // rotation (boot placeholder→real, background reattach) keeps
             // the list and the user's scroll position intact.
             key={storedId ?? 'boot'}
-            inverted
-            initialNumToRender={20}
-            // REVIEW FIX: content grows at the offset-0 end (the visual
-            // bottom — new rows prepend, the streaming row grows). Without
-            // this, RN keeps the raw contentOffset while cells shift to
-            // higher offsets, so reading history while a turn streams creeps
-            // toward the newer end on every flush. mVCP re-anchors to the
-            // first rendered cell instead — the canonical inverted-chat-list
-            // prop for exactly this.
-            maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
-            style={s.list}
-            data={reversedMsgs}
+            // Invisible until the open-chat parking ARRIVES at the bottom —
+            // a long transcript mounts at the top and the re-anchor scroll
+            // would otherwise flash by (see listRevealed).
+            style={{ flex: 1, opacity: listRevealed ? 1 : 0 }}
+            data={msgs}
             keyExtractor={(m) => m.id}
             renderItem={renderMsg}
             extraData={extraData}
-            contentContainerStyle={s.listContent}
+            contentContainerStyle={{ paddingTop: 156, paddingBottom: 16, flexGrow: msgs.length ? 0 : 1 }}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="interactive"
             onScroll={readScroll}
             onScrollBeginDrag={() => {
-              // The user takes the wheel: let position evaluations speak
-              // immediately, even if a programmatic follow armed its quiet
-              // window a moment ago.
+              // The user takes the wheel: end any open-chat parking and let
+              // position evaluations speak immediately, even if a
+              // programmatic follow armed its quiet window a moment ago.
+              parkAtBottomRef.current = false
               stickUntil.current = 0
             }}
             onScrollEndDrag={readScroll}
             onMomentumScrollEnd={readScroll}
             onContentSizeChange={(_w, h) => {
               scrollMetrics.current.contentH = h
-              if (stick && scrollMetrics.current.y > 0) {
-                scrollListToEnd(!busy)
-              } else if (!stick) {
+              // Content fits the viewport → there IS no parking to do (empty
+              // and short chats never scroll, so readScroll's arrival flip
+              // would never fire and the reveal would ride the 700ms
+              // fallback). Arrive immediately.
+              if (parkAtBottomRef.current && scrollMetrics.current.viewH > 0 && h <= scrollMetrics.current.viewH) {
+                parkAtBottomRef.current = false
+                setListRevealed(true)
+              }
+              if (stick) {
+                // Content grew while following (or while parking at the
+                // latest on open): re-anchor to the end using THIS event's
+                // laid-out size — exact target, no 16ms guess, and it
+                // repeats through every layout stage of a restored
+                // transcript. Evaluating "at bottom?" here instead would use
+                // the pre-growth offset and kill the follow (that was the
+                // ghost jump-button bug).
+                scrollListToEnd(parkAtBottomRef.current ? false : !busy)
+              } else {
+                // Scrolled up: a message landing fires no scroll event at
+                // all, so THIS is where the jump button must re-check.
                 evalBottom()
               }
             }}
             onLayout={(e) => {
               scrollMetrics.current.viewH = e.nativeEvent.layout.height
-              evalBottom()
+              // Skip the at-bottom evaluation while parking: at mount the
+              // offset is still 0 against a tall laid-out transcript, which
+              // read as "scrolled up" and threw the button on open.
+              if (!parkAtBottomRef.current) evalBottom()
             }}
             scrollEventThrottle={16}
             ListEmptyComponent={
@@ -1401,22 +1461,6 @@ export default function Chat() {
               </ScrollView>
             ) : null}
 
-            {/* Steer toggle lives ABOVE the pill: below it, its appearance
-                pushed the composer up (input "floating high" off the bottom)
-                while the safe-area pad stayed under the chip. */}
-            {busy ? (
-              <Pressable
-                style={({ pressed }) => [s.steerChip, steerMode && s.steerChipOn, pressed && s.btnPressed]}
-                onPress={() => setSteerMode(!steerMode)}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel={steerMode ? 'Steer mode on' : 'Steer mode'}
-              >
-                <Icon name="git-branch-outline" size={12} color={steerMode ? C.onAccent : C.textDim} />
-                <Text style={[s.steerText, steerMode && { color: C.onAccent }]}>Steer</Text>
-              </Pressable>
-            ) : null}
-
             <View style={s.composer}>
               <Pressable
                 style={({ pressed }) => [s.attach, !canAttach && s.attachOff, pressed && s.btnPressed]}
@@ -1497,6 +1541,19 @@ export default function Chat() {
                 />
               </Pressable>
             </View>
+
+            {busy ? (
+              <Pressable
+                style={({ pressed }) => [s.steerChip, steerMode && s.steerChipOn, pressed && s.btnPressed]}
+                onPress={() => setSteerMode(!steerMode)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={steerMode ? 'Steer mode on' : 'Steer mode'}
+              >
+                <Icon name="git-branch-outline" size={12} color={steerMode ? C.onAccent : C.textDim} />
+                <Text style={[s.steerText, steerMode && { color: C.onAccent }]}>Steer</Text>
+              </Pressable>
+            ) : null}
           </Animated.View>
 
           {/* Interactive pickers — attach sources, /model, options/mixed commands, and the command browser */}
@@ -1666,11 +1723,6 @@ const makeS = () => StyleSheet.create({
   composerWrap: { paddingHorizontal: 12, paddingTop: 6, backgroundColor: C.bg },
   // Positioned box around the transcript that hosts the floating mascot.
   listWrap: { flex: 1 },
-  list: { flex: 1 },
-  // Inverted coordinates: paddingTop (16) is the visual bottom gap above the
-  // composer; paddingBottom (156) is the visual top reserve that keeps the
-  // oldest message (and short/empty chats via flex-end) clear of floating Moch.
-  listContent: { paddingTop: 16, paddingBottom: 156, flexGrow: 1, justifyContent: 'flex-end' },
   // Top-right float for Moch: the absolutely positioned view shrinks to the
   // 144px box (no opposite anchors), so the box is the only touch target and
   // the scroll-to-bottom FAB keeps the bottom-right corner.
@@ -1730,9 +1782,7 @@ const makeS = () => StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     alignSelf: 'center',
-    // Above the pill: spacing hangs below the chip (gap to the pill), so the
-    // pill itself stays pinned to the safe-area bottom.
-    marginBottom: 6,
+    marginTop: 6,
     paddingHorizontal: S.radiusChip > 100 ? 14 : 10,
     height: S.radiusChip > 100 ? 28 : 26,
     borderRadius: S.radiusChip,

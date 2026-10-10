@@ -9,3 +9,4 @@ embedded/.wheelbuild/
 __pycache__/
 *.pyc
 .research/
+.gradle-home/
