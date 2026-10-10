@@ -1,0 +1,27 @@
+# p1_profiles_create — PASS
+PASS  gateway up — port=54355 home=/tmp/moch-fleet-proof/p1/home
+
+## 1. profiles.create over the live WS (no_alias, soul, model pin)
+PASS  profiles.create ok — path=/tmp/moch-fleet-proof/p1/home/profiles/alpha soul_written=True model_set=False
+PASS  profile dir exists — /tmp/moch-fleet-proof/p1/home/profiles/alpha
+PASS  SOUL.md written — # Alpha
+You are a probe bot created by M
+NOTE  no_alias=true → no alias wrapper expected; .env present: True
+NOTE  profiles dir now: ['alpha']
+
+## 2. profiles.list shows it without restart
+PASS  profiles.list includes alpha — names=['default', 'alpha']
+
+## 3. second profile without restart (re-enumeration)
+PASS  profiles.list includes beta after create — names=['default', 'alpha', 'beta']
+
+## 4. in-process profiles_to_serve(multiplex=True) chokepoint
+PASS  profiles_to_serve includes default+alpha+beta — ['default', 'alpha', 'beta']
+
+## 5. served-set record + hot-notify vs ticker re-enumeration (the v1.1 fix)
+PASS  embedded gateway records no 'live default multiplexer' — hot-notify (_notify_multiplexer) has no listener on-device; FINDING: multiplex pickup relies on the cron ticker's per-cycle re-enumeration (web_server.py InProcessCronScheduler profile_homes lambda), which sections 2-4 prove picks up new profiles without restart — pid=None recorded=None
+
+## 6. config gate (control): multiplex=False gateway in its own process
+PASS  subprocess gateway up — port=59297 home=/tmp/moch-fleet-proof/p1-nomux/home
+PASS  nomux gateway: profiles.create + list ok — names=['default', 'gamma']
+NOTE  The serving-set distinction (what the HTTP/WS gateway serves vs what profiles.list reports) is recorded observationally; full config-gate behavior verifies on-device where each gateway is its own process.

@@ -202,6 +202,8 @@ export function ScreenShell({
   // moved into Settings' AGENT section.
   const topNav = useMemo<NavItem[]>(() => [
     { key: 'chat', label: 'Chat', icon: 'chatbubble-outline' },
+    { key: 'fleet', label: 'Fleet', icon: 'people-outline' },
+    { key: 'crew', label: 'Crew', icon: 'grid-outline' },
     { key: 'browser', label: 'Browser', icon: 'globe-outline' },
     { key: 'terminal', label: 'Terminal', icon: 'terminal-outline' },
     { key: 'automations', label: 'Automations', icon: 'timer-outline', mochis: runningAuto },
@@ -260,15 +262,19 @@ export function ScreenShell({
       const route =
         key === 'chat'
           ? '/(tabs)/chat'
-          : key === 'browser'
-            ? '/(tabs)/browser'
-            : key === 'terminal'
-              ? '/(tabs)/terminal'
-              : key === 'automations'
-                ? '/(tabs)/automations'
-                : key === 'connectors'
-                  ? '/(tabs)/connectors'
-                  : '/(tabs)/settings'
+          : key === 'fleet'
+            ? '/(tabs)/fleet'
+            : key === 'crew'
+              ? '/(tabs)/crew'
+              : key === 'browser'
+                ? '/(tabs)/browser'
+                : key === 'terminal'
+                  ? '/(tabs)/terminal'
+                  : key === 'automations'
+                    ? '/(tabs)/automations'
+                    : key === 'connectors'
+                      ? '/(tabs)/connectors'
+                      : '/(tabs)/settings'
       // navigate, never push: `/(tabs)` is a single route on the root stack,
       // so push mounts a whole fresh copy of every tab screen each tap —
       // navigate just switches the tab inside the instance we already have.
