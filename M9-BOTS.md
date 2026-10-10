@@ -768,6 +768,17 @@ system 3.14. Deferred to M9.4 polish: goal-loop judge parity for worker turns
   a real OS pid nor defers forever *(v1.2)*.
 
 ### M9.2 — Fleet UI v1 (the bots exist for the user)
+
+**STATUS: stage 1–3 LANDED on PC (2026-10-10, commits 8fe94ef/d39dce9/2927dea/5911b1b6/bd04acd).**
+Fleet tab (roster + instant create with starter-template chips + freeze/unfreeze +
+runtime status), bot-scoped chats (`profile` through `session.create`, `Bot · <name>`
+identity titles, persisted active bot), bot detail modal (SOUL/description editor,
+delete wizard with honest scope note, chat hand-off), i18n foundation (EN/AR catalog,
+RTL flag, strings externalized), a11y roles. tsc clean. **Remaining:** on-device
+acceptance (create <60s on device, 8-profile restart + multiplex re-enumeration,
+RTL pass on device), bot detail memory-browser (read-only MEMORY.md view), delete
+wizard kanban-reassignment surface (lands with M9.4 write slice).
+
 - Fleet tab (list/create/author), bot detail (SOUL editor, tools picker, autonomy,
   model), bot-scoped chat (`profile` param through `session.create`/turns/send queue),
   bot chips + attribution in chat and sidebar; feature-detect empty fleet (B12); UI
@@ -804,6 +815,13 @@ system 3.14. Deferred to M9.4 polish: goal-loop judge parity for worker turns
   can read *(v1.2)*.
 
 ### M9.4 — Crew (work together; the headline demo)
+
+**STATUS: read-side LANDED on PC (2026-10-10, commits 3cbbf11/7254cb2).**
+`moch.runs.timeline` merged ledger (kanban + cron + delegations, newest-first,
+tested), `moch.kanban.tasks` read RPC, Crew screen (status columns + run ledger,
+read view). **Remaining:** write slice (create/claim/complete from the app),
+goal-loop judge parity for in-process workers, budgets dashboard, freeze/melt UI.
+
 - Crew board UI over kanban (create/claim/comment/complete/handoff), in-process
   dispatcher (M9.1b's off-ticker dispatcher thread) surfaced in the crew board UI
   *(v1.2)*, assignee avatars; run graph (delegation ledger +
