@@ -60,6 +60,9 @@ const EN: Catalog = {
   'fleet.unfreeze': 'Unfreeze {name}',
   'fleet.refresh': 'Refresh fleet',
   'fleet.detail.back': 'Fleet',
+  'crew.readonly': 'Read view — write actions land with the M9.4 crew slice.',
+  'crew.timeline': 'Run ledger',
+  'crew.timeline.empty': 'No runs recorded yet.',
 
   'bot.job': 'Job / description',
   'bot.soul': 'SOUL.md — the job description',
@@ -93,6 +96,9 @@ const AR: Catalog = {
   'fleet.unfreeze': 'إلغاء تجميد {name}',
   'fleet.refresh': 'تحديث الأسطول',
   'fleet.detail.back': 'الأسطول',
+  'crew.readonly': 'عرض للقراءة — إجراءات الكتابة تأتي مع شريحة M9.4.',
+  'crew.timeline': 'سجل الأدوار',
+  'crew.timeline.empty': 'لا أدوار مسجلة بعد.',
 
   'bot.job': 'المهمة / الوصف',
   'bot.soul': 'SOUL.md — وصف المهمة',

@@ -111,6 +111,32 @@ def _install(tg_server) -> bool:
         audit.record("profile.deleted", profile=name)
         return _ok(rid, {"deleted": name})
 
+    def moch_kanban_tasks(rid, params):
+        """Read-only crew-board view (default board): tasks grouped for the app.
+        Params: {assignee?: str, status?: str, limit?: 100}."""
+        limit = max(1, min(int(params.get("limit") or 100), 300))
+        try:
+            from hermes_cli import kanban_db as _kb
+            from hermes_cli import kanban_db_connect as _kbc
+            with _kbc.connect_closing() as conn:
+                tasks = _kb.list_tasks(
+                    conn,
+                    assignee=params.get("assignee") or None,
+                    status=params.get("status") or None,
+                    limit=limit,
+                    order_by="updated",
+                )
+                return _ok(rid, {"tasks": [
+                    {"id": t.id, "title": t.title, "assignee": t.assignee or "",
+                     "status": t.status, "priority": t.priority,
+                     "createdAt": t.created_at,
+                     "completedAt": t.completed_at}
+                    for t in tasks]})
+        except ImportError as exc:
+            return _err(rid, 5021, f"kanban unavailable: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            return _err(rid, 5022, f"kanban read failed: {exc}")
+
     def moch_runs_timeline(rid, params):
         """Merged read-side run ledger (§2.1: a VIEW, not a store):
         kanban tasks + cron executions + delegation records, newest first.
@@ -189,6 +215,7 @@ def _install(tg_server) -> bool:
 
     registry = {
         "moch.fleet.status": moch_fleet_status,
+        "moch.kanban.tasks": moch_kanban_tasks,
         "moch.profiles.delete": moch_profiles_delete,
         "moch.fleet.freeze": moch_fleet_freeze,
         "moch.fleet.budgets": moch_fleet_budgets,

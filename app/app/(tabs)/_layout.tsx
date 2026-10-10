@@ -22,6 +22,7 @@ export default function TabsLayout() {
       }}
     >
       <Tabs.Screen name="chat" />
+      <Tabs.Screen name="crew" />
       <Tabs.Screen name="fleet" />
       <Tabs.Screen name="browser" />
       <Tabs.Screen name="sessions" />
