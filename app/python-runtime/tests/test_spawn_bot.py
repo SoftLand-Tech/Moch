@@ -275,7 +275,7 @@ class TestSpawnHappy(SpawnBase):
         self.assertEqual(c["name"], r2["name"])
         self.assertIn("summarize the report", c["soul"])
         self.assertTrue(c["no_alias"])
-        self.assertFalse(c["mirror_credentials"])
+        self.assertTrue(c["mirror_credentials"])  # v1.2: model key only (§2.8)
         # budget slice debited from parent as an allocation
         self.assertEqual(len(f.budget_rows), 1)
         self.assertEqual(f.budget_rows[0]["bot"], "alpha")

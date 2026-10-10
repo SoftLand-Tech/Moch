@@ -108,7 +108,9 @@ export async function createProfile(input: {
     description: input.description ?? '',
     soul: input.soul ?? '',
     no_alias: true,
-    mirror_credentials: false,
+    // §2.8 default: mirror the launch profile's MODEL key only (never
+    // platform/bot tokens) so a fresh bot can actually answer.
+    mirror_credentials: true,
   })
   await refreshFleet()
   return { ok: res.ok !== false, path: res.path }

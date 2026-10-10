@@ -111,6 +111,49 @@ def _install(tg_server) -> bool:
         audit.record("profile.deleted", profile=name)
         return _ok(rid, {"deleted": name})
 
+    def moch_profiles_mirror_model_key(rid, params):
+        """Repair path for keyless bots created before the §2.8 default flipped:
+        copy *API_KEY lines from the launch home's .env into the profile's .env
+        (never overwriting an existing value; channel/bot tokens are NOT
+        matched). Returns the list of mirrored key names."""
+        name = str(params.get("profile") or "").strip()
+        if not name or name == "default":
+            return _err(rid, 4061, "a non-default profile is required")
+        try:
+            from hermes_cli.profiles import get_profile_dir
+            from hermes_constants import get_hermes_home
+            dst = Path(get_profile_dir(name)) / ".env"
+            launch = Path(get_hermes_home()) / ".env"
+            if not launch.is_file():
+                return _err(rid, 4064, "launch profile has no .env to mirror")
+            existing = {}
+            if dst.is_file():
+                for line in dst.read_text(encoding="utf-8").splitlines():
+                    if "=" in line and not line.lstrip().startswith("#"):
+                        k = line.split("=", 1)[0].strip()
+                        existing[k] = line
+            mirrored = []
+            out = dst.read_text(encoding="utf-8") if dst.is_file() else ""
+            add = []
+            for line in launch.read_text(encoding="utf-8").splitlines():
+                ls = line.strip()
+                if not ls or ls.startswith("#") or "=" not in ls:
+                    continue
+                k = ls.split("=", 1)[0].strip()
+                if not k.endswith("API_KEY") or k in existing:
+                    continue
+                add.append(ls)
+                mirrored.append(k)
+            if add:
+                body = out.rstrip("\n") + "\n" + "\n".join(add) + "\n" if out.strip() else "\n".join(add) + "\n"
+                dst.write_text(body, encoding="utf-8")
+            audit.record("profile.model_key_mirrored", profile=name, keys=mirrored)
+            return _ok(rid, {"profile": name, "mirrored": mirrored})
+        except FileNotFoundError as exc:
+            return _err(rid, 4063, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(rid, 5065, f"mirror failed: {exc}")
+
     def moch_kanban_tasks(rid, params):
         """Read-only crew-board view (default board): tasks grouped for the app.
         Params: {assignee?: str, status?: str, limit?: 100}."""
@@ -216,6 +259,7 @@ def _install(tg_server) -> bool:
     registry = {
         "moch.fleet.status": moch_fleet_status,
         "moch.kanban.tasks": moch_kanban_tasks,
+        "moch.profiles.mirror_model_key": moch_profiles_mirror_model_key,
         "moch.profiles.delete": moch_profiles_delete,
         "moch.fleet.freeze": moch_fleet_freeze,
         "moch.fleet.budgets": moch_fleet_budgets,

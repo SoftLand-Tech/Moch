@@ -240,7 +240,7 @@ class SpawnBotService:
         try:
             if self._profiles_create is not None:
                 self._profiles_create(name=name, soul=soul, no_alias=True,
-                                      mirror_credentials=False)
+                                      mirror_credentials=True)  # model key only (§2.8); parent opt-in verified in request()
         except Exception as exc:  # noqa: BLE001 — structured, never silent
             return refuse("create-failed", parent_profile, str(exc))
         self._budgets.record(bot=parent_profile, tokens=slice_tokens,

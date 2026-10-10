@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { ScreenShell } from '../src/components/ScreenShell'
+import { showAlert } from '../src/components/AlertDialog'
 import { C, useStyles } from '../src/lib/theme'
 import { rpc } from '../src/lib/gateway'
 import { refreshFleet, setActiveBot } from '../src/lib/fleet'
@@ -26,6 +27,8 @@ export default function BotDetail() {
   const [savedAt, setSavedAt] = useState<number | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(0)
   const [deleting, setDeleting] = useState(false)
+  const [noProvider, setNoProvider] = useState(false)
+  const [mirroring, setMirroring] = useState(false)
 
   const load = useCallback(async () => {
     if (!bot) return
@@ -35,6 +38,7 @@ export default function BotDetail() {
       const r = (res as { result?: { soul?: string; description?: string } }).result ?? res
       setSoul((r as { soul?: string }).soul ?? '')
       setDesc((r as { description?: string }).description ?? '')
+      setNoProvider(!((r as { model?: { provider?: string } }).model?.provider))
     } catch {
       // profile listing stays authoritative; editor starts blank on failure
     } finally {
@@ -53,6 +57,26 @@ export default function BotDetail() {
       void refreshFleet()
     } finally {
       setSaving(false)
+    }
+  }
+
+  const connectProvider = async () => {
+    if (mirroring) return
+    setMirroring(true)
+    try {
+      const res = await rpc<{ mirrored?: string[] }>(
+        'moch.profiles.mirror_model_key', { profile: bot }, 15000)
+      const keys = res.mirrored ?? []
+      showAlert(
+        keys.length ? 'Provider connected' : 'Nothing to mirror',
+        keys.length
+          ? `Mirrored ${keys.join(', ')} from your main bot. Try chatting now.`
+          : 'Your main bot has no API keys to mirror. Add one in Connectors first.')
+      setNoProvider(false)
+    } catch (e) {
+      showAlert('Mirror failed', e instanceof Error ? e.message : String(e))
+    } finally {
+      setMirroring(false)
     }
   }
 
@@ -107,6 +131,18 @@ export default function BotDetail() {
               multiline
               textAlignVertical="top"
             />
+
+            {noProvider ? (
+              <View style={s.noProviderBox}>
+                <Text style={s.noProviderText}>
+                  This bot has no AI provider yet — it can't answer until it shares
+                  your main bot's model key.
+                </Text>
+                <Pressable accessibilityRole="button" style={s.btn} onPress={connectProvider} disabled={mirroring}>
+                  {mirroring ? <ActivityIndicator size="small" /> : <Text style={s.btnText}>Use my provider</Text>}
+                </Pressable>
+              </View>
+            ) : null}
 
             <View style={s.rowBtns}>
               {savedAt ? <Text style={s.saved}>{tr("bot.saved")}</Text> : null}
@@ -165,6 +201,8 @@ const makeS = () =>
     btn: { backgroundColor: C.accent, borderRadius: 10, paddingHorizontal: 18, paddingVertical: 9 },
     disabled: { opacity: 0.5 },
     btnText: { color: C.onAccent, fontWeight: '600', fontSize: 13 },
+    noProviderBox: { backgroundColor: C.amberSoft, borderRadius: 10, padding: 10, marginTop: 12, gap: 8 },
+    noProviderText: { color: C.textDim, fontSize: 12, lineHeight: 17 },
     danger: { marginTop: 36, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.border, paddingTop: 16 },
     dangerTitle: { color: C.red, fontSize: 13, fontWeight: '700' },
     dangerBody: { color: C.textDim, fontSize: 12, lineHeight: 18, marginTop: 6 },
