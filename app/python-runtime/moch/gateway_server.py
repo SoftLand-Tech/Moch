@@ -100,6 +100,13 @@ def _run_server(port: int) -> None:
                 _dm_bridge.install_dm_bridge(_bot_dm)
                 from moch import rpc_fleet as _rpc_fleet
                 _rpc_fleet.install(_tg_server)
+                # M9.1b: in-process kanban worker (FleetWorker) replaces the
+                # Popen spawn; reclaim learns to ignore synthetic pids.
+                from hermes_cli import kanban_db_dispatch as _kbd
+                from moch import fleet_worker as _fw
+                _fleet_worker = _fw.FleetWorker()
+                _fw.install_reclaim_patch(_kbd)
+                _fw.install_dispatch_spawn_patch(_kbd, _fleet_worker)
         except Exception:
             traceback.print_exc()
 
