@@ -908,6 +908,14 @@ export default function Chat() {
             key={storedId ?? 'boot'}
             inverted
             initialNumToRender={20}
+            // REVIEW FIX: content grows at the offset-0 end (the visual
+            // bottom — new rows prepend, the streaming row grows). Without
+            // this, RN keeps the raw contentOffset while cells shift to
+            // higher offsets, so reading history while a turn streams creeps
+            // toward the newer end on every flush. mVCP re-anchors to the
+            // first rendered cell instead — the canonical inverted-chat-list
+            // prop for exactly this.
+            maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
             style={s.list}
             data={reversedMsgs}
             keyExtractor={(m) => m.id}
