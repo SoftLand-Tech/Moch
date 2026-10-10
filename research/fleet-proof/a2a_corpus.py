@@ -148,10 +148,10 @@ def a2a_reference(payload: str) -> dict:
 
 
 def dm_expected_row(payload: str) -> str:
-    """The row the DM path must persist: boundary + filter_inbound over the WHOLE
-    attribution-prefixed envelope (that is exactly what install_deliver_framing
-    does — the filter sees prefix+payload as one string)."""
-    return DM_BOUNDARY + _a2a().filter_inbound(ATTR_PREFIX + payload)
+    """The row the DM path must persist: boundary + attribution prefix +
+    filter_inbound over the BODY standalone (defang parity: ^-anchored injection
+    patterns must hit after the prefix, exactly as A2A filters its payload)."""
+    return DM_BOUNDARY + ATTR_PREFIX + _a2a().filter_inbound(payload)
 
 
 class BetaTranscript:

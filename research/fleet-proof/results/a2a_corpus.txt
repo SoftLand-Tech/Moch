@@ -1,8 +1,8 @@
 # a2a_corpus — PASS
-PASS  gateway up — port=59025 home=/tmp/moch-fleet-proof/a2a-corpus/home
+PASS  gateway up — port=60479 home=/tmp/moch-fleet-proof/a2a-corpus/home
 
 ## 0. setup
-PASS  beta Bot Chat live — sid=d805a18a
+PASS  beta Bot Chat live — sid=a27117ff
 NOTE  dm_bridge.install_deliver_framing active on bot_relay.deliver: True
 
 ## 1. corpus matrix — a2a reference vs in-process DM transcript

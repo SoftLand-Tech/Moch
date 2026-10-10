@@ -1,5 +1,5 @@
 # accept_m91a_dm — PASS
-PASS  gateway up — port=36687 home=/tmp/moch-fleet-proof/m91a/home
+PASS  gateway up — port=39905 home=/tmp/moch-fleet-proof/m91a/home
 
 ## 1. flag-on boot: gate + bridge + moch.* installed
 NOTE  main-thread fleet_enabled=True gate_installed=True dispatch_name=gated_dispatch
@@ -32,5 +32,5 @@ PASS  audit vocabulary present — ['dm.refused', 'dm.reply', 'dm.send', 'freeze
 NOTE  audit events so far: ['dm.refused', 'dm.reply', 'dm.send', 'freeze', 'unfreeze']
 
 ## 7. flag-off control (subprocess gateway): nothing installed
-PASS  subprocess gateway up — port=36365 home=/tmp/moch-fleet-proof/m91a-flagoff/home
+PASS  subprocess gateway up — port=57093 home=/tmp/moch-fleet-proof/m91a-flagoff/home
 PASS  moch.* absent with flag off (unknown method)
