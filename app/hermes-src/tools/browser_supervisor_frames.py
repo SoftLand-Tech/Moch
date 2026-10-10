@@ -47,11 +47,19 @@ class FrameInfo:
 class FrameTrackingMixin:
     """Frame-tree bookkeeping for ``CDPSupervisor`` (event handlers run on its loop)."""
 
-    async def _enable_page_domains(self, session_id: Optional[str], *, timeout: float) -> None:
-        """Page.enable + Runtime.enable + nested auto-attach on one session."""
+    async def _enable_page_domains(self, session_id: Optional[str], *, timeout: float,
+                                   auto_attach: bool = True) -> None:
+        """Page.enable + Runtime.enable (+ nested auto-attach) on one session.
+
+        ``auto_attach=False`` for the per-page (WebView) attach: ``Target.setAutoAttach``
+        is a browser-level command the page socket may reject, and nested-session OOPIF
+        tracking is meaningless when there is no browser target to attach through
+        (BUG-104).
+        """
         await self._cdp("Page.enable", session_id=session_id, timeout=timeout)
         await self._cdp("Runtime.enable", session_id=session_id, timeout=timeout)
-        await self._cdp("Target.setAutoAttach", _AUTO_ATTACH_PARAMS, session_id=session_id, timeout=timeout)
+        if auto_attach:
+            await self._cdp("Target.setAutoAttach", _AUTO_ATTACH_PARAMS, session_id=session_id, timeout=timeout)
 
     def _on_frame_attached(self, params: Dict[str, Any], session_id: Optional[str]) -> None:
         frame_id = params.get("frameId")
