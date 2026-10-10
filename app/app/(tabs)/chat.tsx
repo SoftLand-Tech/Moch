@@ -1461,6 +1461,22 @@ export default function Chat() {
               </ScrollView>
             ) : null}
 
+            {/* Steer toggle lives ABOVE the pill: below it, its appearance
+                pushed the composer up (input "floating high" off the bottom)
+                while the safe-area pad stayed under the chip. */}
+            {busy ? (
+              <Pressable
+                style={({ pressed }) => [s.steerChip, steerMode && s.steerChipOn, pressed && s.btnPressed]}
+                onPress={() => setSteerMode(!steerMode)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={steerMode ? 'Steer mode on' : 'Steer mode'}
+              >
+                <Icon name="git-branch-outline" size={12} color={steerMode ? C.onAccent : C.textDim} />
+                <Text style={[s.steerText, steerMode && { color: C.onAccent }]}>Steer</Text>
+              </Pressable>
+            ) : null}
+
             <View style={s.composer}>
               <Pressable
                 style={({ pressed }) => [s.attach, !canAttach && s.attachOff, pressed && s.btnPressed]}
@@ -1541,19 +1557,6 @@ export default function Chat() {
                 />
               </Pressable>
             </View>
-
-            {busy ? (
-              <Pressable
-                style={({ pressed }) => [s.steerChip, steerMode && s.steerChipOn, pressed && s.btnPressed]}
-                onPress={() => setSteerMode(!steerMode)}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel={steerMode ? 'Steer mode on' : 'Steer mode'}
-              >
-                <Icon name="git-branch-outline" size={12} color={steerMode ? C.onAccent : C.textDim} />
-                <Text style={[s.steerText, steerMode && { color: C.onAccent }]}>Steer</Text>
-              </Pressable>
-            ) : null}
           </Animated.View>
 
           {/* Interactive pickers — attach sources, /model, options/mixed commands, and the command browser */}
@@ -1782,7 +1785,9 @@ const makeS = () => StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     alignSelf: 'center',
-    marginTop: 6,
+    // Above the pill: spacing hangs below the chip (gap to the pill), so the
+    // pill itself stays pinned to the safe-area bottom.
+    marginBottom: 6,
     paddingHorizontal: S.radiusChip > 100 ? 14 : 10,
     height: S.radiusChip > 100 ? 28 : 26,
     borderRadius: S.radiusChip,
