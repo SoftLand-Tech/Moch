@@ -18,6 +18,7 @@ import {
   FleetProfile,
 } from '../../src/lib/fleet'
 import { isConnected } from '../../src/lib/gateway'
+import { tr } from '../../src/lib/strings'
 
 /**
  * Fleet (M9.2): the bots surface. Feature-detected (B12): with no profiles the
@@ -73,11 +74,11 @@ export default function Fleet() {
   return (
     <SafeAreaView style={s.safe} edges={['bottom']}>
       <ScreenShell
-        title="Fleet"
+        title={tr("fleet.title")}
         showBrand
         right={
           <Pressable
-            accessibilityLabel="Refresh fleet"
+            accessibilityLabel={tr('fleet.refresh')}
             onPress={refresh}
             hitSlop={8}
           >
@@ -85,17 +86,17 @@ export default function Fleet() {
           </Pressable>
         }
       >
-        {error ? <Text style={s.banner}>Fleet offline: {error}</Text> : null}
+        {error ? <Text style={s.banner}>{tr("fleet.offline")}: {error}</Text> : null}
         {status ? (
           <View style={s.statusRow}>
             <Text style={s.statusText}>
               {status.fleetEnabled
-                ? `fleet runtime · ${status.queue.active}/${status.queue.slots} turns`
-                : 'fleet runtime idle on this gateway'}
+                ? tr('fleet.runtime.active', { active: status.queue.active, slots: status.queue.slots })
+                : tr('fleet.runtime.idle')}
             </Text>
             {waiting.length > 0 ? (
               <Text style={s.statusText}>
-                {waiting.length} waiting ({waiting.map((w) => w.priority).join(', ')})
+                {tr('fleet.waiting', { n: waiting.length, prios: waiting.map((w) => w.priority).join(', ') })}
               </Text>
             ) : null}
           </View>
@@ -110,12 +111,8 @@ export default function Fleet() {
             ListEmptyComponent={
               <View style={s.empty}>
                 <Ionicons name="people-outline" size={40} color={C.textDim} />
-                <Text style={s.emptyTitle}>Your fleet starts here</Text>
-                <Text style={s.emptyBody}>
-                  Bots are profiles on this device with their own memory, skills and
-                  computer. Describe a job below — creation is instant and nothing
-                  about chat changes.
-                </Text>
+                <Text style={s.emptyTitle}>{tr("fleet.empty.title")}</Text>
+                <Text style={s.emptyBody}>{tr("fleet.empty.body")}</Text>
               </View>
             }
             renderItem={({ item }) => {
@@ -140,7 +137,7 @@ export default function Fleet() {
                       )}
                     </View>
                     <Pressable
-                      accessibilityLabel={`Chat with ${item.name}`}
+                      accessibilityLabel={tr("fleet.chat", { name: item.name })}
                       onPress={() => router.navigate({
                         pathname: '/(tabs)/chat',
                         params: { botProfile: item.name },
@@ -151,7 +148,7 @@ export default function Fleet() {
                       <Ionicons name="chatbubble-outline" size={18} color={C.textDim} />
                     </Pressable>
                     <Pressable
-                      accessibilityLabel={frozen ? `Unfreeze ${item.name}` : `Freeze ${item.name}`}
+                      accessibilityLabel={frozen ? tr("fleet.unfreeze", { name: item.name }) : tr("fleet.freeze", { name: item.name })}
                       onPress={() => toggleFreeze(item)}
                       disabled={busy === item.name}
                       style={s.freezeBtn}
@@ -179,17 +176,17 @@ export default function Fleet() {
             <View style={s.createBox}>
               <TextInput
                 style={s.input}
-                placeholder="Describe the job — e.g. watch price drops daily"
+                placeholder={tr("fleet.create.job")}
                 placeholderTextColor={C.textDim}
                 value={job}
                 onChangeText={setJob}
                 multiline
                 autoFocus
               />
-              <Text style={s.hint}>Suggested name: {slugifyName(job) || '…'}</Text>
+              <Text style={s.hint}>{tr("fleet.create.suggested")}: {slugifyName(job) || "…"}</Text>
               <View style={s.rowBtns}>
                 <Pressable style={s.btnGhost} onPress={() => setCreating(false)}>
-                  <Text style={s.btnGhostText}>Cancel</Text>
+                  <Text style={s.btnGhostText}>{tr("fleet.cancel")}</Text>
                 </Pressable>
                 <Pressable
                   style={[s.btn, !job.trim() && s.btnDisabled]}
@@ -199,7 +196,7 @@ export default function Fleet() {
                   {busy === 'create' ? (
                     <ActivityIndicator size="small" />
                   ) : (
-                    <Text style={s.btnText}>Create bot</Text>
+                    <Text style={s.btnText}>{tr("fleet.create.cta")}</Text>
                   )}
                 </Pressable>
               </View>
@@ -207,7 +204,7 @@ export default function Fleet() {
           ) : (
             <Pressable style={s.fab} onPress={() => setCreating(true)} disabled={!online}>
               <Ionicons name="add" size={20} color={C.bg} />
-              <Text style={s.fabText}>New bot</Text>
+              <Text style={s.fabText}>{tr("fleet.create")}</Text>
             </Pressable>
           )}
         </View>

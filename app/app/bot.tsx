@@ -7,6 +7,7 @@ import { ScreenShell } from '../src/components/ScreenShell'
 import { C, useStyles } from '../src/lib/theme'
 import { rpc } from '../src/lib/gateway'
 import { refreshFleet, setActiveBot } from '../src/lib/fleet'
+import { tr } from '../src/lib/strings'
 
 /**
  * Bot detail (M9.2): SOUL viewer/editor, description, freeze, chat hand-off,
@@ -75,7 +76,7 @@ export default function BotDetail() {
         showBrand
         right={
           <Pressable
-            accessibilityLabel={`Chat with ${bot}`}
+            accessibilityLabel={tr("bot.chat", { name: bot })}
             onPress={async () => {
               await setActiveBot(bot)
               router.navigate({ pathname: '/(tabs)/chat', params: { botProfile: bot } } as never)
@@ -92,13 +93,13 @@ export default function BotDetail() {
           <ScrollView contentContainerStyle={s.body}>
             <Pressable onPress={() => router.back()} hitSlop={8} style={s.backRow}>
               <Ionicons name="chevron-back" size={18} color={C.textDim} />
-              <Text style={s.backText}>Fleet</Text>
+              <Text style={s.backText}>{tr("fleet.detail.back")}</Text>
             </Pressable>
-            <Text style={s.label}>Job / description</Text>
+            <Text style={s.label}>{tr("bot.job")}</Text>
             <TextInput style={s.input} value={desc} onChangeText={setDesc}
                        placeholder="What is this bot for?" placeholderTextColor={C.textFaint} />
 
-            <Text style={s.label}>SOUL.md — the job description</Text>
+            <Text style={s.label}>{tr("bot.soul")}</Text>
             <TextInput
               style={[s.input, s.soulInput]}
               value={soul}
@@ -108,19 +109,15 @@ export default function BotDetail() {
             />
 
             <View style={s.rowBtns}>
-              {savedAt ? <Text style={s.saved}>saved</Text> : null}
+              {savedAt ? <Text style={s.saved}>{tr("bot.saved")}</Text> : null}
               <Pressable style={[s.btn, saving && s.disabled]} onPress={save} disabled={saving}>
-                {saving ? <ActivityIndicator size="small" /> : <Text style={s.btnText}>Save</Text>}
+                {saving ? <ActivityIndicator size="small" /> : <Text style={s.btnText}>{tr("bot.save")}</Text>}
               </Pressable>
             </View>
 
             <View style={s.danger}>
-              <Text style={s.dangerTitle}>Danger zone</Text>
-              <Text style={s.dangerBody}>
-                Deleting tombstones this bot: its scheduled jobs stop firing (ticker skips
-                tombstones), running turns stop at the next boundary. Kanban tasks it holds
-                stay on the board until the M9.4 crew board offers reassignment.
-              </Text>
+              <Text style={s.dangerTitle}>{tr("bot.delete.title")}</Text>
+              <Text style={s.dangerBody}>{tr("bot.delete.body")}</Text>
               <Pressable
                 style={[s.deleteBtn, confirmDelete > 0 && s.deleteArmed]}
                 onPress={() => {
@@ -131,9 +128,9 @@ export default function BotDetail() {
               >
                 {deleting ? <ActivityIndicator size="small" /> : (
                   <Text style={s.deleteText}>
-                    {confirmDelete === 0 ? 'Delete this bot'
-                      : confirmDelete === 1 ? 'Tap again to confirm deletion'
-                        : 'Deleting…'}
+                    {confirmDelete === 0 ? tr("bot.delete.cta")
+                      : confirmDelete === 1 ? tr("bot.delete.confirm")
+                        : tr("bot.delete.doing")}
                   </Text>
                 )}
               </Pressable>
