@@ -152,11 +152,12 @@ class DialogSupervisionMixin:
         except Exception as e:
             logger.debug("%s failed (%s): %s", method, what, e)
 
-    async def _install_dialog_bridge(self, session_id: str) -> None:
+    async def _install_dialog_bridge(self, session_id: Optional[str]) -> None:
         """Install the dialog-bridge init script + Fetch interceptor on a session. Idempotent at
         the CDP level (Chromium de-dupes identical add-script calls; Fetch.enable replaces prior
         patterns); the final Runtime.evaluate injects into the already-loaded document so
-        existing pages pick up the override on reconnect."""
+        existing pages pick up the override on reconnect. ``None`` (per-page/WebView mode)
+        runs sessionless — ``_cdp`` drops falsy session ids (BUG-104)."""
         sid = (session_id or "")[:16]
         steps = (
             ("Page.addScriptToEvaluateOnNewDocument", {"source": _DIALOG_BRIDGE_SCRIPT, "runImmediately": True},
