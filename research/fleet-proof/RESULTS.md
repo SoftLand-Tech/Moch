@@ -46,3 +46,23 @@ at the model call by design). Raw evidence: `results/<tag>.txt` (regenerate any 
 5. **P4 — the M9.1b synthetic-pid shape is confirmed safe**: `dispatch_once` accepts an
    injectable `spawn_fn`; a negative synthetic pid is a no-op in the exit registry
    (pid≤0 guard); the pass never touches `subprocess.Popen`.
+
+## M9.1a stage-1 addendum (2026-10-10, later)
+
+`moch/fleet.py` + `app/python-runtime/tests/test_fleet.py` landed (17/17 unit tests OK;
+test_terminal/test_linux_exec regressions still green):
+
+- **TurnGate** (process-global per-profile RLock registry, 30s bounded), **FleetTurnQueue**
+  (priority classes, FIFO within class, depth cap → `fleet_busy`, snapshot), **freeze**
+  (persisted), **BudgetLedger** (fleet-level SQLite; admission check separate from
+  completion-time record — the check does not accumulate, usage records at model-call
+  completion), `admission_check` + `install_dispatch_gate`.
+- `gateway_server.py` installs the gate flag-gated (MOCH_FLEET=1).
+- **P4b regreened against the REAL gate**: delivery-vs-user-chat and delivery-vs-cron
+  both serialize (max overlap 1, slots=2) — `results/p4b_turn_serialization.txt`
+  section 5.
+- **Flag-off contract proven live**: without MOCH_FLEET, the gateway boots with dispatch
+  unwrapped and fully functional (`p4b_flagoff_smoke`).
+- Stage-2 (next): dm_bridge + spawn_bot + audit jsonl + `moch.*` RPC layer — the
+  moch-side turn paths hold the same gate across their whole turn and wait out live
+  chat sessions (P4c composition contract).

@@ -12,4 +12,7 @@ PASS  claim verified — flock serializes delivery-vs-delivery, but NOT delivery
 
 ## 4. Regreen simulation — shared threading.Lock as the M9.1a turn gate stand-in
 PASS  regreen simulation — NO overlap with the shared gate — max simultaneous CS entries=1, pairs=none — a single per-profile gate covering all three turn paths serializes them (M9.1a contract holds)
+
+## 5. REAL production gate (moch.fleet, MOCH_FLEET=1) — delivery vs chat vs cron
+PASS  REAL gate regreen — delivery vs user-chat AND vs cron serialized — max chat=1, max cron=1 (FleetTurnQueue + TurnGate, slots=2)
 NOTE  VERDICT: GAP CONFIRMED — M9.1a turn gate required (probe PASS = gap documented per the fail-then-regreen plan; must regreen after M9.1a)

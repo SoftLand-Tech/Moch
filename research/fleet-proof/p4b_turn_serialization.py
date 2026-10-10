@@ -18,6 +18,7 @@ Run:  cd research/fleet-proof && ~/.hermes/hermes-agent/venv/bin/python p4b_turn
 """
 from __future__ import annotations
 
+import os
 import sys
 import threading
 import time
@@ -189,6 +190,45 @@ def _run(p: Probe) -> int:
     else:
         p.fail("regreen simulation", f"still overlapping: max={ov_regreen.max_overlap} "
                                      f"pairs={sorted(ov_regreen.overlap_pairs)}")
+
+    p.section("5. REAL production gate (moch.fleet, MOCH_FLEET=1) — delivery vs chat vs cron")
+    try:
+        os.environ["MOCH_FLEET"] = "1"
+        from moch import fleet as mfleet
+        prod_home = str(Path(os.environ["HERMES_HOME"])) if os.environ.get("HERMES_HOME") \
+            else "/tmp/moch-fleet-proof/p4b/home"
+        prod_overlap = Overlap()
+
+        def prod_path(ov: Overlap, tag: str, priority: int,
+                      entered: threading.Event | None = None) -> None:
+            # exactly the composition dm_bridge / the dispatch wrap use:
+            # FleetTurnQueue slot FIRST, then the per-profile turn gate (§2.2 order)
+            with mfleet.FLEET_QUEUE.turn(prod_home, priority, timeout=10.0):
+                with mfleet.TURN_GATE.hold(prod_home):
+                    ov.enter(tag)
+                    if entered is not None:
+                        entered.set()
+                    time.sleep(CS_SECONDS)
+                    ov.exit(tag)
+
+        ov_prod_dm_chat = run_pair(
+            lambda ov, entered=None: prod_path(ov, "dm-delivery", mfleet.PRIORITY_DM, entered),
+            lambda ov, entered=None: prod_path(ov, "user-chat", mfleet.PRIORITY_USER),
+        )
+        ov_prod_dm_cron = run_pair(
+            lambda ov, entered=None: prod_path(ov, "dm-delivery", mfleet.PRIORITY_DM, entered),
+            lambda ov, entered=None: prod_path(ov, "cron-occurrence", mfleet.PRIORITY_CRON_KANBAN),
+        )
+        ok_prod = (ov_prod_dm_chat.max_overlap <= 1 and ov_prod_dm_cron.max_overlap <= 1)
+        (p.ok if ok_prod else p.fail)(
+            "REAL gate regreen — delivery vs user-chat AND vs cron serialized",
+            f"max chat={ov_prod_dm_chat.max_overlap}, max cron={ov_prod_dm_cron.max_overlap} "
+            f"(FleetTurnQueue + TurnGate, slots={mfleet.FLEET_QUEUE.snapshot()['slots']})")
+        if not ok_prod:
+            p.failed = True
+    except Exception as e:  # noqa: BLE001
+        p.fail("REAL gate regreen", f"{e!r}")
+        p.failed = True
 
     print("VERDICT: GAP CONFIRMED — M9.1a turn gate required")
     p.note("VERDICT: GAP CONFIRMED — M9.1a turn gate required "

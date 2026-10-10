@@ -85,6 +85,16 @@ def _run_server(port: int) -> None:
         from moch.slash_worker_bridge import InProcessSlashWorker
 
         _tg_server._SlashWorker = InProcessSlashWorker
+
+        # M9 fleet runtime (flag-gated): installs the chat-path admission gate
+        # (freeze / budget / FleetTurnQueue) only when MOCH_FLEET=1; no-op and
+        # zero behavior change otherwise. Must never break boot.
+        try:
+            from moch import fleet as _moch_fleet
+            _moch_fleet.install_dispatch_gate(_tg_server)
+        except Exception:
+            traceback.print_exc()
+
         # hermes' in-process cron ticker (scheduled automations) only arms
         # under HERMES_DESKTOP=1 — the embedded serve process is exactly the
         # desktop-shell situation (a serve backend with no external
