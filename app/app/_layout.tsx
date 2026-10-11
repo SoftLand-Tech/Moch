@@ -27,6 +27,7 @@ import { flushDrafts, loadDrafts } from '../src/lib/drafts'
 import { flushSendQueue, loadSendQueue } from '../src/lib/sendQueue'
 import { initShareIn, deliverSharedNow, shareInInbox } from '../src/lib/shareIn'
 import { loadLocale } from '../src/lib/strings'
+import { AgentBrowserHost } from '../src/components/AgentBrowserHost'
 import { syncBackendIdentity } from '../src/lib/backendIdentity'
 import { parseConnectUrl } from '../src/lib/pairing'
 import { pruneRelayMedia } from '../src/lib/mediaCache'
@@ -283,6 +284,12 @@ export default function RootLayout() {
   return (
     <KeyboardProvider>
     <View style={{ flex: 1, backgroundColor: C.bg }}>
+      {/* BUG-130 follow-up ("browser tools always available"): an app-owned
+          agent tab that boots the relay + gate for the whole process lifetime,
+          so every new chat sees the browser tools with no Browser-screen
+          visit. Must live in THIS (connected) return: the !cfg early return
+          unmounts before the gateway/config exists. */}
+      <AgentBrowserHost />
       <StatusBar style="light" />
       <Stack
         screenOptions={{

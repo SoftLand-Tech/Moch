@@ -157,6 +157,20 @@ def _prepare_home(home: Path) -> None:
     # arms the tools mid-session with no restart, in either open order. A
     # preset BROWSER_CDP_URL (manual PC runs) is left untouched here either
     # way — this branch only ever arms FROM the file.
+    _arm_browser_gate_from_relay_file(home)
+    tempfile.tempdir = None
+
+
+def _arm_browser_gate_from_relay_file(home) -> None:
+    """BUG-105/BUG-132: arm the browser gate from a live-process relay.json.
+
+    Idempotent and safe to call repeatedly — including LATE in boot (the
+    gateway re-invokes this right before start_server), which closes the
+    cold-start race where CdpRelay.start lands after this file was first
+    read: a relay started mid-boot then writes the CURRENT pid, and this
+    re-check picks it up instead of leaving the gateway serving an
+    un-armed catalog.
+    """
     try:
         relay_state = home / "browser" / "relay.json"
         if relay_state.exists():
@@ -170,7 +184,6 @@ def _prepare_home(home: Path) -> None:
                 os.environ.setdefault("MOCH_BROWSER_RELAY", "1")
     except Exception:  # noqa: BLE001 — never let the browser feature break boot
         pass
-    tempfile.tempdir = None
 
 
 def boot() -> dict:

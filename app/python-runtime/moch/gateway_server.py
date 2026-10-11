@@ -138,6 +138,19 @@ def _run_server(port: int) -> None:
         # gateway to tick the store). Verified: without it, jobs.json is
         # never touched and scheduled jobs never fire.
         os.environ.setdefault("HERMES_DESKTOP", "1")
+        # BUG-132 belt-and-braces: the native relay start (AgentBrowserHost)
+        # races this boot — if it landed after hermes_boot's arm check, the
+        # gateway would serve sessions an un-armed (browser-less) catalog for
+        # the whole process. Re-check the pid-gated relay.json one last time
+        # before the first request can arrive.
+        try:
+            from pathlib import Path as _Path
+
+            from moch.hermes_boot import _arm_browser_gate_from_relay_file
+
+            _arm_browser_gate_from_relay_file(_Path(os.environ["HERMES_HOME"]))
+        except Exception:
+            pass
         from hermes_cli.web_server import start_server
 
         start_server(host="127.0.0.1", port=port, open_browser=False, headless=True)

@@ -39,8 +39,11 @@ def _stub_optional_deps() -> None:
     import importlib.util
     import types
 
-    if importlib.util.find_spec("httpx") is not None:
-        return
+    try:
+        if importlib.util.find_spec("httpx") is not None:
+            return
+    except Exception:
+        pass  # a stub from a sibling test module has no __spec__ — treat as absent
 
     class _AnyModule(types.ModuleType):
         def __getattr__(self, name):  # pragma: no cover — import shim
