@@ -223,9 +223,19 @@ export function ScreenShell({
     // was opened (opening clears the event-driven mark; the question still
     // blocks) — derived from pendingBySession, the source of truth.
     const statusOf = (id: string) => rowStatus(busy.includes(id), attention[id], pendingStored.includes(id))
-    const fromServer = rows.map((r) => ({
+    const fromServer = rows.map((r) => {
+      const rawTitle = r.title || r.preview?.slice(0, 60) || 'Untitled'
+      // BUG-112: a row from a bot profile identifies itself in the drawer even
+      // when its title doesn't (chats started while a bot was active are
+      // auto-titled). Fleet-created chats already carry "Bot · <name>", so the
+      // prefix is only added when the name isn't already in the title.
+      const title =
+        r.profile && r.profile !== 'default' && !rawTitle.toLowerCase().includes(r.profile.toLowerCase())
+          ? `${r.profile} · ${rawTitle}`
+          : rawTitle
+      return {
       id: r.id,
-      title: r.title || r.preview?.slice(0, 60) || 'Untitled',
+      title,
       // Revive-to-top: started_at is creation time only, so a revived old
       // chat never bubbled. The local bump (bumpSessionActivity, in
       // sessionList) overlays the real last activity — max() of the two,
@@ -234,7 +244,8 @@ export function ScreenShell({
       ts: Math.max(toMs(r.started_at), lastActiveMap[r.id] ?? 0),
       status: statusOf(r.id),
       active: r.id === current,
-    }))
+      }
+    })
 
     const seen = new Set(fromServer.map((c) => c.id))
     const locals = Object.values(all)

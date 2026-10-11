@@ -435,6 +435,51 @@ class TestVersionStamps(MochLinuxExecTest):
         self.assertTrue((self.linux / "rootfs" / "etc" / "os-release").exists(),
                         "absent stamp + existing rootfs = keep")
 
+    # ── BUG-123: a stub rootfs/ is not an installed distribution ──────────
+
+    def test_stub_rootfs_without_os_release_is_reprovisioned(self):
+        """`rootfs/` created by the bind targets (data/, workspace/) must not
+        satisfy the rootfs step: after a Reset the existence check skipped the
+        download, wrote the stamp and left the app reporting 'Linux ready'."""
+        stub = self.linux / "rootfs"
+        (stub / "workspace").mkdir(parents=True)
+        (stub / "data").mkdir()
+        report, fd = self._bootstrap()
+        self.assertTrue(report["ok"], report)
+        self.assertIn("rootfs", [s.split(":")[0] for s in report["steps"]])
+        self.assertIn(_UBUNTU_URL, fd.urls, "the base tarball must be re-downloaded")
+        self.assertTrue((stub / "etc" / "os-release").exists())
+
+    def test_status_requires_a_distribution_not_a_directory(self):
+        (self.linux / "rootfs").mkdir(parents=True)          # stub only
+        (self.linux / "bin").mkdir()
+        (self.linux / "bin" / "proot").write_bytes(b"PROOT")
+        with self._patched_native():
+            st = le.status(walk=True)
+        self.assertFalse(st["bootstrapped"], "a stub rootfs must never read as installed")
+        self.assertIsNone(st["distro"])
+
+    def test_reset_tolerates_undeletable_leftover_and_clears_stamp(self):
+        """`rootfs/workspace` is a bind target the app uid cannot remove. A
+        strict rmtree raised, half-deleted the tree and left the stamp that made
+        every later reinstall a silent no-op."""
+        report, _fd = self._bootstrap()
+        self.assertTrue(report["ok"], report)
+        blocker = self.linux / "rootfs" / "workspace"
+        blocker.mkdir(parents=True, exist_ok=True)
+        blocker.chmod(0o000)
+        try:
+            res = le.reset()
+            self.assertTrue(res["ok"], res)
+            self.assertFalse((self.linux / le.STAMP_NAME).exists(),
+                             "the stamp must never outlive a reset")
+            if os.geteuid() != 0:  # chmod 000 is meaningless for root
+                self.assertIn("rootfs", res.get("leftovers") or [],
+                              "leftovers must be reported, not raised")
+        finally:
+            blocker.chmod(0o755)
+            shutil.rmtree(self.linux, ignore_errors=True)
+
 
 # --------------------------------------------------------------------------
 # §9.1.4 — ar-parser regression
