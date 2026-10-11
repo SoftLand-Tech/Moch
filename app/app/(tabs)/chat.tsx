@@ -62,7 +62,7 @@ import { AttachmentChip } from '../../src/components/media/AttachmentChip'
 import { AttachSheet } from '../../src/components/media/AttachSheet'
 import { chatTabFocused } from '../../src/lib/attention'
 import { draftFor, setDraft } from '../../src/lib/drafts'
-import { setActiveBot } from '../../src/lib/fleet'
+import { activeBotAtom, setActiveBot } from '../../src/lib/fleet'
 import { shareInInbox, ackShareIn, applySharedToDraft, type SharedFile } from '../../src/lib/shareIn'
 import { isConnected as isConnectedAtom, connectionState, gatewayError, retryNow } from '../../src/lib/gateway'
 import { completeSlash, loadCatalog, runCommand, parseSlashCommand, canonicalName, interactiveTarget, describeCommand, subsFor, argumentModeFor, slashLabel, localCompleteSync, isKnownSlashCommand, type CompletionItem, type SlashOutcome } from '../../src/lib/slash'
@@ -97,6 +97,8 @@ export default function Chat() {
   const msgs = useStore(messages)
   const tls = useStore(tools)
   const busy = useStore(agentBusy)
+  // BUG-111: which bot NEW chats are scoped to (persisted in fleet.ts).
+  const activeBot = useStore(activeBotAtom)
   const req = useStore(pendingRequest)
   const td = useStore(todos)
   const qb = useStore(outbox)
@@ -567,6 +569,13 @@ export default function Chat() {
   // the user reviews the composer and taps Send (ChatGPT's share behavior).
   useEffect(() => {
     if (!sharedIn) return
+    // BUG-113: a COLD share arrives before this screen owns a session, and
+    // `draftFor('')` is '' — so the text was written to the empty draft key and
+    // then wiped when the new session landed and re-read its own draft
+    // (chat.tsx: `setInput(draftFor(storedId))`). Hold the share in the inbox
+    // until a session exists; the effect re-runs on `storedId` and lands the
+    // text in the right draft. Files are deferred with it.
+    if (!storedId) return
     ackShareIn()
     const cur = draftFor(storedId)
     const merged = applySharedToDraft(cur, sharedIn)
@@ -593,8 +602,9 @@ export default function Chat() {
     }
     // One-shot per share: ack above clears the trigger, so the closed-over
     // helpers (updateInput/addAttachment) are only read on the firing pass.
+    // `storedId` is a real dependency now: a cold share waits for it (BUG-113).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sharedIn])
+  }, [sharedIn, storedId])
 
 
   const send = async () => {
@@ -855,6 +865,30 @@ export default function Chat() {
               >
                 <Icon name="cube-outline" size={12} color={C.accent} />
                 <Text style={s.modelChipText} numberOfLines={1}>{curModel}</Text>
+              </Pressable>
+            ) : null}
+            {/* BUG-111: an active bot silently scoped every NEW chat to its
+                profile — same UI, different memory/skills/credentials/routing.
+                Make the scoping visible and give it one obvious way back. */}
+            {activeBot ? (
+              <Pressable
+                style={({ pressed }) => [s.botChip, pressed && s.btnPressed]}
+                onPress={() =>
+                  showAlert(
+                    `New chats go to ${activeBot}`,
+                    'This bot runs on its own profile: its own memory, skills and credentials. Chats you start now belong to it until you switch back.',
+                    [
+                      { text: 'Stay', style: 'cancel' },
+                      { text: 'Switch back', onPress: () => { void setActiveBot(null) } },
+                    ],
+                  )
+                }
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={`Bot ${activeBot} is active — new chats use this bot. Tap to switch back to the default agent.`}
+              >
+                <Icon name="people-outline" size={12} color={C.accent} />
+                <Text style={s.botChipText} numberOfLines={1}>{activeBot}</Text>
               </Pressable>
             ) : null}
           </>
@@ -1626,6 +1660,21 @@ const makeS = () => StyleSheet.create({
     borderColor: S.modelChipTint ? C.accentSoft : C.border,
   },
   modelChipText: { color: C.textDim, fontSize: 11.5, fontWeight: '700', flexShrink: 1 },
+  // BUG-111 bot chip: same chip vocabulary as the model chip, accent-filled so the
+  // active-bot scoping is unmissable next to it.
+  botChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    maxWidth: 148,
+    height: 30,
+    paddingHorizontal: 10,
+    borderRadius: 15,
+    backgroundColor: C.accentSoft,
+    borderWidth: 1,
+    borderColor: C.accentSoft,
+  },
+  botChipText: { color: C.accent, fontSize: 11.5, fontWeight: '700', flexShrink: 1 },
   // Header new-chat button: same circle vocabulary as the drawer's other
   // header controls, so it reads next to the model chip without competing.
   headerIconBtn: {

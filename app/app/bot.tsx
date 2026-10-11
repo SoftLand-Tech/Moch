@@ -33,8 +33,15 @@ export default function BotDetail() {
   const load = useCallback(async () => {
     if (!bot) return
     try {
+      // BUG-108: the `profiles.*` family resolves `params["name"]`
+      // (`tui_gateway/methods_profiles.py::_resolve_profile` — 4063 "name
+      // required" otherwise); only the `moch.*` family takes `profile`. This
+      // screen sent `profile`, so describe failed silently (the editor opened
+      // blank for a bot that has a description and a SOUL) and configure was a
+      // silent no-op on Save. `profiles.create` in fleet.ts has always used
+      // `name` — this is the same contract.
       const res = await rpc<{ result?: { soul?: string; description?: string } }>(
-        'profiles.describe', { profile: bot }, 15000)
+        'profiles.describe', { name: bot }, 15000)
       const r = (res as { result?: { soul?: string; description?: string } }).result ?? res
       setSoul((r as { soul?: string }).soul ?? '')
       setDesc((r as { description?: string }).description ?? '')
@@ -52,7 +59,7 @@ export default function BotDetail() {
     if (saving) return
     setSaving(true)
     try {
-      await rpc('profiles.configure', { profile: bot, soul, description: desc }, 20000)
+      await rpc('profiles.configure', { name: bot, soul, description: desc }, 20000)
       setSavedAt(Date.now())
       void refreshFleet()
     } finally {
@@ -80,8 +87,15 @@ export default function BotDetail() {
     }
   }
 
+  // BUG-110 (second cause): the guard used to read `confirmDelete < 2`, but the
+  // second tap calls doDelete() from the render where confirmDelete is still 1 —
+  // React state updates are async, so the guard returned immediately and the
+  // delete never fired (the button then sat on "deleting…" until the screen was
+  // remounted). Verified on device: two taps left the bot in /api/profiles while
+  // the same RPC called directly returned {"deleted": "…"}. Only `deleting`
+  // guards now; the armed tap is the confirmation.
   const doDelete = async () => {
-    if (confirmDelete < 2 || deleting) return
+    if (deleting) return
     setDeleting(true)
     try {
       await rpc('moch.profiles.delete', { profile: bot, confirm: true }, 20000)
