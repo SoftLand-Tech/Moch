@@ -969,3 +969,57 @@ BUG-036, BUG-074, BUG-119, BUG-122, BUG-124, BUG-128, and the three PR-fixed ite
 confirmation in the user's next dev build (BUG-101, BUG-102, BUG-103).
 
 Needs a human or a second machine: voice **audio** content, and real second-machine pairing.
+
+---
+
+## BUG-132 [HIGH] (NEW, WIP) Browser tools are not always available — the agent boots the relay but a cold-start race still hides the tools
+
+**Requested behaviour:** the browser is an always-on toolset like the terminal — the agent never
+improvises with curl, and the relay/browser engine stay alive for the whole app process (chat deletes
+are irrelevant; only closing the app ends it).
+
+**Built and working (verified on device):** `AgentBrowserHost` (`app/src/components/AgentBrowserHost.tsx`,
+mounted in `_layout.tsx`'s main return) — an app-owned offscreen "agent tab" (2×2 WebView) that calls
+`ensureBrowserRelay()` for the whole process lifetime. On a fresh boot with the Browser screen **never
+opened**, the relay now comes up by itself (socket 9334 LISTEN; `relay.json` carries the live pid).
+The host's first attempt mounted inside `_layout`'s `!cfg` early-return and silently unmounted once the
+config loaded — fixed by moving it into the main (connected) return.
+
+**Still broken (the actual symptom):** a new chat's turn right after a fresh boot still found **no
+browser tools** and improvised with the terminal (agent.log for session 20261011_224734: `tool_search`
+→ `Tool terminal returned error` → more terminal calls; zero `browser_*`).
+
+**Root cause of the remaining gap — a cold-start race with TWO arming paths that can both miss:**
+1. JS host mounts early (~cfg load) → `ensureRunning` starts the relay ✓ → then the native module calls
+   `moch.browser_gate.activate` — but Python is **not booted yet** at that point, so the call throws and
+   `ensureRunning`'s promise REJECTS (the module's try/catch wraps the Python call). `ensureBrowserRelay`
+   catches, reports `running:false`, and the host **never retries** — the gate never arms from this path.
+2. Python boots later and `hermes_boot`'s pid-gated arming reads `relay.json` — but if the relay started
+   *after* Python read the file, the pid is stale and it does not arm either.
+
+**Fix shape (next session):** make the native `ensureRunning` retry the `browser_gate.activate` call
+(e.g. 5 attempts / 3 s apart, in its existing background thread) until Python acknowledges — the relay is
+already up by then, so retries are cheap — OR re-check `relay.json` at the END of the Python boot instead
+of only during it. Also investigate a new regression: `session.list` rows now report `tool_names` empty
+for ALL sessions, including ones that previously carried populated catalogs — catalog checks made via
+`session.list` are unreliable until that is understood.
+
+**Installed state:** the phone runs a build with `AgentBrowserHost` (harmless: one offscreen 2×2
+WebView + a relay that boots with the app). The component + its `_layout` mount line are in the working
+tree, deliberately **not** in any PR until the feature actually works end to end.
+
+### BUG-132 round 32 — the remaining gap is a BOOT-TIMING race, instrumented
+
+On-device acceptance after the cache-key fix: relay auto-starts at boot ✓ (socket up, Browser
+screen never opened), but the acceptance turn **still improvised with curl** (`tool_search` →
+terminal; no `browser_*`), answering correctly only because curl worked. Probes: `config.yaml` on
+device is EMPTY (so toolset defaults apply — not the stripper); logcat showed no arm line, meaning
+the native retry loop had already exhausted: **10×3 s = 30 s < this cold boot's time-to-Python**
+(first boot after an install is the slow case — exactly the user's scenario).
+
+Fix applied (build in progress, unverified on device yet): the native arm loop now polls
+`Python.isStarted()` every **1 s for up to 120 s**, arming the moment Python exists, and logs
+`armed/ticks/pid` so the next failure is self-diagnosing. Together with the cache-key fix (stale
+catalogs are unreachable once the gate flips) this closes the race without ordering assumptions:
+whichever of {native retry, gateway pre-serve re-arm} lands first arms the gate, and no pre-arm
+catalog survives the flip.
