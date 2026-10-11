@@ -1,6 +1,7 @@
 import { atom } from 'nanostores'
 import { rpc } from './gateway'
 import { log } from './log'
+import { fleetProfiles, refreshFleet } from './fleet'
 /**
  * The server's conversation list.
  *
@@ -30,6 +31,14 @@ export interface SessionRow {
   started_at?: number
   message_count?: number
   source?: string
+  /**
+   * Owning profile (M9.2 bots). Absent or `default` = the default agent.
+   * BUG-112: `session.list` is profile-scoped server-side and the client used
+   * to ask for the active profile only, so a bot's conversations disappeared
+   * from the drawer and Chats screen after an app restart even though they were
+   * still on disk. Rows now carry the profile they came from.
+   */
+  profile?: string
 }
 
 /** Live id for each stored id, so overlays can be matched. */
@@ -162,6 +171,61 @@ let loadGen = 0
  *  pagination is a gateway protocol addition, tracked in bugs.md). */
 const LIST_LIMIT = 1000
 
+const DEFAULT_PROFILE = 'default'
+/** Bound the per-profile fan-out: rosters are small, but never unbounded. */
+const PROFILE_FANOUT_MAX = 8
+
+/**
+ * BUG-112: merge the other profiles' conversations into the list.
+ *
+ * `session.list` answers for one profile — the active one — so a bot's chats
+ * were invisible on every surface once the optimistic local row was gone (after
+ * a restart, or on any other device). Fan out over the roster the Fleet screen
+ * already keeps, tag each row with its profile, and interleave by recency so the
+ * default profile's ordering is preserved among its own rows. Best-effort: a
+ * failing profile is skipped, never blanking the list, and nothing extra is
+ * fetched while the roster is empty (single-profile installs pay no RPC).
+ */
+async function withOtherProfiles(base: SessionRow[]): Promise<SessionRow[]> {
+  let names: string[] = []
+  try {
+    // The roster is normally primed by the Fleet screen; on a cold start it is
+    // empty, and an empty roster used to mean "no other profiles exist" — which
+    // is exactly the restart case this fixes. Prime it once, best-effort.
+    if (fleetProfiles.get().length === 0) await refreshFleet()
+    names = fleetProfiles
+      .get()
+      .map((p) => p.name)
+      .filter((n): n is string => !!n && n !== DEFAULT_PROFILE)
+  } catch {
+    return base
+  }
+  if (!names.length) return base
+  const seen = new Set(base.map((r) => r.id))
+  const extra: SessionRow[] = []
+  const settled = await Promise.allSettled(
+    names.slice(0, PROFILE_FANOUT_MAX).map(async (name) => {
+      const res = await rpc<{ sessions?: SessionRow[] }>('session.list', {
+        limit: LIST_LIMIT,
+        profile: name,
+      })
+      return (res?.sessions ?? []).map((r) => ({ ...r, profile: name }))
+    }),
+  )
+  for (const r of settled) {
+    if (r.status !== 'fulfilled') continue
+    for (const row of r.value) {
+      if (seen.has(row.id)) continue
+      seen.add(row.id)
+      extra.push(row)
+    }
+  }
+  if (!extra.length) return base
+  const key = (r: SessionRow) =>
+    toMs((r as { last_active?: number }).last_active ?? r.started_at)
+  return [...base, ...extra].sort((a, b) => key(b) - key(a))
+}
+
 /**
  * Fetch the conversation list. Concurrent callers share one request so the
  * drawer and the Chats screen don't double-fetch on first paint.
@@ -184,10 +248,15 @@ export function loadSessions(opts?: { force?: boolean }): Promise<SessionRow[]> 
       // (immutable CREATION time) destroyed that order, so actively-used old
       // chats never rose to the top. Pass the server's order through.
       const rows = res?.sessions ?? []
-      sessionRows.set(rows)
-      // BUG-025: only a non-truncated list proves absence elsewhere.
+      // BUG-112: pull the bot profiles' conversations in as well, so a bot chat
+      // survives a restart / shows up on any surface that reads this list.
+      const merged = await withOtherProfiles(rows)
+      if (gen !== loadGen) return sessionRows.get()
+      sessionRows.set(merged)
+      // BUG-025: only a non-truncated list proves absence elsewhere. Judged on
+      // the DEFAULT profile's window — the merge only ever adds rows.
       sessionListComplete.set(rows.length < LIST_LIMIT)
-      return rows
+      return merged
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Could not load chats'
       if (gen === loadGen) sessionListError.set(msg)
