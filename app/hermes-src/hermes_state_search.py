@@ -1090,7 +1090,14 @@ class SessionSearchMixin:
             matches = self._search_messages_like_fallback(query, limit=limit, offset=offset, sort=sort, **filters)
             return self._finalize_search_matches(matches, result_fields=result_fields)
         if not self._fts_enabled:
-            return []
+            # BUG-114: an interpreter without the fts5 module (the Android
+            # embedded runtime: "no such module: fts5") used to answer [] for
+            # EVERY query, so session search looked empty rather than degraded —
+            # and the LIKE scan sitting right above (used when the index is
+            # stale) was never reached. Same fallback, same finalisation; only
+            # the reason differs.
+            matches = self._search_messages_like_fallback(query, limit=limit, offset=offset, sort=sort, **filters)
+            return self._finalize_search_matches(matches, result_fields=result_fields)
 
         order_by_sql = _FTS_ORDER_BY.get(sort.strip().lower() if isinstance(sort, str) else None, "ORDER BY rank")
         route = dict(order_by_sql=order_by_sql, limit=limit, offset=offset, **filters)

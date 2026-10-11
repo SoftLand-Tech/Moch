@@ -516,7 +516,14 @@ def bootstrap(distro: str = "ubuntu-24.04") -> dict:
     if stamp and stamp.get("rootfs") != rootfs_url and rootfs.exists():
         _log(f"rootfs pin changed ({stamp.get('rootfs')} → {rootfs_url}) — wiping old rootfs")
         shutil.rmtree(rootfs, ignore_errors=True)
-    if not rootfs.exists():
+    # BUG-123: the gate is a SENTINEL, never bare `rootfs.exists()`. `rootfs/`
+    # is created by things that are not a distribution — the bind targets
+    # (`rootfs/data`, `rootfs/workspace`) and DNS seeding all mkdir under it —
+    # so after a Reset (which cannot remove the workspace bind target) an
+    # existence check skipped the download, wrote the stamp and left the app
+    # reporting "Linux ready — None · 0 MB" over an empty tree. os-release is
+    # written by the base tarball and by nothing else.
+    if not (rootfs / "etc" / "os-release").exists():
         def _rootfs():
             with tempfile.TemporaryDirectory(dir=linux_dir) as td:
                 td = Path(td)
@@ -599,9 +606,13 @@ def status(walk: bool = False) -> dict:
         # Store even the rootfs-missing result (0.0): bootstrap() refreshes
         # the cache when it creates the tree, and reset() invalidates it.
         _SIZE_MB_CACHE = _rootfs_size_mb(rootfs)
+    # BUG-123: "installed" means a DISTRIBUTION, not a directory. `rootfs/`
+    # can exist as a stub (bind targets, DNS seeding) with no userland at all —
+    # the sentinel is what the base tarball writes and everything else does not.
+    installed = proot.exists() and os_release.exists()
     return {
-        "bootstrapped": proot.exists() and rootfs.exists(),
-        "rootfs_exists": rootfs.exists(),
+        "bootstrapped": installed,
+        "rootfs_exists": installed,
         "distro": distro,
         "loader_ok": loader_ok,
         "size_mb": _SIZE_MB_CACHE,
@@ -609,15 +620,30 @@ def status(walk: bool = False) -> dict:
 
 
 def reset() -> dict:
-    """Remove the whole guest tree (Settings → Reset)."""
+    """Remove the whole guest tree (Settings → Reset).
+
+    BUG-123: the workspace bind target (`rootfs/workspace`) belongs to the
+    process that created the mount and is not removable by the app uid, so a
+    strict ``rmtree`` raised, half-deleted the tree and reported nothing —
+    leaving a stamp that made every later reinstall a silent no-op. Tolerate
+    the leftovers, always drop the stamp (so the next bootstrap re-arms), and
+    return what actually happened instead of raising into the bridge.
+    """
     global _SIZE_MB_CACHE
     # Invalidate first: even a failed reset may have deleted part of the tree,
     # and a stale cached size must never outlive the guest it described.
     _SIZE_MB_CACHE = None
     linux_dir = _linux_dir()
+    if not linux_dir.exists():
+        return {"ok": True, "removed": True, "leftovers": []}
+    shutil.rmtree(linux_dir, ignore_errors=True)
+    # The stamp must never outlive a reset: with it gone, bootstrap() re-reads
+    # the pins and the sentinel decides the rootfs, not a stale marker.
     try:
-        if linux_dir.exists():
-            shutil.rmtree(linux_dir, ignore_errors=False)
-        return {"ok": True}
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        _stamp_path(linux_dir).unlink(missing_ok=True)
+    except OSError:
+        pass
+    leftovers = sorted(p.name for p in linux_dir.iterdir()) if linux_dir.exists() else []
+    if leftovers:
+        _log(f"reset left {leftovers} (not removable by the app uid) — stamp cleared")
+    return {"ok": True, "removed": not leftovers, "leftovers": leftovers}

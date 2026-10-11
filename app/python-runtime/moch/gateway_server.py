@@ -86,6 +86,27 @@ def _run_server(port: int) -> None:
 
         _tg_server._SlashWorker = InProcessSlashWorker
 
+        # BUG-109: ARM the fleet runtime for the embedded install. Every moch/
+        # fleet module (fleet.py, fleet_worker.py, dm_bridge.py) and the install
+        # block below gate on MOCH_FLEET=1 / MOCH_EMBEDDED=1, and NOTHING in the
+        # app ever set either one — so on device the M9.2/M9.4 UI shipped over a
+        # runtime that was never installed: `moch.fleet.status`,
+        # `moch.fleet.freeze`, `moch.kanban.tasks`, `moch.runs.timeline` and
+        # `moch.profiles.delete` all answered -32601 "unknown method", the Crew
+        # board pinned a raw "run hermes update" banner, Freeze was a silent
+        # no-op and bots could not be deleted (verified on 1.0.15-browser).
+        #
+        # This process IS the embedded gateway (on-device Chaquopy), so it sets
+        # the flag itself — the "set by the embedded gateway boot on
+        # fleet-capable installs" contract fleet.py documents. `setdefault` keeps
+        # an explicit operator/desktop override authoritative, and the emission
+        # stays ahead of the install block so the flag sees it.
+        #
+        # Fail-safe by construction: the M9.1a admission gate is a no-op for
+        # ordinary chat (nothing frozen; budget limits default to 0 = unlimited
+        # in fleet.BudgetLedger.check), and the whole install is try/except'd.
+        os.environ.setdefault("MOCH_FLEET", "1")
+
         # M9 fleet runtime (flag-gated): installs the chat-path admission gate
         # (freeze / budget / FleetTurnQueue) and swaps bot_mode_dm's subprocess
         # CLI turn for the in-process dm_bridge — only when MOCH_FLEET=1 (or
