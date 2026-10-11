@@ -1,0 +1,19 @@
+# p4_flock_kanban — PASS
+
+## 1. flock-across-threads sanity for the DM turn lock
+PASS  signature read — acquire_turn_lock(root, profile, timeout_seconds=None) ctx-mgr -> Path; TurnBusyError(reason='target_busy')
+PASS  1a contention across threads — TurnBusyError reason='target_busy' profile='alpha' waited=0.30s (budget 0.3s; lock=/tmp/moch-fleet-proof/p4/home/bot_relay/locks/alpha.lock)
+PASS  1b sequential re-acquire — acquired immediately after release; lock path /tmp/moch-fleet-proof/p4/home/bot_relay/locks/alpha.lock
+PASS  1c fresh os.open per acquisition (no cached/reused fd) — sequential: 2 separate os.open calls for alpha.lock (fds [3, 3] — number recycled by close is OS behavior); concurrent alpha+beta: distinct simultaneously-live fds [3, 4]
+
+## 2. Kanban board created on probe storage (probe home as the 'device')
+PASS  create_board('fleet-probe') — db=/tmp/moch-fleet-proof/p4/home/kanban/boards/fleet-probe/kanban.db exists=True
+PASS  assignee profile live — /tmp/moch-fleet-proof/p4/home/profiles/alpha live=True
+PASS  task inserted — id=t_d61fd7cf status=ready assignee=alpha
+PASS  task claimed via claim_task — status=running (ready -> running CAS)
+
+## 3. dispatch_once pass dry-run — injectable spawn_fn, synthetic pid, Popen poisoned
+PASS  3a task transitioned to running per dispatcher semantics — spawned=[('t_cc93b59e', 'alpha', '/tmp/moch-fleet-proof/p4/home/kanban/boards/fleet-probe/workspaces/t_cc93b59e')] status=running claim_lock=omarchy:353
+PASS  3b subprocess.Popen never called — Popen was monkeypatched to raise; pass completed
+PASS  3c synthetic pid accepted — spawn_fn called once -> pid -12345 for ('t_cc93b59e', '/tmp/moch-fleet-proof/p4/home/kanban/boards/fleet-probe/workspaces/t_cc93b59e', 'fleet-probe')
+PASS  3d _record_worker_exit ignores pid<=0 — -12345 in exit registry: False (expected False)

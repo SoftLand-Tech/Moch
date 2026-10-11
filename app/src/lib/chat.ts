@@ -9,6 +9,7 @@ import { bindLiveId, liveIdFor, sessionRows, sessionListComplete, toMs, upsertOp
 import { hookModelState, noteSessionInfo } from './modelState'
 import { markAttention, clearAttention, pushToast, chatTabFocused, pendingOpenStoredId, type AttentionKind } from './attention'
 import { clearDraft, draftFor, setDraft } from './drafts'
+import { getActiveBot } from './fleet'
 import { sendQueue, peekQueued, removeQueued, clearSendQueue, queueFor, enqueueSend, type QueuedSend } from './sendQueue'
 import { extractMedia, isDataUrlPath, joinedTextOf, appendRefText, stripMediaFromText, mediaSegment } from './media'
 import { processAttachments, detachImages, type PendingAttachment } from './mediaSend'
@@ -999,6 +1000,11 @@ async function createSessionRpc<T>(params: Record<string, unknown>): Promise<T> 
 }
 
 export async function createSession(title?: string): Promise<ResumeResult> {
+  // M9.2 bot-scoped chats: when a fleet bot is active, the session is created
+  // under that profile (memory/skills/cron ride the profile server-side) and
+  // carries its identity as a manual title so the sidebar shows who it is.
+  const bot = getActiveBot()
+  const botParams = bot ? { profile: bot, ...(title ? {} : { title: `Bot · ${bot}` }) } : {}
   const res = await createSessionRpc<{ session_id?: string; stored_session_id?: string; messages?: Array<Record<string, unknown>>; info?: { model?: string; provider?: string; reasoning_effort?: string } }>(
     // A create-time title is MANUAL authority server-side: it is applied at
     // the end of turn 1, clobbering the auto-title and permanently blocking
@@ -1007,7 +1013,7 @@ export async function createSession(title?: string): Promise<ResumeResult> {
     // Embedded runtime: root the session in the on-phone workspace
     // (files/Moch/workspace) so file tools operate there (M5). Remote
     // machines keep their own cwd semantics.
-    { ...(title ? { title } : {}), cols: CREATE_COLS, source: 'mobile', ...(await embeddedSessionCwd()) },
+    { ...(title ? { title } : {}), ...botParams, cols: CREATE_COLS, source: 'mobile', ...(await embeddedSessionCwd()) },
   )
   const id = res?.session_id
   if (!id) throw new Error('session.create returned no id')

@@ -1,0 +1,23 @@
+# p4c_session_lease — PASS
+PASS  gateway up — port=60217 home=/tmp/moch-fleet-proof/p4c/home
+
+## 1. Lease mechanism located (static evidence)
+PASS  SESSION_NOT_OWNED constant — hermes_cli/active_sessions.py:104 = 'SESSION_NOT_OWNED'; parsed from child stderr by tools/bot_mode_dm.py:434-446; owner side declares liveness via lease records (active_sessions.py:542 session_already_owned_message)
+PASS  gateway live-session registry — tui_gateway/server.py _claim_or_reuse_live_session (~:2543) registers session records in server._sessions[sid] with fields profile_home / running / active_session_lease (claimed lazily on the first turn by _ensure_active_session_slot, methods_prompt.py)
+
+## 2. Profile alpha + live Bot Chat session over WS
+PASS  profiles.create alpha — path=/tmp/moch-fleet-proof/p4c/home/profiles/alpha dir_exists=True
+PASS  session.create(profile=alpha, title='Bot Chat') — sid=1b10cfa9 stored_key=20261010_221047_da3af7
+PASS  liveness representation — server._sessions[1b10cfa9…] profile_home=/tmp/moch-fleet-proof/p4c/home/profiles/alpha running=False live_title='Bot Chat' (methods_bot_relay matches on profile_home + BOT_CHAT_TITLE)
+
+## 3. DM delivery (WS bot_relay.deliver) — LIVE + IDLE session
+PASS  LIVE+IDLE → accepted (queued-into-Bot-Chat branch) — reply="Delivered into @alpha's open Bot Chat; the reply will appear there." — deliver found the live Bot Chat and submitted via prompt.submit(queued=True); session running flag after=True
+NOTE  after idle probe + interrupt: running flag cleared = True
+
+## 4. DM delivery — LIVE + RUNNING session (mid-flight interactive turn)
+PASS  LIVE+RUNNING → accepted, queued as NEXT turn (queued=True branch) — reply="Delivered into @alpha's open Bot Chat; the reply will appear there."; queued_prompt present=True — prompt.submit(queued=True) forces queue mode in _handle_busy_submit (session_auto_continue.py:248): never interrupts, never steers
+
+## 5. Findings for the M9.1a bridge contract
+PASS  P4c FINDING — queued, not refused — (b) QUEUE — an in-process DM delivery into a live Bot Chat is NEVER refused: LIVE+IDLE submits immediately (turn starts, reply 'Delivered into @alpha's open Bot Chat…'), LIVE+RUNNING queues as the next turn via prompt.submit(queued=True). The upstream subprocess SESSION_NOT_OWNED/target_busy refusal does NOT exist on the in-process live-session branch — it only fires on the subprocess transport path (acquire_turn_lock contention → TurnBusyError/target_busy, or another process's lease → SESSION_NOT_OWNED). The M9.1a dm_bridge must add its own lease/busy check if a machine-readable refusal is required.
+NOTE  idle raw  = {'ok': {'reply': "Delivered into @alpha's open Bot Chat; the reply will appear there."}}
+NOTE  running raw = {'ok': {'reply': "Delivered into @alpha's open Bot Chat; the reply will appear there."}}

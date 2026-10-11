@@ -1,0 +1,26 @@
+# p3_ram — PASS
+PASS  gateway up — port=58741 home=/tmp/moch-fleet-proof/p3/home
+
+## 1. idle-profile RSS sweep (0/2/4/8 profiles, zero active turns)
+NOTE  N=0 profiles : VmRSS=136.3MB ru_maxrss=135.6MB (after boot+settle)
+NOTE  N=2 profiles: VmRSS=136.5MB ru_maxrss=136.1MB (delta vs N=0: 0.2MB, per-profile: 0.1MB)
+NOTE  N=4 profiles: VmRSS=136.6MB ru_maxrss=136.1MB (delta vs N=0: 0.3MB, per-profile: 0.1MB)
+NOTE  N=8 profiles: VmRSS=136.6MB ru_maxrss=136.1MB (delta vs N=0: 0.3MB, per-profile: 0.0MB)
+PASS  idle sweep measured — 0p=136.3MB → 8p=136.6MB; ~0.0MB/idle-profile marginal (gateway+probe process, upper bound)
+
+## 2. concurrent-turn RSS (1 then 4 turns at profile alpha, no provider)
+NOTE  pre-turn baseline (9 profiles idle): VmRSS=136.6MB
+NOTE  1 concurrent turn : pre=139.6MB peak=156.0MB post=172.8MB (peak-pre=16.4MB, post-pre=33.2MB, per-turn peak ≈ 16.4MB)
+NOTE    turn[0] outcome: {'status': 'streaming'}
+NOTE  4 concurrent turns: pre=172.8MB peak=177.4MB post=178.3MB (peak-pre=4.5MB, post-pre=5.5MB, per-turn peak ≈ 1.1MB)
+NOTE    turn[0] outcome: {'status': 'streaming'}
+NOTE    turn[1] outcome: {'status': 'streaming'}
+NOTE    turn[2] outcome: {'status': 'streaming'}
+NOTE    turn[3] outcome: {'status': 'streaming'}
+NOTE  final settled VmRSS=178.3MB (vs pre-turn 136.6MB: 41.7MB retained; ru_maxrss high-water=177.8MB)
+
+## 3. conclusions (from THESE numbers; on-device RAM is the real gate)
+PASS  conclusion recorded — idle 8 profiles ≈ 0.3MB (0.0MB/profile) in-process upper bound; see notes below
+NOTE  FleetTurnQueue: idle-profile cost here is ~0.0MB/profile and the turn-path overhead (session row + failed agent build, NO model streaming) is the concurrent-turn delta above. FINDING: the FIRST turn in the process paid ~15.8MB at peak and settled +33-40MB retained — that is mostly one-time module-import/agent-build-path warmup, because the subsequent 4 concurrent turns added only ~3-4MB more. Marginal per-turn allocation is therefore well under ~4MB on the no-provider path; full LLM turns add model context + streaming buffers this probe deliberately does NOT measure. The plan's default of 2 concurrent active turns stays the right default from this data — not because turns are expensive, but because the live-provider context/streaming cost is the dominant unknown and stays unmeasured here; keep 2 until the on-device pass measures real turns.
+NOTE  Soft profile cap (B3): 0.0MB/idle-profile marginal on x86-64 with the in-process gateway suggests idle profiles are cheap (SQLite handles + dir bookkeeping; no per-profile agent is resident when idle — upstream evicts idle session agents). On-device (Termux/proot, less RAM, slower allocator) expect a higher per-profile cost; the 6–8 soft cap from the plan is NOT contradicted by idle RSS on PC — the cap should be gated by on-device idle sweep + live-turn RSS, not by these PC numbers alone.
+NOTE  Caveat: /tmp home, no provider keys, venv python 3.11 x86-64 PC. Numbers are directional for M9 design defaults; M9.0 device pass re-measures.

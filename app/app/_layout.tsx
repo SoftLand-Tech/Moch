@@ -30,6 +30,7 @@ import { syncBackendIdentity } from '../src/lib/backendIdentity'
 import { parseConnectUrl } from '../src/lib/pairing'
 import { pruneRelayMedia } from '../src/lib/mediaCache'
 import { C, loadTheme, useStyles } from '../src/lib/theme'
+import { loadActiveBot } from '../src/lib/fleet'
 
 // Keep the native splash up until the animated overlay is committed on top
 // of the app — global scope, un-awaited, per the SDK 57 docs.
@@ -84,6 +85,7 @@ export default function RootLayout() {
     // paired machine can't hydrate the previous machine's caches.
     const offDial = onDialConfig(syncBackendIdentity)
     void loadTheme()
+    void loadActiveBot()
     // Captured, not fired-and-forgotten: the boot IIFE below awaits this
     // BEFORE its first dial. initPush restores the saved push token into the
     // atom, and dial→wsUrl() reads it — without the await, the first dial of
@@ -287,6 +289,7 @@ export default function RootLayout() {
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="add-computer" options={{ headerShown: false, presentation: 'modal' }} />
+        <Stack.Screen name="bot" options={{ headerShown: false, presentation: 'modal' }} />
         <Stack.Screen name="setup" options={{ headerShown: false, presentation: 'modal' }} />
       </Stack>
       {!online && state !== 'idle' && bootStruggling ? (

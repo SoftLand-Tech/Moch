@@ -1,0 +1,23 @@
+# p2_profile_scoping — PASS
+NOTE  pre-boot: wrote PROBE_SECRET=launchvalue to launch home .env (/tmp/moch-fleet-proof/p2/home/.env)
+PASS  gateway up — port=47493 home=/tmp/moch-fleet-proof/p2/home
+
+## 1. profiles.create alpha (no_alias, no creds)
+PASS  profiles.create ok — path=/tmp/moch-fleet-proof/p2/home/profiles/alpha .env=True
+
+## 2. session.create{profile:'alpha'} + prompt.submit turn
+PASS  session.create returned — session_id=dd39f98e stored_session_id=20261010_221001_5741c0 profile_name=alpha
+NOTE  prompt.submit returned (unexpected full success): {'status': 'streaming'}
+
+## 3. state.db routing
+NOTE  alpha state.db=/tmp/moch-fleet-proof/p2/home/profiles/alpha/state.db exists=True rows=[('20261010_221001_5741c0', 'desktop', 'alpha', None)]
+NOTE  default state.db rows (before turn: 0, after: 0): []
+PASS  session row landed in profile alpha's state.db — row=('20261010_221001_5741c0', 'desktop', 'alpha', None) db=/tmp/moch-fleet-proof/p2/home/profiles/alpha/state.db
+PASS  default home state.db has no alpha row — /tmp/moch-fleet-proof/p2/home/state.db rows=[]
+PASS  server session record binds alpha's profile_home — profile_home=/tmp/moch-fleet-proof/p2/home/profiles/alpha
+
+## 4. secrets fail closed for unscoped reads under multi-profile hosting
+NOTE  multiplex active=True
+PASS  unscoped get_secret raises UnscopedSecretError (fail closed) — mechanism: agent.secret_scope.get_secret with _MULTIPLEX_ACTIVE=True (flipped by launch_profile_policy.activate_multi_profile_hosting); msg=Hermes could not read this profile's PROBE_SECRET (an internal profile-scoping bug on the multiplexed gateway, not your 
+PASS  launch scope still resolves its own .env secret — launch_secret_scope(<launch home>) + set_secret_scope → launchvalue
+PASS  alpha's scope cannot read the launch secret — build_profile_secret_scope(alpha_home) miss → None under multiplex (no os.environ fallthrough)

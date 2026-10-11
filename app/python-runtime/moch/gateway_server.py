@@ -85,6 +85,32 @@ def _run_server(port: int) -> None:
         from moch.slash_worker_bridge import InProcessSlashWorker
 
         _tg_server._SlashWorker = InProcessSlashWorker
+
+        # M9 fleet runtime (flag-gated): installs the chat-path admission gate
+        # (freeze / budget / FleetTurnQueue) and swaps bot_mode_dm's subprocess
+        # CLI turn for the in-process dm_bridge — only when MOCH_FLEET=1 (or
+        # MOCH_EMBEDDED=1, the §6 transport-selection flag). No-op and zero
+        # behavior change otherwise. Must never break boot.
+        try:
+            from moch import fleet as _moch_fleet
+            _moch_fleet.install_dispatch_gate(_tg_server)
+            if _moch_fleet.fleet_enabled():
+                from tools import bot_mode_dm as _bot_dm
+                from moch import dm_bridge as _dm_bridge
+                _dm_bridge.install_dm_bridge(_bot_dm)
+                _dm_bridge.install_deliver_framing(_tg_server)
+                from moch import rpc_fleet as _rpc_fleet
+                _rpc_fleet.install(_tg_server)
+                # M9.1b: in-process kanban worker (FleetWorker) replaces the
+                # Popen spawn; reclaim learns to ignore synthetic pids.
+                from hermes_cli import kanban_db_dispatch as _kbd
+                from moch import fleet_worker as _fw
+                _fleet_worker = _fw.FleetWorker()
+                _fw.install_reclaim_patch(_kbd)
+                _fw.install_dispatch_spawn_patch(_kbd, _fleet_worker)
+        except Exception:
+            traceback.print_exc()
+
         # hermes' in-process cron ticker (scheduled automations) only arms
         # under HERMES_DESKTOP=1 — the embedded serve process is exactly the
         # desktop-shell situation (a serve backend with no external
