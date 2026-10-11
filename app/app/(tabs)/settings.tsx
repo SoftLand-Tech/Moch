@@ -19,6 +19,7 @@ import {
 import { getEmbeddedGateway, mochiRuntimeStatus, restartEmbeddedRuntime, stopEmbeddedRuntime, requestBatteryExemption, linuxStatus, linuxReset, linuxBootstrap, type LinuxGuestStatus } from '../../src/lib/mochiRuntime'
 import { C, useStyles, setTheme, THEME_OPTIONS, themeId, type ThemeId } from '../../src/lib/theme'
 import { ScreenShell } from '../../src/components/ScreenShell'
+import { localeAtom, setLocale } from '../../src/lib/strings'
 import { showAlert } from '../../src/components/AlertDialog'
 
 export default function Settings() {
@@ -229,6 +230,8 @@ function ThemeCard({ id, name, desc, swatches, onPick }: {
 function SettingsInner() {
   const s = useStyles(makeS)
   const cfg = useStore(connConfig)
+  // BUG-116: which catalog the fleet screens read (EN/AR).
+  const locale = useStore(localeAtom)
   const state = useStore(connectionState)
   const err = useStore(gatewayError)
   const logs = useStore(diagLog)
@@ -326,6 +329,22 @@ function SettingsInner() {
               <ThemeCard key={t.id} id={t.id} name={t.name} desc={t.desc} swatches={t.swatches} onPick={(id) => { void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); void setTheme(id) }} />
             ))}
           </View>
+          <Divider />
+          {/* BUG-116: the EN/AR catalog shipped with M9.2 but nothing ever called
+              setLocale()/loadLocale(), so the Arabic strings and the RTL flag
+              were unreachable dead code. This is the switch. */}
+          <Row
+            icon="language-outline"
+            label="Language"
+            sub={locale === 'ar' ? 'العربية — fleet screens are right-to-left' : 'English (fleet screens)'}
+            chevron
+            onPress={() =>
+              showAlert('Language', 'Fleet screens follow this choice. The rest of the app is still English (retrofit is a later pass).', [
+                { text: 'English', style: locale === 'en' ? 'cancel' : 'default', onPress: () => { void setLocale('en') } },
+                { text: 'العربية', style: locale === 'ar' ? 'cancel' : 'default', onPress: () => { void setLocale('ar') } },
+              ])
+            }
+          />
         </Section>
 
         <Section title="AGENT">

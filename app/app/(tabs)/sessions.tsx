@@ -23,6 +23,7 @@ import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
 import { StatusDot } from '../../src/components/Sidebar'
 import { loadSessions, sessionRows, sessionListLoading, sessionListError, toMs, type SessionRow } from '../../src/lib/sessionList'
+import { apiFetch } from '../../src/lib/http'
 
 // BUG-063: the row type IS SessionRow — the local duplicate dropped.
 type Sess = SessionRow
@@ -61,6 +62,11 @@ function SessionsInner() {
   const s = useStyles(makeS)
   const list = useStore(sessionRows)
   const [query, setQuery] = useState('')
+  // BUG-114 (client half): the box above used to filter the loaded titles only.
+  // The server can now search message CONTENT (its LIKE fallback runs when the
+  // interpreter has no fts5 — see hermes_state_search); pull those matches in
+  // and render them as ordinary conversation rows, snippet in `preview`.
+  const [hits, setHits] = useState<SessionRow[]>([])
   // BUG-018: the tray's search affordance FOCUSES the field (it used to
   // merely clear the query); submit blurs instead of doing nothing.
   const searchRef = useRef<TextInput>(null)
@@ -94,11 +100,60 @@ function SessionsInner() {
     void load()
   }, [load])
 
+  useEffect(() => {
+    const q = query.trim()
+    if (q.length < 2) {
+      setHits([])
+      return
+    }
+    let alive = true
+    const t = setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await apiFetch<{ results?: Record<string, unknown>[] }>(
+            `/api/sessions/search?q=${encodeURIComponent(q)}&limit=12`,
+            { timeoutMs: 12_000 },
+          )
+          if (!alive) return
+          const seen = new Set<string>()
+          const rows: SessionRow[] = []
+          for (const r of res?.results ?? []) {
+            const id = String(r.session_id ?? '')
+            if (!id || seen.has(id)) continue
+            seen.add(id)
+            rows.push({
+              id,
+              title: typeof r.title === 'string' ? r.title : undefined,
+              // The snippet IS the matching content — show it where a row shows
+              // its preview, so a content hit reads as "why this matched".
+              preview: typeof r.snippet === 'string' ? r.snippet.replace(/\s+/g, ' ').trim() : undefined,
+              started_at: typeof r.started_at === 'number' ? r.started_at : undefined,
+              profile: typeof r.profile === 'string' ? r.profile : undefined,
+            })
+          }
+          setHits(rows)
+        } catch {
+          if (alive) setHits([]) // search is best-effort; the title filter still applies
+        }
+      })()
+    }, 300)
+    return () => {
+      alive = false
+      clearTimeout(t)
+    }
+  }, [query])
+
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return list
-    return list.filter((s) => `${s.title ?? ''} ${s.preview ?? ''} ${s.source ?? ''}`.toLowerCase().includes(q))
-  }, [list, query])
+    const titleMatches = list.filter((s) =>
+      `${s.title ?? ''} ${s.preview ?? ''} ${s.source ?? ''}`.toLowerCase().includes(q),
+    )
+    // BUG-114: content matches the title filter can't see, deduped and after
+    // the title hits (a title match is the stronger signal).
+    const seen = new Set(titleMatches.map((s) => s.id))
+    return [...titleMatches, ...hits.filter((h) => !seen.has(h.id))]
+  }, [list, query, hits])
 
   const openSession = useCallback(
     (s: Sess) => {

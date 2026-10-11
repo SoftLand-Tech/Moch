@@ -26,6 +26,7 @@ import { loadAttention, pendingOpenStoredId, requestOpenSession } from '../src/l
 import { flushDrafts, loadDrafts } from '../src/lib/drafts'
 import { flushSendQueue, loadSendQueue } from '../src/lib/sendQueue'
 import { initShareIn, deliverSharedNow, shareInInbox } from '../src/lib/shareIn'
+import { loadLocale } from '../src/lib/strings'
 import { syncBackendIdentity } from '../src/lib/backendIdentity'
 import { parseConnectUrl } from '../src/lib/pairing'
 import { pruneRelayMedia } from '../src/lib/mediaCache'
@@ -194,6 +195,11 @@ export default function RootLayout() {
     // lands the user on the composer, however it was delivered.
     const routeToChat = () => { try { router.navigate('/(tabs)/chat') } catch {} }
     const offShare = initShareIn(routeToChat)
+
+    // BUG-116: apply the stored EN/AR choice at boot. Nothing called
+    // loadLocale() before, so even a saved preference was ignored and the
+    // Arabic catalog could never be selected.
+    void loadLocale()
 
     // Notification tap → the chat it is about (covers killed-state launch
     // too). Routed through push.ts so expo-notifications is never in this
