@@ -257,6 +257,10 @@ export default function RootLayout() {
   if (!cfg) {
     return (
       <>
+      {/* BUG-132 (cause 5): child 0 under the SAME Fragment root in BOTH
+          returns, so the agent tab never unmounts across the cfg transition —
+          present during onboarding, and survives "Forget this computer". */}
+      <AgentBrowserHost />
       <View style={{ flex: 1, backgroundColor: C.bg }}>
         <StatusBar style="light" />
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: C.bg } }} />
@@ -282,14 +286,10 @@ export default function RootLayout() {
   const bootStruggling = !everOpen
 
   return (
+    <>
+    <AgentBrowserHost />
     <KeyboardProvider>
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      {/* BUG-130 follow-up ("browser tools always available"): an app-owned
-          agent tab that boots the relay + gate for the whole process lifetime,
-          so every new chat sees the browser tools with no Browser-screen
-          visit. Must live in THIS (connected) return: the !cfg early return
-          unmounts before the gateway/config exists. */}
-      <AgentBrowserHost />
       <StatusBar style="light" />
       <Stack
         screenOptions={{
@@ -390,6 +390,7 @@ export default function RootLayout() {
     </View>
     {splash}
     </KeyboardProvider>
+    </>
   )
 }
 

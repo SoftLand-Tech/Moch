@@ -5,6 +5,7 @@ Cycle-safe import chain: this module imports nothing from model_tools or tool fi
 tools/*.py import it at module level; model_tools.py imports both; run_agent/cli import
 model_tools."""
 
+import os
 import ast
 import functools
 import importlib
@@ -259,7 +260,7 @@ def _prune_check_fn_caches(now: float) -> None:
             cache.pop(next(iter(cache)))
 
 
-def check_fn_cache_scope() -> Optional[str]:
+def _check_fn_cache_scope_base() -> Optional[str]:
     """Return the active profile key when availability is profile-scoped. Browser-controller
     availability is request-bound (changes on every attach/detach), so a fully bound
     browser-control request bypasses this cache AND model_tools' outer definition cache (same
@@ -283,6 +284,25 @@ def check_fn_cache_scope() -> Optional[str]:
         # Fail closed: bypass both cache layers rather than aliasing requests
         # whose multiplex profile identity could not be resolved.
         return CHECK_FN_CACHE_BYPASS
+
+
+def check_fn_cache_scope() -> Optional[str]:
+    """BUG-132 (cause 3): the base scope partitioned by the browser-gate state.
+
+    The raw scope keys verdicts by (fn, profile-scope) ONLY — a pre-arm False
+    was served post-arm for its whole 30s TTL, and the first armed
+    get_tool_definitions then memoized a browser-less list UNDER THE ARMED key
+    (model_tools' key carries the env since BUG-132) with no TTL — poisoning
+    every new chat for the process lifetime. Folding the two gate env vars into
+    the scope makes a pre-arm verdict unreadable post-arm for every check_fn
+    consumer, mirroring what model_tools already does for the outer memo. The
+    bypass sentinel passes through untouched.
+    """
+    scope = _check_fn_cache_scope_base()
+    if scope == CHECK_FN_CACHE_BYPASS:
+        return scope
+    gate = "br=%s|cdp=%s" % (os.environ.get("MOCH_BROWSER_RELAY", ""), os.environ.get("BROWSER_CDP_URL", ""))
+    return "%s|%s" % (scope, gate) if scope else gate
 
 
 def _run_check_fn_uncached(fn: Callable) -> bool:

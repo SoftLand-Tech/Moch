@@ -92,5 +92,42 @@ class GateInCacheKeyTest(unittest.TestCase):
         )
 
 
+class CheckFnScopePartitionsByGateTest(unittest.TestCase):
+    """BUG-132 cause 3: the check_fn cache scope must partition by gate state,
+    else a pre-arm False verdict is served post-arm and the first armed
+    get_tool_definitions memoizes a browser-less list under the armed key."""
+
+    def setUp(self):
+        self._saved = {k: os.environ.get(k) for k in ("MOCH_BROWSER_RELAY", "BROWSER_CDP_URL")}
+        os.environ.pop("MOCH_BROWSER_RELAY", None)
+        os.environ.pop("BROWSER_CDP_URL", None)
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def test_scope_changes_when_the_gate_flips(self):
+        from tools.registry import CHECK_FN_CACHE_BYPASS, check_fn_cache_scope
+
+        pre = check_fn_cache_scope()
+        os.environ["MOCH_BROWSER_RELAY"] = "1"
+        os.environ["BROWSER_CDP_URL"] = "http://127.0.0.1:9334/tok"
+        post = check_fn_cache_scope()
+        self.assertNotEqual(pre, post, "check_fn scope must change with the gate (BUG-132 cause 3)")
+        if post != CHECK_FN_CACHE_BYPASS:
+            self.assertIn("br=1", post)
+
+    def test_bypass_sentinel_passes_through(self):
+        from tools.registry import CHECK_FN_CACHE_BYPASS, _check_fn_cache_scope_base
+
+        if _check_fn_cache_scope_base() != CHECK_FN_CACHE_BYPASS:
+            self.skipTest("base scope is not the bypass sentinel in this environment")
+        os.environ["MOCH_BROWSER_RELAY"] = "1"
+        self.assertEqual(check_fn_cache_scope(), CHECK_FN_CACHE_BYPASS)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
