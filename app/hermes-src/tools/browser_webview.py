@@ -33,6 +33,17 @@ logger = logging.getLogger(__name__)
 
 _NO_SESSION = "No browser page. Call browser_navigate first (and keep the Moch Browser screen open)."
 
+# BUG-105 companion: the generic _NO_SESSION tells the model to retry against
+# a relay that may not exist at all. When the RELAY is down (app restarted,
+# Browser screen not opened yet this session), the only fix is the user
+# opening it — say so, so the agent relays a real instruction instead of
+# concluding "the browser is dead".
+_RELAY_DOWN_ERROR = (
+    "The Moch browser relay is not running — there is no browser to drive right now. "
+    "Ask the user to open the Browser screen in Moch once (drawer → Browser); the "
+    "browser tools activate the moment it opens, then retry the task."
+)
+
 
 def is_webview_mode() -> bool:
     """True when the Moch relay is the configured browser backend."""
@@ -44,6 +55,29 @@ def _supervisor(task_id: Optional[str] = None):
     from tools.browser_supervisor import SUPERVISOR_REGISTRY
 
     return SUPERVISOR_REGISTRY.get(task_id or "default")
+
+
+def _relay_down_error() -> Optional[str]:
+    """``_RELAY_DOWN_ERROR`` when the configured relay is unreachable, else None.
+
+    None covers "no CDP URL configured" (nothing to probe — the generic
+    message is correct) and "probe succeeded" (relay up; a missing session
+    then really means no live page target). One short GET, failure path only.
+    """
+    url = os.environ.get("BROWSER_CDP_URL", "").strip()
+    if not url:
+        return None
+    try:
+        import requests
+
+        from agent.proxy_bypass import loopback_request_kwargs
+        from tools.browser_supervisor import _http_probe_root
+
+        version_url = _http_probe_root(url).rstrip("/") + "/json/version"
+        requests.get(version_url, timeout=2, **loopback_request_kwargs(version_url))
+    except Exception:  # noqa: BLE001 — an unreachable relay IS the answer
+        return _RELAY_DOWN_ERROR
+    return None
 
 
 def _call(sup, method: str, params: Optional[Dict[str, Any]] = None, timeout: float = 15.0) -> Dict[str, Any]:
@@ -136,7 +170,9 @@ def webview_navigate(url: str, task_id: Optional[str] = None) -> str:
         except Exception as exc:  # noqa: BLE001
             return json.dumps({"success": False, "error": f"supervisor attach failed: {exc}"})
         if sup is None:
-            return json.dumps({"success": False, "error": _NO_SESSION})
+            # BUG-105: attach is swallowed upstream (non-fatal by design), so a
+            # dead relay and a live-relay-no-page look identical. Distinguish.
+            return json.dumps({"success": False, "error": _relay_down_error() or _NO_SESSION})
     try:
         _call(sup, "Page.navigate", {"url": url}, timeout=20.0)
         # Settle: wait for load in small polls instead of a fixed sleep.
@@ -161,12 +197,28 @@ def webview_navigate(url: str, task_id: Optional[str] = None) -> str:
 
 # ── Actions ─────────────────────────────────────────────────────────────────
 
+def _normalize_ref(ref: str) -> str:
+    """The bare ``eN`` id a snapshot hands out.
+
+    BUG-125: snapshots print refs as ``[e1]`` and every sibling agentic-browser
+    toolset (browser-use, Playwright MCP) has models emit ``@e1``, but the
+    attribute lookup is literal — ``@e1`` never matched, and the miss was
+    reported as "stale ref", which sent the model re-snapshotting into the same
+    wall (observed on-device: two failed ``browser_type`` calls on a ref taken
+    from a fresh snapshot, then success with the bare id). Normalize every shape
+    a model plausibly produces, and never call a format miss "stale".
+    """
+    return (ref or "").strip().lstrip("@").strip().strip("[]").strip()
+
+
 def _ref_js(ref: str, expression: str) -> str:
     """JS that resolves a data-moch-ref element; expression receives `el`."""
+    ref = _normalize_ref(ref)
     safe = json.dumps(ref)
     return (
         f"(() => {{ const el = document.querySelector('[data-moch-ref=\"' + {safe} + '\"]'); "
-        f"if (!el) return JSON.stringify({{ok: false, error: 'stale ref {ref} — re-snapshot'}}); "
+        f"if (!el) return JSON.stringify({{ok: false, error: 'unknown ref {ref} — refs are the "
+        f"bare ids the snapshot prints ([e1] → e1); re-snapshot if the page changed'}}); "
         f"return (() => {{ {expression} }})(); }})()"
     )
 
