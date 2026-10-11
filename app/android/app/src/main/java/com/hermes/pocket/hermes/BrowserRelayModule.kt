@@ -44,8 +44,14 @@ class BrowserRelayModule(reactContext: ReactApplicationContext) :
           // boot order. The promise resolves immediately — the caller only
           // needs the relay state.
           promise.resolve(statusMap())
+          // First-boot-after-install cold starts can take >60 s to reach a
+          // started Python; a fixed 30 s window exhausted on exactly those
+          // boots (observed on device). Poll cheaply instead: 1 s ticks, up
+          // to 120 s, arming the moment Python exists.
           var armed = false
-          for (attempt in 1..10) {
+          var ticks = 0
+          while (ticks < 120) {
+            ticks++
             if (com.chaquo.python.Python.isStarted()) {
               try {
                 com.chaquo.python.Python.getInstance()
@@ -57,9 +63,9 @@ class BrowserRelayModule(reactContext: ReactApplicationContext) :
                 // Python started but the module import raced the boot — retry.
               }
             }
-            Thread.sleep(3000)
+            Thread.sleep(1000)
           }
-          android.util.Log.i("MochBrowserRelay", "gate arm retry: armed=$armed attempts<=10")
+          android.util.Log.i("MochBrowserRelay", "gate arm retry: armed=$armed ticks=$ticks pid=${android.os.Process.myPid()}")
         } else {
           promise.resolve(statusMap())
         }
