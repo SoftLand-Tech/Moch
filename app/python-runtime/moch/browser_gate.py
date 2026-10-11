@@ -39,13 +39,28 @@ def activate(port: int, token: str) -> dict:
     # The registry TTL-caches check_fn results process-wide; a stale False from
     # before the relay existed would keep the tools hidden for up to 30s. Clear
     # so the next schema build (next message / new chat) sees the gate immediately.
+    #
+    # BUG-107: clearing ONLY the check_fn verdicts is not enough. ``model_tools``
+    # memoizes the fully ASSEMBLED tool list per (enabled, disabled,
+    # skip_tool_search) key in ``_tool_defs_cache``, and the browser verdict is
+    # baked into that list — so a session whose list was assembled before the
+    # relay started kept replaying the browser-less catalog for the rest of the
+    # process (device: gate active 18:02:17, a chat created 18:03:18 still
+    # resolved 8 tools with no browser_*). ``tools/mcp_tool_agent.py``'s
+    # ``reprobe_tool_availability()`` pairs exactly these two clears for the same
+    # reason when MCP servers appear mid-session.
     try:
-        from tools.registry import _check_fn_cache, _check_fn_cache_lock
+        from tools.registry import invalidate_check_fn_cache
 
-        with _check_fn_cache_lock:
-            _check_fn_cache.clear()
+        invalidate_check_fn_cache()
     except Exception:  # noqa: BLE001 — cache shape drift must never break the gate
         logger.debug("check_fn cache clear failed", exc_info=True)
+    try:
+        from model_tools import _clear_tool_defs_cache
+
+        _clear_tool_defs_cache()
+    except Exception:  # noqa: BLE001 — cache shape drift must never break the gate
+        logger.debug("tool-defs cache clear failed", exc_info=True)
     logger.info("Moch browser gate active: %s", url)
     return status()
 

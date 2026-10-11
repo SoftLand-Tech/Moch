@@ -81,12 +81,21 @@ object CdpRelay {
     appContext = context.applicationContext
     lastError = null
     val srv = ServerSocket()
+    // BUG-106: bind the IPv4 loopback LITERAL. `InetAddress.getLoopbackAddress()`
+    // resolves to ::1 on Android, so the relay listened IPv6-only while both
+    // arming paths publish `http://127.0.0.1:<port>/<token>` — requests and
+    // websockets dial that as IPv4, the connect is refused, and every browser
+    // tool dies with "the Moch browser relay is not running". Verified on-device:
+    // ::1:9334 LISTEN, nothing on 127.0.0.1, `nc 127.0.0.1 9334` refused; an
+    // in-namespace IPv4→IPv6 forwarder made the whole feature work. Loopback only,
+    // IPv4 only — no wildcard bind.
+    val loopback = InetAddress.getByName("127.0.0.1")
     try {
       srv.reuseAddress = true
-      srv.bind(InetSocketAddress(InetAddress.getLoopbackAddress(), preferPort), 16)
+      srv.bind(InetSocketAddress(loopback, preferPort), 16)
     } catch (e: Exception) {
       try {
-        srv.bind(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 16)
+        srv.bind(InetSocketAddress(loopback, 0), 16)
       } catch (e2: Exception) {
         lastError = "bind failed: $e2"
         log("bind failed on $preferPort and ephemeral: $e2")

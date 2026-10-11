@@ -67,6 +67,17 @@ def _prepare_home(home: Path) -> None:
     workspace = home / "workspace"
     workspace.mkdir(parents=True, exist_ok=True)
     os.environ["MOCH_WORKSPACE"] = str(workspace)
+    # BUG-118: the MCP Browse catalog reads optional-mcps manifests. The resolver
+    # (hermes_constants._packaged_dir) already falls back to
+    # <HERMES_HOME>/optional-mcps — but mcp_catalog passes the SOURCE-CHECKOUT
+    # path as its default, and that directory does not exist inside the app, so
+    # `list_catalog()` always answered [] and Connectors → Browse showed "Catalog
+    # is empty" no matter what. Point the documented override at the app's own
+    # home and create it, so curated manifests can ship there (or be dropped in
+    # by hand) without touching the vendored resolver.
+    optional_mcps = home / "optional-mcps"
+    optional_mcps.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("HERMES_OPTIONAL_MCPS", str(optional_mcps))
     # Moch Linux: if the guest is installed, its shim dir goes AHEAD of the
     # system paths so every `sh`/`bash` resolution lands in the guest. Before
     # install the dir doesn't exist and the entry is inert.
@@ -133,6 +144,19 @@ def _prepare_home(home: Path) -> None:
     # Moch-Browser-Level probe picks per-page (WebView) mode automatically.
     # Absent file ⇒ feature off, everything else unchanged (rollback = the
     # Browser screen simply never starts the relay).
+    #
+    # BUG-105: the file OUTLIVES the process — stop() never deletes it (the
+    # token is deliberately stable per install) — so its presence only proves
+    # the relay ran at SOME point. Arm solely when its `pid` is THIS process:
+    # the relay is in-process (CdpRelay + this Python share the app pid), so
+    # a stale pid means the relay is DOWN right now. Arming on a stale file
+    # advertised the browser tools against a dead endpoint after every app
+    # restart, and every call died as "No browser page…" (the "the browser
+    # is dead" report). The live flip stays BrowserRelayModule →
+    # moch.browser_gate.activate on relay start: opening the Browser screen
+    # arms the tools mid-session with no restart, in either open order. A
+    # preset BROWSER_CDP_URL (manual PC runs) is left untouched here either
+    # way — this branch only ever arms FROM the file.
     try:
         relay_state = home / "browser" / "relay.json"
         if relay_state.exists():
@@ -140,7 +164,8 @@ def _prepare_home(home: Path) -> None:
 
             relay = _json.loads(relay_state.read_text(encoding="utf-8"))
             _port, _token = int(relay.get("port") or 0), str(relay.get("token") or "")
-            if _port > 0 and _token:
+            _pid = int(relay.get("pid") or 0)
+            if _port > 0 and _token and _pid == os.getpid():
                 os.environ["BROWSER_CDP_URL"] = f"http://127.0.0.1:{_port}/{_token}"
                 os.environ.setdefault("MOCH_BROWSER_RELAY", "1")
     except Exception:  # noqa: BLE001 — never let the browser feature break boot
