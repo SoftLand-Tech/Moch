@@ -98,11 +98,83 @@ export async function refreshFleet(): Promise<void> {
   }
 }
 
+export interface CreateChecklist {
+  /** Copy launch USER.md ("ideas about me") — default ON. */
+  copyUserMemory: boolean
+  /** Copy launch MEMORY.md too — default OFF (noisy accumulated history). */
+  copyMemory: boolean
+  /** Selected launch skill names to copy (moch.profiles.seed). */
+  skills: string[]
+}
+
+const CREATE_DEFAULTS_KEY = 'hermes.fleet.createDefaults.v1'
+
+export const DEFAULT_CHECKLIST: CreateChecklist = {
+  copyUserMemory: true,
+  copyMemory: false,
+  skills: [],
+}
+
+/** Persisted so the checklist re-opens with the user's last choices. */
+export async function loadCreateDefaults(): Promise<CreateChecklist> {
+  try {
+    const raw = await AsyncStorage.getItem(CREATE_DEFAULTS_KEY)
+    if (!raw) return { ...DEFAULT_CHECKLIST }
+    const parsed = JSON.parse(raw) as Partial<CreateChecklist>
+    return {
+      copyUserMemory: parsed.copyUserMemory ?? DEFAULT_CHECKLIST.copyUserMemory,
+      copyMemory: parsed.copyMemory ?? DEFAULT_CHECKLIST.copyMemory,
+      skills: Array.isArray(parsed.skills) ? parsed.skills : [],
+    }
+  } catch {
+    return { ...DEFAULT_CHECKLIST }
+  }
+}
+
+export async function saveCreateDefaults(c: CreateChecklist): Promise<void> {
+  try {
+    await AsyncStorage.setItem(CREATE_DEFAULTS_KEY, JSON.stringify(c))
+  } catch {
+    // best-effort persistence
+  }
+}
+
+export interface LaunchSkill {
+  name: string
+  description: string
+  path: string
+}
+
+/** Skills installed in the launch home (Moch) — for the create checklist. */
+export async function listLaunchSkills(): Promise<LaunchSkill[]> {
+  try {
+    const res = await rpc<{ skills?: LaunchSkill[] }>('moch.skills.list', {}, 10000)
+    return res.skills ?? []
+  } catch {
+    return [] // older gateway without the fleet RPC — picker renders empty
+  }
+}
+
+export interface SeedResult {
+  profile: string
+  userMemory: string | null
+  memory: string | null
+  skills: { name: string; result: string }[]
+}
+
+/** True when any seeded item was NOT copied (missing/skipped-exists/…). */
+export function seedHasSkips(seed: SeedResult): boolean {
+  const bad = (v: string | null) => v !== null && v !== 'copied'
+  return bad(seed.userMemory) || bad(seed.memory) ||
+    seed.skills.some((s) => s.result !== 'copied')
+}
+
 export async function createProfile(input: {
   name: string
   description?: string
   soul?: string
-}): Promise<{ ok: boolean; path?: string; error?: string }> {
+  checklist?: CreateChecklist
+}): Promise<{ ok: boolean; path?: string; error?: string; seed?: SeedResult; seedError?: string }> {
   const res = await rpc<{ ok?: boolean; path?: string }>('profiles.create', {
     name: input.name,
     description: input.description ?? '',
@@ -112,8 +184,27 @@ export async function createProfile(input: {
     // platform/bot tokens) so a fresh bot can actually answer.
     mirror_credentials: true,
   })
+  // Checklist seeding is BEST-EFFORT post-create: the bot exists either way;
+  // a seed failure is surfaced, never fatal (never clone_from — that would
+  // copy the whole .env/config.yaml and silently upgrade §2.8 mirroring).
+  let seed: SeedResult | undefined
+  let seedError: string | undefined
+  const c = input.checklist
+  if (c && (c.copyUserMemory || c.copyMemory || c.skills.length > 0)) {
+    try {
+      const out = await rpc<SeedResult>('moch.profiles.seed', {
+        profile: input.name,
+        copy_user_memory: c.copyUserMemory,
+        copy_memory: c.copyMemory,
+        skills: c.skills,
+      }, 20000)
+      seed = out
+    } catch (e) {
+      seedError = e instanceof Error ? e.message : String(e)
+    }
+  }
   await refreshFleet()
-  return { ok: res.ok !== false, path: res.path }
+  return { ok: res.ok !== false, path: res.path, seed, seedError }
 }
 
 export async function freezeProfile(name: string, frozen: boolean): Promise<void> {

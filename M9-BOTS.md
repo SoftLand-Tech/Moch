@@ -727,6 +727,13 @@ Device step (P1–P2 green on device + on-device P3 sweep) remains open — need
 
 ### M9.1a — Fleet core (Python side)
 
+**STATUS (2026-10-12, PR #122): stage-3 LANDED — the `spawn_bot` tool door.** `moch/spawn_tool.py`
+registers onto the existing `delegation` toolset at boot (zero vendored edits; verified live:
+`resolve_toolset('delegation')` → `[delegate_task, spawn_bot]`); first-spawn approval surfaces as a
+real on-device card via `request_tool_approval` (deny → structured refusal); parent identity from the
+call-time home override, parent depth from the spawn-record ancestry chain. Deferred: per-bot
+"may create helpers" toggle (flag + caps govern v1).
+
 *(v1.2)* May land as two PR stages: core fleet.py + gate + queue + ledger first, then
 dm_bridge/spawn_bot/audit/RPC — the milestone is the dependency root for M9.2/M9.4 and
 is deliberately allowed to stage.
@@ -774,10 +781,14 @@ Fleet tab (roster + instant create with starter-template chips + freeze/unfreeze
 runtime status), bot-scoped chats (`profile` through `session.create`, `Bot · <name>`
 identity titles, persisted active bot), bot detail modal (SOUL/description editor,
 delete wizard with honest scope note, chat hand-off), i18n foundation (EN/AR catalog,
-RTL flag, strings externalized), a11y roles. tsc clean. **Remaining:** on-device
-acceptance (create <60s on device, 8-profile restart + multiplex re-enumeration,
-RTL pass on device), bot detail memory-browser (read-only MEMORY.md view), delete
-wizard kanban-reassignment surface (lands with M9.4 write slice).
+RTL flag, strings externalized), a11y roles. tsc clean. **Creation checklist LANDED
+(2026-10-12, PR #122):** "ideas about me" (USER.md copy, default ON), MEMORY.md
+(default OFF), selective skill copy via `moch.profiles.seed` (+`moch.skills.list`
+picker) — as files, never clone_from; model pin deferred (needs a pick-only sheet).
+**Remaining:** on-device acceptance (create <60s on device, 8-profile restart +
+multiplex re-enumeration, RTL pass on device), bot detail memory-browser
+(read-only MEMORY.md view), delete wizard kanban-reassignment surface (lands with
+the M9.4 write slice).
 
 - Fleet tab (list/create/author), bot detail (SOUL editor, tools picker, autonomy,
   model), bot-scoped chat (`profile` param through `session.create`/turns/send queue),
@@ -819,8 +830,14 @@ wizard kanban-reassignment surface (lands with M9.4 write slice).
 **STATUS: read-side LANDED on PC (2026-10-10, commits 3cbbf11/7254cb2).**
 `moch.runs.timeline` merged ledger (kanban + cron + delegations, newest-first,
 tested), `moch.kanban.tasks` read RPC, Crew screen (status columns + run ledger,
-read view). **Remaining:** write slice (create/claim/complete from the app),
-goal-loop judge parity for in-process workers, budgets dashboard, freeze/melt UI.
+read view). **Write slice LANDED (2026-10-12, PR #122):** `moch.kanban.create/
+assign/complete/block` (assignee required + validated; frozen refused; force-
+complete = dashboard operator precedent; db_path pinned at RPC entry against the
+worker-env race), dispatch poke + 60s heal ticker (`moch/kanban_dispatch.py` —
+nothing in the embedded process dispatched before; serialized via
+`fleet_worker._worker_lock`), Crew create box + Complete/Reassign. **Remaining:**
+goal-loop judge parity for in-process workers, budgets dashboard, freeze/melt UI,
+kanban knocks (board is manual-refresh), breaker parity for synthetic-pid workers.
 
 - Crew board UI over kanban (create/claim/comment/complete/handoff), in-process
   dispatcher (M9.1b's off-ticker dispatcher thread) surfaced in the crew board UI
