@@ -261,6 +261,11 @@ export default function RootLayout() {
           returns, so the agent tab never unmounts across the cfg transition —
           present during onboarding, and survives "Forget this computer". */}
       <AgentBrowserHost />
+      {/* BUG-133: KeyboardProvider must wrap BOTH root branches. The onboarding
+          screens (index / add-computer / setup) host PairForm/ProviderKeyForm
+          inputs; without a provider every keyboard-controller consumer there
+          reads a dead context (shared values stuck at 0) and silently no-ops. */}
+      <KeyboardProvider>
       <View style={{ flex: 1, backgroundColor: C.bg }}>
         <StatusBar style="light" />
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: C.bg } }} />
@@ -270,6 +275,7 @@ export default function RootLayout() {
       </View>
       <AlertDialogHost />
       {splash}
+      </KeyboardProvider>
       </>
     )
   }

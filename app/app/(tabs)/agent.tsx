@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from 'react'
-import { View, Text, Pressable, ScrollView, StyleSheet, ActivityIndicator, Switch, TextInput } from 'react-native'
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Switch, TextInput } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+// BUG-133: the provider search + inline API-key form had no avoidance (form
+// and everything below sat under the IME), and the missing
+// keyboardShouldPersistTaps ate the first tap on provider rows while the
+// keyboard was open (BUG-027 class). KeyboardAwareScrollView keeps the list
+// above the keys, scrolls the focused field in, and delivers taps.
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller'
 import { useStore } from '@nanostores/react'
 import { Icon } from '../../src/components/Icon'
 import { isConnected as isConnectedAtom, retryNow, rpc } from '../../src/lib/gateway'
@@ -209,7 +215,7 @@ export default function Controls() {
       </Pressable>
     </View>
   ) : (
-    <ScrollView style={s.root} contentContainerStyle={{ padding: 16, gap: 24, paddingBottom: 40 }}>
+    <KeyboardAwareScrollView style={s.root} contentContainerStyle={{ padding: 16, gap: 24, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
       <View>
         <View style={s.sectionRow}>
           <Text style={s.section}>MODEL</Text>
@@ -364,7 +370,7 @@ export default function Controls() {
           />
         </View>
       </View>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   )
 
   return (

@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { View, Text, FlatList, StyleSheet, Pressable, TextInput, ActivityIndicator } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
+import Animated, { useAnimatedStyle } from 'react-native-reanimated'
 import { useRouter } from 'expo-router'
 import { useStore } from '@nanostores/react'
 import { ScreenShell } from '../../src/components/ScreenShell'
@@ -16,6 +18,10 @@ import { isConnected as isConnectedAtom } from '../../src/lib/gateway'
  */
 export default function Skills() {
   const s = useStyles(makeS)
+  // BUG-133: chat-pad pattern on the LIST only — the filter field stays
+  // top-anchored while the results viewport ends at the keyboard's top edge.
+  const kb = useReanimatedKeyboardAnimation()
+  const kbPad = useAnimatedStyle(() => ({ paddingBottom: -kb.height.value }))
   const router = useRouter()
   const online = useStore(isConnectedAtom)
   const skills = useStore(skillCommands)
@@ -105,6 +111,7 @@ export default function Skills() {
         {loading ? <ActivityIndicator color={C.textDim} style={{ marginTop: 28 }} /> : null}
 
         {!loading && tab === 'commands' ? (
+          <Animated.View style={[s.kbListWrap, kbPad]}>
           <FlatList
             data={commandList}
             keyExtractor={(x) => x.name}
@@ -128,9 +135,11 @@ export default function Skills() {
               </Pressable>
             )}
           />
+          </Animated.View>
         ) : null}
 
         {!loading && tab === 'skills' ? (
+          <Animated.View style={[s.kbListWrap, kbPad]}>
           <FlatList
             data={skillList}
             keyExtractor={(x) => x.name}
@@ -151,6 +160,7 @@ export default function Skills() {
               </Pressable>
             )}
           />
+          </Animated.View>
         ) : null}
       </ScreenShell>
     </SafeAreaView>
@@ -159,6 +169,7 @@ export default function Skills() {
 
 const makeS = () => StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
+  kbListWrap: { flex: 1 },
   searchWrap: { paddingHorizontal: 16, paddingBottom: 8 },
   search: { backgroundColor: C.bgCard, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 12, color: C.text, fontSize: 15, minHeight: 44 },
   tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingBottom: 10 },

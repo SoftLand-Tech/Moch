@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Pressable } from 'react-native'
+import { View, Text, StyleSheet, ActivityIndicator, Pressable } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+// BUG-133: KeyboardAwareScrollView keeps the pair form's focused field (and
+// the Connect CTA below it) above the IME — under edge-to-edge the OS never
+// resizes this screen, so a plain ScrollView left the token field under the
+// keys with no auto-scroll.
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller'
 import { router } from 'expo-router'
 import { useStore } from '@nanostores/react'
 import { Icon } from '../src/components/Icon'
@@ -41,7 +46,7 @@ export default function Onboarding() {
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
-      <ScrollView style={s.root} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollView style={s.root} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
         {/* Mochi opens the app the way the splash leaves him: mid wake-up
             loop — asleep, stretch, awake, back to sleep while you pair. */}
         <MochiStage state="mochi-waking-up" size={168} marginBottom={0} />
@@ -77,7 +82,7 @@ export default function Onboarding() {
             {switchErr ? <Text style={s.error}>{switchErr}</Text> : null}
           </View>
         ) : null}
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   )
 }

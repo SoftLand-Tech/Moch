@@ -18,6 +18,8 @@ import type { GestureResponderEvent, PanResponderGestureState, ViewStyle } from 
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { Icon } from './Icon'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
+import RAnimated, { useAnimatedStyle } from 'react-native-reanimated'
 import { usePathname } from 'expo-router'
 import { useStore } from '@nanostores/react'
 import { archivedIds, groupChats, pinnedIds } from '../lib/chatListState'
@@ -292,6 +294,15 @@ export function Sidebar({
 
   const renameOpen = renaming != null
   const { anim: renameAnim, rendered: renameRendered } = usePopFade(renameOpen)
+  // BUG-133: the rename dialog's autoFocus input opened the keyboard straight
+  // over the centered card (input, error and Cancel/Save under the IME). The
+  // wrapper pads by the live IME height (chat-pad pattern), so the card stays
+  // centered in the area ABOVE the keys — input and buttons always visible.
+  const kb = useReanimatedKeyboardAnimation()
+  const renameKbPad = useAnimatedStyle(() => ({
+    paddingBottom: Math.max(24 + kb.height.value, 24),
+  }))
+  const drawerListKbPad = useAnimatedStyle(() => ({ paddingBottom: -kb.height.value }))
   const renameRef = useRef<RecentChat | null>(null)
   useEffect(() => {
     if (renaming) renameRef.current = renaming
@@ -747,6 +758,10 @@ export function Sidebar({
                 </Pressable>
               ) : null}
             </View>
+            {/* BUG-133: chat-pad pattern on the LIST only — the drawer's
+                search field stays at the panel top while chat results render
+                above the keys instead of behind them. */}
+            <RAnimated.View style={[{ flex: 1 }, drawerListKbPad]}>
             <SectionList<RecentChat, Section>
               sections={sections}
               keyExtractor={chatKey}
@@ -765,6 +780,7 @@ export function Sidebar({
               renderSectionFooter={renderSectionFooter}
               ListEmptyComponent={listEmpty}
             />
+            </RAnimated.View>
           </>
         ) : (
           <View style={{ flex: 1 }} />
@@ -825,32 +841,34 @@ export function Sidebar({
           <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: C.scrim, opacity: renameAnim }]}>
             <Pressable style={StyleSheet.absoluteFill} onPress={closeDialogs} accessibilityLabel="Cancel rename" />
           </Animated.View>
-          <Animated.View style={[s.dialogCard, { opacity: renameAnim, transform: [{ scale: renameScale }] }]}>
-            <Text style={s.dialogTitle}>Rename chat</Text>
-            <TextInput
-              style={s.renameInput}
-              value={renameText}
-              onChangeText={setRenameText}
-              autoFocus
-              selectTextOnFocus
-              maxLength={200}
-              onSubmitEditing={() => void saveRename()}
-              accessibilityLabel="Chat name"
-            />
-            {dialogError ? <Text style={s.dialogError}>{dialogError}</Text> : null}
-            <View style={s.dialogButtons}>
-              <Pressable style={[s.dialogBtn, dialogBusy && s.dialogBtnBusy]} onPress={closeDialogs} disabled={dialogBusy}>
-                <Text style={s.dialogBtnText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={[s.dialogBtnPrimary, (dialogBusy || !renameText.trim()) && s.dialogBtnBusy]}
-                onPress={() => void saveRename()}
-                disabled={dialogBusy || !renameText.trim()}
-              >
-                <Text style={s.dialogBtnPrimaryText}>Save</Text>
-              </Pressable>
-            </View>
-          </Animated.View>
+          <RAnimated.View style={renameKbPad}>
+            <Animated.View style={[s.dialogCard, { opacity: renameAnim, transform: [{ scale: renameScale }] }]}>
+              <Text style={s.dialogTitle}>Rename chat</Text>
+              <TextInput
+                style={s.renameInput}
+                value={renameText}
+                onChangeText={setRenameText}
+                autoFocus
+                selectTextOnFocus
+                maxLength={200}
+                onSubmitEditing={() => void saveRename()}
+                accessibilityLabel="Chat name"
+              />
+              {dialogError ? <Text style={s.dialogError}>{dialogError}</Text> : null}
+              <View style={s.dialogButtons}>
+                <Pressable style={[s.dialogBtn, dialogBusy && s.dialogBtnBusy]} onPress={closeDialogs} disabled={dialogBusy}>
+                  <Text style={s.dialogBtnText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[s.dialogBtnPrimary, (dialogBusy || !renameText.trim()) && s.dialogBtnBusy]}
+                  onPress={() => void saveRename()}
+                  disabled={dialogBusy || !renameText.trim()}
+                >
+                  <Text style={s.dialogBtnPrimaryText}>Save</Text>
+                </Pressable>
+              </View>
+            </Animated.View>
+          </RAnimated.View>
         </View>
       ) : null}
 

@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, FlatList, Pressable, TextInput, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native'
 import { Icon } from '../../src/components/Icon'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
+import Animated, { useAnimatedStyle } from 'react-native-reanimated'
 import { useStore } from '@nanostores/react'
 import { router } from 'expo-router'
 import { rpc, isConnected as isConnectedAtom, retryNow } from '../../src/lib/gateway'
@@ -60,6 +62,11 @@ export default function Sessions() {
 
 function SessionsInner() {
   const s = useStyles(makeS)
+  // BUG-133: chat-pad pattern on the LIST only — the search field stays
+  // top-anchored while the results viewport ends at the keyboard's top edge,
+  // so matches render above the keys instead of behind them.
+  const kb = useReanimatedKeyboardAnimation()
+  const kbPad = useAnimatedStyle(() => ({ paddingBottom: -kb.height.value }))
   const list = useStore(sessionRows)
   const [query, setQuery] = useState('')
   // BUG-114 (client half): the box above used to filter the loaded titles only.
@@ -275,6 +282,7 @@ function SessionsInner() {
         </Pressable>
       ) : null}
 
+      <Animated.View style={[s.kbListWrap, kbPad]}>
       <FlatList
         data={shown}
         keyExtractor={(x) => x.id}
@@ -336,6 +344,7 @@ function SessionsInner() {
           ) : null
         }
         />
+      </Animated.View>
       </View>
     </ScreenShell>
   )
@@ -344,6 +353,7 @@ function SessionsInner() {
 const makeS = () => StyleSheet.create({
   frame: { flex: 1, backgroundColor: C.bg },
   root: { flex: 1, backgroundColor: C.bg },
+  kbListWrap: { flex: 1 },
   searchRow: { paddingHorizontal: 16, paddingBottom: 10, flexDirection: 'row', gap: 8 },
   search: { flex: 1, backgroundColor: C.bgCard, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 12, color: C.text, fontSize: 15, minHeight: 44 },
   newBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.accent, justifyContent: 'center', alignItems: 'center' },
