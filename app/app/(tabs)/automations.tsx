@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { View, Text, ScrollView, StyleSheet, Pressable, RefreshControl, ActivityIndicator, Modal, TextInput, Platform } from 'react-native'
+import { View, Text, ScrollView, StyleSheet, Pressable, RefreshControl, ActivityIndicator, Modal, TextInput } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { Ionicons } from '@expo/vector-icons'
 import { Icon } from '../../src/components/Icon'
@@ -312,8 +312,14 @@ export default function Automations() {
 
       {/* Add / edit sheet */}
       <Modal visible={!!form} animationType="slide" onRequestClose={() => { if (!form?.saving) setForm(null) }}>
-        <SafeAreaView style={s.modalSafe}>
-          <KeyboardAvoidingView style={s.modalRoot} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        {/* BUG-133: the KAV used to nest INSIDE the SafeAreaView with
+            behavior 'height' — parent-relative frame math (the variant this
+            repo rejected in terminal.tsx) undershooting by the top inset, so
+            the prompt's lower rows could sit under the IME. As the Modal's
+            full-screen root with 'padding' (connectors-proven shape) the lift
+            is exact: form fields and hints clear the keyboard on any device. */}
+        <KeyboardAvoidingView style={s.modalSafe} behavior="padding">
+          <SafeAreaView style={s.modalRoot}>
             <View style={s.modalHead}>
               <Pressable
                 style={({ pressed }) => [s.modalTextBtn, pressed && s.btnPressed]}
@@ -388,8 +394,8 @@ export default function Automations() {
                 <Text style={s.fieldHint}>Jobs run in a fresh session with no chat context — write self-contained prompts.</Text>
               </View>
             </ScrollView>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
+          </SafeAreaView>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   )

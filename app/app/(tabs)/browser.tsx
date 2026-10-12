@@ -10,6 +10,8 @@ import {
 } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
+import Animated, { useAnimatedStyle } from 'react-native-reanimated'
 import { useStore } from '@nanostores/react'
 import { Ionicons } from '@expo/vector-icons'
 import { ScreenShell } from '../../src/components/ScreenShell'
@@ -49,6 +51,14 @@ const HOME_URL = 'https://www.google.com'
 
 export default function Browser() {
   const s = useStyles(makeS)
+  // BUG-133: tapping a web-page input (a search box in the page itself) opens
+  // the IME over the pool with no inset handling anywhere — react-native-
+  // webview has none built in under edge-to-edge. The chat-pad pattern on the
+  // pool container shrinks the page viewport to the keyboard's top edge, so
+  // in-page inputs can always be scrolled/scrolled-into view above the keys.
+  // The URL bar and Ask-Moch row are top-anchored and stay put.
+  const kb = useReanimatedKeyboardAnimation()
+  const kbPad = useAnimatedStyle(() => ({ paddingBottom: -kb.height.value }))
   const tabs = useStore(browserTabs)
   const activeId = useStore(activeTabId)
   const status = useStore(relayStatus)
@@ -249,7 +259,7 @@ export default function Browser() {
             {/* WebView pool — every tab stays mounted; inactive tabs render
                 1px, opaque and untouchable so their renderer keeps producing
                 frames for CDP (screenshots/screencast need a live surface). */}
-            <View style={s.pool}>
+            <Animated.View style={[s.pool, kbPad]}>
               {tabs.map((t) => {
                 const on = t.id === activeId
                 return (
@@ -277,7 +287,7 @@ export default function Browser() {
                   </View>
                 )
               })}
-            </View>
+            </Animated.View>
           </View>
         )}
       </SafeAreaView>

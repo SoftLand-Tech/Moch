@@ -1195,3 +1195,25 @@ DEVICE-VERIFIED (bundled build): cold ask at T+50s → auto-continue → "The pa
 Deferred (documented, not shipped): Tier B anydoc wheel (+3.4MB, unlocks doc extraction — note
 read_file's schema CLAIMS anydoc is bundled but it never was: drift), Tier C ddgs/lxml/primp
 (+4-5MB, lights web_search/web_extract — or configure a search API key instead).
+
+## BUG-133 [HIGH] Keyboard opens over inputs app-wide — the input and everything at the bottom must rise ABOVE the keyboard
+
+User report (2026-10-12): "find all inputs/anything that will open the keyboard, and make sure when the
+keyboard opens the input (and everything in bottom) will go above the keyboard and not stay with it."
+
+Verified app-wide by 5 read-only adversarial agents on disjoint scopes (chat composer / forms+onboarding /
+tab screens+shell / sheets+modals / platform wiring+terminal+webview), grounded in the native + library
+sources: under RN 0.86 edge-to-edge (targetSdk 36) the manifest's adjustResize is inert and RNKC forces
+adjustNothing inside Modals — JS-side lifting is the only mechanism. Confirmed NOT COVERED: fleet
+create-bot box (input AND buttons), Sidebar rename dialog, ModelPickerSheet (RN-core KAV is a literal
+Android no-op — worst: API-key form + Save), automations modal ('height' undershoot), all four form
+screens + PairForm/ProviderKeyForm, agent tab inline key form, browser WebView in-page inputs; PARTIAL:
+chat (composer floated one nav-bar inset above the keys + hop), search lists (results behind keys);
+KeyboardProvider was missing on the !cfg onboarding branch entirely.
+
+*(fixed in PR #62 — chat-pad / connectors-KAV patterns ported to every surface + KeyboardAwareScrollView
+on the form screens + provider hoist; typecheck clean, 15/15 suites pass, zero new lint — on-device check
+pending user's next dev build; JS-only, Metro reload is enough.)*
+
+Deferred: SessionToasts render under open sheet Modals (RNKC OverKeyboardView is the fix surface);
+chat pathological tall-stack overflow in clarify cards (flexShrink on s.sheet/s.runFooter).
