@@ -1491,3 +1491,24 @@ chat pathological tall-stack overflow in clarify cards (flexShrink on s.sheet/s.
 ## Misc wave (2026-10-12) — GH #73
 
 - [x] **BUG-128 / BH-000014 [LOW] data: URLs refused with the wrong reason (_url_policy_error fell through to _is_safe_url's scheme floor, reporting "private or internal address" for what is an unsupported scheme)** — browser_tool.py:_url_policy_error — *(fixed in PR #144 — explicit non-navigable-scheme floor FIRST: "Blocked: <scheme>: URLs are not supported by the browser tools (only http/https are navigable)" — honest + actionable; the private-address floor is unchanged for real private hosts)*
+
+## Wave 10 on-device review (2026-10-12 evening) — verdict: GOOD, two catches fixed in PR #139
+
+Reviewed PRs #122–#126 (BUG-134..139) against the device. Static: 187 Python tests OK, tsc clean,
+34/34 test:browser-relay. Device: the BUG-136 tab lifecycle WORKS — browser_navigate 0.80s,
+browser_tab_list 0.07s through the RN round-trip (the bridge is fast), multi-tab titles verified by
+snapshot; BUG-134/135/137/138/139 reviewed and consistent with their tracker entries.
+
+CATCHES (both in PR #139):
+1. BUILD-BLOCKER: `class TabOpAck internal constructor {` (from #124) is invalid Kotlin — every
+   build of main failed until `internal class TabOpAck`. Suite was green only because nothing
+   compiles Kotlin in CI.
+2. The BUG-132 wait-emit was schema-invalid (pydantic extra_forbidden on waiting_for/note, raised
+   on every warming note — device errors.log). Removed; rebuild the RN indicator against a
+   schema-valid event if wanted.
+
+OPEN (fresh installs only): the cold-kit window stretched >15 min on the fresh-install test
+(20:21–20:36), with `check_fn <lambda> returned False` repeating, while an upgrade install warms in
+~2.5 min and heals a running turn in ~30 s. Fresh-install logs were wiped by the reinstall; needs a
+focused repro (logs before any reinstall) — suspect first-boot Chaquopy extraction + onboarding
+I/O contention, or a provider-dependent check. Self-healing in all observed cases.
