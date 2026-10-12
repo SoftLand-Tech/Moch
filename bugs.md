@@ -1063,3 +1063,31 @@ lacks browser_* even when named explicitly. The remaining suspects, for the next
 Also requested by the user (new feature, not yet started): browser tab management tools —
 navigate BETWEEN tabs, create/delete/manage multiple tabs (the Browser screen already has a tab
 strip; needs browser_tab_* tools + relay support for target selection).
+
+### BUG-132 round 34 — THE REFRAME: it was never browser-specific
+
+Asked directly (*"List your exact tool names, one per line"*), the agent's complete kit on the
+current build (all four fixes installed, armed=true, env set) is EXACTLY:
+
+    skill_view, skills_list, terminal, tool_search, tool_describe, tool_call
+
+Six tools — the deferred/bridge base. No browser_*, and also no file tools (read_file/patch), no
+memory, no delegate_task: the ENTIRE extended toolset is absent from these sessions. The browser is
+simply the most visible casualty. This matches every historical 6/8-tool catalog observation and
+explains why every arm/cache/refresh fix changed nothing: the selection never included the rich
+toolsets to begin with.
+
+What differs in the rare 21/22-tool sessions (round 14, 17:51; round 4, 15:02)? Those are the
+outliers to explain, not the baseline. Suspects for the selection difference, in order:
+
+1. `_load_enabled_toolsets(platform)` / `_get_platform_tools(cfg, "cli")` with the on-device EMPTY
+   config.yaml vs a populated one — the empty-config path may yield a minimal set, not the
+   hermes-cli composite the static analysis assumed. NEXT STEP: run that exact call on the PC with
+   an empty config and print the result; then log the resolved enabled_toolsets at agent build.
+2. The tool_search bridge masking: with this kit, tool_search CANNOT surface core tools by design,
+   so "search then curl" is the model's rational fallback (amplifier, not cause).
+3. Compare a 6-tool session's creation context vs a 21-tool one (profile? config write in between?
+   registry generation?) — the one variable that flipped.
+
+USER FEATURE REQUEST (queued, not started): browser tab management tools — create/delete/switch/
+list tabs (the Browser screen has a tab strip; needs browser_tab_* tools + relay multi-target).
