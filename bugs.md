@@ -278,6 +278,12 @@ Check off `- [ ]` as you fix. All findings were adversarially verified against s
 
 ---
 
+## Security (audit C-items)
+
+- [x] **C-05 / BH-000038 [HIGH, security] Plaintext-by-default pairing + cleartext app-wide — crafted QR/deep-link silently dials ws:// with the token in the URL** — pairing.ts:37, gateway.ts:559, http.ts:5, AndroidManifest:23 — *(fixed in PR #PR_NUMBER_PLACEHOLDER — tls defaults ON for public hosts, explicit confirm before any plaintext public dial (QR + deep-link + manual), dial/http refusal without confirmation; networkSecurityConfig loopback-only deferred (breaks documented LAN plaintext pairing — product call); on-device check pending user's next dev build)*.
+
+---
+
 ## Suggested fix order
 1. **BUG-001 + BUG-007** (reconnect pair — one commit).
 2. **BUG-002 + BUG-003 + BUG-008 + BUG-019** (outbox rework: pin `{storedId,text}`, dequeue-after-success, single enqueue layer, resetOutbox).
