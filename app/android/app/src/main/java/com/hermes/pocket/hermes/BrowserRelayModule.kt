@@ -31,6 +31,16 @@ class BrowserRelayModule(reactContext: ReactApplicationContext) :
 
   override fun getName() = "BrowserRelay"
 
+  /**
+   * BH-000045 (BUG-99): bumped by [stop] so any in-flight gate-arm retry
+   * loop from [ensureRunning] (up to 120 s of 1 s ticks waiting for Python)
+   * exits instead of re-activating a relay this process just stopped. The
+   * pre-activate check closes the common (sleeping-tick) race; an activate
+   * that began mid-call is ordered after by the stop thread's own
+   * deactivate, which runs last by construction.
+   */
+  private val relayGeneration = java.util.concurrent.atomic.AtomicInteger(0)
+
   init {
     // BUG-136: /json/new|close|activate round-trip to the RN tab owner —
     // install the relay's emitter sink at module creation. A React reload
@@ -70,9 +80,10 @@ class BrowserRelayModule(reactContext: ReactApplicationContext) :
           // started Python; a fixed 30 s window exhausted on exactly those
           // boots (observed on device). Poll cheaply instead: 1 s ticks, up
           // to 120 s, arming the moment Python exists.
+          val gen = relayGeneration.get()
           var armed = false
           var ticks = 0
-          while (ticks < 120) {
+          while (ticks < 120 && relayGeneration.get() == gen) {
             ticks++
             if (com.chaquo.python.Python.isStarted()) {
               try {
@@ -99,12 +110,33 @@ class BrowserRelayModule(reactContext: ReactApplicationContext) :
 
   @ReactMethod
   fun stop(promise: Promise) {
-    try {
-      CdpRelay.stop()
-      promise.resolve(statusMap())
-    } catch (e: Exception) {
-      promise.reject("cdp_relay_stop", e.message, e)
-    }
+    // BH-000045 (BUG-99): a stop used to leave the Python-side gate ARMED
+    // (BROWSER_CDP_URL/MOCH_BROWSER_RELAY set, tools advertised) against a
+    // relay that would never answer — every browser tool then died as "No
+    // browser page…". Same thread shape as ensureRunning: the relay stops,
+    // then (when Python is up) moch.browser_gate.deactivate clears the env
+    // gates + tool caches, and ONLY THEN does the promise resolve — a
+    // follow-up ensureRunning can never race a still-pending deactivate.
+    Thread {
+      try {
+        val s = CdpRelay.status()
+        relayGeneration.incrementAndGet() // kill in-flight gate-arm loops first
+        CdpRelay.stop() // also rewrites relay.json with pid:0 + closes tunnels
+        if (com.chaquo.python.Python.isStarted()) {
+          try {
+            com.chaquo.python.Python.getInstance()
+              .getModule("moch.browser_gate")
+              .callAttr("deactivate", s.port, s.token)
+            android.util.Log.i("MochBrowserRelay", "gate deactivated (port=${s.port})")
+          } catch (e: Throwable) {
+            android.util.Log.w("MochBrowserRelay", "gate deactivate failed: $e")
+          }
+        }
+        promise.resolve(statusMap())
+      } catch (e: Exception) {
+        promise.reject("cdp_relay_stop", e.message, e)
+      }
+    }.start()
   }
 
   @ReactMethod

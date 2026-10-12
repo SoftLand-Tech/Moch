@@ -1212,6 +1212,18 @@ def _browser_eval(expression: str, task_id: Optional[str] = None) -> str:
     if _is_camofox_mode():
         return _camofox_eval(expression, task_id)
 
+    # BUG-126 (BH-000045-adjacent): WebView mode has NO agent-browser CLI —
+    # on-device the subprocess path below can only answer "agent-browser CLI
+    # not found (cached)". Route the expression to the webview backend
+    # instead, running the same attach dance as browser_navigate first so the
+    # FIRST eval of a turn works even with no supervisor attached yet (the
+    # supervisor fast path below returns None in exactly that case, which is
+    # how the CLI probe used to be reached). Never fall through to the CLI
+    # here: webview_eval reports the honest attach/relay-down error.
+    if _webview.is_webview_mode():
+        _webview.ensure_webview_supervisor(task_id)
+        return _webview.webview_eval(expression, task_id)
+
     fast = _eval_supervisor_fast_path(effective_task_id, expression)
     if fast is not None:
         return fast
