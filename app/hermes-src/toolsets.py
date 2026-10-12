@@ -199,6 +199,14 @@ TOOLSETS = {
     # Mirrors hermes-cli; `hermes tools` platform config filters it down and
     # _get_platform_tools() drops _DEFAULT_OFF_TOOLSETS unless user-enabled.
     "hermes-cron": _bundle("Default cron toolset - same core tools as hermes-cli; gated by `hermes tools`"),
+    # BUG-132: the embedded Moch app's sessions resolve platform "mobile"; with
+    # no composite registered, _get_platform_tools returned the BARE name and the
+    # selection collapsed to ~{skills, terminal} — the agent lost the entire
+    # extended toolset (browser, file, memory, delegation...) and answered "no
+    # browser tool in my kit" while improvising with curl. Mirror hermes-cli
+    # (the hermes-cron precedent); the browser toolset is check_fn-gated to the
+    # in-app WebView relay, so it only appears when the gate is armed.
+    "hermes-mobile": _bundle("Moch embedded app toolset - full core tools (browser drives the in-app WebView relay)"),
     "hermes-telegram": _bundle("Telegram bot toolset - full access for personal use (terminal has safety checks)"),
     "hermes-discord": _bundle(
         "Discord bot toolset - full access (terminal has safety checks via dangerous "

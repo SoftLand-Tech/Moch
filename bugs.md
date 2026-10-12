@@ -1091,3 +1091,33 @@ outliers to explain, not the baseline. Suspects for the selection difference, in
 
 USER FEATURE REQUEST (queued, not started): browser tab management tools — create/delete/switch/
 list tabs (the Browser screen has a tab strip; needs browser_tab_* tools + relay multi-target).
+
+### BUG-132 round 35 — composite fix landed; kit grew; browser still absent WITHOUT any check_fn evaluation
+
+**Fix applied this round** (toolsets.py): registered the missing `hermes-mobile` composite
+(mirroring hermes-cli, the hermes-cron precedent). Verified on PC: `_get_platform_tools(cfg,
+"mobile")` now returns the full 18-toolset list (browser/file/memory/delegation/...) instead of the
+bare `['hermes-mobile']` name. 118 tests OK; build succeeded; installed on device.
+
+**Device result:** the agent's kit GREW (was 6: skill_view/skills_list/terminal+bridge; now also
+cronjob_manage, todo_list, desktop_project) — the composite is provably live in the APK. But the
+acceptance turn STILL answered "Example Domain — though no browser tools are available in this
+session" (fetched via curl; turn used tool_search + terminal), and the kit listing shows no
+browser/file/memory.
+
+**The remaining mystery, precisely:** browser/file/memory tools are absent from the resolved kit
+while the agent.log shows ZERO `check_fn ... returned False/raised` lines for them this boot —
+i.e. their check_fns are never evaluated, so the filtering happens UPSTREAM of check_fn, inside
+toolset→tool resolution (registry.get_definitions / toolset member expansion), or the model's own
+listing is lossy (verify with the instrument below before trusting it).
+
+**Successor's first move (the instrument that was never added):** one `logger.info` in
+`agent/agent_init.py::_load_tools` printing the resolved tool names (the "Final tool selection"
+print is suppressed by quiet_mode on the embedded build). One device turn then makes the kit
+readable from agent.log, separating "tools genuinely absent" from "model lists them lossily".
+Then bisect upstream: whether `enabled_toolsets` reaching _make_agent contains browser, and
+whether registry.get_definitions drops the browser toolset members without logging.
+
+**Verified this round (keep):** platform 'mobile' expands via the composite (PC);
+desktop_project/todo_list/cronjob_manage appearing = _gui_surface_toolsets + composite both live;
+relay native-start + armed=true ticks=1 still hold; suite green; PR #61 carries everything.
