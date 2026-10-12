@@ -74,3 +74,34 @@ export function outboxPinFor(storedId: string | undefined): string {
   if (!storedId) return ''
   return storedId.startsWith('new:') ? '' : storedId
 }
+
+/** What flushOutbox should do with one outbox item (BH-000019).
+ *  - 'origin'  — the chat the text was COMPOSED in is still tracked under its
+ *    own live/temp id (an optimistic new-chat window that never left the
+ *    screen): resolve through THAT window, never the flush-time active chat.
+ *  - 'pinned'  — a real stored id pin (BUG-008): deliver to that chat,
+ *    resuming it quietly if no live entry tracks it.
+ *  - 'active'  — legacy unpinned contract: whichever chat is active at flush
+ *    time (a swept window, a restarted app, a pre-origin install). */
+export type OutboxTarget =
+  | { kind: 'origin'; id: string }
+  | { kind: 'pinned'; storedId: string }
+  | { kind: 'active' }
+
+/**
+ * Pure routing decision for one outbox item, so the truth table lives in
+ * test-queue.ts. `sessionsByIdKeys` is the CURRENT key set of the session
+ * map — an origin id that no longer names a tracked window (swept by a newer
+ * newChat, re-keyed by its own successful create, or lost to a restart)
+ * falls back to the pinned/unpinned contract instead of a dead reference.
+ */
+export function outboxTargetFor(
+  item: { storedId?: string; originId?: string },
+  sessionsByIdKeys: ReadonlySet<string>,
+): OutboxTarget {
+  if (item.originId && sessionsByIdKeys.has(item.originId)) {
+    return { kind: 'origin', id: item.originId }
+  }
+  if (item.storedId) return { kind: 'pinned', storedId: item.storedId }
+  return { kind: 'active' }
+}

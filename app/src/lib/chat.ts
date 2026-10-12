@@ -13,7 +13,8 @@ import { getActiveBot } from './fleet'
 import { sendQueue, peekQueued, removeQueued, clearSendQueue, queueFor, enqueueSend, type QueuedSend } from './sendQueue'
 import { extractMedia, isDataUrlPath, joinedTextOf, appendRefText, stripMediaFromText, mediaSegment } from './media'
 import { processAttachments, detachImages, type PendingAttachment } from './mediaSend'
-import { isGatewayTimeout, isUnconfirmedSubmit, outboxPinFor, shouldAutoRetry, UnconfirmedSubmitError } from './rpcRetry'
+import { isGatewayTimeout, isUnconfirmedSubmit, outboxPinFor, outboxTargetFor, shouldAutoRetry, UnconfirmedSubmitError } from './rpcRetry'
+import { migrateV1TranscriptWith } from './transcriptMigrate'
 // Type-only: erased at runtime, so chat.ts stays free of slash.ts's atom graph
 // (chat.ts already cannot load in plain node — react-native/AsyncStorage at
 // import time — and this keeps it that way).
@@ -188,10 +189,16 @@ const pendingBySession = atom<Record<string, PendingRequest[]>>({})
 /** Queued prompts that could not be sent yet (offline). */
 /** One outbox entry: text composed offline, pinned to the chat it was
  *  composed for (BUG-008). `storedId: ''` = legacy unpinned entry from an
- *  older install — flushed with the old active-chat contract. */
+ *  older install — flushed with the old active-chat contract.
+ *  `originId` (BH-000019) = the live/temp id of the chat the text was
+ *  COMPOSED in — for an optimistic new-chat window the pseudo stored id is
+ *  unpinnable (BH-000018), so this is the only record of which chat the
+ *  text belongs to; a flush routes through it while the window still
+ *  exists (see outboxTargetFor). */
 export interface OutboxItem {
   storedId: string
   text: string
+  originId?: string
 }
 export const outbox = atom<OutboxItem[]>([])
 
@@ -632,45 +639,15 @@ async function persistSession(s: SessionState) {
 }
 
 /**
- * One-time v1→v2 migration, run lazily when a v2 read misses. v1 blobs were
- * keyed two ways: by a LIVE id (which rotates on every resume — one stored
- * chat routinely has several v1 keys of different vintages, the FRESHEST
- * under the most recently mapped live id) and, from an interim build, by the
- * stored id itself. Scan newest-first so a stale vintage never paints over
- * the last one written, and remove EVERY v1 key mapped to this stored id.
- * Pairs that fell out of the 200-entry map cap are unreachable junk —
- * bounded and best-effort by design (no key enumeration API is in use).
+ * One-time v1→v2 migration, run lazily when a v2 read misses. The sweep
+ * itself lives node-safe in transcriptMigrate.ts (pinned in
+ * scripts/test-queue.ts); Pairs that fell out of the 200-entry map cap are
+ * unreachable junk — bounded and best-effort by design (no key enumeration
+ * API is in use).
  */
 async function migrateV1Transcript(storedId: string): Promise<string | null> {
   if (!storedIdMapLoaded) await loadStoredIdMap()
-  try {
-    // Interim-build key: stored-keyed but still .v1 — freshest format.
-    const interim = await AsyncStorage.getItem(transcriptKey(storedId))
-    if (interim) {
-      await AsyncStorage.setItem(transcriptV2Key(storedId), interim)
-      await AsyncStorage.removeItem(transcriptKey(storedId))
-      return interim
-    }
-    // Legacy: keyed by a live id that has since rotated. storedIdMap appends
-    // per resume, so the LAST pair mapping here holds the newest write.
-    const lives = Object.entries(storedIdMap)
-      .filter(([, st]) => st === storedId)
-      .map(([live]) => live)
-      .reverse()
-    let found: string | null = null
-    for (const live of lives) {
-      const raw = await AsyncStorage.getItem(transcriptKey(live))
-      if (raw) {
-        found = raw
-        await AsyncStorage.setItem(transcriptV2Key(storedId), raw)
-        break
-      }
-    }
-    for (const live of lives) await AsyncStorage.removeItem(transcriptKey(live))
-    return found
-  } catch {
-    return null
-  }
+  return migrateV1TranscriptWith(AsyncStorage, storedId, { v1: transcriptKey, v2: transcriptV2Key }, storedIdMap)
 }
 
 /** Load a cached transcript for a chat we have no messages for yet. Takes
@@ -801,12 +778,12 @@ async function persistOutbox() {
   }
 }
 
-function enqueueOffline(text: string, storedId = '') {
+function enqueueOffline(text: string, storedId = '', originId?: string) {
   // BH-000018: never pin to a pseudo stored id (`new:…`) — flushOutbox can
   // neither match a live entry for one nor resume it, so a pseudo-pinned
   // item sat undeliverable forever. Fall back to the unpinned contract.
   const pin = outboxPinFor(storedId)
-  outbox.set([...outbox.get(), { storedId: pin, text }].slice(0, MAX_OUTBOX))
+  outbox.set([...outbox.get(), { storedId: pin, text, ...(originId ? { originId } : {}) }].slice(0, MAX_OUTBOX))
   void persistOutbox()
 }
 
@@ -820,12 +797,19 @@ export async function loadOutbox() {
         // pinned `OutboxItem[]` entries. Pins to pseudo `new:` ids (written
         // before the BH-000018 fix) normalize to unpinned here, so an
         // upgraded install can never carry a forever-undeliverable item.
+        // BH-000019's `originId` survives the reload (it is a live/temp id —
+        // after a restart nothing tracks it and outboxTargetFor falls back).
         const items: OutboxItem[] = []
         for (const x of list) {
           if (typeof x === 'string') items.push({ storedId: '', text: x })
           else if (x && typeof x === 'object' && typeof (x as { text?: unknown }).text === 'string') {
             const rawStored = (x as { storedId?: unknown }).storedId
-            items.push({ storedId: outboxPinFor(typeof rawStored === 'string' ? rawStored : undefined), text: (x as { text: string }).text })
+            const rawOrigin = (x as { originId?: unknown }).originId
+            items.push({
+              storedId: outboxPinFor(typeof rawStored === 'string' ? rawStored : undefined),
+              text: (x as { text: string }).text,
+              ...(typeof rawOrigin === 'string' && rawOrigin ? { originId: rawOrigin } : {}),
+            })
           }
         }
         outbox.set(items.slice(0, MAX_OUTBOX))
@@ -855,22 +839,50 @@ export async function flushOutbox(): Promise<void> {
     const [item, ...rest] = outbox.get()
     outbox.set(rest)
     await persistOutbox()
+    // BH-000019: the flush catch below decides "did sendPrompt already
+    // re-enqueue this text?" by snapshot — an origin-routed send that fails
+    // re-enqueues under the chat's REAL stored id (not this item's pin), so
+    // the old same-storedId check missed it and re-added the item too,
+    // double-delivering the text.
+    const beforeCount = outbox.get().length
     try {
-      if (item.storedId) {
+      // BH-000019: route through the chat the text was COMPOSED in whenever
+      // that window/session is still tracked — an unpinned item from an
+      // optimistic new-chat window used to flush through ensureSession()
+      // against the flush-time ACTIVE chat, so text typed in window B landed
+      // in chat A while B kept the stale 'failed' row.
+      const target = outboxTargetFor(item, new Set(Object.keys(sessionsById.get())))
+      let deliveredVia = ''
+      if (target.kind === 'origin') {
+        const state = sessionsById.get()[target.id]
+        if (state?.provisional) {
+          // The window is still provisional: resolve through ITS keyed
+          // create (starting one if none is in flight), then send pinned to
+          // the fresh live id — never the active chat.
+          const sid = await createForWindow(target.id)
+          await sendPrompt(item.text, { session: sid })
+          deliveredVia = sid
+        } else {
+          // A live (non-provisional) origin entry: the exact chat it was
+          // composed in, by live id.
+          await sendPrompt(item.text, { session: target.id })
+          deliveredVia = target.id
+        }
+      } else if (target.kind === 'pinned') {
         // Pinned (BUG-008): deliver to the chat it was composed for, never
         // to whichever chat happens to be active at flush time.
-        const live = Object.values(sessionsById.get()).find((s) => s.storedId === item.storedId)?.id
+        const live = Object.values(sessionsById.get()).find((s) => s.storedId === target.storedId)?.id
         if (live) {
           await sendPrompt(item.text, { session: live })
         } else {
           // Not tracked (cold boot / evicted handle): a quiet resume brings
           // the handle back; a not-found answer means the chat is gone.
           try {
-            const fresh = await resumeShared(item.storedId)
+            const fresh = await resumeShared(target.storedId)
             await sendPrompt(item.text, { session: fresh.sessionId })
           } catch (resumeErr) {
             if (!isSessionNotFound(resumeErr)) throw resumeErr
-            log('warn', 'chat', `outbox item dropped — chat ${item.storedId} no longer exists`)
+            log('warn', 'chat', `outbox item dropped — chat ${target.storedId} no longer exists`)
           }
         }
       } else {
@@ -878,7 +890,11 @@ export async function flushOutbox(): Promise<void> {
       }
       // The stale 'failed' row from the original offline failure would
       // duplicate the freshly delivered message — drop it (BUG-008).
-      dropMatchingFailedRow(item.storedId, item.text)
+      // BH-000019: an origin-routed delivery re-keys the composing window
+      // onto the real session (carrying its failed row along), so clean up
+      // by the LIVE id we delivered through, not just the stored-id match
+      // (an unpinned item's storedId is '' and matches nothing).
+      dropMatchingFailedRow(item.storedId, item.text, deliveredVia || undefined)
     } catch (err) {
       // sendPrompt's offline path re-enqueued the failed item; if it threw
       // for a reason that did NOT re-enqueue (e.g. the pinned guard), put
@@ -889,7 +905,7 @@ export async function flushOutbox(): Promise<void> {
       // a re-enqueued copy would silently fire again on the next flush.
       if (
         shouldAutoRetry('submit', err) &&
-        !outbox.get().some((x) => x.text === item.text && x.storedId === item.storedId)
+        !(outbox.get().length > beforeCount && outbox.get().some((x) => x.text === item.text))
       ) {
         outbox.set([...outbox.get(), item].slice(0, MAX_OUTBOX))
         void persistOutbox()
@@ -900,9 +916,13 @@ export async function flushOutbox(): Promise<void> {
 }
 
 /** Remove the first failed user row matching a just-flushed outbox item so
- *  the transcript doesn't show the text twice (failed row + sent row). */
-function dropMatchingFailedRow(storedId: string, text: string) {
-  const entry = Object.values(sessionsById.get()).find((s) => s.storedId === storedId)
+ *  the transcript doesn't show the text twice (failed row + sent row).
+ *  `liveId` (BH-000019) matches the entry an origin-routed delivery just
+ *  delivered through — the composing window's failed row re-keyed onto it —
+ *  which a storedId of '' (unpinned pseudo-composed item) can never name. */
+function dropMatchingFailedRow(storedId: string, text: string, liveId?: string) {
+  const map = sessionsById.get()
+  const entry = (liveId ? map[liveId] : undefined) ?? Object.values(map).find((s) => s.storedId === storedId)
   if (!entry) return
   const idx = entry.messages.findIndex((m) => m.role === 'user' && m.status === 'failed' && m.text === text)
   if (idx < 0) return
@@ -1220,15 +1240,7 @@ export async function ensureSession(opts?: { create?: boolean }): Promise<string
       // BH-000018: reuse only THIS window's in-flight create (keyed by its
       // temp id) — the old global made a send in a second new-chat window
       // resolve to (and land in) the first window's session.
-      const existing = inflightCreates.get(current)
-      if (existing) return await existing
-      const tempId = current
-      const pseudo = state.storedId
-      const p = runNewChat(tempId, pseudo).finally(() => {
-        if (inflightCreates.get(tempId) === p) inflightCreates.delete(tempId)
-      })
-      inflightCreates.set(tempId, p)
-      return await p
+      return await createForWindow(current)
     }
     // A released session still has a usable stored id — bring it back rather
     // than letting the next send fail against a dead handle.
@@ -1310,6 +1322,21 @@ export async function activeLiveId(): Promise<string> {
 // window's create must never be adopted), and each entry removes itself in
 // its create's finally.
 const inflightCreates = new Map<string, Promise<string>>()
+
+/** Get-or-start THIS provisional window's keyed create — the single seam
+ *  both ensureSession and the outbox flush's origin routing (BH-000019)
+ *  resolve through, so nothing can adopt another window's create or mint a
+ *  second one for a window that already has one in flight. */
+function createForWindow(tempId: string): Promise<string> {
+  const existing = inflightCreates.get(tempId)
+  if (existing) return existing
+  const pseudo = sessionsById.get()[tempId]?.storedId ?? ''
+  const p = runNewChat(tempId, pseudo).finally(() => {
+    if (inflightCreates.get(tempId) === p) inflightCreates.delete(tempId)
+  })
+  inflightCreates.set(tempId, p)
+  return p
+}
 
 /**
  * New chat, optimistically: the screen swaps to a placeholder THIS tick and
@@ -1799,7 +1826,10 @@ export async function sendPrompt(
       }
       // Queue full — fall through to the outbox so the text still survives.
     }
-    enqueueOffline(text, lockedStored ?? '')
+    // BH-000019: record the chat the text was COMPOSED in (the lock key is
+    // the pinned session or the active one) so a later flush routes through
+    // it while that window/session is still tracked.
+    enqueueOffline(text, lockedStored ?? '', lockKey === '_boot' ? undefined : lockKey)
     return
   }
   sendingSessions.add(lockKey)
@@ -1863,7 +1893,10 @@ export async function sendPrompt(
       }
       // BUG-008: re-enqueue pinned to the chat the send was bound for, so a
       // later flush delivers it HERE and not to whichever chat is active.
-      enqueueOffline(text, t0?.storedId ?? '')
+      // BH-000019: `target` (the provisional window's temp id included) is
+      // the origin — the pseudo stored id is unpinnable, but the window is
+      // still tracked and a flush can route through its own keyed create.
+      enqueueOffline(text, t0?.storedId ?? '', target ?? undefined)
       throw err
     }
 
