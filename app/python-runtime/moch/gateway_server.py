@@ -174,6 +174,8 @@ def _run_server(port: int) -> None:
             except Exception:
                 pass
 
+        _warm_waiters = set()
+
         def _browser_tools_ready() -> bool:
             """True when browser_navigate resolves in a FRESH catalog build."""
             try:
@@ -199,6 +201,27 @@ def _run_server(port: int) -> None:
                 if _browser_tools_ready():
                     _warm_rearm()
                     print("[moch] browser toolset warm", flush=True)
+                    # Auto-continue: every session that asked during the window
+                    # gets ONE short continuation turn — the user's original
+                    # request is already in the agent's context, so this is a
+                    # single cheap prompt, submitted through the same queue the
+                    # app uses (safe if a turn is still running).
+                    for _sid in list(_warm_waiters):
+                        _warm_waiters.discard(_sid)
+                        try:
+                            _note_upstream(
+                                {
+                                    "jsonrpc": "2.0",
+                                    "id": "moch-warm-" + _sid,
+                                    "method": "prompt.submit",
+                                    "params": {
+                                        "session_id": _sid,
+                                        "text": "[SYSTEM: The in-app browser is now ready. Carry out the user's earlier browser request now.]",
+                                    },
+                                }
+                            )
+                        except Exception:
+                            pass
                     return
                 try:
                     from model_tools import _clear_tool_defs_cache as _clr
@@ -208,6 +231,15 @@ def _run_server(port: int) -> None:
                     pass
                 _time.sleep(15)
 
+        def _import_prewarm() -> None:
+            # First-import cost at boot, not mid-request (Tier A bundle).
+            for _mod in ("edge_tts", "PIL.Image", "aiohttp"):
+                try:
+                    __import__(_mod)
+                except Exception:
+                    pass
+
+        threading.Thread(target=_import_prewarm, name="moch-import-prewarm", daemon=True).start()
         _prewarm = threading.Thread(target=_prewarm_browser, name="moch-browser-prewarm", daemon=True)
         _prewarm.start()
 
@@ -220,13 +252,35 @@ def _run_server(port: int) -> None:
                     params = req.get("params") or {}
                     text = str(params.get("text") or "")
                     if text and not text.startswith("["):
+                        _sid = str(params.get("session_id") or "")
+                        if _sid:
+                            _warm_waiters.add(_sid)
                         params["text"] = (
-                            "[SYSTEM: The in-app browser is still starting up — it becomes available "
-                            "a minute or two after the app launches. If the user is asking you to open "
-                            "or browse a web page, tell them the browser will be ready shortly and to "
-                            "send the request again in a minute. Do NOT use terminal curl as a "
-                            "replacement for browsing.]\n\n"
+                            "[SYSTEM: The in-app browser is still starting up (a minute or two after "
+                            "the app launches). If the user is asking you to open or browse a web "
+                            "page, tell them you will CONTINUE AUTOMATICALLY the moment the browser "
+                            "is ready — they do NOT need to resend or do anything; you will pick the "
+                            "task back up yourself shortly. Keep the reply to one short sentence. Do "
+                            "NOT use terminal curl as a replacement for browsing.]\n\n"
                         ) + text
+                        # Surface the wait: the app already renders attention
+                        # notices for sessions (toasts + the hermes-alerts
+                        # knock), so the gap between this turn and the
+                        # auto-continue is not a silent dead end.
+                        try:
+                            _notice_sid = str(params.get("session_id") or "")
+                            if _notice_sid:
+                                _tg_server._emit(
+                                    "status.update",
+                                    _notice_sid,
+                                    {
+                                        "busy": True,
+                                        "waiting_for": "browser",
+                                        "note": "Warming up the browser — Moch will continue automatically",
+                                    },
+                                )
+                        except Exception:
+                            pass
             except Exception:
                 pass
             return _note_upstream(req, transport)

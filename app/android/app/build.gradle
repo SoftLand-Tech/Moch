@@ -111,8 +111,8 @@ android {
         // See embedded/EXEC-DESIGN.md §1/§4.2. The raise and the loader
         // fix ship together in this versionCode.
         targetSdkVersion 36
-        versionCode 17
-        versionName "1.0.14-bots"
+        versionCode 18
+        versionName "1.0.15-browser"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -198,9 +198,22 @@ chaquopy {
             // plus the Chaquopy-prebuilt psutil land here — see
             // embedded/build-android-wheels.sh.
             options("--find-links", "../../wheels-android")
+            // Chaquopy's prebuilt Android wheel repo — required for compiled
+            // deps (aiohttp chain, Pillow) that have no PyPI Android wheels.
+            options("--extra-index-url", "https://chaquo.com/pypi-13.1")
             // Exact import closure of the vendored hermes runtime (M2);
             // psutil is the only native build. jiter deferred to M3.
             install("-r", "../../python-runtime/requirements-embedded.txt")
+            // BUG-132 cold-window closers (Tier A, ~+1.2MB): the on-device
+            // warm-up retried these every boot — edge-tts is pure-python but
+            // its aiohttp dep is compiled and only exists as a Chaquopy
+            // prebuilt, so a runtime PyPI install can NEVER succeed on
+            // Android. Bundling kills the churn and enables TTS + vision
+            // resize. (Pillow 11 = newest prebuilt; the 12.3.0 lazy pin never
+            // fires because the import succeeds.)
+            install("edge-tts==7.2.7")
+            install("aiohttp==3.10.10")
+            install("Pillow==11.0.0")
         }
     }
     sourceSets {

@@ -78,6 +78,12 @@ def _prepare_home(home: Path) -> None:
     optional_mcps = home / "optional-mcps"
     optional_mcps.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("HERMES_OPTIONAL_MCPS", str(optional_mcps))
+
+    # BUG-132: every not-yet-bundled lazy feature would otherwise spawn a
+    # runtime pip subprocess that can only fail on Android (compiled deps have
+    # no PyPI wheels) — the prewarm loop's catalog rebuilds retried it on every
+    # boot. With Tier A bundled (edge-tts/aiohttp/Pillow), fail FAST instead.
+    os.environ.setdefault("HERMES_DISABLE_LAZY_INSTALLS", "1")
     # Moch Linux: if the guest is installed, its shim dir goes AHEAD of the
     # system paths so every `sh`/`bash` resolution lands in the guest. Before
     # install the dir doesn't exist and the entry is inert.

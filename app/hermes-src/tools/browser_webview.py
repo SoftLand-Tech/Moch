@@ -300,6 +300,462 @@ def webview_press(key: str, task_id: Optional[str] = None) -> str:
     return _action(sup, js, "press")
 
 
+# ── Tabs ────────────────────────────────────────────────────────────────────
+#
+# Endpoint reality this section is written against (CdpRelay.kt):
+#   - GET /json/list        → the relay filters it to the ACTIVE tab only (at
+#     most ONE page advertised; plain desktop DevTools returns every page).
+#   - /json/new, /json/close, /json/activate → the relay 405s all of them
+#     ("tab lifecycle is native-owned in Moch"): the RN Browser screen owns the
+#     tab strip, and closing/creating WebView targets behind its back would
+#     desync it. Plain DevTools serves them (PUT since Chrome ≥63).
+#   - Target.* over the supervisor socket → the WebView page socket rejects the
+#     Target domain (browser_supervisor._attach_initial_page skips it for
+#     exactly this reason), so CDP tab verbs are a desktop-only fallback.
+# The tools below therefore prefer the classic HTTP endpoints (the relay is an
+# HTTP proxy), fall back to Target.*, and fail with an honest, actionable error
+# when the backend owns neither path.
+
+
+def _normalize_tab_id(tab_id: Any) -> str:
+    """The bare target id a model should pass (``' "ABC123" '`` → ``ABC123``).
+
+    Same spirit as ``_normalize_ref``: models quote ids and pad them with
+    whitespace often enough that every plausible shape normalizes, and a format
+    miss is never reported as "unknown tab".
+    """
+    text = str(tab_id or "").strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+        text = text[1:-1].strip()
+    return text
+
+
+def _coerce_index(value: Any) -> Optional[int]:
+    """``value`` as a tab index when it plausibly is one (int, or a clean integer
+    string); None otherwise. Bools are ints in Python but never a tab index."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    text = str(value or "").strip()
+    if text and text.lstrip("+-").isdigit():
+        try:
+            return int(text)
+        except ValueError:  # pragma: no cover — isdigit() guards this
+            return None
+    return None
+
+
+def _resolve_tab(tabs: List[Dict[str, Any]], *, tab_id: Any = None, index: Any = None,
+                 active_id: Optional[str] = None, require_choice: bool = False) -> tuple:
+    """Pick the tab a close/switch call means, from ``browser_tab_list`` output.
+
+    Resolution order: explicit id → explicit index (int or integer string) → a
+    non-matching id retried as an index (models paste positions into ``tab_id``)
+    → the active tab. Returns ``(tab, None)`` or ``(None, error)``; with
+    ``require_choice`` (switch) the active-tab default is rejected so a switch
+    can never silently succeed as a no-op.
+    """
+    if tab_id is not None and index is not None:
+        return None, "pass either tab_id or index, not both"
+    wanted = _normalize_tab_id(tab_id)
+    if wanted:
+        for tab in tabs:
+            if tab.get("id") == wanted:
+                return tab, None
+    idx = _coerce_index(index) if index is not None else (_coerce_index(wanted) if wanted else None)
+    if idx is not None:
+        if not -len(tabs) <= idx < len(tabs):
+            return None, f"index {idx} is out of range (0..{len(tabs) - 1} for {len(tabs)} open tab(s))"
+        return tabs[idx], None
+    if wanted:
+        known = ", ".join(str(t.get("id", "?")) for t in tabs)
+        return None, f"unknown tab id '{wanted}' — open tabs: {known}"
+    if require_choice:
+        return None, "tab_id or index is required (browser_tab_list shows the open tabs)"
+    for tab in tabs:
+        if tab.get("id") == active_id:
+            return tab, None
+    return (tabs[0], None) if tabs else (None, "no open tabs")
+
+
+def _relay_http_root() -> str:
+    """``http://127.0.0.1:<port>/<token>`` (or the plain DevTools root) from the
+    configured CDP endpoint, ``""`` when none is configured."""
+    from tools.browser_supervisor import _http_probe_root
+
+    return _http_probe_root(os.environ.get("BROWSER_CDP_URL", "").strip()).rstrip("/")
+
+
+def _relay_http(path: str, *, verb: str = "GET", timeout: float = 5.0):
+    """One ``/json`` HTTP request against the configured endpoint; the
+    ``requests`` response. Raises on transport errors and when no endpoint is
+    configured — callers shape the error, like ``_relay_down_error`` does."""
+    import requests
+
+    from agent.proxy_bypass import loopback_request_kwargs
+
+    root = _relay_http_root()
+    if not root:
+        raise RuntimeError("no browser endpoint configured (BROWSER_CDP_URL is unset)")
+    url = f"{root}{path}"
+    return requests.request(verb, url, timeout=timeout, **loopback_request_kwargs(url))
+
+
+_NATIVE_OWNED_MARKER = "native-owned"  # the relay's 405 body for /json/new|close|activate
+
+
+def _relay_lifecycle(path: str):
+    """PUT-then-GET on a mutating ``/json`` endpoint: Chrome ≥63 demands PUT on
+    ``/json/new`` while older builds accept GET only. The Moch relay 405s both
+    verbs with the same body, so the retry is skipped when that marker is
+    present and the relay's own reason surfaces verbatim."""
+    response = _relay_http(path, verb="PUT")
+    if response.status_code != 405 or _NATIVE_OWNED_MARKER in (response.text or ""):
+        return response
+    return _relay_http(path, verb="GET")
+
+
+def _describe_http(response) -> str:
+    return f"HTTP {response.status_code}: {(response.text or '').strip()[:160]}"
+
+
+def _relay_filters_tabs() -> bool:
+    """True when the endpoint is the Moch relay (its ``/json/list`` advertises
+    only the ACTIVE tab). Best-effort — False on any probe failure."""
+    try:
+        response = _relay_http("/json/version")
+        response.raise_for_status()
+        return (response.json() or {}).get("Moch-Browser-Level") is False
+    except Exception:  # noqa: BLE001 — the filter note is an optimization
+        return False
+
+
+_TAB_BACKEND_NOTE = (
+    "The Moch relay advertises only the ACTIVE tab and deliberately 405s /json/new|close|activate "
+    "(tab lifecycle is owned by the app's Browser screen), and the WebView page socket rejects "
+    "Target.* — so only the active tab is visible and tab lifecycle needs app-side support. Use "
+    "browser_navigate in the current tab, or ask the user to open/close/switch tabs in the Browser screen."
+)
+
+
+def _tab_unavailable_error(what: str, attempts: List[str]) -> str:
+    """Honest composite error once every tab-lifecycle path has failed."""
+    return (
+        f"{what} failed on every available path — " + "; ".join(attempts) +
+        ". Tab lifecycle needs the app side: use browser_navigate in the current tab, or ask the "
+        "user to open/close/switch tabs in the Moch Browser screen."
+    )
+
+
+def _webview_tab_targets(task_id: Optional[str] = None) -> Dict[str, Any]:
+    """Enumerate open page tabs (``{id, title, url}``) + the active tab's id.
+
+    ``/json/list`` is authoritative for the ACTIVE tab (the relay filters it to
+    exactly that); ``Target.getTargets`` over the supervisor socket, when the
+    endpoint speaks it (desktop DevTools), widens the list to every open page —
+    the WebView page socket rejects ``Target.*``, so on device the active tab is
+    all that is visible. Raises RuntimeError when no path yields a tab list.
+    """
+    listed, list_error = [], None
+    try:
+        response = _relay_http("/json/list")
+        response.raise_for_status()
+        listed = [t for t in (response.json() or []) if isinstance(t, dict) and t.get("type", "page") == "page"]
+    except Exception as exc:  # noqa: BLE001 — the Target.* fallback may still enumerate
+        list_error = exc
+
+    gathered, cdp_error = [], None
+    sup = _supervisor(task_id)
+    if sup is not None:
+        try:
+            infos = _call(sup, "Target.getTargets", timeout=8.0).get("targetInfos") or []
+            gathered = [t for t in infos if isinstance(t, dict) and t.get("type") == "page"]
+        except Exception as exc:  # noqa: BLE001 — the HTTP list alone is still usable
+            cdp_error = exc
+
+    if not listed and not gathered:
+        if list_error is not None:
+            detail = f"; Target.getTargets: {cdp_error}" if cdp_error is not None else ""
+            raise RuntimeError(f"listing tabs failed: {list_error}{detail}")
+        raise RuntimeError("no open page tabs (open the Moch Browser screen, or navigate first)")
+
+    tabs: List[Dict[str, Any]] = []
+    seen = set()
+    for raw in listed + gathered:
+        tab_id = str(raw.get("id") or raw.get("targetId") or "").strip()
+        if not tab_id or tab_id in seen:
+            continue
+        seen.add(tab_id)
+        tabs.append({"id": tab_id, "title": str(raw.get("title") or ""), "url": str(raw.get("url") or "")})
+    active_id = str(listed[0].get("id") or "").strip() if listed else None
+    note = _TAB_BACKEND_NOTE if _relay_filters_tabs() and (cdp_error is not None or sup is None) else None
+    return {"tabs": tabs, "active_id": active_id, "note": note}
+
+
+def _http_tab_op(path: str) -> tuple:
+    """``(ok, detail)`` for one /json lifecycle call over HTTP."""
+    try:
+        response = _relay_lifecycle(path)
+    except Exception as exc:  # noqa: BLE001 — a dead transport is an answer
+        return False, str(exc)
+    if response.status_code == 200:
+        return True, ""
+    return False, _describe_http(response)
+
+
+def _cdp_tab_op(sup, method: str, params: Dict[str, Any]) -> tuple:
+    """``(ok, detail)`` for one Target.* fallback command via the supervisor."""
+    try:
+        _call(sup, method, params, timeout=10.0)
+        return True, ""
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+
+
+def _activate_tab(tab_id: str, task_id: Optional[str] = None) -> tuple:
+    """Make ``tab_id`` the active tab: /json/activate (HTTP) then Target.activateTarget."""
+    ok, detail = _http_tab_op(f"/json/activate/{tab_id}")
+    if ok:
+        return True, ""
+    sup = _supervisor(task_id)
+    if sup is not None:
+        cdp_ok, cdp_detail = _cdp_tab_op(sup, "Target.activateTarget", {"targetId": tab_id})
+        if cdp_ok:
+            return True, ""
+        detail += f"; Target.activateTarget: {cdp_detail}"
+    return False, detail
+
+
+def _focus_supervisor_origin(sup, url: str) -> None:
+    """Best-effort ``focus_page`` onto ``url``'s origin: endpoints whose
+    ``/devtools/browser`` does not re-resolve to the active page (plain desktop
+    DevTools attaches the FIRST target) need the hint. Skipped when the URL has
+    no origin to match (about:blank)."""
+    if not url:
+        return
+    try:
+        from agent.vault_store import normalize_origin
+
+        sup.focus_page(normalize_origin(url))
+    except Exception:  # noqa: BLE001 — a missed focus only snapshots the old tab
+        pass
+
+
+def _resync_supervisor(task_id: Optional[str], *, prefer_url: str = "") -> None:
+    """Restart the task's supervisor so a fresh ``/devtools/browser`` connect
+    re-resolves to the NOW-active page — the relay pins the page per CONNECT
+    ("a later tab switch means a new supervisor connect"), so an activation only
+    reaches later tools after a reconnect. No-op when nothing is attached."""
+    from tools.browser_supervisor import SUPERVISOR_REGISTRY
+
+    key = task_id or "default"
+    sup = SUPERVISOR_REGISTRY.get(key)
+    if sup is None:
+        return
+    cdp_url = sup.cdp_url
+    SUPERVISOR_REGISTRY.stop(key)
+    sup = SUPERVISOR_REGISTRY.get_or_start(task_id=key, cdp_url=cdp_url)
+    _focus_supervisor_origin(sup, prefer_url)
+
+
+def _ensure_or_resync_supervisor(task_id: Optional[str], *, prefer_url: str = "") -> None:
+    """Attach a supervisor when none exists (first browser tool of the turn —
+    same dance as ``webview_navigate``), else reconnect to the active page."""
+    if _supervisor(task_id) is None:
+        from tools.browser_tool_cdp import _ensure_cdp_supervisor
+
+        _ensure_cdp_supervisor(task_id or "default")
+        sup = _supervisor(task_id)
+        if sup is not None:
+            _focus_supervisor_origin(sup, prefer_url)
+        return
+    _resync_supervisor(task_id, prefer_url=prefer_url)
+
+
+def _poll_tabs_after_close(closed_id: str, timeout: float = 4.0) -> Optional[List[Dict[str, Any]]]:
+    """Fresh /json/list page entries once ``closed_id`` is gone — DevTools closes
+    targets asynchronously, so the id lingers in an immediate re-list. None on
+    timeout or transport failure; the caller falls back to the pre-close list."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            response = _relay_http("/json/list")
+            response.raise_for_status()
+            entries = [t for t in (response.json() or []) if isinstance(t, dict) and t.get("type", "page") == "page"]
+            if all(str(t.get("id") or t.get("targetId") or "").strip() != closed_id for t in entries):
+                return [
+                    {"id": str(t.get("id") or t.get("targetId") or "").strip(),
+                     "title": str(t.get("title") or ""), "url": str(t.get("url") or "")}
+                    for t in entries
+                ]
+        except Exception:  # noqa: BLE001 — transient; keep polling to the deadline
+            pass
+        time.sleep(0.3)
+    return None
+
+
+def _poll_new_tab(new_id: str, url: str, task_id: Optional[str], timeout: float = 5.0) -> Dict[str, Any]:
+    """Best-effort readback of a freshly created tab: DevTools fills the target's
+    url/title asynchronously, so wait (bounded) for the URL to leave about:blank
+    and a title to arrive. Returns the freshest entry seen (or id+requested url)."""
+    tab = {"id": new_id, "title": "", "url": url}
+    if url.rstrip("/") == "about:blank":
+        return tab
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            entry = next((t for t in _webview_tab_targets(task_id)["tabs"] if t["id"] == new_id), None)
+            if entry is not None:
+                tab = entry
+                if entry.get("url") not in ("", "about:blank") and entry.get("title"):
+                    break
+        except Exception:  # noqa: BLE001 — readback is an optimization
+            break
+        time.sleep(0.4)
+    return tab
+
+
+def webview_tab_list(task_id: Optional[str] = None) -> str:
+    """Open tabs as ``[{id, title, url, active}]`` — the active tab is marked."""
+    try:
+        data = _webview_tab_targets(task_id)
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"success": False, "error": _relay_down_error() or f"tab list failed: {exc}"})
+    tabs = [{**tab, "active": tab["id"] == data["active_id"]} for tab in data["tabs"]]
+    response: Dict[str, Any] = {"success": True, "tabs": tabs, "count": len(tabs)}
+    if data["note"]:
+        response["note"] = data["note"]
+    return json.dumps(response)
+
+
+def webview_tab_create(url: str, task_id: Optional[str] = None) -> str:
+    """Open a NEW tab at ``url`` (HTTP /json/new, Target.createTarget fallback)
+    and make it the active tab."""
+    import urllib.parse
+
+    url = (url or "").strip()
+    if not url:
+        return json.dumps({"success": False, "error": "url is required (e.g. 'https://example.com')"})
+    quoted = urllib.parse.quote(url, safe=":/?&=%#")
+    attempts: List[str] = []
+    new_id = ""
+    try:
+        response = _relay_lifecycle(f"/json/new?{quoted}")
+        if response.status_code == 200:
+            payload = response.json() or {}
+            new_id = str(payload.get("id") or payload.get("targetId") or "").strip()
+        else:
+            attempts.append(f"/json/new: {_describe_http(response)}")
+    except Exception as exc:  # noqa: BLE001 — the Target.* fallback gets its turn
+        attempts.append(f"/json/new: {exc}")
+    if not new_id:
+        sup = _supervisor(task_id)
+        if sup is None:
+            attempts.append("Target.createTarget: no attached browser page")
+        else:
+            try:
+                created = _call(sup, "Target.createTarget", {"url": url}, timeout=15.0)
+                new_id = str((created or {}).get("targetId") or "").strip()
+                if not new_id:
+                    attempts.append("Target.createTarget: no targetId in the result")
+            except Exception as exc:  # noqa: BLE001
+                attempts.append(f"Target.createTarget: {exc}")
+    if not new_id:
+        return json.dumps({"success": False, "error": _tab_unavailable_error("opening a new tab", attempts)})
+    _activate_tab(new_id, task_id)  # best effort — some backends open tabs foregrounded
+    try:
+        _ensure_or_resync_supervisor(task_id, prefer_url=url)
+    except Exception as exc:  # noqa: BLE001 — the tab exists; attach trouble becomes a note
+        return json.dumps({"success": True, "tab": {"id": new_id, "title": "", "url": url}, "url": url,
+                           "note": f"tab opened, but re-attaching the browser to it failed: {exc}"})
+    tab = _poll_new_tab(new_id, url, task_id)
+    return json.dumps({"success": True, "tab": tab, "url": tab.get("url") or url, "title": tab.get("title", "")})
+
+
+def webview_tab_close(tab_id: Optional[str] = None, task_id: Optional[str] = None) -> str:
+    """Close the given tab (or the active one). NEVER the last remaining tab."""
+    try:
+        data = _webview_tab_targets(task_id)
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"success": False, "error": _relay_down_error() or f"tab close failed: {exc}"})
+    tab, error = _resolve_tab(data["tabs"], tab_id=tab_id, active_id=data["active_id"])
+    if error is not None:
+        return json.dumps({"success": False, "error": f"tab close failed: {error}"})
+    if len(data["tabs"]) <= 1:
+        return json.dumps({
+            "success": False,
+            "error": "refusing to close the last remaining tab — the browser must always keep one "
+                     "tab open; navigate it elsewhere with browser_navigate instead",
+        })
+    closed_active = tab["id"] == data["active_id"]
+    ok, detail = _http_tab_op(f"/json/close/{tab['id']}")
+    if not ok:
+        sup = _supervisor(task_id)
+        if sup is None:
+            cdp_ok, cdp_detail = False, "no attached browser page"
+        else:
+            cdp_ok, cdp_detail = _cdp_tab_op(sup, "Target.closeTarget", {"targetId": tab["id"]})
+        if not cdp_ok:
+            return json.dumps({"success": False, "error": _tab_unavailable_error(
+                f"closing tab {tab['id']}", [f"/json/close: {detail}", f"Target.closeTarget: {cdp_detail}"])})
+    remaining = _poll_tabs_after_close(tab["id"])
+    if remaining is None:
+        remaining = [t for t in data["tabs"] if t["id"] != tab["id"]]
+    if closed_active and remaining:
+        survivor = next((t for t in remaining if t["id"] != tab["id"]), None)
+        if survivor is not None:
+            _activate_tab(survivor["id"], task_id)  # best effort — never leave nothing active
+            try:
+                _resync_supervisor(task_id, prefer_url=survivor.get("url") or "")
+            except Exception:  # noqa: BLE001 — the close worked; the next tool re-attaches
+                pass
+    return json.dumps({"success": True, "closed": tab["id"], "tabs_remaining": len(remaining)})
+
+
+def _same_page(a: str, b: str) -> bool:
+    """Origin-level match of two page URLs (paths drift through redirects)."""
+    from urllib.parse import urlsplit
+
+    pa, pb = urlsplit(a or ""), urlsplit(b or "")
+    return bool(pa.netloc) and (pa.scheme, pa.netloc) == (pb.scheme, pb.netloc)
+
+
+def webview_tab_switch(tab_id: Optional[str] = None, index: Any = None, task_id: Optional[str] = None) -> str:
+    """Activate the tab named by ``tab_id`` or 0-based ``index`` and snapshot it,
+    so the model sees the page it switched to."""
+    try:
+        data = _webview_tab_targets(task_id)
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"success": False, "error": _relay_down_error() or f"tab switch failed: {exc}"})
+    tab, error = _resolve_tab(data["tabs"], tab_id=tab_id, index=index,
+                              active_id=data["active_id"], require_choice=True)
+    if error is not None:
+        return json.dumps({"success": False, "error": f"tab switch failed: {error}"})
+    ok, detail = _activate_tab(tab["id"], task_id)
+    if not ok:
+        return json.dumps({"success": False,
+                           "error": _tab_unavailable_error(f"activating tab {tab['id']}", [detail])})
+    response: Dict[str, Any] = {"success": True, "tab": tab}
+    try:
+        _ensure_or_resync_supervisor(task_id, prefer_url=tab.get("url") or "")
+    except Exception as exc:  # noqa: BLE001 — activation worked; say what is missing
+        response["note"] = f"tab activated, but re-attaching the browser to it failed: {exc}"
+        return json.dumps(response)
+    snapshot = json.loads(webview_snapshot(task_id))
+    if snapshot.get("success"):
+        response["snapshot"] = snapshot.get("snapshot", "")
+        snap_url = next((line[5:].strip() for line in str(snapshot.get("snapshot") or "").splitlines()
+                         if line.startswith("URL: ")), "")
+        if snap_url and tab.get("url") and not _same_page(snap_url, tab["url"]):
+            # The attachment kept the previous tab (e.g. an origin-less URL like
+            # about:blank cannot be focused on plain desktop DevTools).
+            response["note"] = f"snapshot shows {snap_url} — the browser attachment may still be on the previous tab; retry browser_snapshot in a moment"
+    else:
+        response["note"] = f"tab activated, but snapshotting it failed: {snapshot.get('error', 'unknown error')}"
+    return json.dumps(response)
+
+
 def webview_console(clear: bool = False, task_id: Optional[str] = None) -> str:
     sup = _supervisor(task_id)
     if sup is None:
