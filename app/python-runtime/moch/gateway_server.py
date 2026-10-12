@@ -76,6 +76,87 @@ def _load_or_mint_token() -> str:
     return token
 
 
+# hermes' headless serve shim (web_server_dashboard.mount_spa under
+# HERMES_SERVE_HEADLESS=1) registers its root handshake on this catch-all path.
+_ROOT_SHIM_PATH = "/{full_path:path}"
+# Marker attr set on the replacement endpoint so re-runs recognise their own work.
+_ROOT_SHIM_MARKER = "_moch_root_shim_neutralized"
+
+
+def _neutralize_root_token_handshake(application: Any) -> bool:
+    """BUG-120 / GitHub #67 — stop the loopback root from serving the session token.
+
+    Under ``HERMES_SERVE_HEADLESS=1`` (set below, before the web_server import)
+    hermes' SPA mount answers unauthenticated ``GET /`` with an HTML page
+    embedding ``window.__HERMES_SESSION_TOKEN__=<the live gateway token>`` — a
+    desktop-Electron handshake (upstream #94227/#95575). No Moch consumer needs
+    it: the RN client gets the token over the JNI bridge
+    (``HermesBridge.getGateway``) and authenticates REST/WS via
+    ``X-Hermes-Session-Token`` / ``?token=``, never via HTTP-GET /. But this
+    gateway binds plain loopback TCP (127.0.0.1:9119), which every app on the
+    phone can reach — so that page handed the full hermes API to any
+    co-installed app (same threat model the browser relay is token-gated
+    against, FEATURE-BROWSER.md §Safety).
+
+    Fix = surgical route-table swap from the Moch side (hermes-src stays
+    pristine — the boot-time-patch convention of ``_tg_server._SlashWorker``
+    and the dispatch wrapper below): remove the shim's catch-all GET route and
+    re-register the same path with an endpoint that ALWAYS returns the shim's
+    own no-token 404 JSON, so ``/`` answers exactly what every other unmatched
+    path answers. /api/* routes, public paths and the WS ``?token=`` handshake
+    are untouched — we do NOT set ``app.state.auth_required`` (gated mode
+    rejects the legacy ``?token=`` the RN client still uses).
+
+    Idempotent: on an already-neutralized app it only strips stray duplicate
+    shims and never registers a second replacement. Returns True when no
+    token-serving catch-all remains, False when the upstream shape changed
+    (warned, never raised — boot must not die here).
+    """
+    try:
+        routes = application.router.routes
+        matching = [
+            r for r in routes
+            if getattr(r, "path", None) == _ROOT_SHIM_PATH
+            and "GET" in (getattr(r, "methods", None) or ())
+        ]
+
+        def _ours(route: Any) -> bool:
+            return bool(getattr(getattr(route, "endpoint", None), _ROOT_SHIM_MARKER, False))
+
+        if any(_ours(r) for r in matching):
+            # Second run (or a double mount_spa): keep OUR replacement, drop
+            # any duplicate upstream shims, register nothing new.
+            routes[:] = [r for r in routes if r not in matching or _ours(r)]
+            return True
+        if not matching:
+            print(
+                f"[moch] WARNING BUG-120: headless root shim route {_ROOT_SHIM_PATH} not found "
+                "— GET / NOT neutralized (upstream web_server_dashboard changed shape?)",
+                flush=True,
+            )
+            return False
+        routes[:] = [r for r in routes if r not in matching]
+
+        from fastapi.responses import JSONResponse
+
+        try:  # keep the 404 body identical to the shim's non-root reply
+            from hermes_cli.web_server_dashboard import _HEADLESS_MSG
+        except Exception:
+            _HEADLESS_MSG = "Headless backend (hermes serve): web UI disabled."
+
+        async def _moch_no_frontend(full_path: str):  # same signature as the shim
+            return JSONResponse({"error": _HEADLESS_MSG}, status_code=404)
+
+        setattr(_moch_no_frontend, _ROOT_SHIM_MARKER, True)
+        application.get(_ROOT_SHIM_PATH)(_moch_no_frontend)
+        print("[moch] BUG-120: root token handshake neutralized — GET / no longer serves the session token", flush=True)
+        return True
+    except Exception:
+        print("[moch] WARNING BUG-120: root token handshake neutralization failed:", flush=True)
+        traceback.print_exc()
+        return False
+
+
 def _run_server(port: int) -> None:
     try:
         # Automations/slash commands: hermes spawns a child interpreter for
@@ -305,7 +386,11 @@ def _run_server(port: int) -> None:
             _tg_server.dispatch = _moch_note_dispatch
             _tg_server._moch_note_installed = True
 
-        from hermes_cli.web_server import start_server
+        from hermes_cli.web_server import app as _web_app, start_server
+
+        # BUG-120/#67: strip the headless root shim's token page BEFORE the
+        # first request can arrive (never raises; see the neutralizer).
+        _neutralize_root_token_handshake(_web_app)
 
         start_server(host="127.0.0.1", port=port, open_browser=False, headless=True)
     except BaseException:  # noqa: BLE001 — thread boundary; recorded in state
