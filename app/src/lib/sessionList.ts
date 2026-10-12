@@ -51,7 +51,7 @@ export const runningStoredIds = atom<ReadonlySet<string>>(new Set())
  */
 export async function refreshRunningSessions(): Promise<void> {
   try {
-    const res = await rpc<{ sessions?: ActiveListSession[] }>('session.active_list', {})
+    const res = await sessionRpc<{ sessions?: ActiveListSession[] }>('session.active_list', {})
     runningStoredIds.set(joinRunningSessions(res?.sessions, sessionRows.get()))
   } catch (err) {
     log('info', 'sessions', `session.active_list failed: ${err instanceof Error ? err.message : String(err)}`)
