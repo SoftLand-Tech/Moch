@@ -605,6 +605,59 @@ BROWSER_TOOL_SCHEMAS = [
             "required": []
         }
     },
+    {
+        "name": "browser_tab_list",
+        "description": "List the browser's open tabs: id, title and url of each, with the active tab marked. Call this before browser_tab_switch/browser_tab_close to get the tab ids and positions. In the Moch embedded browser only the active tab may be visible (the app's Browser screen owns the tab strip) — the response says so in a note when that applies.",
+        "parameters": {
+            "type": "object", "properties": {}, "required": []
+        }
+    },
+    {
+        "name": "browser_tab_create",
+        "description": "Open a new browser tab at the given URL and make it the active tab. The new tab becomes the target of subsequent browser tools (snapshot, click, type...). Requires browser_navigate to have been called first. In the Moch embedded browser tab creation may be refused (tab lifecycle is owned by the app's Browser screen) — the error says what to do instead, e.g. navigate the current tab.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The URL to open in the new tab (e.g., 'https://example.com')"
+                }
+            },
+            "required": ["url"]
+        }
+    },
+    {
+        "name": "browser_tab_close",
+        "description": "Close a browser tab by its id from browser_tab_list (the active tab when no id is given). Refuses to close the last remaining tab — a browser always keeps one tab; navigate it elsewhere instead. When the active tab is closed, another open tab becomes active automatically.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "tab_id": {
+                    "type": "string",
+                    "description": "The id of the tab to close, from browser_tab_list. Omit to close the active tab."
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "browser_tab_switch",
+        "description": "Switch the active browser tab — activate the tab named by tab_id or by its 0-based position in browser_tab_list's output — and return a snapshot of the page switched to, so you can keep working immediately. Pass exactly one of tab_id or index.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "tab_id": {
+                    "type": "string",
+                    "description": "The id of the tab to activate, from browser_tab_list"
+                },
+                "index": {
+                    "type": "integer",
+                    "description": "0-based position of the tab in browser_tab_list's output (0 is the first tab)"
+                }
+            },
+            "required": []
+        }
+    },
 ]
 
 from tools import browser_tool_snapshot as _snapshot
@@ -1022,6 +1075,55 @@ def browser_console(clear: bool = False, expression: Optional[str] = None, task_
     return _dumps(response)
 
 
+def _tabs_not_available() -> str:
+    """Error payload for backends with no drivable tab strip (CLI/cloud/camofox)."""
+    return _dumps(_err(
+        "Tab management is only available in the Moch embedded browser (WebView backend). "
+        "Navigate the current page instead, or ask the user to manage tabs in the Moch Browser screen."))
+
+
+def browser_tab_list(task_id: Optional[str] = None) -> str:
+    """List the browser's open tabs: id, title, url — the active tab is marked."""
+    if _is_camofox_mode():
+        return _tabs_not_available()
+    if _is_webview_mode():
+        return _webview.webview_tab_list(task_id)
+    return _tabs_not_available()
+
+
+def browser_tab_create(url: str, task_id: Optional[str] = None) -> str:
+    """Open a new tab at ``url`` and make it the active tab."""
+    if _is_camofox_mode():
+        return _tabs_not_available()
+    if not _is_webview_mode():
+        return _tabs_not_available()
+    url, safety_error = _secret_url_error_normalized(url)
+    if safety_error is not None:
+        return json.dumps(safety_error)
+    safety_error = _url_policy_error(url)
+    if safety_error is not None:
+        return json.dumps(safety_error)
+    return _webview.webview_tab_create(url, task_id)
+
+
+def browser_tab_close(tab_id: Optional[str] = None, task_id: Optional[str] = None) -> str:
+    """Close a tab by id (the active tab when omitted). Refuses to close the last remaining tab."""
+    if _is_camofox_mode():
+        return _tabs_not_available()
+    if _is_webview_mode():
+        return _webview.webview_tab_close(tab_id, task_id)
+    return _tabs_not_available()
+
+
+def browser_tab_switch(tab_id: Optional[str] = None, index: Any = None, task_id: Optional[str] = None) -> str:
+    """Make a tab active by id or 0-based index (as listed by browser_tab_list) and snapshot it."""
+    if _is_camofox_mode():
+        return _tabs_not_available()
+    if _is_webview_mode():
+        return _webview.webview_tab_switch(tab_id, index, task_id)
+    return _tabs_not_available()
+
+
 from tools import browser_tool_eval_policy as _eval_policy
 
 
@@ -1337,6 +1439,10 @@ _BROWSER_TOOL_TABLE = (
     ("browser_get_images", "🖼️", _install.check_browser_requirements, {}),
     ("browser_vision", "👁️", _install.check_browser_vision_requirements, {"question": "", "annotate": False}),
     ("browser_console", "🖥️", _install.check_browser_requirements, {"clear": False, "expression": None}),
+    ("browser_tab_list", "🗂️", None, {}),
+    ("browser_tab_create", "🆕", None, {"url": ""}),
+    ("browser_tab_close", "❌", None, {"tab_id": None}),
+    ("browser_tab_switch", "🔀", None, {"tab_id": None, "index": None}),
 )
 
 
