@@ -66,7 +66,14 @@ class MainApplication : Application(), ReactApplication {
     // no RN UI ever mounts (the previous, RN-only start left the gateway
     // serving a browser-less catalog until the user next opened the app).
     // WebView debugging becomes process-wide from boot: the accepted posture
-    // of the always-available browser (see PR #61).
+    // of the always-available browser (see PR #61). SECURITY NOTE (C-06 /
+    // BH-000039): this CANNOT be gated on BuildConfig.DEBUG — CdpRelay's
+    // upstream IS the DevTools abstract socket (CdpRelay.connectUpstream),
+    // so a release gate would kill every browser tool. Verified surface:
+    // abstract unix socket (no network path), SO_PEERCRED rejects other
+    // apps, the relay's loopback TCP is token-gated; the only real path is
+    // an adb-AUTHORIZED host (USB debugging + prior RSA trust). Full
+    // analysis + conditions for changing this posture: SECURITY.md (root).
     try {
       android.webkit.WebView.setWebContentsDebuggingEnabled(true)
       com.hermes.pocket.hermes.CdpRelay.start(this, 9334)

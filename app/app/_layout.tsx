@@ -9,7 +9,7 @@ import * as SplashScreen from 'expo-splash-screen'
 import { initPush, registerPushIfGranted, dismissMochNotifications, lastNotificationResponse, onNotificationResponse, clearLastNotificationResponse, type NotificationTarget } from '../src/lib/push'
 import { log } from '../src/lib/log'
 import { AnimatedSplash } from '../src/components/AnimatedSplash'
-import { AlertDialogHost } from '../src/components/AlertDialog'
+import { AlertDialogHost, showAlert } from '../src/components/AlertDialog'
 import { SessionToasts } from '../src/components/SessionToasts'
 import { MochiStage } from '../src/components/Mascot'
 import {
@@ -26,10 +26,11 @@ import { loadAttention, pendingOpenStoredId, requestOpenSession } from '../src/l
 import { flushDrafts, loadDrafts } from '../src/lib/drafts'
 import { flushSendQueue, loadSendQueue } from '../src/lib/sendQueue'
 import { initShareIn, deliverSharedNow, shareInInbox } from '../src/lib/shareIn'
-import { loadLocale } from '../src/lib/strings'
+import { loadLocale, tr } from '../src/lib/strings'
 import { AgentBrowserHost } from '../src/components/AgentBrowserHost'
 import { syncBackendIdentity } from '../src/lib/backendIdentity'
 import { parseConnectUrl } from '../src/lib/pairing'
+import { needsPlaintextConfirm } from '../src/lib/transportGate'
 import { pruneRelayMedia } from '../src/lib/mediaCache'
 import { C, loadTheme, useStyles } from '../src/lib/theme'
 import { loadActiveBot } from '../src/lib/fleet'
@@ -152,7 +153,29 @@ export default function RootLayout() {
       }
       try {
         const p = parseConnectUrl(url)
-        await connect({ host: p.host, token: p.token, tls: p.tls, name: p.name })
+        // C-05 (#95): a deep link NEVER auto-dials plaintext to a public
+        // host — the QR/link used to hand the token to the gateway in the
+        // clear with zero interaction. Non-private plaintext links stop at
+        // this confirmation dialog; only "Connect anyway" dials. (Public
+        // hosts without an explicit tls= now parse as TLS by default, so
+        // this only fires for links that explicitly asked for plaintext.)
+        const plain = needsPlaintextConfirm(p.host, p.tls)
+        if (plain) {
+          const btn = await showAlert({
+            title: tr('pair.plain.title'),
+            message: tr('pair.plain.body', { host: p.host }),
+            buttons: [
+              { text: tr('pair.plain.cancel'), style: 'cancel' },
+              { text: tr('pair.plain.confirm'), style: 'destructive' },
+            ],
+          })
+          if (btn.style !== 'destructive') return // declined — nothing dials
+        }
+        await connect({
+          host: p.host, token: p.token, tls: p.tls,
+          ...(p.name ? { name: p.name } : {}),
+          ...(plain ? { plaintextConfirmed: true } : {}),
+        })
         router.replace('/(tabs)/chat')
       } catch (e) {
         setLinkMsg(e instanceof Error ? e.message : 'Bad pairing link')

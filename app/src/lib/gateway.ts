@@ -5,6 +5,11 @@ import { JsonRpcGatewayClient, type GatewayEvent, type ConnectionState, type Ser
 import { RnWebSocketAdapter } from '../protocol/rn-socket'
 import { log } from './log'
 import { getEmbeddedGateway } from './mochiRuntime'
+import { isPrivateHost, normalizeHost } from './transportGate'
+
+// Host normalization moved to transportGate.ts (pure, node-loadable — pairing.ts
+// and the scripts suites need it); re-exported here so existing callers are untouched.
+export { normalizeHost } from './transportGate'
 
 export interface ConnConfig {
   host: string // "127.0.0.1:9119" or "myserver.tailnet.ts.net:443"
@@ -12,6 +17,11 @@ export interface ConnConfig {
   tls: boolean
   /** Machine label for the saved list (from the QR's name=). Optional. */
   name?: string
+  /** C-05 (#95): set ONLY after the user explicitly confirmed a plaintext
+   *  connection to this PUBLIC host in the pairing dialog. Never set for
+   *  private hosts — the documented LAN plaintext flow needs no flag — and
+   *  never persisted anywhere except the remembered-server entry. */
+  plaintextConfirmed?: boolean
 }
 
 const HOST_KEY = 'hermes.connection.host.v2'
@@ -32,6 +42,9 @@ export interface SavedServer {
   tls: boolean
   addedAt: number
   lastUsedAt: number
+  /** C-05: the user once confirmed a plaintext connection to this (public)
+   *  host — the only way a saved tls=false public server may redial. */
+  plaintextConfirmed?: boolean
 }
 
 export const servers = atom<SavedServer[]>([])
@@ -118,31 +131,17 @@ function dispatchRequest(req: ServerRequest): boolean {
   return false
 }
 
-/** Normalize "host[:port]" — accepts bare host, host:port, or full URLs. Throws on garbage. */
-export function normalizeHost(raw: string): string {
-  let h = raw.trim()
-  if (!h) throw new Error('Enter the server address.')
-  h = h.replace(/^(wss?|https?):\/\//i, '').replace(/\/+$/, '')
-  // strip path/query if user pasted a full URL
-  const slash = h.indexOf('/')
-  if (slash >= 0) h = h.slice(0, slash)
-  const q = h.indexOf('?')
-  if (q >= 0) h = h.slice(0, q)
-  h = h.trim()
-  if (!h || /\s/.test(h)) throw new Error('Invalid server address.')
-  // basic hostname:port sanity — letters, digits, dots, dashes, colons (ipv6), brackets
-  if (!/^[A-Za-z0-9.\-_:[\]]+$/.test(h)) throw new Error('Invalid server address.')
-  if (h.length > 253) throw new Error('Server address too long.')
-  return h
-}
-
 export function validateConfig(c: ConnConfig): ConnConfig {
   const host = normalizeHost(c.host)
   const token = c.token.trim()
   if (!token) throw new Error('Enter the token.')
   if (token.length > 4096) throw new Error('Token too long.')
   const name = (c.name ?? '').trim().slice(0, 40)
-  return { host, token, tls: !!c.tls, ...(name ? { name } : {}) }
+  return {
+    host, token, tls: !!c.tls,
+    ...(name ? { name } : {}),
+    ...(c.plaintextConfirmed ? { plaintextConfirmed: true } : {}),
+  }
 }
 
 function wsUrl(c: ConnConfig): string {
@@ -165,10 +164,9 @@ export function redactedUrl(c: ConnConfig): string {
   return `${c.tls ? 'wss' : 'ws'}://${c.host}/api/ws?token=***`
 }
 
-function isLocalHost(host: string): boolean {
-  const h = host.toLowerCase().split(':')[0].replace(/^\[|\]$/g, '')
-  return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h.startsWith('192.168.') || h.startsWith('10.') || /^172\.(1[6-9]|2\d|3[01])\./.test(h)
-}
+// isLocalHost lives on as isPrivateHost in transportGate.ts (same predicate,
+// hardened for IPv6 literals); gateway's embedded-runtime detection below
+// uses it unchanged.
 
 async function secureAvailable(): Promise<boolean> {
   try { return await SecureStore.isAvailableAsync() } catch { return false }
@@ -249,6 +247,9 @@ async function upsertServer(c: ConnConfig): Promise<SavedServer> {
     const saved = await readTokenFor(srv.id)
     if (saved === c.token) {
       srv.lastUsedAt = now
+      // C-05: a fresh explicit confirmation sticks (it is never un-confirmed
+      // here — dropping TLS on re-pair, or forgetting the computer, resets it).
+      if (c.plaintextConfirmed) srv.plaintextConfirmed = true
       await writeServerList(list)
       try { await AsyncStorage.setItem(ACTIVE_SERVER_KEY, srv.id) } catch {}
       activeServerId.set(srv.id)
@@ -262,7 +263,10 @@ async function upsertServer(c: ConnConfig): Promise<SavedServer> {
     while (taken.has(`${name} ${i}`)) i++
     name = `${name} ${i}`
   }
-  const srv: SavedServer = { id: newServerId(), name, host: c.host, tls: c.tls, addedAt: now, lastUsedAt: now }
+  const srv: SavedServer = {
+    id: newServerId(), name, host: c.host, tls: c.tls, addedAt: now, lastUsedAt: now,
+    ...(c.plaintextConfirmed ? { plaintextConfirmed: true } : {}),
+  }
   list.push(srv)
   await writeTokenFor(srv.id, c.token)
   await writeServerList(list)
@@ -284,7 +288,13 @@ export async function switchToServer(id: string): Promise<void> {
   if (!srv) throw new Error('This computer is no longer saved.')
   const token = await readTokenFor(srv.id)
   if (!token) throw new Error('No saved token for this computer — pair again.')
-  await connect({ host: srv.host, token, tls: srv.tls })
+  // C-05: only a remembered explicit confirmation lets a public plaintext
+  // server redial; anything else is refused inside dial() with an
+  // actionable message (re-add / re-confirm) instead of a silent dial.
+  await connect({
+    host: srv.host, token, tls: srv.tls,
+    ...(srv.plaintextConfirmed ? { plaintextConfirmed: true } : {}),
+  })
 }
 
 /** Remove one remembered computer. Forgets the active connection if it was ours. */
@@ -330,6 +340,15 @@ export async function loadSavedConfig(): Promise<ConnConfig | null> {
     }
     const loaded = await readStored()
     if (loaded) {
+      // C-05: the stored config keys carry no confirmation — adopt it from
+      // the matching remembered server so a user-confirmed public plaintext
+      // computer can resume at boot, and an unconfirmed one is refused by
+      // dial() (visible error, user re-adds/confirms) instead of silently
+      // dialing ws:// with the token in the URL.
+      const remembered = await readServerList()
+      if (remembered.some((s) => s.host === loaded.host && s.tls === loaded.tls && s.plaintextConfirmed)) {
+        loaded.plaintextConfirmed = true
+      }
       connConfig.set(loaded)
       // Seed the remembered-computers list from pre–multi-server installs.
       const list = await readServerList()
@@ -494,14 +513,14 @@ function ensureTokenReadvertise(): void {
   } catch {}
 }
 
-async function dial(c: ConnConfig, opts?: { isRetry?: boolean }): Promise<void> {
+async function dial(c: ConnConfig, opts?: { isRetry?: boolean; plaintextConfirmed?: boolean }): Promise<void> {
   ensureTokenReadvertise() // idempotent: arms the mid-session token re-advertise once
   const gen = ++connectGen
   // Embedded gateway: always use the LIVE token from the runtime. A stored
   // token can go stale (e.g. app uninstall regenerated the token file while
   // SecureStore kept the old pairing) — that presented as "must forget and
   // re-pair after reinstall".
-  if (isLocalHost(c.host)) {
+  if (isPrivateHost(c.host)) {
     const gw = await getEmbeddedGateway().catch(() => null)
     if (gw?.token) c = { ...c, token: gw.token }
     // Wait out the runtime boot (first launch extracts assets for tens of
@@ -523,6 +542,21 @@ async function dial(c: ConnConfig, opts?: { isRetry?: boolean }): Promise<void> 
     }
   }
   const v = validateConfig(c)
+  // C-05 (#95): a plaintext dial to a PUBLIC host is never silent — the
+  // token rides the dial URL, so ws:// hands it to every network hop. Only
+  // a config the user explicitly confirmed (PairForm / deep-link dialog,
+  // remembered per-server) may do it. Private hosts (loopback embedded
+  // runtime, LAN pairing) are the documented plaintext flow: unaffected.
+  // Refusal happens BEFORE any state/persistence so no reconnect timer is
+  // ever armed against a refused config, and surfaces through the normal
+  // error machinery (boot veil / chat offline banner + gatewayError).
+  if (!v.tls && !isPrivateHost(v.host) && !v.plaintextConfirmed && !opts?.plaintextConfirmed) {
+    const msg = 'unencrypted connection to a public host — confirm it in the pairing dialog or pair over TLS'
+    log('warn', 'gateway', `refusing plaintext dial ${redactedUrl(v)} — no explicit user confirmation`)
+    if (connectionState.get() !== 'open') connectionState.set('error')
+    gatewayError.set(`${redactedUrl(v)} — ${msg}`)
+    throw new Error(`Refusing ${msg}`)
+  }
   // BUG-001: remember the validated config HERE, not only in retryNow —
   // scheduleReconnect bails on `!lastConfig`, so a socket drop that happened
   // before any manual retry/foreground cycle never armed a retry at all and
@@ -556,7 +590,9 @@ async function dial(c: ConnConfig, opts?: { isRetry?: boolean }): Promise<void> 
     try { await upsertServer(v) } catch (err) { log('warn', 'auth', `remember computer failed: ${String(err)}`) }
   }).catch((err) => { log('warn', 'auth', `save connection failed: ${String(err)}`) }))
 
-  if (!v.tls && !isLocalHost(v.host)) {
+  if (!v.tls && !isPrivateHost(v.host)) {
+    // Unreachable unless the confirmation flag was set — kept as a
+    // log-only tripwire in case a future caller bypasses the gate above.
     log('warn', 'gateway', 'plain ws:// to non-local host — token travels unencrypted')
   }
 
@@ -603,9 +639,11 @@ async function dial(c: ConnConfig, opts?: { isRetry?: boolean }): Promise<void> 
   await persist
 }
 
-export async function connect(c: ConnConfig): Promise<void> {
+export async function connect(c: ConnConfig, opts?: { plaintextConfirmed?: boolean }): Promise<void> {
   cancelReconnect()
-  await dial(c)
+  // C-05: the confirmation may ride the config (persisted per-server by
+  // upsertServer) or the explicit opts (one-shot); dial() enforces it.
+  await dial(c, opts)
 }
 
 export function disconnect() {
