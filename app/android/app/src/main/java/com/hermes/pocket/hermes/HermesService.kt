@@ -14,6 +14,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.hermes.pocket.MainActivity
 import com.hermes.pocket.R
+import java.util.Date
 
 /**
  * Foreground service that keeps the embedded hermes runtime (Chaquopy
@@ -21,6 +22,14 @@ import com.hermes.pocket.R
  * or the screen is off. Android only guarantees long-running work to a
  * process with a foreground service — this is the platform-legit mechanism,
  * no battery-optimization bypasses.
+ *
+ * FGS type (BH-000046 / GH #100): specialUse from API 34 — dataSync (the
+ * pre-migration type, still used on API 29-33) carries a ~6 h per rolling
+ * 24 h hard timeout at targetSdk 35+, after which Android 15 calls
+ * [onTimeout] and crashes the app if the service doesn't stop within a few
+ * seconds. specialUse has no timeout and is the honest type for an embedded
+ * agent runtime gateway (declared subtype: embedded_agent_runtime_gateway).
+ * [onTimeout] remains as defense-in-depth.
  *
  * Lifecycle: started from MainApplication.onCreate after the runtime boot
  * kicks off; START_STICKY so the system restarts it (and with it the process
@@ -49,8 +58,31 @@ class HermesService : Service() {
       }
     }
 
+    /**
+     * User-facing "Stop runtime" (Settings row, BUG-129): FULL teardown via
+     * the service's ACTION_STOP path — stopForeground(STOP_FOREGROUND_REMOVE)
+     * + stopService + process exit(0). The old bare stopService left the
+     * Python runtime and gateway serving while the UI claimed success
+     * (Chaquopy cannot unload Python in-process). The process exit is the
+     * INTENDED UX — the brain IS the process — and the next app launch
+     * auto-starts it fresh (MainApplication.onCreate wiring).
+     */
     fun stop(context: Context) {
-      context.applicationContext.stopService(Intent(context, HermesService::class.java))
+      val app = context.applicationContext
+      try {
+        // Delivered as a start command so a live service instance runs its
+        // own stopForeground first — the exact machinery the notification's
+        // Stop action uses. If the service is already gone (crashed, timed
+        // out) this recreates it just long enough to fall into the same
+        // ACTION_STOP teardown, so the runtime's process still exits.
+        app.startService(Intent(app, HermesService::class.java).setAction(ACTION_STOP))
+      } catch (e: RuntimeException) {
+        // Background service-start restriction (the settings row is
+        // foreground, so this shouldn't fire) — fall back to the direct
+        // teardown rather than swallowing the stop like the old bug did.
+        Log.w(TAG, "stop: direct shutdown after startService refusal: ${e.message}")
+        shutdownProcess(app)
+      }
     }
 
     /** Full runtime teardown: stop the service, then end the process.
@@ -121,15 +153,82 @@ class HermesService : Service() {
       return START_NOT_STICKY
     }
     val notification = buildNotification()
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-    } else {
-      startForeground(NOTIFICATION_ID, notification)
+    when {
+      // BH-000046 / GH #100: specialUse from API 34 — dataSync's ~6h/24h
+      // timeout (enforced at targetSdk 35+ / Android 15) would kill the
+      // always-on runtime; specialUse has no time budget.
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
+          startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+      // API 29-33 keep the legacy type (its permission is still declared
+      // for exactly this branch); no timeout exists there.
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ->
+          startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+      else -> startForeground(NOTIFICATION_ID, notification)
     }
     return START_STICKY
   }
 
-  private fun buildNotification(): Notification {
+  /**
+   * FGS timeout contract (BH-000046): when a timed foreground-service type
+   * (dataSync was ours — ~6 h per rolling 24 h at targetSdk 35+) hits its
+   * budget, the system calls [onTimeout] and grants a grace period of a few
+   * seconds to leave foreground state; lingering past it throws
+   * ForegroundServiceDidNotStopInTimeException (process crash). Our
+   * specialUse type has no timeout, so reaching here means policy shifted
+   * under us or the type got reverted — defense-in-depth that must stay
+   * FAST: marker file, sleep notice, stop. All in this one callback, no
+   * delayed work, and deliberately NO process exit — the graceful outcome
+   * is "Mochi sleeps", not another crash.
+   */
+  private fun handleFgsTimeout(startId: Int, fgsType: Int?) {
+    Log.w(TAG, "FGS timeout: startId=$startId type=$fgsType — going to sleep gracefully")
+    // (i) Durable marker beside crash-last.txt (same Moch/logs directory,
+    //     shared writer) so the next boot can explain the gap.
+    MochLogs.write(this, "fgs-timeout.txt", "${Date()} startId=$startId type=$fgsType\n")
+    // (ii) Sleep notice reusing the running-notification machinery (open
+    //      + Stop actions); non-ongoing so the user can dismiss it.
+    val sleep =
+        buildNotification(
+            title = "Mochi went to sleep",
+            text = "Android's 6-hour background limit was reached; reopen the app to wake her.",
+            ongoing = false)
+    // (iii) Stop NOW, in this callback: stopForeground(REMOVE) drops the
+    //       FGS notification, stopSelf ends the service. The system throws
+    //       ForegroundServiceDidNotStopInTimeException if we linger.
+    stopForeground(STOP_FOREGROUND_REMOVE)
+    stopSelf()
+    // The sleep notice is posted only AFTER the REMOVE above — a moment
+    // earlier and the teardown would cancel it (same notification id).
+    // This is a plain NotificationManager post, not an FGS notification.
+    getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, sleep)
+  }
+
+  /**
+   * API 34+ timeout callback (shortService budgets). See
+   * [handleFgsTimeout] for the contract.
+   */
+  override fun onTimeout(startId: Int) {
+    handleFgsTimeout(startId, null)
+  }
+
+  /**
+   * API 35+ timeout callback for timed FGS types (e.g. dataSync's 6 h cap);
+   * [fgsType] is the ServiceInfo type that timed out. NOTE: this is the
+   * compileSdk 36 shape — API 35's (startId, Service.StartArgToken) was
+   * replaced by (startId, fgsType) in API 36, and Service.StartArgToken no
+   * longer resolves against the API 36 SDK. Implementing this overload
+   * covers 35+ (the platform calls it for both shortService and timed-type
+   * budgets from VANILLA_ICE_CREAM on).
+   */
+  override fun onTimeout(startId: Int, fgsType: Int) {
+    handleFgsTimeout(startId, fgsType)
+  }
+
+  private fun buildNotification(
+      title: String = "Mochi is running",
+      text: String = "Mochi is awake on this phone — automations and tasks keep working.",
+      ongoing: Boolean = true
+  ): Notification {
     val open =
         PendingIntent.getActivity(
             this,
@@ -144,9 +243,9 @@ class HermesService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     return NotificationCompat.Builder(this, CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification)
-        .setContentTitle("Mochi is running")
-        .setContentText("Mochi is awake on this phone — automations and tasks keep working.")
-        .setOngoing(true)
+        .setContentTitle(title)
+        .setContentText(text)
+        .setOngoing(ongoing)
         .setContentIntent(open)
         .addAction(0, "Stop", stop)
         .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)

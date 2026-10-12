@@ -466,7 +466,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   *Fix:* a scheme-specific message: "only http(s) URLs can be driven; data:,
   javascript:, file: and blobs are refused".
 
-- [ ] **BUG-129 [MEDIUM] Settings → "Stop runtime" does nothing — the app keeps running and the gateway keeps serving, with the failure swallowed** — `app/app/(tabs)/settings.tsx:125-131` → `src/lib/mochiRuntime.ts:55-58` → `android/.../hermes/HermesBridgeModule.kt:58-65` (`HermesService.stop`)
+- [x] **BUG-129 [MEDIUM] Settings → "Stop runtime" does nothing — the app keeps running and the gateway keeps serving, with the failure swallowed** — `app/app/(tabs)/settings.tsx:125-131` → `src/lib/mochiRuntime.ts:55-58` → `android/.../hermes/HermesBridgeModule.kt:58-65` (`HermesService.stop`)
   On device, with the runtime healthy: tapping the row (label: *"Ends the background service
   and exits the app"*) produced no dialog, no toast, no exit — same pid, app still
   foreground, `/` on `127.0.0.1:9119` still answering 200, ten seconds later.
@@ -478,6 +478,13 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   *Fix:* make `HermesService.stop` actually tear the runtime down (and exit like
   Restart does), or relabel the row to what it really does; surface the rejection
   instead of `.catch(() => {})`.
+  *(fixed in PR #PR_NUMBER_PLACEHOLDER — `HermesService.stop` now delivers the
+  service's ACTION_STOP command (the exact machinery the notification's Stop
+  action uses): stopForeground(STOP_FOREGROUND_REMOVE) + stopService + process
+  exit(0), so the gateway dies and the app exits like Restart; falls back to the
+  direct `shutdownProcess` teardown if startService is refused. The settings row
+  already said "Ends the background service and exits the app" — now honest.
+  Source-level only — on-device check pending next dev build.)*
 
 - [x] **BUG-130 [MEDIUM, CORRECTED] The composer's accessibility subtree freezes while a turn runs — the Steer chip and the Stop button are rendered but invisible to a11y, and the EditText keeps reporting the last submitted text** — `app/(tabs)/chat.tsx:1414-1427` (Steer chip, `busy`-gated), `:1469-1478` (Stop button, `busy`-gated), composer `TextInput` a11y text
   **Correction first:** this entry was originally filed as "a running turn shows no busy state, the Stop control is unreachable". That was wrong, and the mistake is instructive: the instrument was `uiautomator`, not the screen. Re-checked with a screenshot of the composer band while a run was provably in flight (a `terminal` call to `sleep 600`; transcript timestamps 17:08:28 → 17:18:xx): the band reads **"Steer"**, and `chat.tsx:1414` renders that chip only when `busy` is true — so `busy` is tracked locally and the code path that swaps the voice slot for the **Stop** button (`chat.tsx:1469`) is live too. The UI is fine; the accessibility tree is not.
@@ -1355,3 +1362,28 @@ chat pathological tall-stack overflow in clarify cards (flexShrink on s.sheet/s.
 - [x] **BUG-137 [HIGH] M9 headline false: bots cannot spawn sub-bots — SpawnBotService has no tool door (M9.1a stage 3 never landed)** — `app/python-runtime/moch/spawn_bot.py:81` (service + tests only; zero registration in `hermes-src` tools/plugins, no wiring in `gateway_server.py` boot) — "bots create their own sub-bots" is a service without a caller — wire the stage-3 toolset wrapper (Moch-side, flag-gated, no vendored edit) + surface the first-spawn-of-day `approval-required` refusal through the existing approval card machinery. *(fixed in PR #122 — `moch/spawn_tool.py` registers onto the `delegation` toolset at boot (verified live: resolve_toolset includes it), approval card via `request_tool_approval`, parent-depth ancestry; 5 tests green — on-device check pending user's next dev build.)*
 - [x] **BUG-138 [HIGH] Crew board is read-only from the app — the "user puts work on the board" loop cannot close** — `app/app/(tabs)/crew.tsx:15` (write ops deferred), `app/python-runtime/moch/rpc_fleet.py:157` (`moch.kanban.tasks` is read-only) — bots have board tools but the user has no write surface — add `moch.kanban.create/assign/complete` RPCs + Crew screen buttons. *(fixed in PR #122 — create/assign/complete/block RPCs through kb mutators (assignee validated, frozen refused), db_path pinned at RPC entry (wrong-board race), dispatch poke + 60s heal ticker (`moch/kanban_dispatch.py` — nothing dispatched before), Crew create box + Complete/Reassign; 5 tests green — on-device check pending. Deferred: kanban knocks, block UI, breaker parity for synthetic pids.)*
 - [x] **BUG-139 [MEDIUM] Bot creation has no checklist — context/skills/model knobs exist at the RPC layer but are unreachable from the UI** — `app/src/lib/fleet.ts:101` (`createProfile` sends only name/description/soul), `hermes-src/tui_gateway/methods_profiles.py:366` (`clone_from`/`no_skills`/`model`/`provider` accepted but unused by the app) — new bots always start strangers with default skills — checklist UI ("ideas about me" = USER.md copy as a file, selective skills, model pin) + small selective-copy additions in `moch/rpc_fleet.py` (not vendored edits). *(fixed in PR #122 — `moch.profiles.seed` + `moch.skills.list`, checklist rows in the create box (USER.md default ON, MEMORY.md OFF, skill picker; persisted defaults; dst-exists/symlink guards), EN/AR; 3 tests green — on-device check pending. Deferred: model pin (needs a pick-only sheet; ModelPickerSheet applies config — wrong shape).)*
+
+## BH bug-hunt wave (2026-10-12) — always-on runtime survival, GH #100
+
+- [x] **BH-000046 [HIGH] Always-on dataSync FGS has no onTimeout — 6h/24h Android 15+ cap crashes the runtime (and sticky-restart + swallowed ForegroundServiceStartNotAllowedException = silent death)** — AndroidManifest:39, HermesService.kt:124 — *(fixed in PR #PR_NUMBER_PLACEHOLDER — migrated to specialUse FGS (no 6h cap, honest type for an embedded runtime gateway) + onTimeout(int[,fgsType]) defense-in-depth (marker file, sleep notification, immediate stop) + BUG-129: Stop runtime now fully tears down; source-level only — on-device check pending next dev build)*
+  Implementation notes: `FOREGROUND_SERVICE_SPECIAL_USE` permission added (dataSync
+  permission kept for the API 29-33 `startForeground` branch); subtype property
+  `android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE=embedded_agent_runtime_gateway`.
+  Timeout defense: `onTimeout(startId)` (API 34+) + `onTimeout(startId, fgsType)`
+  — the latter is the **compileSdk 36 signature**: API 35's
+  `onTimeout(int, Service.StartArgToken)` was replaced by `onTimeout(int, int)`
+  in API 36 and `Service.StartArgToken` no longer resolves against the API 36
+  SDK (verified against `$ANDROID_HOME/platforms/android-36/android.jar` and
+  AOSP main `Service.java`; the briefed StartArgToken override would not
+  compile). Handler order, all in one callback: write
+  `files/Moch/logs/fgs-timeout.txt` (timestamp + startId + type, shared
+  `MochLogs` writer with the crash handler), build the "Mochi went to sleep —
+  Android's 6-hour background limit was reached; reopen the app to wake her"
+  notification (reuses buildNotification + Stop action, non-ongoing),
+  `stopForeground(STOP_FOREGROUND_REMOVE)` + `stopSelf()` immediately (the
+  system throws ForegroundServiceDidNotStopInTimeException if we linger), then
+  re-post the sleep notice via NotificationManager after the REMOVE (posting
+  before it would cancel the same id). Known residual: if the timeout fires
+  while the process stays alive, "reopen the app to wake her" needs a process
+  restart — MainApplication auto-start only runs on process creation; a
+  MainActivity.onResume restart hook is deliberately out of scope here.
