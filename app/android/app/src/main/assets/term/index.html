@@ -249,6 +249,14 @@ html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hi
     fontSize: 13,
     fontFamily: 'monospace',
     cursorBlink: false,
+    // BUG-135 OSC-8 seam: xterm's auto-registered OscLinkProvider calls
+    // linkHandler.activate for explicit OSC-8 hyperlinks. The xterm default
+    // (confirm() + window.open) is unhandled in the RN WebView — route to
+    // RN, which opens the built-in Browser tab. Taps on BARE urls never
+    // reach xterm (BUG-100 box-only wrapper); those go through __linkAt.
+    linkHandler: {
+      activate: function (_e, uri) { say({ type: 'link', url: uri }); }
+    },
     theme: {
       background: '#000000',
       foreground: '#E8E8E8',
@@ -290,6 +298,53 @@ html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hi
     try {
       var d = fit.proposeDimensions();
       if (d && (d.cols !== term.cols || d.rows !== term.rows)) fit.fit();
+    } catch (e) {}
+  };
+  // BUG-135 hit-test: RN's box-only wrapper (BUG-100) owns every touch, so
+  // it asks us WHERE the tap landed. Pure read: px→cell via the render
+  // dimensions (same _core reach-in the fit addon above uses), +viewportY
+  // for scrollback, then regex-scan the tapped line for a URL under the
+  // column. Answered via say({type:'link'}) — RN cancels its deferred IME
+  // refocus and opens the built-in Browser.
+  function __countChar(s, ch) {
+    var n = 0;
+    for (var i = 0; i < s.length; i++) if (s.charAt(i) === ch) n++;
+    return n;
+  }
+  // INLINE COPY of normalizeTerminalUrl in app/src/lib/terminal.ts (this
+  // asset is self-contained by design — keep the two in sync; unit tests
+  // cover the TS copy).
+  function __normUrl(raw) {
+    var u = raw.replace(/^\s+/, '').replace(/\s+$/, '');
+    if (u.charAt(0) === '<' && u.charAt(u.length - 1) === '>' && u.length > 1) u = u.slice(1, -1);
+    while (u !== '' && '.,;:!?'.indexOf(u.charAt(u.length - 1)) !== -1) u = u.slice(0, -1);
+    while (u.charAt(u.length - 1) === ')' && __countChar(u, '(') < __countChar(u, ')')) u = u.slice(0, -1);
+    if (/^www\./i.test(u)) u = 'https://' + u;
+    return /^https?:\/\//i.test(u) ? u : null;
+  }
+  window.__linkAt = function (x, y) {
+    try {
+      var dims = term._core._renderService.dimensions;
+      if (!dims || !(dims.css.cell.width > 0) || !(dims.css.cell.height > 0)) return;
+      var rect = term.element.getBoundingClientRect();
+      var col = Math.floor((x - rect.left) / dims.css.cell.width);
+      var row = Math.floor((y - rect.top) / dims.css.cell.height);
+      if (col < 0 || row < 0) return;
+      var buf = term.buffer.active;
+      var line = buf.getLine(row + buf.viewportY);
+      if (!line) return;
+      var text = line.translateToString(true);
+      // INLINE COPY of TERM_URL_RE in app/src/lib/terminal.ts (see the
+      // sync note above).
+      var re = /\b(?:https?:\/\/|www\.)[^\s<>"'`]+/gi;
+      var m;
+      while ((m = re.exec(text)) !== null) {
+        if (col >= m.index && col < m.index + m[0].length) {
+          var u = __normUrl(m[0]);
+          if (u) say({ type: 'link', url: u });
+          return;
+        }
+      }
     } catch (e) {}
   };
   // BUG-100 safety net: if the WebView ever holds focus, the Android IME

@@ -162,6 +162,60 @@ async function main() {
   ctl3.destroy()
   ctlBig.destroy()
 
+  // ── URL matcher (BUG-135 terminal link hit-test) ──────────────────────
+  // Covers the TS copies of the matcher/normalizer that the xterm asset
+  // mirrors inline (see the sync notes in terminal.ts / index.html).
+  check(
+    'normalize keeps a plain https url',
+    m.normalizeTerminalUrl('https://example.com/x') === 'https://example.com/x',
+  )
+  check(
+    'normalize trims trailing sentence punctuation',
+    m.normalizeTerminalUrl('https://example.com/x,.:') === 'https://example.com/x',
+  )
+  check(
+    'normalize keeps balanced parens (wikipedia-style)',
+    m.normalizeTerminalUrl('https://en.wikipedia.org/wiki/A_(b)') === 'https://en.wikipedia.org/wiki/A_(b)',
+  )
+  check(
+    'normalize strips unbalanced trailing paren + period',
+    m.normalizeTerminalUrl('https://example.com/a).') === 'https://example.com/a',
+  )
+  check(
+    'normalize promotes www. to https',
+    m.normalizeTerminalUrl('www.example.com/x') === 'https://www.example.com/x',
+  )
+  check(
+    'normalize scheme check is case-insensitive',
+    m.normalizeTerminalUrl('HTTPS://EXAMPLE.COM/X') === 'HTTPS://EXAMPLE.COM/X',
+  )
+  check(
+    'normalize unwraps angle brackets',
+    m.normalizeTerminalUrl('<https://example.com/>') === 'https://example.com/',
+  )
+  check('normalize trims wrapping whitespace', m.normalizeTerminalUrl('  https://a.com ') === 'https://a.com')
+  check('normalize rejects non-web schemes (mailto)', m.normalizeTerminalUrl('mailto:foo@bar.com') === null)
+  check('normalize rejects non-web schemes (ftp)', m.normalizeTerminalUrl('ftp://example.com') === null)
+
+  const urlLine = 'see https://example.com/docs for more' // url at [4,28)
+  check('hit-test: tap on url start opens it', m.findTerminalUrlAt(urlLine, 4) === 'https://example.com/docs')
+  check('hit-test: tap inside url opens it', m.findTerminalUrlAt(urlLine, 27) === 'https://example.com/docs')
+  check('hit-test: tap just past url end misses', m.findTerminalUrlAt(urlLine, 28) === null)
+  check('hit-test: tap before url misses', m.findTerminalUrlAt(urlLine, 0) === null)
+  check(
+    'hit-test: www. prefix hit promotes to https',
+    m.findTerminalUrlAt('go www.example.com now', 3) === 'https://www.example.com',
+  )
+  check(
+    'hit-test: trailing punctuation in the line is trimmed from the url',
+    m.findTerminalUrlAt('ref (https://ex.com/a).', 10) === 'https://ex.com/a',
+  )
+  check(
+    'hit-test: uppercase scheme matches and survives',
+    m.findTerminalUrlAt('HTTPS://EXAMPLE.COM/X', 0) === 'HTTPS://EXAMPLE.COM/X',
+  )
+  check('hit-test: no url on the line misses', m.findTerminalUrlAt('plain output line', 5) === null)
+
   console.log(`\n${pass} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)
 }

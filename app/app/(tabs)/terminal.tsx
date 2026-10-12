@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { View, Text, Pressable, StyleSheet, TextInput, ActivityIndicator } from 'react-native'
+import { View, Text, Pressable, StyleSheet, TextInput, ActivityIndicator, type GestureResponderEvent } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useKeyboardState, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
 import Animated, { useAnimatedStyle } from 'react-native-reanimated'
@@ -28,8 +28,17 @@ import {
   type FieldState,
   type TermState,
 } from '../../src/lib/terminal'
+import { openInAppBrowserTab } from '../../src/lib/openInBrowser'
 
 type Gate = 'checking' | 'noprobe' | 'noguest' | 'nopty' | 'ready' | 'failed'
+
+/**
+ * BUG-135: grace window a tap gives the WebView's __linkAt hit-test to
+ * answer before the legacy IME re-focus fires. Well above the bridge
+ * round-trip (~tens of ms), short enough that the refocus still feels
+ * instant.
+ */
+const REFOCUS_DELAY_MS = 140
 
 export default function Terminal() {
   const s = useStyles(makeS)
@@ -105,6 +114,18 @@ function TerminalInner() {
   // the WebView answers with {ready|fit} JSON on postMessage.
   const wvRef = useRef<WebView>(null)
   const out = useRef({ ready: false, buf: [] as string[], bytes: 0 })
+  // BUG-135 tap arbitration: the box-only wrapper (BUG-100) owns every tap.
+  // A tap is EITHER a link open (WebView answers the __linkAt hit-test with
+  // {type:'link'}) OR the legacy IME re-focus — never both. The refocus is
+  // deferred one beat; a link reply cancels it.
+  const hitRef = useRef<View>(null)
+  const refocusTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cancelPendingRefocus = useCallback(() => {
+    if (refocusTimer.current != null) {
+      clearTimeout(refocusTimer.current)
+      refocusTimer.current = null
+    }
+  }, [])
   const inject = useCallback((js: string) => {
     wvRef.current?.injectJavaScript(js)
   }, [])
@@ -154,7 +175,7 @@ function TerminalInner() {
 
   const handleWebMsg = useCallback(
     (e: { nativeEvent: { data: string } }) => {
-      let msg: { type?: string; cols?: number; rows?: number; data?: string }
+      let msg: { type?: string; cols?: number; rows?: number; data?: string; url?: string }
       try {
         msg = JSON.parse(e.nativeEvent.data)
       } catch {
@@ -178,9 +199,15 @@ function TerminalInner() {
         // so this channel and the hidden sentinel input are mutually
         // exclusive; no double-send is possible.
         send(msg.data)
+      } else if (msg.type === 'link' && typeof msg.url === 'string' && msg.url) {
+        // BUG-135: the WebView's __linkAt hit-test answered — this tap was
+        // on a URL. Cancel the pending IME re-focus and open the built-in
+        // Browser instead of raising the keyboard.
+        cancelPendingRefocus()
+        openInAppBrowserTab(msg.url)
       }
     },
-    [ctl, inject, send],
+    [cancelPendingRefocus, ctl, inject, send],
   )
 
   // Refit on layout changes (keyboard lift, font bump) — trailing throttle
@@ -303,6 +330,37 @@ function TerminalInner() {
     requestAnimationFrame(() => el.focus())
   }, [keyboardVisible])
 
+  /**
+   * BUG-135 tap arbitration for the box-only wrapper. On touchEnd: ask the
+   * WebView WHERE the tap landed (window.__linkAt does the px→cell→URL
+   * hit-test — only it knows cells and scrollback), and defer the legacy
+   * focusInput by one beat (REFOCUS_DELAY_MS). A {type:'link'} reply
+   * cancels the refocus and opens the built-in Browser; no reply within
+   * the window means "not a link" and focusInput runs exactly as before.
+   * When the WebView isn't ready (still loading / renderer gone) there is
+   * no one to answer, so focusInput runs immediately — today's behavior.
+   */
+  const onTapOutput = useCallback(
+    (e: GestureResponderEvent) => {
+      if (!out.current.ready) {
+        focusInput()
+        return
+      }
+      cancelPendingRefocus()
+      hitRef.current?.measureInWindow((wx, wy) => {
+        const x = Math.round(e.nativeEvent.pageX - wx)
+        const y = Math.round(e.nativeEvent.pageY - wy)
+        if (x >= 0 && y >= 0) inject(`window.__linkAt(${x},${y});void 0;`)
+      })
+      refocusTimer.current = setTimeout(() => {
+        refocusTimer.current = null
+        focusInput()
+      }, REFOCUS_DELAY_MS)
+    },
+    [cancelPendingRefocus, focusInput, inject],
+  )
+  useEffect(() => cancelPendingRefocus, [cancelPendingRefocus])
+
   const submitLine = useCallback(() => {
     send(TERM_KEYS.ENTER)
     fieldRef.current = { logical: '', pendingKeys: 0 }
@@ -382,7 +440,7 @@ function TerminalInner() {
           touches BEFORE the WebView and is itself the tap target; the dead
           overlay stays a sibling so Retry remains tappable. */}
       <View style={s.outputWrap} onLayout={scheduleFit}>
-        <View style={s.outputHit} pointerEvents="box-only" onTouchEnd={focusInput}>
+        <View ref={hitRef} style={s.outputHit} pointerEvents="box-only" onTouchEnd={onTapOutput}>
           <WebView
             ref={wvRef}
             source={{ uri: 'file:///android_asset/term/index.html' }}
