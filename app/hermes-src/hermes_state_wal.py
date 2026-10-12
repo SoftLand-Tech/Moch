@@ -547,21 +547,39 @@ _ONCE_LOGS = {
 }
 
 
-def _log_once(kind: str, db_label: str, *args: Any) -> None:
+def _log_once(kind: str, db_label: str, *args: Any, level: int | None = None) -> None:
     """Emit ``_ONCE_LOGS[kind]`` once per (process, db_label). Callable *args* are
-    resolved only after the dedupe check, so install-method probes run once."""
-    lock, set_name, level, message = _ONCE_LOGS[kind]
+    resolved only after the dedupe check, so install-method probes run once.
+    ``level`` overrides the template's level (BUG-122: embedded app runtimes
+    demote the per-database WAL-reset repeats to INFO)."""
+    lock, set_name, tpl_level, message = _ONCE_LOGS[kind]
     seen = globals()[set_name]
     with lock:
         if db_label in seen:
             return
         seen.add(db_label)
-    logger.log(level, message, db_label, *(a() if callable(a) else a for a in args))
+    logger.log(tpl_level if level is None else level, message, db_label, *(a() if callable(a) else a for a in args))
 
 
 def _log_wal_reset_bug_once(db_label: str, *, kept_wal: bool, indeterminate: bool = False) -> None:
     """Log once per (process, db_label) about the WAL-reset vulnerability path."""
     action = _WAL_RESET_BUG_ACTIONS["indeterminate" if indeterminate else "kept_wal" if kept_wal else "delete"]
+    # BUG-122 / GH #69: in the EMBEDDED app runtime (MOCH_EMBEDDED=1) there is
+    # no CLI, no `hermes update`, and the interpreter's SQLite only changes
+    # with an APK update — the desktop remediation copy ("upgrade to SQLite
+    # 3.51.3+ ... See `hermes doctor`") is non-actionable there. Keep the
+    # warning honest but app-appropriate, and drop the per-database repeats
+    # to INFO: nothing the phone user can do in-session warrants WARNING
+    # spam on every boot (state.db, kanban.db, cron db each fire once).
+    if os.environ.get("MOCH_EMBEDDED") == "1":
+        _log_once(
+            "wal_reset_bug", db_label, sqlite3.sqlite_version, sys.executable, action,
+            lambda: "update the Moch app when a new build is available (the bundled "
+                    "SQLite ships with it); this notice is informational — the runtime "
+                    "already uses the safe journal mode",
+            level=logging.INFO,
+        )
+        return
     _log_once("wal_reset_bug", db_label, sqlite3.sqlite_version, sys.executable, action, _wal_reset_repair_hint)
 
 
