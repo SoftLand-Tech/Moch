@@ -634,6 +634,16 @@ class _SupervisorRegistry:
             if existing is not None:
                 thread, loop = existing._thread, existing._loop
                 healthy = thread is not None and thread.is_alive() and loop is not None and loop.is_running()
+                if healthy:
+                    # BUG-127 companion: a supervisor parked in reconnect
+                    # backoff (endpoint dropped; thread + loop alive, no page
+                    # attached) used to pass this check — every call then
+                    # answered "supervisor is not active" until the 5-failure
+                    # deregister. Inactive == in backoff (or worse): treat it
+                    # as unhealthy so the caller's self-heal path replaces it
+                    # with a fresh attach.
+                    with existing._state_lock:
+                        healthy = existing._active
                 if existing.cdp_url == cdp_url and healthy:
                     return existing
                 self._by_task.pop(task_id, None)

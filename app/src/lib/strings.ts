@@ -116,6 +116,9 @@ const EN: Catalog = {
   // the card is bilingual from day one.
   'chat.foreign.title': 'Another session on this machine is asking you something',
   'chat.foreign.hint': 'Tap to review and answer it here.',
+  // BUG-118 (BH-000093): the Browser screen's relay-failure retry button —
+  // the error branch used to be a dead end.
+  'browser.retry': 'Retry',
   // BH-000025: the batch-clarify card's gate hint — missing answers are
   // indistinguishable from deliberate skips on the server, so Send waits.
   'chat.clarify.pending.one': '1 question still needs an answer before sending.',
@@ -230,6 +233,8 @@ const AR: Catalog = {
   // tracking (automation/CLI on the host).
   'chat.foreign.title': 'جلسة أخرى على هذا الجهاز تطلب منك إجابة',
   'chat.foreign.hint': 'اضغط لمراجعتها والإجابة عليها من هنا.',
+  // BUG-118 (BH-000093): the Browser screen's relay-failure retry button.
+  'browser.retry': 'إعادة المحاولة',
   // BH-000025: the batch-clarify card's gate hint.
   'chat.clarify.pending.one': 'سؤال واحد لا يزال بحاجة إلى إجابة قبل الإرسال.',
   'chat.clarify.pending.many': '{n} أسئلة لا تزال بحاجة إلى إجابات قبل الإرسال.',
