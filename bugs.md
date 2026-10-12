@@ -1375,9 +1375,14 @@ chat pathological tall-stack overflow in clarify cards (flexShrink on s.sheet/s.
 ## Security audit (C-items) — 2026-10-12 wave
 
 - [x] **C-06 / BH-000039 [LOW, security] WebView debugging enabled process-wide in release builds — resident agent WebView holds the browsing session** — `MainApplication.kt:71`, `AgentBrowserHost.tsx:53`, `BrowserRelayModule.kt:145` — *(resolved in PR #128 — verified NOT code-fixable: CdpRelay's upstream IS the DevTools abstract socket (`CdpRelay.kt:544-558`), a `BuildConfig.DEBUG` gate kills every browser tool in release (the PR #61 always-available-browser feature). Verified attack surface is narrow: abstract unix socket (no network path), `SO_PEERCRED` rejects other apps, relay TCP token-gated — the only real path is an adb-AUTHORIZED host (USB debugging + prior RSA trust). Posture documented in SECURITY.md (root) + in-code comment at the enable call; changing it needs a separate non-debuggable WebView profile for authenticated browsing — deferred as a product decision)*
+
+## Security audit fixes (2026-10-12) — C-04 / GitHub #94
+
+- [x] **C-04 / BH-000037 [HIGH→MEDIUM, security] Release builds silently fell back to the publicly tracked debug.keystore; keystore.properties was never gitignored** — build.gradle:140, plugins/with-android-release.js — *(fixed in PR #133 — release now fails fast without keystore.properties (plugin mirrored), debug signingConfig + tracked debug.keystore removed (AGP default auto-creates), keystore.properties gitignored; PUBLIC RELEASE IMPACT REFUTED: v1.0.0 APK verified signed by a different key (0598c942…); residual = local dev sideloads + future local-gradle releases, now blocked)*
+
 ## BH bug-hunt wave (2026-10-12) — always-on runtime survival, GH #100
 
-- [x] **BH-000046 [HIGH] Always-on dataSync FGS has no onTimeout — 6h/24h Android 15+ cap crashes the runtime (and sticky-restart + swallowed ForegroundServiceStartNotAllowedException = silent death)** — AndroidManifest:39, HermesService.kt:124 — *(fixed in PR #PR_NUMBER_PLACEHOLDER — migrated to specialUse FGS (no 6h cap, honest type for an embedded runtime gateway) + onTimeout(int[,fgsType]) defense-in-depth (marker file, sleep notification, immediate stop) + BUG-129: Stop runtime now fully tears down; source-level only — on-device check pending next dev build)*
+- [x] **BH-000046 [HIGH] Always-on dataSync FGS has no onTimeout — 6h/24h Android 15+ cap crashes the runtime (and sticky-restart + swallowed ForegroundServiceStartNotAllowedException = silent death)** — AndroidManifest:39, HermesService.kt:124 — *(fixed in PR #134 — migrated to specialUse FGS (no 6h cap, honest type for an embedded runtime gateway) + onTimeout(int[,fgsType]) defense-in-depth (marker file, sleep notification, immediate stop) + BUG-129: Stop runtime now fully tears down; source-level only — on-device check pending next dev build)*
   Implementation notes: `FOREGROUND_SERVICE_SPECIAL_USE` permission added (dataSync
   permission kept for the API 29-33 `startForeground` branch); subtype property
   `android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE=embedded_agent_runtime_gateway`.
