@@ -84,6 +84,29 @@ export const JSON_RPC_METHOD_NOT_FOUND = -32601
 /** JSON-RPC "internal error" — used when a server-request handler throws. */
 export const JSON_RPC_INTERNAL_ERROR = -32603
 
+/**
+ * A request whose frame was already SENT timed out without a response
+ * (BUG-036). The transport has no cancellation: at the moment this rejects,
+ * the server may already be acting on the frame — a `prompt.submit` timeout
+ * can mean "delivered, turn running" just as easily as "never arrived".
+ * Unlike `JsonRpcGatewayError` (the server answered "no"), callers must not
+ * blindly retry non-idempotent methods on this error.
+ */
+export class GatewayTimeoutError extends Error {
+  /** The method whose frame was sent but never answered. */
+  readonly method: string
+
+  constructor(method: string, seconds?: number) {
+    super(
+      typeof seconds === 'number'
+        ? `request timed out after ${seconds}s: ${method}`
+        : `request timed out: ${method}`,
+    )
+    this.name = 'GatewayTimeoutError'
+    this.method = method
+  }
+}
+
 export function jsonRpcErrorFromFrame(raw: unknown, fallbackMessage = 'Mochi RPC failed'): JsonRpcGatewayError {
   const err = (raw && typeof raw === 'object' ? raw : {}) as JsonRpcErrorPayload
 
@@ -253,7 +276,10 @@ export class JsonRpcRequestChannel {
           if (this.pending.delete(id)) {
             detachAbort()
             const seconds = Math.round(timeoutMs / 1000)
-            reject(new Error(`request timed out after ${seconds}s: ${method}`))
+            // BUG-036: typed rejection — the frame left at `transport.send`
+            // below and cannot be cancelled, so callers must be able to tell
+            // "no answer (maybe delivered)" from every definitive failure.
+            reject(new GatewayTimeoutError(method, seconds))
           }
         }, timeoutMs)
       }
