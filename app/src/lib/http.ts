@@ -1,7 +1,16 @@
 import { connConfig, type ConnConfig } from './gateway'
 import { log } from './log'
+import { isPrivateHost } from './transportGate'
 
 export function httpBase(c: ConnConfig): string {
+  // C-05 (#95): the session token rides the X-Hermes-Session-Token header —
+  // over http:// to a PUBLIC host that is cleartext to every hop. Refused
+  // unless the user explicitly confirmed plaintext pairing to this host
+  // (same flag the gateway dial enforces). Private hosts (loopback embedded
+  // runtime, LAN pairing) keep the documented plaintext flow untouched.
+  if (!c.tls && !isPrivateHost(c.host) && !c.plaintextConfirmed) {
+    throw new Error(`Refusing unencrypted http:// to ${c.host} — pair over TLS or confirm the plaintext connection.`)
+  }
   return `${c.tls ? 'https' : 'http'}://${c.host}`
 }
 

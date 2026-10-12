@@ -104,6 +104,11 @@ const EN: Catalog = {
   // the card is bilingual from day one.
   'chat.foreign.title': 'Another session on this machine is asking you something',
   'chat.foreign.hint': 'Tap to review and answer it here.',
+  'pair.plain.title': 'Unencrypted connection',
+  'pair.plain.body':
+    'Connect to {host} without TLS? The connection is not encrypted, so your pairing token travels in the clear — anyone watching the network can read it.',
+  'pair.plain.confirm': 'Connect anyway',
+  'pair.plain.cancel': 'Cancel',
 }
 
 const AR: Catalog = {
@@ -168,6 +173,11 @@ const AR: Catalog = {
   // tracking (automation/CLI on the host).
   'chat.foreign.title': 'جلسة أخرى على هذا الجهاز تطلب منك إجابة',
   'chat.foreign.hint': 'اضغط لمراجعتها والإجابة عليها من هنا.',
+  'pair.plain.title': 'اتصال غير مشفّر',
+  'pair.plain.body':
+    'الاتصال بـ {host} بدون TLS؟ الاتصال غير مشفّر، لذا سينتقل رمز الاقتران مكشوفًا — أي من يراقب الشبكة يستطيع قراءته.',
+  'pair.plain.confirm': 'اتصال رغم ذلك',
+  'pair.plain.cancel': 'إلغاء',
 }
 
 const CATALOGS: Record<Locale, Catalog> = { en: EN, ar: AR }
