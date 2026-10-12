@@ -13,8 +13,13 @@ import { log } from './log'
  * - `syncActiveUrl(url)` feeds the relay's /json/list filter so the agent's
  *   "first page target" is the tab the user is looking at. Pure local IPC —
  *   never throws, never blocks the UI.
- * - `browserTabs` is the screen's tab list (id/url/title/live), and
- *   `activeTabId` picks which one the agent binds to. Persistence is
+ * - BUG-136: this module is the RN half of the tab-lifecycle round-trip —
+ *   the relay's /json/new|close|activate emit one "mochTabOp" event, the
+ *   handler below applies it to the store and acks via `tabOpAck`; the
+ *   tabs⇔targets registry maps store tabs to DevTools target ids so
+ *   close/activate can find their tab.
+ * - `browserTabs` is the screen's tab list (id/url/title/live/targetId),
+ *   and `activeTabId` picks which one the agent binds to. Persistence is
  *   deliberately session-local: tabs are ephemeral by design; cookies and
  *   logins live in the WebView profile (CookieManager), not this list.
  *
@@ -38,6 +43,20 @@ export interface BrowserTab {
   title: string
   /** False while the first load is still in flight. */
   ready: boolean
+  /**
+   * DevTools target id of this tab's WebView (BUG-136), resolved by matching
+   * tab.url against the relay's upstream page list — see refreshTabTargetIds.
+   * Undefined until mapped, and dropped again when the target disappears
+   * (e.g. after a renderer remount creates a NEW id).
+   */
+  targetId?: string
+}
+
+/** One /json/moch-tabs entry (the relay's full upstream page list). */
+export interface TabTarget {
+  id: string
+  url: string
+  title: string
 }
 
 export const browserTabs = atom<BrowserTab[]>([])
@@ -50,18 +69,40 @@ type RelayModule = {
   status(): Promise<RelayStatus>
   setActiveUrl(url: string | null): Promise<boolean>
   setWebDebugEnabled(enabled: boolean): Promise<boolean>
+  /** RN ack for a mochTabOp round-trip (bridge method, fire-and-forget). */
+  tabOpAck(requestId: string, ok: boolean, error?: string | null): void
+  /** The relay's full upstream page list — the tab⇔target registry source. */
+  tabTargets(): Promise<TabTarget[]>
+}
+
+/** One "mochTabOp" event from the relay (CdpRelay → RN, BUG-136). */
+export interface MochTabOpEvent {
+  requestId: string
+  op: 'open' | 'close' | 'activate'
+  url?: string
+  targetId?: string
+}
+
+type EmitterLike = {
+  addListener(name: string, cb: (e: MochTabOpEvent) => void): { remove(): void }
 }
 
 let moduleOverride: RelayModule | null = null
 let cached: RelayModule | null = null
+let tabOpEmitterOverride: EmitterLike | null = null
+let tabOpSub: { remove(): void } | null = null
 
-/** Test seam — inject a fake native module (parity with shareIn.ts). */
-export function _useBrowserRelayForTests(m: RelayModule | null) {
+/** Test seam — inject a fake native module (+ a fake mochTabOp emitter). */
+export function _useBrowserRelayForTests(m: RelayModule | null, e?: EmitterLike | null) {
   moduleOverride = m
   cached = null
+  tabOpEmitterOverride = e ?? null
+  tabOpSub?.remove()
+  tabOpSub = null
 }
 
 function native(): RelayModule {
+  armTabOpListener()
   if (moduleOverride) return moduleOverride
   if (!cached) {
     // TurboModule interop: NativeModules still resolves legacy bridge modules.
@@ -69,6 +110,27 @@ function native(): RelayModule {
     cached = NativeModules.BrowserRelay as RelayModule
   }
   return cached
+}
+
+/**
+ * Subscribe ONCE (process lifetime) to the relay's "mochTabOp" events — the
+ * RN side of the BUG-136 /json/new|close|activate round-trip. Armed lazily on
+ * the first native-module touch (same no-react-native-at-module-scope
+ * contract as shareIn.ts); scripts inject a fake emitter instead.
+ */
+function armTabOpListener() {
+  if (tabOpSub) return
+  try {
+    const e = tabOpEmitterOverride ?? resolveDeviceEventEmitter()
+    if (e) tabOpSub = e.addListener(MOCH_TAB_OP_EVENT, onMochTabOp)
+  } catch {
+    // node-side tests without an injected emitter: stay unarmed, retry later
+  }
+}
+
+function resolveDeviceEventEmitter(): EmitterLike | null {
+  const rn = require('react-native') as { DeviceEventEmitter?: EmitterLike }
+  return rn.DeviceEventEmitter ?? null
 }
 
 /**
@@ -135,6 +197,9 @@ export async function stopBrowserRelay(): Promise<RelayStatus> {
 export function syncActiveUrl(url: string | null) {
   try {
     void native().setActiveUrl(url)
+    // BUG-136: every URL sync is a cheap, throttled chance to re-map the
+    // tab⇔target registry (in-page navigations drift tab.url vs the live URL).
+    void refreshTabTargetIds()
   } catch (e) {
     log('warn', 'browserRelay', `setActiveUrl failed: ${e}`)
   }
@@ -181,4 +246,134 @@ export function updateTab(id: string, patch: Partial<BrowserTab>) {
 export function getActiveTab(): BrowserTab | null {
   const id = activeTabId.get()
   return browserTabs.get().find((t) => t.id === id) ?? null
+}
+
+// ── Tab lifecycle round-trip (BUG-136) ──────────────────────────────────────
+//
+// CdpRelay serves /json/new|close|activate by asking RN — this module IS the
+// tab owner. Contract (mirror of CdpRelay.handleTabLifecycle):
+//   event  "mochTabOp"  {requestId, op: open|close|activate, url?, targetId?}
+//   ack    BrowserRelay.tabOpAck(requestId, ok, error) — statuses live in
+//          Kotlin (200 / 409 refused / 502 unreachable / 504 timeout).
+
+const MOCH_TAB_OP_EVENT = 'mochTabOp'
+
+function tabByTargetId(targetId: unknown): BrowserTab | null {
+  const tid = typeof targetId === 'string' ? targetId : ''
+  if (!tid) return null
+  return browserTabs.get().find((t) => t.targetId === tid) ?? null
+}
+
+/** Apply one relay tab op to the store, then ack it. Never throws. */
+function onMochTabOp(ev: MochTabOpEvent | null | undefined) {
+  const requestId = ev && typeof ev.requestId === 'string' ? ev.requestId : ''
+  if (!requestId) return
+  const op = ev?.op
+  let ok = false
+  let error: string | null = null
+  if (op === 'open') {
+    const url = typeof ev?.url === 'string' && ev.url ? ev.url : 'https://www.google.com'
+    addTab(url)
+    ok = true
+  } else if (op === 'close' || op === 'activate') {
+    const tab = tabByTargetId(ev?.targetId)
+    if (!tab) {
+      error = `no open tab matches DevTools target '${ev?.targetId ?? ''}' — the tab strip changed; retry browser_tab_list`
+    } else if (op === 'close') {
+      if (browserTabs.get().length <= 1) {
+        // RN mirror of the Python-side guard: the strip always keeps one tab.
+        error = 'refusing to close the last remaining tab — navigate it elsewhere instead'
+      } else {
+        closeTab(tab.id)
+        ok = true
+      }
+    } else {
+      switchTab(tab.id)
+      ok = true
+    }
+  } else {
+    error = `unknown tab op '${String(op ?? '')}'`
+  }
+  if (ok) void refreshTabTargetIds() // opportunistic re-map (open mounts a WebView)
+  try {
+    native().tabOpAck(requestId, ok, error)
+  } catch (e) {
+    log('warn', 'browserRelay', `tabOpAck(${requestId}) failed: ${e}`)
+  }
+}
+
+// ── tabs ⇔ DevTools targets registry (BUG-136) ──────────────────────────────
+//
+// close/activate arrive as DevTools target ids, but the store owns tab ids —
+// this registry bridges them by matching tab.url (the REQUESTED url) against
+// the relay's upstream page list (tabTargets = /json/moch-tabs data; the
+// hidden agent host page is filtered Kotlin-side). LIMITATIONS, deliberate:
+//   - redirects/in-page navigation drift tab.url vs the target's live URL —
+//     matches are exact or trailing-slash/prefix-tolerant; a drifted tab may
+//     stay unmapped until its URL is re-synced;
+//   - duplicate URLs tie to the FIRST unused target (both sides iterate in
+//     order) and each target is claimed at most once;
+//   - refreshes are opportunistic (tab-op events, URL syncs, remounts), so a
+//     stale mapping self-heals on the next refresh rather than being feared.
+
+let refreshInFlight: Promise<void> | null = null
+let lastRefreshAt = 0
+const REFRESH_MIN_INTERVAL_MS = 800
+
+function urlsMatch(a: string, b: string): boolean {
+  if (!a || !b) return false
+  const x = a.replace(/\/+$/, '')
+  const y = b.replace(/\/+$/, '')
+  return x === y || x.startsWith(`${y}/`) || y.startsWith(`${x}/`)
+}
+
+/**
+ * Re-map every store tab to its DevTools targetId from the relay's upstream
+ * page list. Coalesces concurrent calls and throttles repeat calls (pass
+ * force=true after a renderer remount — the fresh WebView gets a NEW id).
+ * Existing live mappings are kept as-is so URL drift never unmaps a tab.
+ */
+export async function refreshTabTargetIds(force = false): Promise<void> {
+  if (refreshInFlight) return refreshInFlight
+  if (!force && Date.now() - lastRefreshAt < REFRESH_MIN_INTERVAL_MS) return
+  lastRefreshAt = Date.now()
+  refreshInFlight = (async () => {
+    let targets: TabTarget[] = []
+    try {
+      const raw = await native().tabTargets()
+      targets = (Array.isArray(raw) ? raw : []).filter(
+        (t): t is TabTarget =>
+          !!t && typeof (t as TabTarget).id === 'string' && (t as TabTarget).id !== '',
+      )
+    } catch (e) {
+      log('warn', 'browserRelay', `tabTargets failed: ${e}`)
+      return
+    }
+    const used = new Set<string>()
+    let changed = false
+    const next = browserTabs.get().map((tab) => {
+      if (tab.targetId && targets.some((t) => t.id === tab.targetId)) {
+        used.add(tab.targetId) // current id still live — keep it
+        return tab
+      }
+      const hit = targets.find((t) => !used.has(t.id) && urlsMatch(t.url, tab.url))
+      if (hit) {
+        used.add(hit.id)
+        if (hit.id !== tab.targetId) {
+          changed = true
+          return { ...tab, targetId: hit.id }
+        }
+        return tab
+      }
+      if (tab.targetId) {
+        changed = true // target gone (renderer remounted, tab closed upstream)
+        return { ...tab, targetId: undefined }
+      }
+      return tab
+    })
+    if (changed) browserTabs.set(next)
+  })().finally(() => {
+    refreshInFlight = null
+  })
+  return refreshInFlight
 }
