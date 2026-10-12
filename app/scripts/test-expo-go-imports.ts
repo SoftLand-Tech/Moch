@@ -125,7 +125,15 @@ stub('react-native-reanimated', {
   createAnimatedComponent: () => (props: unknown) => props,
 })
 stub('@expo/vector-icons', { Ionicons: () => null })
-stub('@ronradtke/react-native-markdown-display', { default: () => null })
+// Markdown surface as the REAL dist exports it (BUG-135): a default
+// component plus the re-exported raw MarkdownIt constructor (and
+// createMarkdownIt) — Chat.tsx builds its linkified instance from
+// MarkdownIt via require() at module scope, so the stub must carry it.
+stub('@ronradtke/react-native-markdown-display', {
+  default: () => null,
+  MarkdownIt: Object.assign(() => ({ set: () => {}, use: () => {} }), {}),
+  createMarkdownIt: () => ({ set: () => {}, use: () => {} }),
+})
 stub('expo-clipboard', { setStringAsync: async () => {} })
 stub('expo-speech', { speak: () => {}, stop: async () => {} })
 stub('expo-audio', { AudioModule: {}, useAudioRecorder: () => ({}), RecordingPresets: {}, createAudioPlayer: () => ({}) })
