@@ -21,10 +21,18 @@ import {
 import { forgetChatMarks } from '../../src/lib/chatListState'
 import { C, useStyles } from '../../src/lib/theme'
 import { attentionById, rowStatus } from '../../src/lib/attention'
+import { tr } from '../../src/lib/strings'
+import { log } from '../../src/lib/log'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
 import { StatusDot } from '../../src/components/Sidebar'
-import { loadSessions, sessionRows, sessionListLoading, sessionListError, toMs, type SessionRow } from '../../src/lib/sessionList'
+import {
+  loadSessions, sessionRows, sessionListLoading, sessionListError, toMs,
+  refreshRunningSessions, runningStoredIds, type SessionRow,
+} from '../../src/lib/sessionList'
+import {
+  searchHitToRow, sourceLabel, messageCountText, isDeleteRefusalBusy,
+} from '../../src/lib/sessionRowMeta'
 import { apiFetch } from '../../src/lib/http'
 
 // BUG-063: the row type IS SessionRow — the local duplicate dropped.
@@ -86,6 +94,10 @@ function SessionsInner() {
   // re-renders at turn edges, not per 33ms stream flush.
   const busyKey = useStore(busyStoredKey)
   const busy = useMemo(() => (busyKey ? busyKey.split(',') : []), [busyKey])
+  // BUG-131 (client half): gateway-live sessions this app never opened
+  // (another device / prior launch) — from session.active_list, joined in
+  // lib/sessionList. busyStoredKey alone can never know about them.
+  const running = useStore(runningStoredIds)
   const attention = useStore(attentionById)
   const pending = useStore(pendingCount)
   // BUG-085: unanswered questions keep their row dot even after the chat was
@@ -99,6 +111,9 @@ function SessionsInner() {
     async (force = false) => {
       if (!online) return
       await loadSessions({ force })
+      // BUG-131 (client half): the running overlay rides every list refresh —
+      // after the rows land, so the active_list join has something to match.
+      void refreshRunningSessions()
     },
     [online],
   )
@@ -125,18 +140,14 @@ function SessionsInner() {
           const seen = new Set<string>()
           const rows: SessionRow[] = []
           for (const r of res?.results ?? []) {
-            const id = String(r.session_id ?? '')
-            if (!id || seen.has(id)) continue
-            seen.add(id)
-            rows.push({
-              id,
-              title: typeof r.title === 'string' ? r.title : undefined,
-              // The snippet IS the matching content — show it where a row shows
-              // its preview, so a content hit reads as "why this matched".
-              preview: typeof r.snippet === 'string' ? r.snippet.replace(/\s+/g, ' ').trim() : undefined,
-              started_at: typeof r.started_at === 'number' ? r.started_at : undefined,
-              profile: typeof r.profile === 'string' ? r.profile : undefined,
-            })
+            // BUG-111: the mapping used to drop message_count/source even
+            // though the search endpoint sends them on rich hits — every
+            // content row rendered "0 msgs". The pure mapper keeps them when
+            // present; absent stays undefined so the meta line reads "— msgs".
+            const row = searchHitToRow(r)
+            if (!row || seen.has(row.id)) continue
+            seen.add(row.id)
+            rows.push(row)
           }
           setHits(rows)
         } catch {
@@ -217,7 +228,17 @@ function SessionsInner() {
             // Drop it from the shared store so the drawer updates too.
             sessionRows.set(sessionRows.get().filter((x) => x.id !== s.id))
           } catch (e) {
-            showAlert('Delete failed', e instanceof Error ? e.message : '')
+            // BUG-074: the known refusal ("cannot delete an active session"
+            // — the gateway refuses while a live handle persists, and the
+            // detach above can lose the race with a turn that is still
+            // streaming) becomes friendly bilingual copy; the raw message
+            // always lands in the diag log, unknown errors stay verbatim.
+            const raw = e instanceof Error ? e.message : String(e)
+            log('warn', 'sessions', `session.delete failed: ${raw}`)
+            showAlert(
+              tr('sessions.delete.failed'),
+              isDeleteRefusalBusy(e) ? tr('sessions.delete.busy') : raw,
+            )
           }
         },
       },
@@ -294,8 +315,15 @@ function SessionsInner() {
           // `session.list` yields stored ids; all our per-session state is
           // keyed by the same stored id, so compare in that space.
           const isCurrent = !!currentStored && currentStored === item.id
-          const status = rowStatus(busy.includes(item.id), attention[item.id], pendingStored.includes(item.id))
+          // BUG-131: gateway-running rows join the local busy set — same
+          // pulsing dot, sourced from session.active_list.
+          const status = rowStatus(
+            busy.includes(item.id) || running.has(item.id),
+            attention[item.id],
+            pendingStored.includes(item.id),
+          )
           const label = item.title || item.preview?.slice(0, 80) || 'Untitled'
+          const src = sourceLabel(item.source, tr)
           return (
             <Pressable
               style={({ pressed }) => [s.row, pressed && s.rowPressed, isCurrent && s.rowActive]}
@@ -312,8 +340,10 @@ function SessionsInner() {
                   <StatusDot status={status} />
                 </View>
                 <Text style={s.meta} numberOfLines={1}>
-                  {item.source ? `${item.source} · ` : ''}
-                  {item.message_count ?? 0} msgs
+                  {/* BUG-074: known source tokens localized (raw fallback);
+                      BUG-111: unknown counts read "—", never a lying "0". */}
+                  {src ? `${src} · ` : ''}
+                  {messageCountText(item.message_count)} msgs
                   {/* BUG-012: the only server timestamp is CREATION time —
                       label it honestly instead of implying last-used. */}
                   {fmtWhen(item.started_at) ? ` · started ${fmtWhen(item.started_at)}` : ''}

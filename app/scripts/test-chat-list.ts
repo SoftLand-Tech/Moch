@@ -1,10 +1,15 @@
 // Unit tests for the sidebar chat-list layer (no gateway): marks (pin/archive)
-// persistence round-trip + the pure section grouping.
+// persistence round-trip + the pure section grouping, plus the pure session-row
+// helpers (sessionRowMeta / sessionRunning / linkToast) behind the honest-row
+// and running-dot fixes (#63/#75/#109/#111).
 //
 // AsyncStorage cannot load in plain node, so a fake is injected before the
 // state module ever persists — the same pattern test-interactive.ts uses for
-// the gateway module.
+// the gateway module. The three helper modules are deliberately RN-free.
 type ChatListState = typeof import('../src/lib/chatListState')
+type SessionRowMeta = typeof import('../src/lib/sessionRowMeta')
+type SessionRunning = typeof import('../src/lib/sessionRunning')
+type LinkToast = typeof import('../src/lib/linkToast')
 
 let mod: ChatListState
 
@@ -111,6 +116,87 @@ async function main() {
   // No marks → no Pinned/Archived sections at all.
   const plain = mod.groupChats(rows, [], [], now)
   check('no marks → only time sections', plain.every((g) => ['today', 'yesterday', 'week', 'older'].includes(g.key)))
+
+  // ── Session row meta (#63/#111): honest source labels + counts ───────────
+  const meta = (await import('../src/lib/sessionRowMeta')) as SessionRowMeta
+  const running = (await import('../src/lib/sessionRunning')) as SessionRunning
+  const toast = (await import('../src/lib/linkToast')) as LinkToast
+
+  // sourceLabel: known token → tr() key resolved by the injected translator;
+  // unknown token → the raw string; absent → ''.
+  const fakeT = (k: string) => `[${k}]`
+  check('sourceLabel localizes a known token', meta.sourceLabel('mobile', fakeT) === '[sessions.source.mobile]')
+  check('sourceLabel is case/whitespace tolerant', meta.sourceLabel('  Cron ', fakeT) === '[sessions.source.cron]')
+  check('sourceLabel keeps unknown tokens raw', meta.sourceLabel('irc', fakeT) === 'irc')
+  check('sourceLabel empty when absent', meta.sourceLabel(undefined, fakeT) === '' && meta.sourceLabel('  ', fakeT) === '')
+
+  // messageCountText: known counts verbatim, unknown → em-dash, never a 0 lie.
+  check('messageCountText renders a real 0 as "0"', meta.messageCountText(0) === '0')
+  check('messageCountText renders counts', meta.messageCountText(42) === '42')
+  check('messageCountText renders unknown as "—" (BUG-111)', meta.messageCountText(undefined) === '—')
+  check('messageCountText tolerates null/NaN', meta.messageCountText(null) === '—' && meta.messageCountText(Number.NaN) === '—')
+
+  // searchHitToRow: the /api/sessions/search hit mapping — message_count and
+  // source MUST pass through when the server sends them (it does —
+  // web_routers/sessions.py), and MUST stay undefined (→ "— msgs") when not.
+  const rich = meta.searchHitToRow({
+    session_id: '20261012_abcd', snippet: 'lorem   ipsum\tdolor', title: 'Hit',
+    started_at: 1760000000.5, profile: 'default', message_count: 7, source: 'cli',
+  })!
+  check('searchHitToRow keeps message_count (#111)', rich.message_count === 7)
+  check('searchHitToRow keeps source', rich.source === 'cli')
+  check('searchHitToRow keeps id/title/profile', rich.id === '20261012_abcd' && rich.title === 'Hit' && rich.profile === 'default')
+  check('searchHitToRow collapses snippet whitespace', rich.preview === 'lorem ipsum dolor')
+  const bare = meta.searchHitToRow({ session_id: 'x1', snippet: 'match' })!
+  check('searchHitToRow leaves absent count undefined', bare.message_count === undefined && bare.source === undefined)
+  check('searchHitToRow "—" decision applies to hits', meta.messageCountText(bare.message_count) === '—')
+  check('searchHitToRow rejects hits without an id', meta.searchHitToRow({ snippet: 'orphan' }) === null)
+
+  // optimisticSessionRow: a just-created chat has NO known count — undefined,
+  // never the old hard 0 that read "0 msgs" until the next poll.
+  const opt = meta.optimisticSessionRow('newly-created', 'New chat', 1760000100)
+  check('optimistic row leaves message_count undefined', opt.message_count === undefined)
+  check('optimistic row renders "— msgs"', meta.messageCountText(opt.message_count) === '—')
+  check('optimistic row keeps id/title/started_at/source', opt.id === 'newly-created' && opt.title === 'New chat' && opt.started_at === 1760000100 && opt.source === 'mobile')
+
+  // isDeleteRefusalBusy: the gateway's raw refusal (methods_session.py 4023)
+  // is matched on its stable message — the code alone is shared by unrelated
+  // validations, so it must NOT be sufficient.
+  check('isDeleteRefusalBusy matches the known refusal', meta.isDeleteRefusalBusy(new Error('cannot delete an active session')))
+  check('isDeleteRefusalBusy ignores other errors', !meta.isDeleteRefusalBusy(new Error('session not found')) && !meta.isDeleteRefusalBusy('cannot delete an active session'))
+
+  // ── Running join (#75/BUG-131): active_list → rows → Set<storedId> ──────
+  const rows2 = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
+  const run = (list: unknown) => running.joinRunningSessions(list as never, rows2)
+  check('working/streaming/starting/resuming → running', (() => {
+    const s = run([
+      { session_key: 'a', status: 'working' },
+      { session_key: 'b', status: 'streaming' },
+      { session_key: 'c', status: 'starting' },
+      { session_key: 'a', status: 'resuming' },
+    ])
+    return s.size === 3 && s.has('a') && s.has('b') && s.has('c')
+  })())
+  check('waiting → NOT running (attention owns it)', (() => {
+    const s = run([{ session_key: 'a', status: 'waiting' }, { session_key: 'b', status: 'idle' }])
+    return s.size === 0
+  })())
+  check('unmatched session_keys ignored', run([{ session_key: 'elsewhere', status: 'working' }]).size === 0)
+  check('empty/null active_list → empty set', run([]).size === 0 && running.joinRunningSessions(null, rows2).size === 0 && running.joinRunningSessions(undefined, rows2).size === 0)
+  check('malformed entries skipped', (() => {
+    const s = run([null, {}, { session_key: 42, status: 'working' }, { session_key: 'a', status: 7 }, { session_key: 'a' }])
+    return s.size === 0
+  })())
+  check('empty rows → empty set (nothing to mark)', running.joinRunningSessions([{ session_key: 'a', status: 'working' }], []).size === 0)
+
+  // ── linkToast (#109): the toast lifecycle transition table ───────────────
+  check('error sets the message', toast.linkToast(null, { type: 'error', message: 'boom' }) === 'boom')
+  check('error with no message falls back', toast.linkToast('old', { type: 'error', message: '' }) === toast.LINK_TOAST_FALLBACK)
+  check('reset clears (new link / connected)', toast.linkToast('boom', { type: 'reset' }) === null && toast.linkToast(null, { type: 'reset' }) === null)
+  check('dismiss clears (tap)', toast.linkToast('boom', { type: 'dismiss' }) === null)
+  check('timeout clears (7s auto-dismiss)', toast.linkToast('boom', { type: 'timeout' }) === null)
+  // Note: the 7s timer itself and the Pressable live in app/_layout.tsx
+  // (component-level, not extractable to plain node) — verified source-level.
 
   console.log(`\n${pass}/${pass + fail} passed, ${fail} failed`)
   process.exit(fail ? 1 : 0)

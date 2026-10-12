@@ -291,7 +291,7 @@ Check off `- [ ]` as you fix. All findings were adversarially verified against s
 - [x] **BUG-071 [LOW] Per-server token silently falls back to plaintext AsyncStorage (no warn, unlike saveConfig)** — `src/lib/gateway.ts:201-208` vs :371.
 - [x] **BUG-072 [LOW] `client.capabilities` re-advertised on every gateway.ready frame** — `src/protocol/json-rpc-channel.ts:414-415,427-429` ("once per generation" comment unenforced).
 - [x] **BUG-073 [LOW] Queue flush into a session deleted mid-flush drops the head (and its attachments) silently** — `src/lib/chat.ts:1541-1543,1778-1780`.
-- [ ] **BUG-074 [LOW] Raw server strings in UI** — `item.source` verbatim ("mobile · 2 msgs", sessions.tsx:213); "cannot delete an active session"/"session not found" alerts; optimistic row stuck at "0 msgs" (`sessionList.ts:120`).
+- [x] **BUG-074 [LOW] Raw server strings in UI** — `item.source` verbatim ("mobile · 2 msgs", sessions.tsx:213); "cannot delete an active session"/"session not found" alerts; optimistic row stuck at "0 msgs" (`sessionList.ts:120`). *(fixed in PR #PR_NUMBER_PLACEHOLDER — the two real legs: known `source` tokens tr()'d EN/AR (mobile/cli/desktop/tui/webui/cron/kanban/subagent + the gateway's own token set, raw fallback for anything else) and the "cannot delete an active session" refusal mapped to friendly bilingual copy with the raw error kept in the diag log; the optimistic row now leaves `message_count` undefined so "— msgs" renders (pairs with #111/BH-000085). The "session not found" alert leg no longer exists — the delete path already swallows it via `isSessionNotFound`.)*
 - [x] **BUG-075 [LOW] Silent no-feedback sends** — retry early-returns (`chat.ts:1699/1701/1704` — the real silent path is BUG-003's lock); send with no storedId no-ops (`chat.tsx:631`); clarify empty mini-send wipes the field (`chat.tsx:1194` + `chat.ts:1829-1830`); steer with a full queue drops the item's attachments (`chat.tsx:1294-1307` — re-enqueue re-attaches only when the queue isn't full).
 - [x] **BUG-076 [LOW] Enter inserts a newline despite `returnKeyType="send"`** *(documented platform limitation: RN multiline ignores the IME action; a real fix needs a native single-line+manual-newline composer — out of scope)*  — `app/(tabs)/chat.tsx:1381-1383` (multiline native; submit handler web-gated; no `blurOnSubmit`).
 - [x] **BUG-077 [LOW] Truncations with no markers** — expanded thinking at 4000 chars (`Chat.tsx:368,381`); history rows 8000 vs 32000 streamed (`chat.ts:1481-1487`); transcript export 50k silent truncate ("Transcript copied" regardless, settings.tsx:279-280); todos capped at 4, index keys, no "+N" (`chat.tsx:1019-1023`).
@@ -368,7 +368,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   `errors.log`: `SQLite FTS5 unavailable for …/state.db; full-text session search disabled … (no such module: fts5)`. Measured: drawer/Chats search matches **titles** (`AGENT-ISOLATION`) but not a phrase that exists only in a message body (`reachable from my side` → `No matches`, phrase verified in the transcript); `GET /api/sessions/search?q=…` returns `{"results":[]}` even for a title term. No UI hint that search is title-only.
   *Fix:* ship an FTS5-capable SQLite/Python in the embedded runtime, or add a LIKE-based fallback for message search and label the degraded mode.
 
-- [ ] **BUG-115 [MEDIUM] Terminal: Kill → Retry replays the dead session's scrollback into the fresh shell** — `app/python-runtime/moch/terminal.py:202-203` + `app/src/lib/terminal.ts:226-250`
+- [x] **BUG-115 [MEDIUM] Terminal: Kill → Retry replays the dead session's scrollback into the fresh shell** — `app/python-runtime/moch/terminal.py:202-203` + `app/src/lib/terminal.ts:226-250` *(fixed in PR #PR_NUMBER_PLACEHOLDER — start() and kill() now clear `_state.replay`/`replay_bytes` alongside the chunks (bank kept for live WebView reload repaints); 2 regression tests added to tests/test_terminal.py; on-device check pending)*
   `start()` clears `_state.chunks` but not `_state.replay` (the WebView-refill bank), and the JS immediately re-banks `native.replay()` into the new xterm. Repro: echo a marker → Kill → Retry → the previous session's output (`uname -a`, `TICK-1..4`, marker) is on screen again from a bash that never ran it. Also makes the kill affordance look broken.
   *Fix:* clear `_state.replay`/`replay_bytes` in `start()` (or scope the replay bank to WebView reloads only).
 
@@ -376,7 +376,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   Grep over the app finds only the definitions; Settings has no language row (whole screen scrolled). The atom is therefore always `'en'`, so the Arabic catalog and the RTL flag are dead code; forcing the app locale (`cmd locale set-app-locales … ar`) + relaunch leaves the UI English and LTR. M9.2's "RTL pass on the new screens" is untestable as shipped.
   *Fix:* call `loadLocale()` once at boot and add the language row (EN/العربية) that calls `setLocale()` + reloads the RN layout direction.
 
-- [ ] **BUG-117 [MEDIUM] Model picker opened from Settings shows an internal error banner** — `app/(tabs)/settings.tsx` → model sheet
+- [x] **BUG-117 [MEDIUM] Model picker opened from Settings shows an internal error banner** — `app/(tabs)/settings.tsx` → model sheet *(fixed in PR #PR_NUMBER_PLACEHOLDER — the sheet's open-path refresh no longer gates on activeLiveId(): a dead provisional window resolves to null and model.options is fetched sessionless (sessionId is optional per modelState); the internal-error banner stays for genuine inventory failures; on-device check pending)*
   `Couldn't refresh the model inventory (New chat is not ready). Showing the last known list.` The cached list still renders, but an internal precondition leaks into a Settings screen and the inventory can stay stale for anyone who never opens the picker from a chat.
   *Fix:* refresh the inventory without a live chat (gateway `models.*`), or phrase/scope the fallback so it never surfaces raw state.
 
@@ -384,7 +384,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   Connectors → Browse: `Catalog is empty`; `GET /api/mcp/catalog` → `{"entries":[],"diagnostics":[]}`; RPC `mcp.catalog` → `{"servers":[]}`; `…/AssetFinder/app/optional-mcps` does not exist. The screen invites browsing a catalog that never ships.
   *Fix:* bundle `optional-mcps/` in the Python sources, or replace the empty state with an honest "catalog not bundled in this build" + the manual add-server path.
 
-- [ ] **BUG-119 [LOW] About shows `Moch v1.0`, not the installed build** — `app/(tabs)/settings.tsx`
+- [x] **BUG-119 [LOW] About shows `Moch v1.0`, not the installed build** — `app/(tabs)/settings.tsx` *(fixed in PR #PR_NUMBER_PLACEHOLDER — About row and copyDiagnostics now render `Moch v${nativeAppVersion ?? expoConfig.version} (${nativeBuildVersion})`; on-device check pending)*
   Installed APK is `1.0.15-browser` (versionCode 18) and the runtime reports `Mochi 0.21.3`; the About row says `Moch v1.0`, so neither the user nor support can read the build from the UI.
   *Fix:* render `Constants.expoConfig?.version` + the Android versionName/versionCode.
 
@@ -439,6 +439,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   fields all render; only the failure is silent.
   *Fix:* surface the parse/connect error inline next to the field ("could not
   reach 127.0.0.1:1 — check the host and that the agent is running").
+  *(not real at HEAD — paste path inline-errors since PR #36/#54 era; deep-link residue is #109's toast lifecycle)*
 
 - [x] **BUG-125 [HIGH] [FIXED + VERIFIED on device] Refs from a FRESH snapshot are rejected as "stale ref" unless the `@` prefix is stripped — the agent's primary click/type path silently dead-ends** — `hermes-src/tools/browser_webview.py:200-207` (`_ref_js`), snapshot ref rendering
   On device, same page, same minute (session `20261011_162731_898f7c`):
@@ -527,9 +528,10 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   Impact: screen-reader users cannot reach the two busy-only controls (Stop, Steer), and any accessibility-driven automation — including the on-device harness used for this campaign — reads an "idle" composer with the wrong contents. My first BUG-130 report is exactly the false positive that produces.
   *Fix:* re-announce the composer subtree when `busy` flips (`accessibilityLiveRegion`, explicit `importantForAccessibility` on the chip, a keyed re-render or `accessibilityValue` for the input) so the new controls and the live text reach the tree.
 
-- [ ] **BUG-131 [MEDIUM] Session list rows carry no running marker** — `hermes_cli/web_routers/sessions.py` (list rows), `app/src/lib/sessionList.ts`
+- [x] **BUG-131 [MEDIUM] Session list rows carry no running marker** — `hermes_cli/web_routers/sessions.py` (list rows), `app/src/lib/sessionList.ts`
   `/api/sessions` rows return `running: null` (also `active`/`busy`: null) for a session that is demonstrably mid-turn — its own detail endpoint says `last_activity_description: "receiving stream response"` at the same moment. The client can therefore never learn "this chat is working" from a list refresh (`chat.ts:1095` has a `res.running` branch no list payload can satisfy), which is the recovery path a reconnect, a chat switch or a second device needs.
   *Fix:* include the live running flag on `session.list` rows (the gateway already knows it).
+  *(fixed in PR #PR_NUMBER_PLACEHOLDER — client-only via the previously-unused session.active_list RPC join; per-row dot for gateway-live-unopened sessions; vendored SessionListRow.running field deliberately not needed)*
 
   **[FIXED 2026-10-11, verified on device]** `CdpRelay.start` now binds
   `InetAddress.getByName("127.0.0.1")` (IPv4 loopback literal, both the preferred
@@ -1425,6 +1427,14 @@ chat pathological tall-stack overflow in clarify cards (flexShrink on s.sheet/s.
   restart — MainApplication auto-start only runs on process creation; a
   MainActivity.onResume restart hook is deliberately out of scope here.
 
+## BH bug-hunt wave (2026-10-12) — screens error surfaces, GH #64/#65/#66/#106/#107/#108/#112/#115
+
+- [x] **BH-000080 [MEDIUM] Fleet freeze/unfreeze swallows every failure — the row silently snaps back** — `app/app/(tabs)/fleet.tsx:120-128` (`toggleFreeze` try/finally with NO catch) — *(fixed in PR #PR_NUMBER_PLACEHOLDER — freeze-half fixed here (create-half was already fixed in #122/BUG-139): catch → localized `fleet.freeze.failed` alert with name+why, busy cleared in finally; on-device check pending)*
+- [x] **BH-000081 [MEDIUM] Bot detail Save/Delete failures vanish (unhandled rejections, stale UI state)** — `app/app/bot.tsx:64-74,103-114` (both handlers try/finally with NO catch) — *(fixed in PR #PR_NUMBER_PLACEHOLDER — catch → localized `bot.save.failed`/`bot.delete.failed` alerts with why; save failure clears the stale "saved" indicator, delete failure re-arms the wizard (confirmDelete=0); on-device check pending)*
+- [x] **BH-000082 [HIGH] Automations edit destroys long prompts — schedule-only edits rewrite the stored prompt to the truncated preview** — `app/app/(tabs)/automations.tsx:171-189` (prefill from `prompt_preview`, edit ALWAYS sends `--prompt`) + `hermes-src/tools/cronjob_job_args.py:377` (preview capped at 100 chars + literal "...") + `hermes-src/tools/cronjob_tools.py` (`update` overwrites the stored prompt whenever `--prompt` is present) — *(fixed in PR #PR_NUMBER_PLACEHOLDER — new vendored `cron.manage` action `get` (contract updated) returns the `_format_job` row + the FULL prompt; edit prefills from it, falls back to the preview + `automations.promptLoadFailed` banner when get fails; save omits `--prompt` unless the field was actually modified (dirty-check against the loaded prompt); tests/test_cron_get.py green; on-device check pending)*
+- [x] **BH-000086 [MEDIUM] Crew pull-to-refresh is wired to `loading`, and an offline mount spins forever with no banner** — `app/app/(tabs)/crew.tsx` (RefreshControl used `refreshing={loading}`; the offline early-return left `loading=true`) — *(fixed in PR #PR_NUMBER_PLACEHOLDER — dedicated `refreshing` state (automations pattern) set in onRefresh/cleared in the loader's tail; the offline early-return clears `loading` so from-mount offline renders the `crew.offline` banner over the last board instead of a stuck spinner; on-device check pending)*
+- [x] **BH-000089 [MEDIUM] Settings Linux install/reset rows are fire-and-forget — failures change nothing and say nothing** — `app/app/(tabs)/settings.tsx:62-78` (`linuxBootstrap().finally(...)` / bare `void linuxReset()`) — *(fixed in PR #PR_NUMBER_PLACEHOLDER — BUG-016 pattern ported from setup.tsx: async handlers honor the `{ok,steps}|null` result (`!r || r.ok === false` → error) and catch throws → localized `linux.install.failed`/`linux.reset.failed` alerts with why; busy cleared in finally; on-device check pending)*
+
 - [x] **C-04 / BH-000037 [HIGH→MEDIUM, security] Release builds silently fell back to the publicly tracked debug.keystore; keystore.properties was never gitignored** — build.gradle:140, plugins/with-android-release.js — *(fixed in PR #133 — release now fails fast without keystore.properties (plugin mirrored), debug signingConfig + tracked debug.keystore removed (AGP default auto-creates), keystore.properties gitignored; PUBLIC RELEASE IMPACT REFUTED: v1.0.0 APK verified signed by a different key (0598c942…); residual = local dev sideloads + future local-gradle releases, now blocked)*
 
 ## Security audit (C-items) — relay wave, GH #91/#92/#93
@@ -1432,3 +1442,23 @@ chat pathological tall-stack overflow in clarify cards (flexShrink on s.sheet/s.
 - [x] **C-01 / BH-000034 [MEDIUM, security] Relay treated knowledge of tokenHash as machine identity — no proof-of-possession at /control (state.json leak = machine-takeover + victim crash-loop lockout)** — relay/moch-relay-server.js:183-204 — *(fixed in PR #135 — registration that creates a credential or takes over a hash must discharge a verify challenge: relay sends {"t":"verify","nonce"} and the machine opens /tunnel/<nonce> with the raw token (sha256 proof) within the window; failure → close 4003, offline twin KEEPS its slot (no more eviction-based lockout). Returning (id, tokenHash) pairs reconnect hash-only — existing tunnels unaffected. state.json now 0600 in a 0700 dir (any-local-VPS-user read closed). DEFERRED: full sha256→HMAC(relaySecret,token) verifier migration — needs every machine to re-run install.sh + legacy grandfathering (protocol decision))* 
 - [x] **C-02 / BH-000035 [MEDIUM, security] Raw pairing token (and Expo push token) traveled in relay URL query strings on both legs — lands in reverse-proxy access logs; 'relay never sees the token' comments were false** — relay:308-312,377-381; gateway.ts:148-158; install.sh:222-223 — *(fixed in PR #135 — phone dial sends token+push as X-Hermes-Session-Token/X-Hermes-Push-Token upgrade HEADERS (never a URL); relay routes by header and re-injects ?token=&push= into the FORWARDED request line only (in-memory, on the tunnel leg) so old homes and moch-link's push capture keep working; phone falls back to legacy query once on refusal (old relays). Tunnel leg sends its key as X-Moch-Tunnel-Key header with ?key= 403-fallback for old relays. All lying comments/READMEs/docs corrected; nginx log-scrub snippet added to relay/README)*
 - [x] **C-03 / BH-000036 [MEDIUM, security] Relay registration open by default; unauthenticated /control sockets had no lifecycle cap; XFF first-entry trust voided the per-IP cap** — relay:61,268-287,433-435,273-279 — *(fixed in PR #135 — 10s register deadline (close 4001) + parked-socket caps (5/IP after last-entry XFF trust, 100 global; close 4002); /health keeps {"ok":true} public but machine/connection counts only behind the relay key (?key= or X-Moch-Relay-Key); --bind flag (default unchanged — direct-exposure self-hosters keep working, loopback-behind-nginx documented); OPEN REGISTRATION now logs a loud DEPRECATION banner with migration instructions (--open-registration opts out). DEFERRED: flipping require-key default to closed — hard-breaks every tunnel lacking --relay-key (crash-loop); one-release deprecation window instead, MOCH_LINK_RELAY_KEY plumbing already added to install.sh)*
+## BH wave (2026-10-12) — session-list honesty + pairing toast, GH #63/#75/#109/#111
+
+- [x] **BH-000083 [MEDIUM] Sticky pairing/deep-link toast — set on failure, never cleared, not even tap-dismissable** — `app/app/_layout.tsx:158/:242` (`setLinkMsg` on a bad link / the BUG-029 stale-tap notice), `:272-274/:357-359` (rendered on both root branches)
+  `linkMsg` was write-only state: nothing ever set it back to null. A bad pairing link (or a stale
+  notification tap) put a toast up that outlived every later successful pair, survived navigation,
+  and covered bottom-of-screen content indefinitely — with no tap target, since it rendered as a
+  passive `View`. PR #130's plaintext-confirm rewrite of the same handler left the catch path
+  untouched, so the residue persisted at HEAD.
+  *(fixed in PR #PR_NUMBER_PLACEHOLDER — every linkMsg change funnels through a pure `linkToast`
+  transition table (reset on a new deep link AND on successful connect, error with an empty-message
+  fallback), the toast auto-dismisses after ~7s (timeout cleaned up on change/unmount), and it is a
+  Pressable with a dismiss a11y role; the #130 plaintext-confirm gate in the same handler is
+  untouched — the new hunks wrap it)*
+- [x] **BH-000085 [LOW] Content-search rows all read "0 msgs" — the hit mapping drops `message_count` the server actually sends** — `app/app/(tabs)/sessions.tsx:131-139` (hit-row construction), `:316` (`item.message_count ?? 0` render) vs `hermes_cli/web_routers/sessions.py:348` (`message_count` IS in the rich-hit payload)
+  Every content-search hit rendered a lying "0 msgs" while the same conversation showed its real
+  count on the plain list row — the constructor copied `title`/`snippet`/`started_at`/`profile` but
+  silently dropped `message_count` (and `source`), and the render site coerced undefined to 0.
+  *(fixed in PR #PR_NUMBER_PLACEHOLDER — pure `searchHitToRow` keeps `message_count`/`source` when
+  present; absent counts render "— msgs" via `messageCountText` (never a fabricated 0), the same
+  decision the optimistic-row leg of BUG-074 now uses)*

@@ -70,6 +70,7 @@ const EN: Catalog = {
   'fleet.chat': 'Chat with {name}',
   'fleet.freeze': 'Freeze {name}',
   'fleet.unfreeze': 'Unfreeze {name}',
+  'fleet.freeze.failed': "Couldn't freeze/unfreeze {name}: {why}",
   'fleet.refresh': 'Refresh fleet',
   'fleet.detail.back': 'Fleet',
   'crew.hint':
@@ -84,6 +85,7 @@ const EN: Catalog = {
   'crew.assign': 'Reassign',
   'crew.moch': 'Moch',
   'crew.err': 'Action failed: {why}',
+  'crew.offline': 'Crew offline — showing the last board',
   'crew.timeline': 'Run ledger',
   'crew.timeline.empty': 'No runs recorded yet.',
 
@@ -91,13 +93,23 @@ const EN: Catalog = {
   'bot.soul': 'SOUL.md — the job description',
   'bot.save': 'Save',
   'bot.saved': 'saved',
+  'bot.save.failed': "Couldn't save: {why}",
   'bot.chat': 'Chat with {name}',
+  'bot.delete.failed': "Couldn't delete this bot: {why}",
   'bot.delete.title': 'Danger zone',
   'bot.delete.body':
     'Deleting tombstones this bot: its scheduled jobs stop firing (ticker skips tombstones), running turns stop at the next boundary. Kanban tasks it holds stay on the board until the M9.4 crew board offers reassignment.',
   'bot.delete.cta': 'Delete this bot',
   'bot.delete.confirm': 'Tap again to confirm deletion',
   'bot.delete.doing': 'Deleting…',
+
+  // Linux guest install/reset failures (Settings rows, BUG-016 pattern).
+  'linux.install.failed': "The install didn't finish — check the connection and try again. ({why})",
+  'linux.reset.failed': "The reset didn't finish — check the connection and try again. ({why})",
+
+  // #108 automations edit: the full prompt couldn't be fetched — the form
+  // shows the 100-char preview instead.
+  'automations.promptLoadFailed': "Couldn't load the full prompt — showing a truncated preview",
 
   // BUG-086 aggregate card for questions from sessions this app isn't
   // tracking (automation/CLI on the host) — chat-surface keys live here so
@@ -113,6 +125,35 @@ const EN: Catalog = {
     'Connect to {host} without TLS? The connection is not encrypted, so your pairing token travels in the clear — anyone watching the network can read it.',
   'pair.plain.confirm': 'Connect anyway',
   'pair.plain.cancel': 'Cancel',
+
+  // BUG-074 / #111 / #131: Chats-screen row meta. Known `source` tokens the
+  // gateway itself mints are localized (anything else falls back to the raw
+  // token); unknown message counts render "—" instead of a lying 0; the
+  // delete-while-running refusal gets friendly copy instead of raw server
+  // English ("cannot delete an active session").
+  'sessions.source.mobile': 'Phone',
+  'sessions.source.tui': 'Terminal (TUI)',
+  'sessions.source.cli': 'CLI',
+  'sessions.source.webui': 'Web',
+  'sessions.source.desktop': 'Desktop',
+  'sessions.source.cron': 'Scheduled',
+  'sessions.source.kanban': 'Crew board',
+  'sessions.source.subagent': 'Sub-agent',
+  'sessions.source.test': 'Test',
+  'sessions.source.local': 'Local',
+  'sessions.source.acp': 'ACP',
+  'sessions.source.webhook': 'Webhook',
+  'sessions.source.api_server': 'API',
+  'sessions.source.msgraph_webhook': 'MS Graph',
+  'sessions.source.telegram': 'Telegram',
+  'sessions.source.discord': 'Discord',
+  'sessions.source.whatsapp': 'WhatsApp',
+  'sessions.source.slack': 'Slack',
+  'sessions.source.signal': 'Signal',
+  'sessions.source.email': 'Email',
+  'sessions.source.sms': 'SMS',
+  'sessions.delete.failed': 'Delete failed',
+  'sessions.delete.busy': 'This chat is busy on the computer — stop it there before deleting.',
 }
 
 const AR: Catalog = {
@@ -144,6 +185,7 @@ const AR: Catalog = {
   'fleet.chat': 'تحدث مع {name}',
   'fleet.freeze': 'تجميد {name}',
   'fleet.unfreeze': 'إلغاء تجميد {name}',
+  'fleet.freeze.failed': 'تعذّر تجميد/إلغاء تجميد {name}: {why}',
   'fleet.refresh': 'تحديث الأسطول',
   'fleet.detail.back': 'الأسطول',
   'crew.hint':
@@ -158,6 +200,7 @@ const AR: Catalog = {
   'crew.assign': 'إعادة تعيين',
   'crew.moch': 'موك',
   'crew.err': 'فشل الإجراء: {why}',
+  'crew.offline': 'طاقم العمل غير متصل — يُعرض آخر لوح',
   'crew.timeline': 'سجل الأدوار',
   'crew.timeline.empty': 'لا أدوار مسجلة بعد.',
 
@@ -165,13 +208,23 @@ const AR: Catalog = {
   'bot.soul': 'SOUL.md — وصف المهمة',
   'bot.save': 'حفظ',
   'bot.saved': 'تم الحفظ',
+  'bot.save.failed': 'فشل الحفظ: {why}',
   'bot.chat': 'تحدث مع {name}',
+  'bot.delete.failed': 'تعذّر حذف هذا البوت: {why}',
   'bot.delete.title': 'منطقة الخطر',
   'bot.delete.body':
     'الحذف يضع علامة قبر على هذا البوت: مهامه المجدولة تتوقف (الجدول يتخطى الملفات الموابَرة)، والأدوار الجارية تتوقف عند الحد التالي. مهام كانبان تبقى على اللوحة حتى توفر لوحة الطاقم (M9.4) إعادة الإسناد.',
   'bot.delete.cta': 'احذف هذا البوت',
   'bot.delete.confirm': 'اضغط مرة أخرى للتأكيد',
   'bot.delete.doing': 'جارٍ الحذف…',
+
+  // Linux guest install/reset failures (Settings rows, BUG-016 pattern).
+  'linux.install.failed': 'لم يكتمل التثبيت — تحقّق من الاتصال وحاول مجددًا. ({why})',
+  'linux.reset.failed': 'لم يكتمل إعادة التعيين — تحقّق من الاتصال وحاول مجددًا. ({why})',
+
+  // #108 automations edit: the full prompt couldn't be fetched — the form
+  // shows the 100-char preview instead.
+  'automations.promptLoadFailed': 'تعذّر تحميل الأمر الكامل — يُعرض مقتطعًا',
 
   // BUG-086 aggregate card for questions from sessions this app isn't
   // tracking (automation/CLI on the host).
@@ -185,6 +238,31 @@ const AR: Catalog = {
     'الاتصال بـ {host} بدون TLS؟ الاتصال غير مشفّر، لذا سينتقل رمز الاقتران مكشوفًا — أي من يراقب الشبكة يستطيع قراءته.',
   'pair.plain.confirm': 'اتصال رغم ذلك',
   'pair.plain.cancel': 'إلغاء',
+
+  // BUG-074 / #111 / #131 (see the EN block above).
+  'sessions.source.mobile': 'الهاتف',
+  'sessions.source.tui': 'الطرفية (TUI)',
+  'sessions.source.cli': 'سطر الأوامر',
+  'sessions.source.webui': 'الويب',
+  'sessions.source.desktop': 'سطح المكتب',
+  'sessions.source.cron': 'مجدولة',
+  'sessions.source.kanban': 'لوحة الطاقم',
+  'sessions.source.subagent': 'وكيل فرعي',
+  'sessions.source.test': 'اختبار',
+  'sessions.source.local': 'محلي',
+  'sessions.source.acp': 'ACP',
+  'sessions.source.webhook': 'Webhook',
+  'sessions.source.api_server': 'API',
+  'sessions.source.msgraph_webhook': 'MS Graph',
+  'sessions.source.telegram': 'تيليجرام',
+  'sessions.source.discord': 'ديسكورد',
+  'sessions.source.whatsapp': 'واتساب',
+  'sessions.source.slack': 'سلاك',
+  'sessions.source.signal': 'سيجنال',
+  'sessions.source.email': 'البريد',
+  'sessions.source.sms': 'رسائل نصية',
+  'sessions.delete.failed': 'تعذّر الحذف',
+  'sessions.delete.busy': 'هذه المحادثة تعمل الآن على الحاسوب — أوقفها هناك قبل الحذف.',
 }
 
 const CATALOGS: Record<Locale, Catalog> = { en: EN, ar: AR }
