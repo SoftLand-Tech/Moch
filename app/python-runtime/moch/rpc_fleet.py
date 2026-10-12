@@ -156,12 +156,16 @@ def _install(tg_server) -> bool:
 
     def moch_kanban_tasks(rid, params):
         """Read-only crew-board view (default board): tasks grouped for the app.
-        Params: {assignee?: str, status?: str, limit?: 100}."""
+        Params: {assignee?: str, status?: str, limit?: 100, board?: str}.
+        BUG-138 hardening: db_path resolved at ENTRY (a concurrent in-process
+        worker turn pins HERMES_KANBAN_DB process-globally — an ambient
+        connect_closing() could read the WRONG board)."""
         limit = max(1, min(int(params.get("limit") or 100), 300))
         try:
             from hermes_cli import kanban_db as _kb
             from hermes_cli import kanban_db_connect as _kbc
-            with _kbc.connect_closing() as conn:
+            db_path = _kb.kanban_db_path(board=params.get("board") or None)
+            with _kbc.connect_closing(db_path) as conn:
                 tasks = _kb.list_tasks(
                     conn,
                     assignee=params.get("assignee") or None,
@@ -172,6 +176,7 @@ def _install(tg_server) -> bool:
                 return _ok(rid, {"tasks": [
                     {"id": t.id, "title": t.title, "assignee": t.assignee or "",
                      "status": t.status, "priority": t.priority,
+                     "body": getattr(t, "body", "") or "",
                      "createdAt": t.created_at,
                      "completedAt": t.completed_at}
                     for t in tasks]})
@@ -179,6 +184,174 @@ def _install(tg_server) -> bool:
             return _err(rid, 5021, f"kanban unavailable: {exc}")
         except Exception as exc:  # noqa: BLE001
             return _err(rid, 5022, f"kanban read failed: {exc}")
+
+    def _kanban_db_path_at_entry(board):
+        """Resolve the board DB path ONCE at RPC entry, before any in-process
+        worker turn could mutate the process-global kanban env (the
+        wrong-board-write race from the M9 research: FleetWorker._kanban_env
+        pins HERMES_KANBAN_DB/BOARD for the duration of a worker turn)."""
+        from hermes_cli import kanban_db as _kb
+        return _kb.kanban_db_path(board=board)
+
+    def _assignee_refusal(rid, name: str):
+        """None when the assignee is spawnable; else an error dict. Refuses
+        non-profile assignees (a forever-skip bucket upstream dispatch never
+        surfaces) and frozen bots (claim→block loops that end in triage)."""
+        from hermes_cli.profiles import get_profile_dir
+        from moch import fleet
+        home = Path(get_profile_dir(name))
+        if not home.is_dir():
+            return _err(rid, 4071, f"assignee '{name}' is not a profile on this install")
+        if fleet.is_frozen(home):
+            return _err(rid, 4071, f"assignee '{name}' is frozen (fleet kill switch)")
+        return None
+
+    def moch_kanban_create(rid, params):
+        """Crew write slice: put a task on the board from the phone.
+        Params: {title (required), assignee (required — validated, not
+        frozen), body?, priority?, idempotency_key?, board?}.
+        Mirrors kanban_create's required-assignee rule (the dispatcher only
+        spawns assigned rows) and the dashboard plugin's operator semantics
+        (created_by="moch-app"); follows with a flag-gated dispatch poke so
+        the task doesn't wait out the heal ticker."""
+        title = str(params.get("title") or "").strip()
+        assignee = str(params.get("assignee") or "").strip()
+        if not title:
+            return _err(rid, 4071, "title required")
+        if not assignee:
+            return _err(rid, 4071,
+                        "assignee required — the dispatcher only spawns assigned tasks")
+        try:
+            from hermes_cli import kanban_db as _kb
+            from hermes_cli import kanban_db_connect as _kbc
+        except ImportError as exc:
+            return _err(rid, 5021, f"kanban unavailable: {exc}")
+        board = params.get("board") or None
+        refusal = _assignee_refusal(rid, assignee)
+        if refusal is not None:
+            return refusal
+        from moch.audit import record as _audit
+        from moch import kanban_dispatch
+        try:
+            db_path = _kanban_db_path_at_entry(board)
+            with _kbc.connect_closing(db_path) as conn:
+                tid = _kb.create_task(
+                    conn,
+                    title=title,
+                    body=str(params.get("body") or "") or None,
+                    assignee=assignee,
+                    created_by="moch-app",
+                    priority=int(params.get("priority") or 0),
+                    idempotency_key=str(params.get("idempotency_key") or "") or None,
+                    board=board,
+                )
+        except ValueError as exc:
+            return _err(rid, 4071, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(rid, 5022, f"create failed: {exc}")
+        _audit("kanban.create", task=tid, assignee=assignee, board=board or "default")
+        kanban_dispatch.poke_dispatch(db_path, board=board)
+        return _ok(rid, {"task": tid, "assignee": assignee})
+
+    def moch_kanban_assign(rid, params):
+        """Reassign a task ("" = unassign — note it then parks until
+        reassigned: unassigned rows are a dispatch skip bucket).
+        Params: {task_id, assignee (may be ""), reclaim_first?: bool}.
+        RuntimeError while running-claimed maps to a 409-style refusal with
+        the upstream message (assign_task raises; reassign_task returns
+        False — we surface both the same way)."""
+        task_id = str(params.get("task_id") or "").strip()
+        if not task_id:
+            return _err(rid, 4071, "task_id required")
+        assignee = str(params.get("assignee") or "").strip()
+        try:
+            from hermes_cli import kanban_db as _kb
+            from hermes_cli import kanban_db_connect as _kbc
+        except ImportError as exc:
+            return _err(rid, 5021, f"kanban unavailable: {exc}")
+        if assignee:
+            refusal = _assignee_refusal(rid, assignee)
+            if refusal is not None:
+                return refusal
+        board = params.get("board") or None
+        from moch.audit import record as _audit
+        try:
+            db_path = _kanban_db_path_at_entry(board)
+            with _kbc.connect_closing(db_path) as conn:
+                moved = _kb.reassign_task(
+                    conn, task_id, assignee or None,
+                    reclaim_first=bool(params.get("reclaim_first")),
+                    reason="moch-app reassign")
+        except Exception as exc:  # noqa: BLE001 — ValueError/RuntimeError both user-readable
+            return _err(rid, 4072, str(exc))
+        if not moved:
+            return _err(rid, 4072,
+                        f"cannot reassign '{task_id}': still running "
+                        "(retry with reclaim_first)")
+        _audit("kanban.assign", task=task_id, assignee=assignee or "(none)")
+        from moch import kanban_dispatch
+        kanban_dispatch.poke_dispatch(db_path, board=board)
+        return _ok(rid, {"task": task_id, "assignee": assignee})
+
+    def moch_kanban_complete(rid, params):
+        """Complete a task as the human operator: force=True (dashboard
+        precedent — a phone action overrides a live worker claim). Honest
+        limit: force-completing a running card does NOT stop the in-process
+        worker thread; its later writes no-op via the claim-ownership check.
+        Params: {task_id, summary?, result?}."""
+        task_id = str(params.get("task_id") or "").strip()
+        if not task_id:
+            return _err(rid, 4071, "task_id required")
+        try:
+            from hermes_cli import kanban_db as _kb
+            from hermes_cli import kanban_db_connect as _kbc
+        except ImportError as exc:
+            return _err(rid, 5021, f"kanban unavailable: {exc}")
+        board = params.get("board") or None
+        from moch.audit import record as _audit
+        try:
+            db_path = _kanban_db_path_at_entry(board)
+            with _kbc.connect_closing(db_path) as conn:
+                done = _kb.complete_task(
+                    conn, task_id,
+                    result=str(params.get("result") or "") or None,
+                    summary=str(params.get("summary") or "") or None,
+                    force=True)
+        except Exception as exc:  # noqa: BLE001
+            return _err(rid, 4074, str(exc))
+        if not done:
+            return _err(rid, 4074, f"cannot complete '{task_id}' (open parents?)")
+        _audit("kanban.complete", task=task_id)
+        from moch import kanban_dispatch
+        kanban_dispatch.poke_dispatch(db_path, board=board)
+        return _ok(rid, {"task": task_id, "done": True})
+
+    def moch_kanban_block(rid, params):
+        """Park a task with a reason (kind ∈ dependency|needs_input|
+        capability|transient — validated upstream; dependency routes to
+        todo, recurrence ≥2 to triage). Params: {task_id, reason, kind?}."""
+        task_id = str(params.get("task_id") or "").strip()
+        reason = str(params.get("reason") or "").strip()
+        if not task_id or not reason:
+            return _err(rid, 4071, "task_id and reason required")
+        try:
+            from hermes_cli import kanban_db as _kb
+            from hermes_cli import kanban_db_connect as _kbc
+        except ImportError as exc:
+            return _err(rid, 5021, f"kanban unavailable: {exc}")
+        board = params.get("board") or None
+        from moch.audit import record as _audit
+        try:
+            db_path = _kanban_db_path_at_entry(board)
+            with _kbc.connect_closing(db_path) as conn:
+                _kb.block_task(conn, task_id, reason=reason,
+                               kind=str(params.get("kind") or "") or None)
+        except ValueError as exc:
+            return _err(rid, 4071, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(rid, 4074, str(exc))
+        _audit("kanban.block", task=task_id, reason=reason[:120])
+        return _ok(rid, {"task": task_id, "blocked": True})
 
     def moch_skills_list(rid, params):
         """BUG-139 checklist picker: skills installed in the LAUNCH home
@@ -382,6 +555,10 @@ def _install(tg_server) -> bool:
     registry = {
         "moch.fleet.status": moch_fleet_status,
         "moch.kanban.tasks": moch_kanban_tasks,
+        "moch.kanban.create": moch_kanban_create,
+        "moch.kanban.assign": moch_kanban_assign,
+        "moch.kanban.complete": moch_kanban_complete,
+        "moch.kanban.block": moch_kanban_block,
         "moch.profiles.mirror_model_key": moch_profiles_mirror_model_key,
         "moch.profiles.delete": moch_profiles_delete,
         "moch.profiles.seed": moch_profiles_seed,

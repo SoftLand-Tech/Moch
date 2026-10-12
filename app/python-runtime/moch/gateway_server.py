@@ -129,6 +129,12 @@ def _run_server(port: int) -> None:
                 _fleet_worker = _fw.FleetWorker()
                 _fw.install_reclaim_patch(_kbd)
                 _fw.install_dispatch_spawn_patch(_kbd, _fleet_worker)
+                # BUG-138: nothing in this process dispatches (upstream's
+                # dispatcher watcher is a messaging-gateway mixin) — arm the
+                # poke+heal ticker so app-created tasks run and stale claims
+                # reclaim. Idempotent, flag-gated, daemon.
+                from moch import kanban_dispatch as _kd
+                _kd.start_heal_ticker()
         except Exception:
             traceback.print_exc()
 
