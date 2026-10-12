@@ -17,3 +17,7 @@ app/src/main/java/inline/
 
 # Bundle artifacts
 *.jsbundle
+
+# C-04 / GitHub #94: release signing secrets read by app/build.gradle —
+# never commit (the keystore itself lives outside the repo).
+keystore.properties
