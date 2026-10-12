@@ -1196,8 +1196,7 @@ Deferred (documented, not shipped): Tier B anydoc wheel (+3.4MB, unlocks doc ext
 read_file's schema CLAIMS anydoc is bundled but it never was: drift), Tier C ddgs/lxml/primp
 (+4-5MB, lights web_search/web_extract — or configure a search API key instead).
 
-## BUG-134 [HIGH] (NEW, WIP) Terminal ≠ agent environment — gh auth done in the terminal is invisible to the agent
-
+## BUG-134 [HIGH] Terminal ≠ agent environment — gh auth done in the terminal is invisible to the agent
 User report (2026-10-12): "the terminal is not the same as the terminal that the agent do commands on, for
 example i installed gh cli and i authed with my account in the terminal, and i told the agent to check if
 i am authed or not, it said no not authed!"
@@ -1233,7 +1232,13 @@ PTY — the terminal is the leaky surface, agent scrubs), cwd divergence (/root 
 semantics triple (terminal misses login exports), dead linux_session.py, bot profile homes unbound in
 guest, PAGER/TERM asymmetries.
 
-## BUG-135 [MEDIUM] (NEW, WIP) Links in agent responses and terminal output are dead text — must be tappable and open in the built-in browser in a new tab
+*(fixed in PR #123 — `build_guest_launch` + `_shim_body` now export `HOME=/root` and the guest PATH
+prefix (SHIM_FORMAT 6 repairs installed shims at next boot); terminal.py deduped; contract pinned in
+test_linux_exec.py. Full python battery 161 passed / 5 pre-existing skips, re-run by the Lead.
+python-runtime ships inside the APK — on-device check pending the user's next dev build: terminal
+`gh auth login` → agent `gh auth status` must report the same account; same for git config.)*
+
+## BUG-135 [MEDIUM] Links in agent responses and terminal output are dead text — must be tappable and open in the built-in browser in a new tab
 
 User report (2026-10-12): "the terminal/agent responses give me a link to open or something they should be
 clickable and open in the built-in browser in a new tab!"
@@ -1265,7 +1270,17 @@ link-tap gesture must suppress the IME refocus. Adjacent dead-text surfaces note
 (BUG-040 trade — leave), thinking text, ToolRow preview, CommandCard error/usage/notice, clarify
 question. Agent-side new-tab is BUG-136's root (relay 405).
 
-## BUG-136 [HIGH] (NEW, WIP) Browser tab control tools fail with 405 — only the tab list works
+*(fixed in PR #125 (stacked on #124, merge that first) — one shared linkified MarkdownIt instance +
+onLinkPress→`openInAppBrowserTab` (addTab + navigate to the Browser screen, never the OS browser) on
+Chat + CommandOutput; the constructor is require-bound because the lib's CJS-with-JSX dist loses
+NAMED ESM bindings under tsx (the imports-gate stub now mirrors the real exports); terminal:
+`window.__linkAt(x,y)` hit-test over the existing postMessage channel + OSC-8 linkHandler seam +
+140 ms-deferred IME refocus arbitration (link taps open the Browser, other taps unchanged); pure
+matcher extracted+tested in lib/terminal.ts (18 new cases). Typecheck clean, 15/15 suites green
+(test:terminal 54/54, imports gate PASS, browser-relay 34/34). Chat links are JS/OTA-able; the
+terminal asset ships inside the APK — on-device check pending the next dev build.)*
+
+## BUG-136 [HIGH] Browser tab control tools fail with 405 — only the tab list works
 
 User report (2026-10-12): "the browser tab control tools don't work, they return 405 error, only the tab
 list that works!"
@@ -1301,6 +1316,17 @@ manual tab switch (supervisor stays pinned to the old page; resync only runs aft
 activate/close); AgentBrowserHost/browser.tsx active-URL last-writer-wins race; `chosenPageJson`
 first-page fallback on ambiguous/stale URL match; tab ids go stale after onRenderProcessGone remount;
 fixed port 9334 squattable (confusion/DoS only).
+
+*(fixed in PR #124 — the relay's three lifecycle endpoints now round-trip to the RN tab owner: one
+`mochTabOp` event {requestId, op, url/targetId} → 5 s latch ack via the new `tabOpAck` bridge method,
+open resolves the new DevTools target by diffing the unfiltered upstream list (≤3 s) and answers 200
+with the page JSON; honest 400/409/502/503/504 statuses; `GET /json/moch-tabs` (token-gated) exposes
+the FULL page list; browserRelay.ts applies ops to the nanostores (RN-side last-tab guard as defense
+in depth) and keeps a tabs⇔targets registry (self-healing after onRenderProcessGone); python
+tab_list prefers moch-tabs and skips the impossible Target.* fallbacks on the relay. 56/56 tab-tool
+tests, 34/34 relay tsx checks, typecheck clean, full sweep 15/15; Kotlin is source-level verification
+only (no Kotlin test infra) — on-device check pending the next dev build (new APK: Kotlin changed).
+PR #125 stacks on this branch.)*
 
 ## BUG-133 [HIGH] Keyboard opens over inputs app-wide — the input and everything at the bottom must rise ABOVE the keyboard
 
