@@ -1178,3 +1178,20 @@ memory/vision_analyze — the warm-up fix recovered the whole family, not just b
 vs PC: web_search/web_extract (need a configured search backend; on-device config.yaml is empty)
 and delegate_task (needs nemo_relay, not in the APK). In flight: tab-management tools + a
 lazy-deps bundling recommendation (GLM subagents).
+
+### BUG-132 round 39 — Tier A bundled; the doomed pip churn is gone
+
+Per the GLM bundling investigation: the ONLY check-time lazy install was tts.edge (edge-tts), whose
+aiohttp dep is compiled with no Android PyPI wheel — the runtime install could NEVER succeed, so
+every catalog rebuild retried a doomed pip subprocess each boot. Tier A applied to build.gradle
+(+~1.2MB): edge-tts==7.2.7 + aiohttp==3.10.10 + Pillow==11.0.0 from Chaquopy's prebuilt repo
+(--extra-index-url chaquo.com/pypi-13.1; BUILD SUCCESSFUL — wheel resolution verified).
+Plus: HERMES_DISABLE_LAZY_INSTALLS=1 in hermes_boot (unbundled features fail fast, no pip spawns)
+and a boot-time import pre-warm thread (edge_tts/PIL/aiohttp) paying first-import at boot.
+
+DEVICE-VERIFIED (bundled build): cold ask at T+50s → auto-continue → "The page title is
+'Example Domain'." — full cycle, no resend.
+
+Deferred (documented, not shipped): Tier B anydoc wheel (+3.4MB, unlocks doc extraction — note
+read_file's schema CLAIMS anydoc is bundled but it never was: drift), Tier C ddgs/lxml/primp
+(+4-5MB, lights web_search/web_extract — or configure a search API key instead).

@@ -231,6 +231,15 @@ def _run_server(port: int) -> None:
                     pass
                 _time.sleep(15)
 
+        def _import_prewarm() -> None:
+            # First-import cost at boot, not mid-request (Tier A bundle).
+            for _mod in ("edge_tts", "PIL.Image", "aiohttp"):
+                try:
+                    __import__(_mod)
+                except Exception:
+                    pass
+
+        threading.Thread(target=_import_prewarm, name="moch-import-prewarm", daemon=True).start()
         _prewarm = threading.Thread(target=_prewarm_browser, name="moch-browser-prewarm", daemon=True)
         _prewarm.start()
 
