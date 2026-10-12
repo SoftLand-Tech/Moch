@@ -1161,3 +1161,20 @@ DEVICE-VERIFIED, same chat, one boot:
 
 The fixed 45/150/420 timers were removed in favor of the loop; stale scope-partition test removed
 with the revert. 117 tests OK.
+
+### BUG-132 round 38 — AUTO-CONTINUE: the warm-up finishes the user's task by itself
+
+The warming-note wrapper now records the session that asked during the window; the pre-warm loop,
+on first readiness, submits ONE short continuation per waiting session through the normal queue:
+"[SYSTEM: The in-app browser is now ready. Carry out the user's earlier browser request now.]"
+The original request is already in the agent's context, so the extra cost is a single cheap turn —
+token-frugal by construction, queue-safe if a turn is running, and one-shot per session.
+
+DEVICE-VERIFIED, no user resend: cold ask at T+49s → warming message; at warm the chat continued
+BY ITSELF → "Page title: Example Domain — loaded successfully from https://example.com."
+
+Kit note (user question): the WARM kit is 22 tools incl. read_file/write_file/patch/search_files/
+memory/vision_analyze — the warm-up fix recovered the whole family, not just browser. Still absent
+vs PC: web_search/web_extract (need a configured search backend; on-device config.yaml is empty)
+and delegate_task (needs nemo_relay, not in the APK). In flight: tab-management tools + a
+lazy-deps bundling recommendation (GLM subagents).

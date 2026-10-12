@@ -174,6 +174,8 @@ def _run_server(port: int) -> None:
             except Exception:
                 pass
 
+        _warm_waiters = set()
+
         def _browser_tools_ready() -> bool:
             """True when browser_navigate resolves in a FRESH catalog build."""
             try:
@@ -199,6 +201,27 @@ def _run_server(port: int) -> None:
                 if _browser_tools_ready():
                     _warm_rearm()
                     print("[moch] browser toolset warm", flush=True)
+                    # Auto-continue: every session that asked during the window
+                    # gets ONE short continuation turn — the user's original
+                    # request is already in the agent's context, so this is a
+                    # single cheap prompt, submitted through the same queue the
+                    # app uses (safe if a turn is still running).
+                    for _sid in list(_warm_waiters):
+                        _warm_waiters.discard(_sid)
+                        try:
+                            _note_upstream(
+                                {
+                                    "jsonrpc": "2.0",
+                                    "id": "moch-warm-" + _sid,
+                                    "method": "prompt.submit",
+                                    "params": {
+                                        "session_id": _sid,
+                                        "text": "[SYSTEM: The in-app browser is now ready. Carry out the user's earlier browser request now.]",
+                                    },
+                                }
+                            )
+                        except Exception:
+                            pass
                     return
                 try:
                     from model_tools import _clear_tool_defs_cache as _clr
@@ -220,6 +243,9 @@ def _run_server(port: int) -> None:
                     params = req.get("params") or {}
                     text = str(params.get("text") or "")
                     if text and not text.startswith("["):
+                        _sid = str(params.get("session_id") or "")
+                        if _sid:
+                            _warm_waiters.add(_sid)
                         params["text"] = (
                             "[SYSTEM: The in-app browser is still starting up — it becomes available "
                             "a minute or two after the app launches. If the user is asking you to open "
