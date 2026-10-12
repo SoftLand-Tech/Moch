@@ -86,7 +86,7 @@ export function PairForm({ onPaired }: { onPaired: () => void }) {
     }
   }
 
-  const useThisPhone = async () => {
+  const pairThisPhone = async () => {
     if (busy) return
     setBusy(true)
     setError(null)
@@ -162,7 +162,7 @@ export function PairForm({ onPaired }: { onPaired: () => void }) {
 
       <Pressable
         style={({ pressed }) => [s.localBtn, pressed && s.pressed]}
-        onPress={() => void useThisPhone()}
+        onPress={() => void pairThisPhone()}
         disabled={busy}
         accessibilityRole="button"
         accessibilityLabel="Use this phone as the agent host"

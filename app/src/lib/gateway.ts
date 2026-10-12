@@ -10,6 +10,11 @@ import { isPrivateHost, normalizeHost } from './transportGate'
 // Host normalization moved to transportGate.ts (pure, node-loadable — pairing.ts
 // and the scripts suites need it); re-exported here so existing callers are untouched.
 export { normalizeHost } from './transportGate'
+// Dial-transport helpers (URL/header builders, handshake-refusal detection,
+// redaction) moved to dialTransport.ts — pure, node-loadable for the same
+// reason; redactedUrl stays re-exported for gateway's existing callers.
+export { redactedUrl } from './dialTransport'
+import { buildDialUrl, buildDialHeaders, isHandshakeRefusal, redactedUrl } from './dialTransport'
 
 export interface ConnConfig {
   host: string // "127.0.0.1:9119" or "myserver.tailnet.ts.net:443"
@@ -174,58 +179,14 @@ function currentPushToken(): string | null {
 }
 
 function wsUrl(c: ConnConfig, mode: DialTransport): string {
-  const base = `${c.tls ? 'wss' : 'ws'}://${c.host}/api/ws`
-  const pushToken = currentPushToken()
-  if (mode === 'headers') {
-    if (!pushToken) return base // token/push ride the upgrade headers — see dialHeaders()
-    // The client no-ops a redial to the SAME URL while its socket is open,
-    // and the push re-advertise path (below) relies on the URL changing when
-    // the push token does. A short salted fingerprint of the push token
-    // changes exactly then — without putting the token itself on the URL.
-    return `${base}?pushfp=${fnv1a(PUSHFP_SALT + pushToken)}`
-  }
-  // Legacy: token on the query, so the backend can knock while the socket is
-  // down. Direct gateway connections and pre-header relays still need this.
-  let u = `${base}?token=${encodeURIComponent(c.token)}`
-  if (pushToken) u += `&push=${encodeURIComponent(pushToken)}`
-  return u
+  return buildDialUrl(c, mode, currentPushToken(), PUSHFP_SALT)
 }
 
 /** Per-process salt so push-token fingerprints can't be correlated across installs. */
 const PUSHFP_SALT = Math.random().toString(36).slice(2)
-/** Tiny FNV-1a — this is a change-detector, not a crypto hash. */
-function fnv1a(s: string): string {
-  let h = 0x811c9dc5
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i)
-    h = Math.imul(h, 0x01000193)
-  }
-  return (h >>> 0).toString(16).padStart(8, '0')
-}
 
-/** Upgrade-request headers for a header-mode dial: the session token always,
- *  the Expo push token when the app holds one (the relay forwards it onto the
- *  request line it rebuilds for the home, so the push watcher keeps working). */
 function dialHeaders(c: ConnConfig): Record<string, string> {
-  const h: Record<string, string> = { 'X-Hermes-Session-Token': c.token }
-  const pushToken = currentPushToken()
-  if (pushToken) h['X-Hermes-Push-Token'] = pushToken
-  return h
-}
-
-/** Auth-shaped dial failure: the peer answered/refused the upgrade (error or
- *  close BEFORE open) rather than us timing out — exactly the shape a
- * direct-to-gateway home or an old relay produces for a header-auth dial.
- * Timeouts are deliberately excluded: a second attempt would only double the
- * wait. */
-function isHandshakeRefusal(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err)
-  return /closed during handshake|error before open/i.test(msg)
-}
-
-/** Scrubbed URL safe for logs/UI — never prints the token. */
-export function redactedUrl(c: ConnConfig): string {
-  return `${c.tls ? 'wss' : 'ws'}://${c.host}/api/ws?token=***`
+  return buildDialHeaders(c, currentPushToken())
 }
 
 // isLocalHost lives on as isPrivateHost in transportGate.ts (same predicate,

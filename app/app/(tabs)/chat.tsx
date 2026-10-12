@@ -24,6 +24,7 @@ import { AudioModule, useAudioRecorder, RecordingPresets, type RecordingOptions 
 import { transcribeRecording, voiceBusy } from '../../src/lib/voice'
 import { VoiceRecStrip } from '../../src/components/VoiceRecStrip'
 import { clearBadge } from '../../src/lib/push'
+import { evaluateStick, shouldFollowOnAppend, contentGrew } from '../../src/lib/chatScroll'
 import { useFocusEffect, router, useLocalSearchParams } from 'expo-router'
 import {
   messages,
@@ -320,15 +321,13 @@ export default function Chat() {
     listRef.current?.scrollToOffset?.({ offset: 0, animated })
   }, [])
   const evalBottom = useCallback(() => {
-    const { y, contentH, viewH } = scrollMetrics.current
-    if (!viewH) return
     if (Date.now() < stickUntil.current) return
-    // Overscroll past the bottom makes y negative; short chats that fit in
-    // the viewport cannot scroll away from the bottom at all.
-    const distance = contentH > 0 && contentH <= viewH ? 0 : Math.max(0, y)
-    const nearBottom = distance < 120
-    setStick(nearBottom)
-    setShowScrollBtn(!nearBottom)
+    // Position policy (band width, overscroll clamp, fits-viewport) lives in
+    // src/lib/chatScroll.ts — pinned offline by scripts/test-chat-scroll.ts.
+    const verdict = evaluateStick(scrollMetrics.current)
+    if (!verdict) return // no layout yet — hold the previous state
+    setStick(verdict.stick)
+    setShowScrollBtn(verdict.showJump)
   }, [])
   const readScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent
@@ -340,9 +339,9 @@ export default function Chat() {
   const lastMsgSegs = msgs[msgs.length - 1]?.segments?.length
   useEffect(() => {
     // At offset 0, new bubbles and streaming tokens grow directly from the
-    // bottom edge natively; only nudge back to 0 when slightly drifted within
-    // the 120px stick band.
-    if (!stick || scrollMetrics.current.y <= 0 || Date.now() < stickUntil.current) return
+    // bottom edge natively; only nudge back to 0 when the chatScroll policy
+    // says the user is still pinned within reach (see src/lib/chatScroll.ts).
+    if (!shouldFollowOnAppend(scrollMetrics.current, { stick, quietWindow: Date.now() < stickUntil.current })) return
     const t = setTimeout(() => scrollListToEnd(!busy), 16)
     return () => clearTimeout(t)
   }, [msgs.length, lastMsgText, lastMsgSegs, tls.length, stick, busy, scrollListToEnd])
@@ -1193,9 +1192,10 @@ export default function Chat() {
             onMomentumScrollEnd={readScroll}
             onContentSizeChange={(_w, h) => {
               scrollMetrics.current.contentH = h
-              if (stick && scrollMetrics.current.y > 0) {
+              const action = contentGrew(scrollMetrics.current, stick)
+              if (action === 'follow') {
                 scrollListToEnd(!busy)
-              } else if (!stick) {
+              } else if (action === 'reevaluate') {
                 evalBottom()
               }
             }}
