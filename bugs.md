@@ -358,7 +358,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   Installed APK is `1.0.15-browser` (versionCode 18) and the runtime reports `Mochi 0.21.3`; the About row says `Moch v1.0`, so neither the user nor support can read the build from the UI.
   *Fix:* render `Constants.expoConfig?.version` + the Android versionName/versionCode.
 
-- [ ] **BUG-120 [MEDIUM, security] The loopback gateway hands out its own session token without auth** — `moch/gateway_server.py` (hermes `web_server` root shim)
+- [x] **BUG-120 [MEDIUM, security] The loopback gateway hands out its own session token without auth** *(fixed in PR #PR_NUMBER_PLACEHOLDER — embedded runtime no longer serves the token at /: idempotent route-surgery in gateway_server._run_server, hermes-src pristine; regression test tests/test_gateway_root_shim.py; on-device check pending user's next dev build)* — `moch/gateway_server.py` (hermes `web_server` root shim)
   `GET http://127.0.0.1:9119/` returns the dashboard HTML containing `window.__HERMES_SESSION_TOKEN__="…"` with no authentication, while every `/api/*` route requires exactly that token (`X-Hermes-Session-Token`). Loopback TCP is reachable by any app on the device, so any installed app can read the token and then drive the full hermes API — sessions, transcripts, file read/write/delete, cron, fleet. The browser relay was deliberately token-gated against this same threat model (`FEATURE-BROWSER.md` §Safety: "loopback TCP is reachable by other apps, unlike the unix socket"); the gateway is not.
   *Fix:* serve the token only to the app's own WebView (or drop the token from the shim response entirely and inject it through the RN bridge), and/or bind the gateway to a UID-restricted channel.
 
