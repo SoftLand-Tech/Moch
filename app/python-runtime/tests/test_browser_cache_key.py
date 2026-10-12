@@ -109,16 +109,10 @@ class CheckFnScopePartitionsByGateTest(unittest.TestCase):
             else:
                 os.environ[k] = v
 
-    def test_scope_changes_when_the_gate_flips(self):
-        from tools.registry import CHECK_FN_CACHE_BYPASS, check_fn_cache_scope
-
-        pre = check_fn_cache_scope()
-        os.environ["MOCH_BROWSER_RELAY"] = "1"
-        os.environ["BROWSER_CDP_URL"] = "http://127.0.0.1:9334/tok"
-        post = check_fn_cache_scope()
-        self.assertNotEqual(pre, post, "check_fn scope must change with the gate (BUG-132 cause 3)")
-        if post != CHECK_FN_CACHE_BYPASS:
-            self.assertIn("br=1", post)
+    # (scope-partition test removed with the revert: a non-None scope in a
+    # single-profile process broke check_fn evaluation on device — see the
+    # BUG-132 tracker entry. The gate-env partition lives in
+    # model_tools._tool_defs_cache_key + activate()'s double clear.)
 
     def test_bypass_sentinel_passes_through(self):
         from tools.registry import CHECK_FN_CACHE_BYPASS, _check_fn_cache_scope_base

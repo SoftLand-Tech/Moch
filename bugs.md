@@ -1142,3 +1142,22 @@ Residual (cosmetic): the first ~1-2 min after boot still build cold kits (healed
 re-arm). A true pre-warm (loop the catalog build at boot until browser_* resolve) would close even
 that — queued as polish. Scope-partition experiment reverted with evidence (non-None scope broke
 check_fn evaluation; the env-in-key + TTL + activate clears bound the original poison window).
+
+### BUG-132 round 37 — the warm-up is now USER-VISIBLE and self-healing (done)
+
+The user's ask: never look broken, and have MOCHI say it. Two additions in gateway_server:
+
+1. **Pre-warm loop** (`moch-browser-prewarm` thread): polls every 15 s (memo cleared each pass —
+   the probes themselves drive the lazy installs that ARE the warm-up), and on first readiness runs
+   the full activate (cache clears + live-session refresh). Replaces the fixed 45/150/420 s timers —
+   healing now happens at the earliest physically possible moment instead of a scheduled tick.
+2. **Warming note**: while armed-but-not-ready, prompt.submit gets a bracketed system note (the
+   established out-of-band pattern; upstream captured BEFORE replacement — the first attempt
+   recursed into itself and produced "Send failed / internal error", fixed and re-verified).
+
+DEVICE-VERIFIED, same chat, one boot:
+  T+0:49 cold  → "The in-app browser is still warming up — it should be ready in a minute or two. Send the request again…"
+  T+4:41 warm  → "The browser's up. Title: Example Domain." (log: browser_navigate completed 0.81s)
+
+The fixed 45/150/420 timers were removed in favor of the loop; stale scope-partition test removed
+with the revert. 117 tests OK.
