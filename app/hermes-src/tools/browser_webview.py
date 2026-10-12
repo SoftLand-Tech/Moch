@@ -303,18 +303,26 @@ def webview_press(key: str, task_id: Optional[str] = None) -> str:
 # ── Tabs ────────────────────────────────────────────────────────────────────
 #
 # Endpoint reality this section is written against (CdpRelay.kt):
-#   - GET /json/list        → the relay filters it to the ACTIVE tab only (at
-#     most ONE page advertised; plain desktop DevTools returns every page).
-#   - /json/new, /json/close, /json/activate → the relay 405s all of them
-#     ("tab lifecycle is native-owned in Moch"): the RN Browser screen owns the
-#     tab strip, and closing/creating WebView targets behind its back would
-#     desync it. Plain DevTools serves them (PUT since Chrome ≥63).
-#   - Target.* over the supervisor socket → the WebView page socket rejects the
-#     Target domain (browser_supervisor._attach_initial_page skips it for
-#     exactly this reason), so CDP tab verbs are a desktop-only fallback.
-# The tools below therefore prefer the classic HTTP endpoints (the relay is an
-# HTTP proxy), fall back to Target.*, and fail with an honest, actionable error
-# when the backend owns neither path.
+#   - GET /json/moch-tabs → the FULL upstream page list (BUG-136): every
+#     browser-tab WebView with id/url/title (the hidden agent host page is
+#     filtered out Kotlin-side). Preferred when present; feature-detected
+#     once per process via _moch_tabs_available().
+#   - GET /json/list → still filtered to the ACTIVE tab only (attach
+#     semantics depend on that) — the active-tab marker, and the legacy
+#     listing source when /json/moch-tabs is absent (plain desktop DevTools,
+#     older relays).
+#   - /json/new?url, /json/close/<id>, /json/activate/<id> → ROUND-TRIPPED
+#     to the RN tab owner: the relay emits one "mochTabOp" event and waits
+#     (~5 s) for the app to apply it to the tab store. 200 on success (the
+#     new page's DevTools JSON for /json/new), 409 when the app refuses
+#     (unknown target, last-tab guard), 502/504 when the round-trip cannot
+#     complete (UI unreachable / ack timeout — e.g. the Browser screen is
+#     closed, so no WebView mounts).
+#   - Target.* over the supervisor socket → the WebView page socket rejects
+#     the Target domain (browser_supervisor._attach_initial_page skips it
+#     for exactly this reason), so those fallbacks run ONLY when the
+#     endpoint is NOT the Moch relay (_relay_filters_tabs() False); on
+#     device a failed round-trip surfaces its honest HTTP error instead.
 
 
 def _normalize_tab_id(tab_id: Any) -> str:
@@ -407,13 +415,14 @@ _NATIVE_OWNED_MARKER = "native-owned"  # the relay's 405 body for /json/new|clos
 
 def _relay_lifecycle(path: str):
     """PUT-then-GET on a mutating ``/json`` endpoint: Chrome ≥63 demands PUT on
-    ``/json/new`` while older builds accept GET only. The Moch relay 405s both
-    verbs with the same body, so the retry is skipped when that marker is
-    present and the relay's own reason surfaces verbatim."""
-    response = _relay_http(path, verb="PUT")
+    ``/json/new`` while older builds accept GET only. The Moch relay accepts
+    both — its lifecycle endpoints round-trip to the RN tab owner (BUG-136),
+    which can legitimately take up to ~8 s (5 s app ack + 3 s target resolve),
+    so these calls get a wider timeout than plain reads."""
+    response = _relay_http(path, verb="PUT", timeout=10.0)
     if response.status_code != 405 or _NATIVE_OWNED_MARKER in (response.text or ""):
         return response
-    return _relay_http(path, verb="GET")
+    return _relay_http(path, verb="GET", timeout=10.0)
 
 
 def _describe_http(response) -> str:
@@ -431,11 +440,41 @@ def _relay_filters_tabs() -> bool:
         return False
 
 
+# BUG-136: GET /json/moch-tabs (the FULL page list) — feature-detected once.
+_moch_tabs_cache: Optional[bool] = None
+
+
+def _moch_tabs_available() -> bool:
+    """True when the endpoint serves GET /json/moch-tabs.
+
+    Probed once per process: 200 → yes; anything else (older relay, plain
+    desktop DevTools, dead transport) → no, and the legacy /json/list +
+    Target.getTargets merge stays the tab source. Never raises."""
+    global _moch_tabs_cache
+    if _moch_tabs_cache is None:
+        try:
+            _moch_tabs_cache = _relay_http("/json/moch-tabs").status_code == 200
+        except Exception:  # noqa: BLE001 — an absent endpoint is an answer
+            _moch_tabs_cache = False
+    return _moch_tabs_cache
+
+
+def _active_tab_id() -> Optional[str]:
+    """The ACTIVE tab's target id from the (still filtered) /json/list."""
+    try:
+        response = _relay_http("/json/list")
+        response.raise_for_status()
+        entries = [t for t in (response.json() or []) if isinstance(t, dict) and t.get("type", "page") == "page"]
+        return str(entries[0].get("id") or "").strip() if entries else None
+    except Exception:  # noqa: BLE001 — the active marker is best-effort
+        return None
+
+
 _TAB_BACKEND_NOTE = (
-    "The Moch relay advertises only the ACTIVE tab and deliberately 405s /json/new|close|activate "
-    "(tab lifecycle is owned by the app's Browser screen), and the WebView page socket rejects "
-    "Target.* — so only the active tab is visible and tab lifecycle needs app-side support. Use "
-    "browser_navigate in the current tab, or ask the user to open/close/switch tabs in the Browser screen."
+    "The Moch relay advertises only the ACTIVE tab in /json/list and the full-list /json/moch-tabs "
+    "endpoint did not answer (older relay build or transient failure); the WebView page socket rejects "
+    "Target.* — so only the active tab is visible right now. Use browser_navigate in the current tab, "
+    "or ask the user to open/close/switch tabs in the Moch Browser screen."
 )
 
 
@@ -451,12 +490,33 @@ def _tab_unavailable_error(what: str, attempts: List[str]) -> str:
 def _webview_tab_targets(task_id: Optional[str] = None) -> Dict[str, Any]:
     """Enumerate open page tabs (``{id, title, url}``) + the active tab's id.
 
-    ``/json/list`` is authoritative for the ACTIVE tab (the relay filters it to
-    exactly that); ``Target.getTargets`` over the supervisor socket, when the
-    endpoint speaks it (desktop DevTools), widens the list to every open page —
-    the WebView page socket rejects ``Target.*``, so on device the active tab is
-    all that is visible. Raises RuntimeError when no path yields a tab list.
+    Prefers GET /json/moch-tabs (BUG-136): the relay's FULL page list, so
+    every store tab is visible and the last-tab guard counts real tabs. The
+    active marker still comes from the filtered /json/list (moch-tabs is
+    unordered). Falls back to the legacy merge — /json/list (authoritative
+    for the ACTIVE tab) widened by ``Target.getTargets`` where the endpoint
+    speaks it (desktop DevTools; the WebView page socket rejects ``Target.*``).
+    Raises RuntimeError when no path yields a tab list.
     """
+    if _moch_tabs_available():
+        tabs, moch_error = [], None
+        try:
+            response = _relay_http("/json/moch-tabs")
+            response.raise_for_status()
+            seen = set()
+            for raw in response.json() or []:
+                if not isinstance(raw, dict) or raw.get("type", "page") != "page":
+                    continue
+                tab_id = str(raw.get("id") or raw.get("targetId") or "").strip()
+                if not tab_id or tab_id in seen:
+                    continue
+                seen.add(tab_id)
+                tabs.append({"id": tab_id, "title": str(raw.get("title") or ""), "url": str(raw.get("url") or "")})
+        except Exception as exc:  # noqa: BLE001 — fall through to the legacy merge
+            moch_error = exc
+        if moch_error is None:
+            return {"tabs": tabs, "active_id": _active_tab_id(), "note": None}
+
     listed, list_error = [], None
     try:
         response = _relay_http("/json/list")
@@ -518,6 +578,10 @@ def _activate_tab(tab_id: str, task_id: Optional[str] = None) -> tuple:
     ok, detail = _http_tab_op(f"/json/activate/{tab_id}")
     if ok:
         return True, ""
+    if _relay_filters_tabs():
+        # BUG-136: the WebView page socket rejects Target.* — the HTTP error
+        # above (the relay's round-trip result) is the honest answer.
+        return False, detail
     sup = _supervisor(task_id)
     if sup is not None:
         cdp_ok, cdp_detail = _cdp_tab_op(sup, "Target.activateTarget", {"targetId": tab_id})
@@ -649,7 +713,10 @@ def webview_tab_create(url: str, task_id: Optional[str] = None) -> str:
             attempts.append(f"/json/new: {_describe_http(response)}")
     except Exception as exc:  # noqa: BLE001 — the Target.* fallback gets its turn
         attempts.append(f"/json/new: {exc}")
-    if not new_id:
+    if not new_id and not _relay_filters_tabs():
+        # BUG-136: on the Moch relay Target.createTarget is impossible (the
+        # page socket rejects Target.*) — the /json/new error above is the
+        # honest answer; skip the noisy fallback.
         sup = _supervisor(task_id)
         if sup is None:
             attempts.append("Target.createTarget: no attached browser page")
@@ -691,6 +758,11 @@ def webview_tab_close(tab_id: Optional[str] = None, task_id: Optional[str] = Non
     closed_active = tab["id"] == data["active_id"]
     ok, detail = _http_tab_op(f"/json/close/{tab['id']}")
     if not ok:
+        if _relay_filters_tabs():
+            # BUG-136: Target.closeTarget is impossible on the WebView page
+            # socket — surface the /json/close round-trip error alone.
+            return json.dumps({"success": False, "error": _tab_unavailable_error(
+                f"closing tab {tab['id']}", [f"/json/close: {detail}"])})
         sup = _supervisor(task_id)
         if sup is None:
             cdp_ok, cdp_detail = False, "no attached browser page"

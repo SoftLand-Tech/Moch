@@ -76,7 +76,13 @@ STAMP_MECHANISM = 2
 # v5: proot-distro parity flags (link2symlink/sysvipc/-L/fake utsname) +
 # resolv.conf seeding — apt/dpkg upgrades died on link(2) EPERM and DNS
 # was unresolvable (on-device 2026-10-06, third field round).
-SHIM_FORMAT = 5
+# v6 (BUG-134): export HOME=/root + a guest-sane PATH inside the shim —
+# the trampoline env carries the Chaquopy process HOME, a HOST path that
+# does not exist inside the guest (only workspace/scratch/dev/proc are
+# bind-mounted), so every $HOME-resolved credential (gh auth hosts.yml,
+# ~/.gitconfig, ~/.ssh, ~/.netrc, ~/.aws, ~/.npmrc, ~/.config/*) read
+# ENOENT in agent-exec'd commands while the user's Terminal saw them.
+SHIM_FORMAT = 6
 _SHIM_MARKER = f"# moch-shim-format: {SHIM_FORMAT}"
 
 # proot-distro parity on Android (proot_distro/commands/login/proot_cmd.py
@@ -92,6 +98,19 @@ FAKE_UTSNAME = (
     "\\aarch64\\localdomain\\-1\\"
 )
 PROOT_PARITY_FLAGS = ["--link2symlink", "--sysvipc", "-L", f"--kernel-release={FAKE_UTSNAME}"]
+
+# BUG-134: ONE HOME for every guest path. The guest is Ubuntu with a real
+# /root, but the Moch process runs with the Chaquopy default HOME
+# (/data/user/0/<pkg>/files) — a HOST path that does not exist inside the
+# guest (only workspace/scratch/dev/proc are bind-mounted). Inherited
+# verbatim, it made every $HOME-resolved credential (gh auth hosts.yml,
+# ~/.gitconfig, ~/.ssh, ~/.netrc, ~/.aws, ~/.npmrc, ~/.config/*, ~/.cache)
+# read ENOENT inside agent-exec'd commands while the user's Terminal —
+# which pinned HOME=/root itself — saw them fine. build_guest_launch and
+# the PATH shims export these so terminal, agent exec, the bridge's
+# exec_in_guest and background procs all land on the same /root.
+GUEST_HOME = "/root"
+GUEST_PATH_PREFIX = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # Cached rootfs size in MB for status(): computing it means stat()ing every
 # file of a full Ubuntu rootfs — seconds of GIL-hot Python inside the shared
@@ -170,7 +189,11 @@ def build_guest_launch(guest_argv: list[str]) -> tuple[list[str], dict]:
     - ``PROOT_LOADER`` points at the native-lib loader, so every execve the
       ptraced tracee performs (bash → node → children, shebangs, every exec
       variant, raw syscalls) lands on an apk_data_file;
-    - ``LD_PRELOAD`` popped (proot-distro parity; Moch never sets it).
+    - ``LD_PRELOAD`` popped (proot-distro parity; Moch never sets it);
+    - ``HOME``/``PATH`` pinned to the guest's own /root + system dirs
+      (BUG-134): the inherited host HOME does not exist inside the guest,
+      which made gh/git/ssh credentials written at guest /root invisible
+      to every command that entered through this builder.
 
     Used by exec_in_guest and the persistent session; the PATH shims carry
     the same shape inline.
@@ -194,6 +217,14 @@ def build_guest_launch(guest_argv: list[str]) -> tuple[list[str], dict]:
     env["PROOT_LOADER"] = str(loader_path())
     env["PROOT_TMP_DIR"] = str(tmp_dir)
     env.pop("LD_PRELOAD", None)
+    # BUG-134: HOME must be the GUEST's /root — the inherited Chaquopy
+    # process HOME is a host path that does not exist inside the guest, so
+    # ~/.config/gh, ~/.gitconfig, ~/.ssh … all read ENOENT under it. The
+    # guest's system dirs go first on PATH; the inherited tail (shim dir,
+    # self-bound host paths) survives after them. This builder is the ONE
+    # env source for the terminal PTY and the bridge's exec_in_guest.
+    env["HOME"] = GUEST_HOME
+    env["PATH"] = GUEST_PATH_PREFIX + ":" + env.get("PATH", "")
     argv = [
         LINKER64,
         str(proot),
@@ -235,6 +266,14 @@ mkdir -p "$LD/tmp"
 [ -s "$LD/rootfs/etc/resolv.conf" ] || printf 'nameserver 8.8.8.8\\nnameserver 1.1.1.1\\n' > "$LD/rootfs/etc/resolv.conf"
 WS="${{MOCH_WORKSPACE:-$LD/../workspace}}"
 SC="${{TMPDIR:-$LD/../cache/scratch}}"
+# BUG-134: one HOME for every guest path. The trampoline (/system/bin/sh)
+# inherits the Chaquopy process HOME — a host path that does not exist
+# inside the guest — so credentials written at guest /root in the Terminal
+# (~/.config/gh, ~/.gitconfig, ~/.ssh, …) were invisible to hermes'
+# commands and background procs, which all exec through this shim. The
+# export wins over the inherited env for everything below the exec.
+export HOME={GUEST_HOME}
+export PATH="{GUEST_PATH_PREFIX}:$PATH"
 exec /system/bin/linker64 "$LD/bin/proot" -r "$LD/rootfs" \\
   -b "$WS:/workspace" -b "$WS:$WS" -b "$SC:$SC" -b /dev -b /proc -0 \\
   --link2symlink --sysvipc -L --kernel-release='{FAKE_UTSNAME}' \\

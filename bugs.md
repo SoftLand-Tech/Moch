@@ -1197,7 +1197,6 @@ read_file's schema CLAIMS anydoc is bundled but it never was: drift), Tier C ddg
 (+4-5MB, lights web_search/web_extract — or configure a search API key instead).
 
 ## BUG-134 [HIGH] Terminal ≠ agent environment — gh auth done in the terminal is invisible to the agent
-
 User report (2026-10-12): "the terminal is not the same as the terminal that the agent do commands on, for
 example i installed gh cli and i authed with my account in the terminal, and i told the agent to check if
 i am authed or not, it said no not authed!"

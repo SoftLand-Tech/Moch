@@ -157,8 +157,10 @@ def _spawn(cols: int, rows: int) -> dict:
 
     argv, env = _build_launch(["/bin/bash", "-i"])
     env = dict(env)
+    # TERM only: HOME=/root and the guest PATH prefix come from
+    # build_guest_launch now (BUG-134 — one HOME for every guest path, so
+    # gh/git/ssh credentials written here are visible to agent exec too).
     env["TERM"] = "xterm-256color"
-    env["HOME"] = "/root"
     master_fd, slave_fd = pty.openpty()
     _set_winsize(slave_fd, cols, rows)
     try:

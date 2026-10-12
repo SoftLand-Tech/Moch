@@ -31,6 +31,10 @@ os.environ.setdefault("MOCH_FLEET", "1")
 def _make_world(tmp: Path):
     """Seed kanban + cron + delegation ledgers; return (tg._methods-like, home)."""
     os.environ["HERMES_HOME"] = str(tmp)
+    # REVIEW FIX: hermes-home MARKER — without it the server import rewrites
+    # HERMES_HOME to scratch under the REAL ~/.hermes (see test_kanban_rpc's
+    # note) and the timeline/seed/profile lookups go to the machine's home.
+    (tmp / "config.yaml").write_text("# test world marker", "utf-8")
     sys.path.insert(0, str(_PY_RUNTIME.parent / "hermes-src"))
     try:
         from hermes_cli import kanban_db as kb, kanban_db_connect as kbc
@@ -92,11 +96,17 @@ def _make_world(tmp: Path):
 
 class TestRpcFleet(unittest.TestCase):
     def setUp(self):
+        # REVIEW FIX: world FIRST, import SECOND. The server import rewrites
+        # HERMES_HOME when the dir lacks a home marker — it must see the test
+        # world (env + config.yaml) already in place, or everything profile-
+        # dependent resolves against the machine's real ~/.hermes.
+        self._tmp = tempfile.TemporaryDirectory()
+        os.environ["HERMES_HOME"] = self._tmp.name
+        Path(self._tmp.name, "config.yaml").write_text("# test world marker", "utf-8")
         try:
             import tui_gateway.server  # noqa: F401
         except ImportError as exc:
             self.skipTest(f"hermes server deps unavailable: {exc}")
-        self._tmp = tempfile.TemporaryDirectory()
         self.tg, self.home = _make_world(Path(self._tmp.name))
 
     def tearDown(self):
