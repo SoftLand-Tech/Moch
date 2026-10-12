@@ -138,6 +138,107 @@ def _run_server(port: int) -> None:
         # gateway to tick the store). Verified: without it, jobs.json is
         # never touched and scheduled jobs never fire.
         os.environ.setdefault("HERMES_DESKTOP", "1")
+        # BUG-132 belt-and-braces: the native relay start (AgentBrowserHost)
+        # races this boot — if it landed after hermes_boot's arm check, the
+        # gateway would serve sessions an un-armed (browser-less) catalog for
+        # the whole process. Re-check the pid-gated relay.json one last time
+        # before the first request can arrive.
+        try:
+            from pathlib import Path as _Path
+
+            from moch.hermes_boot import _arm_browser_gate_from_relay_file
+
+            _arm_browser_gate_from_relay_file(_Path(os.environ["HERMES_HOME"]))
+        except Exception:
+            pass
+
+        # BUG-132 (warm-up window): the first minutes after a cold boot resolve
+        # a MINIMAL kit (device-measured: 6 tools at T+60s vs 21 with all ten
+        # browser_* at T+5min, same build) — the tool registry matures late.
+        # Sessions built in the window snapshot the cold kit. Re-arm on a
+        # schedule: browser_gate.activate clears both caches AND walks the live
+        # sessions (refresh_agent_mcp_tools, append-only), so an early chat is
+        # healed in place and new chats compute the warm catalog.
+        def _warm_rearm() -> None:
+            try:
+                import json as _json
+                from pathlib import Path as _P
+
+                relay = _json.loads(
+                    (_P(os.environ["HERMES_HOME"]) / "browser" / "relay.json").read_text(encoding="utf-8")
+                )
+                if int(relay.get("pid") or 0) == os.getpid() and int(relay.get("port") or 0) > 0:
+                    from moch import browser_gate as _bg
+
+                    _bg.activate(int(relay["port"]), str(relay.get("token") or ""))
+            except Exception:
+                pass
+
+        def _browser_tools_ready() -> bool:
+            """True when browser_navigate resolves in a FRESH catalog build."""
+            try:
+                import model_tools
+
+                defs = model_tools.get_tool_definitions(None, None, quiet_mode=True) or []
+                return any(d.get("function", {}).get("name") == "browser_navigate" for d in defs)
+            except Exception:
+                return False
+
+        def _browser_warming() -> bool:
+            """Armed but not yet usable — the window the user must be told about."""
+            return os.environ.get("MOCH_BROWSER_RELAY", "") == "1" and not _browser_tools_ready()
+
+        def _prewarm_browser() -> None:
+            # Poll gently: each pass clears the memo (forcing a fresh, WARM
+            # recompute once the registry matures) and the lazy installs the
+            # probes trigger ARE the warm-up. On first readiness, run the full
+            # activate so open chats are refreshed in place.
+            import time as _time
+
+            for _ in range(60):  # ~15 min cap
+                if _browser_tools_ready():
+                    _warm_rearm()
+                    print("[moch] browser toolset warm", flush=True)
+                    return
+                try:
+                    from model_tools import _clear_tool_defs_cache as _clr
+
+                    _clr()
+                except Exception:
+                    pass
+                _time.sleep(15)
+
+        _prewarm = threading.Thread(target=_prewarm_browser, name="moch-browser-prewarm", daemon=True)
+        _prewarm.start()
+
+        # While warming, MOCHI tells the user — no silent curl fallback, no
+        # "Moch looks down". A bracketed system note rides the prompt (the
+        # established out-of-band pattern) only while the window is live.
+        def _moch_note_dispatch(req, transport=None):
+            try:
+                if isinstance(req, dict) and req.get("method") == "prompt.submit" and _browser_warming():
+                    params = req.get("params") or {}
+                    text = str(params.get("text") or "")
+                    if text and not text.startswith("["):
+                        params["text"] = (
+                            "[SYSTEM: The in-app browser is still starting up — it becomes available "
+                            "a minute or two after the app launches. If the user is asking you to open "
+                            "or browse a web page, tell them the browser will be ready shortly and to "
+                            "send the request again in a minute. Do NOT use terminal curl as a "
+                            "replacement for browsing.]\n\n"
+                        ) + text
+            except Exception:
+                pass
+            return _note_upstream(req, transport)
+
+        if not getattr(_tg_server, "_moch_note_installed", False):
+            # Capture BEFORE replacing (the fleet-gate pattern): calling
+            # _tg_server.dispatch from inside the wrapper would recurse into
+            # itself — the "Send failed / internal error" on-device.
+            _note_upstream = _tg_server.dispatch
+            _tg_server.dispatch = _moch_note_dispatch
+            _tg_server._moch_note_installed = True
+
         from hermes_cli.web_server import start_server
 
         start_server(host="127.0.0.1", port=port, open_browser=False, headless=True)

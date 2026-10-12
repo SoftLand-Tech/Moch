@@ -61,6 +61,37 @@ def activate(port: int, token: str) -> dict:
         _clear_tool_defs_cache()
     except Exception:  # noqa: BLE001 — cache shape drift must never break the gate
         logger.debug("tool-defs cache clear failed", exc_info=True)
+    # BUG-132 (cause 4): arming must also reach LIVE sessions. agent.tools is
+    # snapshotted once at build (agent_init._load_tools) and nothing refreshes
+    # it on a gate flip — the between-turns refresh is MCP-gated and a default
+    # phone install has zero MCP servers, so a session built pre-arm improvised
+    # with curl for its whole life. Append-only refresh (preserve_prefix=True,
+    # no enabled_override — the gate changed no toolsets), mirroring
+    # methods_tools._refresh_session_agent.
+    try:
+        import contextlib
+
+        from tui_gateway.server import _emit, _session_info, _sessions, _sessions_lock
+        from tools.mcp_tool_agent import refresh_agent_mcp_tools
+
+        with _sessions_lock:
+            live = [
+                (sid, sess)
+                for sid, sess in list(_sessions.items())
+                if sess.get("agent") is not None
+            ]
+        for sid, sess in live:
+            agent = sess["agent"]
+            try:
+                refresh_agent_mcp_tools(agent, quiet_mode=True, preserve_prefix=True)
+            except Exception:
+                logger.debug("gate live-refresh failed sid=%s", sid, exc_info=True)
+            with contextlib.suppress(Exception):
+                _emit("session.info", sid, _session_info(agent, sess))
+        if live:
+            logger.info("gate live-refresh: %d session(s)", len(live))
+    except Exception:
+        logger.debug("gate live-session refresh skipped (gateway not up)", exc_info=True)
     logger.info("Moch browser gate active: %s", url)
     return status()
 

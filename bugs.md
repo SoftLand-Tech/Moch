@@ -972,6 +972,196 @@ Needs a human or a second machine: voice **audio** content, and real second-mach
 
 ---
 
+## BUG-132 [HIGH] (NEW, WIP) Browser tools are not always available — the agent boots the relay but a cold-start race still hides the tools
+
+**Requested behaviour:** the browser is an always-on toolset like the terminal — the agent never
+improvises with curl, and the relay/browser engine stay alive for the whole app process (chat deletes
+are irrelevant; only closing the app ends it).
+
+**Built and working (verified on device):** `AgentBrowserHost` (`app/src/components/AgentBrowserHost.tsx`,
+mounted in `_layout.tsx`'s main return) — an app-owned offscreen "agent tab" (2×2 WebView) that calls
+`ensureBrowserRelay()` for the whole process lifetime. On a fresh boot with the Browser screen **never
+opened**, the relay now comes up by itself (socket 9334 LISTEN; `relay.json` carries the live pid).
+The host's first attempt mounted inside `_layout`'s `!cfg` early-return and silently unmounted once the
+config loaded — fixed by moving it into the main (connected) return.
+
+**Still broken (the actual symptom):** a new chat's turn right after a fresh boot still found **no
+browser tools** and improvised with the terminal (agent.log for session 20261011_224734: `tool_search`
+→ `Tool terminal returned error` → more terminal calls; zero `browser_*`).
+
+**Root cause of the remaining gap — a cold-start race with TWO arming paths that can both miss:**
+1. JS host mounts early (~cfg load) → `ensureRunning` starts the relay ✓ → then the native module calls
+   `moch.browser_gate.activate` — but Python is **not booted yet** at that point, so the call throws and
+   `ensureRunning`'s promise REJECTS (the module's try/catch wraps the Python call). `ensureBrowserRelay`
+   catches, reports `running:false`, and the host **never retries** — the gate never arms from this path.
+2. Python boots later and `hermes_boot`'s pid-gated arming reads `relay.json` — but if the relay started
+   *after* Python read the file, the pid is stale and it does not arm either.
+
+**Fix shape (next session):** make the native `ensureRunning` retry the `browser_gate.activate` call
+(e.g. 5 attempts / 3 s apart, in its existing background thread) until Python acknowledges — the relay is
+already up by then, so retries are cheap — OR re-check `relay.json` at the END of the Python boot instead
+of only during it. Also investigate a new regression: `session.list` rows now report `tool_names` empty
+for ALL sessions, including ones that previously carried populated catalogs — catalog checks made via
+`session.list` are unreliable until that is understood.
+
+**Installed state:** the phone runs a build with `AgentBrowserHost` (harmless: one offscreen 2×2
+WebView + a relay that boots with the app). The component + its `_layout` mount line are in the working
+tree, deliberately **not** in any PR until the feature actually works end to end.
+
+### BUG-132 round 32 — the remaining gap is a BOOT-TIMING race, instrumented
+
+On-device acceptance after the cache-key fix: relay auto-starts at boot ✓ (socket up, Browser
+screen never opened), but the acceptance turn **still improvised with curl** (`tool_search` →
+terminal; no `browser_*`), answering correctly only because curl worked. Probes: `config.yaml` on
+device is EMPTY (so toolset defaults apply — not the stripper); logcat showed no arm line, meaning
+the native retry loop had already exhausted: **10×3 s = 30 s < this cold boot's time-to-Python**
+(first boot after an install is the slow case — exactly the user's scenario).
+
+Fix applied (build in progress, unverified on device yet): the native arm loop now polls
+`Python.isStarted()` every **1 s for up to 120 s**, arming the moment Python exists, and logs
+`armed/ticks/pid` so the next failure is self-diagnosing. Together with the cache-key fix (stale
+catalogs are unreachable once the gate flips) this closes the race without ordering assumptions:
+whichever of {native retry, gateway pre-serve re-arm} lands first arms the gate, and no pre-arm
+catalog survives the flip.
+
+---
+
+## BUG-133 [HIGH] (NEW, WIP) Keyboard opens over inputs app-wide — the input and everything at the bottom must rise ABOVE the keyboard
+
+User report (2026-10-12): "find all inputs/anything that will open the keyboard, and make sure when
+the keyboard opens the input (and everything in bottom) will go above the keyboard and not stay with it."
+Intake: app-wide keyboard-avoidance audit — enumerate EVERY keyboard-opening surface (TextInput,
+autoFocus, WebView focus, sheets with inputs) and the avoidance each one has today; fix so the focused
+input and everything below it lift above the keyboard on every screen. Verification wave: 5 read-only
+subagents on disjoint scopes (chat composer / forms+onboarding / tab screens+shell / sheets+modals /
+platform wiring+terminal+webview+native RNKC sources). Build in worktree `worktrees/keyboard-avoidance`
+from origin/main.
+
+### BUG-132 round 33 — DECISIVE NEGATIVE: the tools are absent from the callable kit itself
+
+Full fix package installed and verified live (native relay start in MainApplication.onCreate:
+socket up at boot, `armed=true ticks=1 pid=<live>`; check_fn scope partition; live-session refresh;
+Fragment hoist; 118 tests OK; build 02:45). Acceptance still fails:
+
+- turn: "Use your browser tools to open example.com…" → `tool_search` + `terminal` (curl), no browser_*.
+- DECISIVE PROBE: *"Call the tool named browser_navigate with url https://example.com — if that
+  tool does not exist in your toolset, reply exactly NO-SUCH-TOOL."* → the agent answered
+  **"No browser tool in my kit, but I can grab it with a fetch instead."**
+
+That eliminates the arm/env/cache/check_fn/live-refresh layers entirely — the model's CALLABLE SET
+lacks browser_* even when named explicitly. The remaining suspects, for the next session:
+
+1. **Toolset selection on device**: `_load_enabled_toolsets(platform)` → `_get_platform_tools(cfg, "cli")`
+   with the on-device config.yaml being EMPTY (verified) — does the empty-config path really yield the
+   hermes-cli composite including `browser`, or does it fall back to a minimal set? The static analysis
+   said composite, but it was never verified against an empty config on device.
+2. **The APK's baked toolsets.py** vs the tree: does the baked copy's `_HERMES_CORE_TOOLS` contain the
+   browser names? (An earlier check said byte-identical — re-verify against the 02:45 APK.)
+3. **Instrument the truth**: one log line of the resolved tool names at agent build (agent_init._load_tools,
+   even in quiet_mode) would have made every round of this diagnosable from agent.log alone; add it first.
+
+Also requested by the user (new feature, not yet started): browser tab management tools —
+navigate BETWEEN tabs, create/delete/manage multiple tabs (the Browser screen already has a tab
+strip; needs browser_tab_* tools + relay support for target selection).
+
+### BUG-132 round 34 — THE REFRAME: it was never browser-specific
+
+Asked directly (*"List your exact tool names, one per line"*), the agent's complete kit on the
+current build (all four fixes installed, armed=true, env set) is EXACTLY:
+
+    skill_view, skills_list, terminal, tool_search, tool_describe, tool_call
+
+Six tools — the deferred/bridge base. No browser_*, and also no file tools (read_file/patch), no
+memory, no delegate_task: the ENTIRE extended toolset is absent from these sessions. The browser is
+simply the most visible casualty. This matches every historical 6/8-tool catalog observation and
+explains why every arm/cache/refresh fix changed nothing: the selection never included the rich
+toolsets to begin with.
+
+What differs in the rare 21/22-tool sessions (round 14, 17:51; round 4, 15:02)? Those are the
+outliers to explain, not the baseline. Suspects for the selection difference, in order:
+
+1. `_load_enabled_toolsets(platform)` / `_get_platform_tools(cfg, "cli")` with the on-device EMPTY
+   config.yaml vs a populated one — the empty-config path may yield a minimal set, not the
+   hermes-cli composite the static analysis assumed. NEXT STEP: run that exact call on the PC with
+   an empty config and print the result; then log the resolved enabled_toolsets at agent build.
+2. The tool_search bridge masking: with this kit, tool_search CANNOT surface core tools by design,
+   so "search then curl" is the model's rational fallback (amplifier, not cause).
+3. Compare a 6-tool session's creation context vs a 21-tool one (profile? config write in between?
+   registry generation?) — the one variable that flipped.
+
+USER FEATURE REQUEST (queued, not started): browser tab management tools — create/delete/switch/
+list tabs (the Browser screen has a tab strip; needs browser_tab_* tools + relay multi-target).
+
+### BUG-132 round 35 — composite fix landed; kit grew; browser still absent WITHOUT any check_fn evaluation
+
+**Fix applied this round** (toolsets.py): registered the missing `hermes-mobile` composite
+(mirroring hermes-cli, the hermes-cron precedent). Verified on PC: `_get_platform_tools(cfg,
+"mobile")` now returns the full 18-toolset list (browser/file/memory/delegation/...) instead of the
+bare `['hermes-mobile']` name. 118 tests OK; build succeeded; installed on device.
+
+**Device result:** the agent's kit GREW (was 6: skill_view/skills_list/terminal+bridge; now also
+cronjob_manage, todo_list, desktop_project) — the composite is provably live in the APK. But the
+acceptance turn STILL answered "Example Domain — though no browser tools are available in this
+session" (fetched via curl; turn used tool_search + terminal), and the kit listing shows no
+browser/file/memory.
+
+**The remaining mystery, precisely:** browser/file/memory tools are absent from the resolved kit
+while the agent.log shows ZERO `check_fn ... returned False/raised` lines for them this boot —
+i.e. their check_fns are never evaluated, so the filtering happens UPSTREAM of check_fn, inside
+toolset→tool resolution (registry.get_definitions / toolset member expansion), or the model's own
+listing is lossy (verify with the instrument below before trusting it).
+
+**Successor's first move (the instrument that was never added):** one `logger.info` in
+`agent/agent_init.py::_load_tools` printing the resolved tool names (the "Final tool selection"
+print is suppressed by quiet_mode on the embedded build). One device turn then makes the kit
+readable from agent.log, separating "tools genuinely absent" from "model lists them lossily".
+Then bisect upstream: whether `enabled_toolsets` reaching _make_agent contains browser, and
+whether registry.get_definitions drops the browser toolset members without logging.
+
+**Verified this round (keep):** platform 'mobile' expands via the composite (PC);
+desktop_project/todo_list/cronjob_manage appearing = _gui_surface_toolsets + composite both live;
+relay native-start + armed=true ticks=1 still hold; suite green; PR #61 carries everything.
+
+### BUG-132 RESOLVED (round 36) — the agent uses browser_navigate on a cold boot
+
+Root causes, final list: (1) the missing `hermes-mobile` composite collapsed toolset selection to
+{skills, terminal}; (2) a BOOT WARM-UP window — device-measured with the new kit instrument:
+6 tools at T+60s vs 21 (all ten browser_*) at T+5min on the SAME build — the tool registry matures
+minutes after boot, and sessions built in the window snapshot the cold kit.
+
+Fix (this round): scheduled warm-up re-arms in gateway_server — timers at 45/150/420 s re-run
+browser_gate.activate (pid-gated via relay.json), which clears both caches AND walks live sessions
+with refresh_agent_mcp_tools (append-only). An early chat is healed IN PLACE.
+
+VERIFIED ON DEVICE: fresh boot → chat created at T+64s curled ("no browser tools"); at T+105s the
+log shows `gate live-refresh: 1 session(s)`; the SAME chat's next turn used **browser_navigate** and
+answered "Example Domain". Kit instrument retained (logger.info in agent_init._load_tools) — the
+one line that made this diagnosable.
+
+Residual (cosmetic): the first ~1-2 min after boot still build cold kits (healed within ~90 s by the
+re-arm). A true pre-warm (loop the catalog build at boot until browser_* resolve) would close even
+that — queued as polish. Scope-partition experiment reverted with evidence (non-None scope broke
+check_fn evaluation; the env-in-key + TTL + activate clears bound the original poison window).
+
+### BUG-132 round 37 — the warm-up is now USER-VISIBLE and self-healing (done)
+
+The user's ask: never look broken, and have MOCHI say it. Two additions in gateway_server:
+
+1. **Pre-warm loop** (`moch-browser-prewarm` thread): polls every 15 s (memo cleared each pass —
+   the probes themselves drive the lazy installs that ARE the warm-up), and on first readiness runs
+   the full activate (cache clears + live-session refresh). Replaces the fixed 45/150/420 s timers —
+   healing now happens at the earliest physically possible moment instead of a scheduled tick.
+2. **Warming note**: while armed-but-not-ready, prompt.submit gets a bracketed system note (the
+   established out-of-band pattern; upstream captured BEFORE replacement — the first attempt
+   recursed into itself and produced "Send failed / internal error", fixed and re-verified).
+
+DEVICE-VERIFIED, same chat, one boot:
+  T+0:49 cold  → "The in-app browser is still warming up — it should be ready in a minute or two. Send the request again…"
+  T+4:41 warm  → "The browser's up. Title: Example Domain." (log: browser_navigate completed 0.81s)
+
+The fixed 45/150/420 timers were removed in favor of the loop; stale scope-partition test removed
+with the revert. 117 tests OK.
+
 ## BUG-133 [HIGH] Keyboard opens over inputs app-wide — the input and everything at the bottom must rise ABOVE the keyboard
 
 User report (2026-10-12): "find all inputs/anything that will open the keyboard, and make sure when the

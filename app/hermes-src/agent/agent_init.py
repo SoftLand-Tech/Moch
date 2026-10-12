@@ -1072,6 +1072,20 @@ def _load_tools(agent, enabled_toolsets, disabled_toolsets):
     agent.tools = prune_oneshot_tools(agent.tools or [])
 
     agent.valid_tool_names = {tool["function"]["name"] for tool in agent.tools} if agent.tools else set()
+    # BUG-132 instrument: quiet_mode suppresses the "Final tool selection" print,
+    # which made the embedded app's kit undiagnosable from agent.log alone (the
+    # "no browser tools" hunt took many rounds for want of this one line).
+    try:
+        import logging as _logging
+
+        _logging.getLogger(__name__).info(
+            "agent kit (%d): %s | enabled_toolsets=%s",
+            len(agent.tools or []),
+            ",".join(sorted(agent.valid_tool_names)),
+            enabled_toolsets,
+        )
+    except Exception:
+        pass
     # Kanban guidance is session-static for the dispatcher-owned worker only. Profiles may
     # expose kanban_show interactively, and children/cron runs inherit the env var, without
     # owning a task.

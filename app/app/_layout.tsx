@@ -27,6 +27,7 @@ import { flushDrafts, loadDrafts } from '../src/lib/drafts'
 import { flushSendQueue, loadSendQueue } from '../src/lib/sendQueue'
 import { initShareIn, deliverSharedNow, shareInInbox } from '../src/lib/shareIn'
 import { loadLocale } from '../src/lib/strings'
+import { AgentBrowserHost } from '../src/components/AgentBrowserHost'
 import { syncBackendIdentity } from '../src/lib/backendIdentity'
 import { parseConnectUrl } from '../src/lib/pairing'
 import { pruneRelayMedia } from '../src/lib/mediaCache'
@@ -256,6 +257,10 @@ export default function RootLayout() {
   if (!cfg) {
     return (
       <>
+      {/* BUG-132 (cause 5): child 0 under the SAME Fragment root in BOTH
+          returns, so the agent tab never unmounts across the cfg transition —
+          present during onboarding, and survives "Forget this computer". */}
+      <AgentBrowserHost />
       {/* BUG-133: KeyboardProvider must wrap BOTH root branches. The onboarding
           screens (index / add-computer / setup) host PairForm/ProviderKeyForm
           inputs; without a provider every keyboard-controller consumer there
@@ -287,6 +292,8 @@ export default function RootLayout() {
   const bootStruggling = !everOpen
 
   return (
+    <>
+    <AgentBrowserHost />
     <KeyboardProvider>
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <StatusBar style="light" />
@@ -389,6 +396,7 @@ export default function RootLayout() {
     </View>
     {splash}
     </KeyboardProvider>
+    </>
   )
 }
 
