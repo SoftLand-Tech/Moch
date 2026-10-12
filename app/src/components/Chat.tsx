@@ -284,15 +284,26 @@ export const MessageBubble = React.memo(function MessageBubble({
       {/* BUG-045: user messages get a timestamp too — only assistant rows
           showed one. */}
       <Text style={s.userTime}>{fmtTime(m.ts)}</Text>
-      {m.status === 'failed' ? (
+      {/* BUG-036: 'unconfirmed' renders through the same failed-row
+          machinery (marker + Retry) but reads as a warning, not an error —
+          a submit-phase timeout may still be running remotely. */}
+      {m.status === 'failed' || m.status === 'unconfirmed' ? (
         <View style={s.failedRow}>
-          <Icon name="alert-circle" size={15} color={C.red} />
-          <Text style={s.failedText}>{m.error ?? 'Not sent'}</Text>
+          <Icon
+            name={m.status === 'unconfirmed' ? 'help-circle' : 'alert-circle'}
+            size={15}
+            color={m.status === 'unconfirmed' ? C.amber : C.red}
+          />
+          <Text style={s.failedText}>
+            {m.status === 'unconfirmed'
+              ? (m.error ?? 'Sent — no confirmation from the computer; it may have gone through')
+              : (m.error ?? 'Not sent')}
+          </Text>
           {onRetry && !hasMediaSegs ? (
             <Pressable
               onPress={() => onRetry(m.id)}
               style={({ pressed }) => [s.retryBtn, pressed && s.iconPressed]}
-              accessibilityLabel="Retry send"
+              accessibilityLabel={m.status === 'unconfirmed' ? 'Retry unconfirmed send' : 'Retry send'}
             >
               <Icon name="refresh" size={13} color={C.text} />
               <Text style={s.retryText}>Retry</Text>

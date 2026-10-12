@@ -98,6 +98,12 @@ const EN: Catalog = {
   'bot.delete.cta': 'Delete this bot',
   'bot.delete.confirm': 'Tap again to confirm deletion',
   'bot.delete.doing': 'Deleting…',
+
+  // BUG-086 aggregate card for questions from sessions this app isn't
+  // tracking (automation/CLI on the host) — chat-surface keys live here so
+  // the card is bilingual from day one.
+  'chat.foreign.title': 'Another session on this machine is asking you something',
+  'chat.foreign.hint': 'Tap to review and answer it here.',
 }
 
 const AR: Catalog = {
@@ -157,6 +163,11 @@ const AR: Catalog = {
   'bot.delete.cta': 'احذف هذا البوت',
   'bot.delete.confirm': 'اضغط مرة أخرى للتأكيد',
   'bot.delete.doing': 'جارٍ الحذف…',
+
+  // BUG-086 aggregate card for questions from sessions this app isn't
+  // tracking (automation/CLI on the host).
+  'chat.foreign.title': 'جلسة أخرى على هذا الجهاز تطلب منك إجابة',
+  'chat.foreign.hint': 'اضغط لمراجعتها والإجابة عليها من هنا.',
 }
 
 const CATALOGS: Record<Locale, Catalog> = { en: EN, ar: AR }

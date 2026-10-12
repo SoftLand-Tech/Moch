@@ -16,6 +16,11 @@
  */
 import ws from 'ws'
 import { JsonRpcGatewayClient, type ServerRequest, type GatewayEvent } from '../src/protocol/json-rpc-gateway'
+import {
+  GatewayTimeoutError,
+  JsonRpcGatewayError,
+  JsonRpcRequestChannel,
+} from '../src/protocol/json-rpc-channel'
 
 // The installed `ws` is old enough to export the server constructor as
 // `Server`; newer builds call it `WebSocketServer`. Types describe the modern
@@ -346,12 +351,64 @@ async function testReplayAndOpenRequests() {
   check('  same id reused', replayed[0]?.id === OPEN_ID, String(replayed[0]?.id))
 }
 
+// ── 6. A sent-but-unanswered request rejects with a typed error ──────────
+async function testTimeoutClassification() {
+  console.log('\n— request timeout classification (BUG-036 client half) —')
+  // A transport that swallows everything: frames are SENT, never answered.
+  const sent: string[] = []
+  const channel = new JsonRpcRequestChannel({ requestTimeoutMs: 40 })
+  channel.attach({ send: (text: string) => { sent.push(text) } })
+
+  let timedOut: unknown = null
+  try {
+    await channel.request('prompt.submit', { session_id: SESSION_A, text: 'hi' })
+  } catch (e) {
+    timedOut = e
+  }
+
+  check('unanswered request rejects', timedOut !== null)
+  check('  rejection is instanceof GatewayTimeoutError', timedOut instanceof GatewayTimeoutError)
+  check(
+    '  carries the method that timed out',
+    timedOut instanceof GatewayTimeoutError && timedOut.method === 'prompt.submit',
+    String((timedOut as GatewayTimeoutError | null)?.method),
+  )
+  check(
+    '  message still says "timed out" (message-text matchers rely on it)',
+    /timed out/.test(String((timedOut as Error | null)?.message)),
+    String((timedOut as Error | null)?.message),
+  )
+  check(
+    '  the frame was already sent — no cancellation exists',
+    sent.some((t) => t.includes('"method":"prompt.submit"')),
+  )
+
+  // A real JSON-RPC error ANSWER is not a timeout: classification is by
+  // type, never by message text (chat.ts's createSessionRpc keeps matching
+  // /timeout/i on the message, which stays compatible above).
+  const second = channel.request('session.resume', { session_id: 'x' }, 500)
+  const frame = JSON.parse(sent[sent.length - 1]) as WireFrame
+  channel.handleFrame(JSON.stringify({ jsonrpc: '2.0', id: frame.id, error: { code: -32001, message: 'boom (not a timeout)' } }))
+  let rpcErr: unknown = null
+  try {
+    await second
+  } catch (e) {
+    rpcErr = e
+  }
+  check(
+    'a JSON-RPC error answer is NOT classified as a timeout',
+    rpcErr instanceof JsonRpcGatewayError && !(rpcErr instanceof GatewayTimeoutError),
+    `${rpcErr?.constructor?.name ?? String(rpcErr)}`,
+  )
+}
+
 async function main() {
   await testApprovalRoundTrip()
   await testUnhandledAnswers()
   await testHandlerCrash()
   await testSessionIsolation()
   await testReplayAndOpenRequests()
+  await testTimeoutClassification()
   console.log(`\n${pass}/${pass + fail} passed, ${fail} failed`)
   process.exit(fail ? 1 : 0)
 }

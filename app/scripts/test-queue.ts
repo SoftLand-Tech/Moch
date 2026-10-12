@@ -4,6 +4,7 @@
 // AsyncStorage cannot load in plain node, so a fake is injected before the
 // module ever persists — the same pattern test-attention.ts uses.
 type QueueMod = typeof import('../src/lib/sendQueue')
+type RetryMod = typeof import('../src/lib/rpcRetry')
 
 let q: QueueMod
 
@@ -26,6 +27,8 @@ const tick = () => new Promise<void>((r) => setTimeout(r, 0))
 async function main() {
   q = await import('../src/lib/sendQueue')
   q._useStorageForTests(fakeStorage)
+  const rr = await import('../src/lib/rpcRetry')
+  const { GatewayTimeoutError } = await import('../src/protocol/json-rpc-channel')
 
   // ── Basic queue semantics ────────────────────────────────────────────────
   check('empty chat queues to []', q.queueFor('a').length === 0)
@@ -104,6 +107,50 @@ async function main() {
   const chatKeys = Object.keys(q.sendQueue.get())
   check('chat map capped at 60', chatKeys.length === 60, `got ${chatKeys.length}`)
   check('chat cap keeps newest chats', q.queueFor('chat-64').length === 1 && q.queueFor('chat-0').length === 0)
+
+  // ── Auto-retry truth table (BUG-036 client half) ────────────────────────
+  // The queue/outbox flushes must never re-fire a prompt.submit whose frame
+  // was already sent when the 120s deadline hit — the turn may be running
+  // remotely, and the server's own turn events re-release the queue.
+  check(
+    'resolve-phase timeout IS auto-retryable',
+    rr.shouldAutoRetry('resolve', new GatewayTimeoutError('session.resume', 120)) === true,
+  )
+  check(
+    'submit-phase timeout is NOT auto-retryable',
+    rr.shouldAutoRetry('submit', new GatewayTimeoutError('prompt.submit', 120)) === false,
+  )
+  check(
+    'submit-phase generic error IS auto-retryable',
+    rr.shouldAutoRetry('submit', new Error('gateway not connected')) === true,
+  )
+  check(
+    'resolve-phase generic error IS auto-retryable',
+    rr.shouldAutoRetry('resolve', new Error('Not connected')) === true,
+  )
+  check(
+    'an UnconfirmedSubmitError is never auto-retried (any phase)',
+    rr.shouldAutoRetry('resolve', new rr.UnconfirmedSubmitError(new GatewayTimeoutError('prompt.submit', 120))) === false &&
+      rr.shouldAutoRetry('submit', new rr.UnconfirmedSubmitError(new GatewayTimeoutError('prompt.submit', 120))) === false,
+  )
+  check(
+    'classification is by type, not message text',
+    rr.isGatewayTimeout(new Error('request timed out after 120s: prompt.submit')) === false,
+  )
+  check(
+    'null/undefined/non-error values are not timeouts',
+    rr.isGatewayTimeout(null) === false && rr.isGatewayTimeout(undefined) === false && rr.isGatewayTimeout('timeout') === false,
+  )
+
+  // ── Outbox pin policy (BH-000018) ───────────────────────────────────────
+  // A pseudo `new:` stored id can never be matched to a live entry or
+  // resumed, so pinning an offline-enqueued text to one strands it forever.
+  check('outbox pin passes a real stored id through', rr.outboxPinFor('sess-123') === 'sess-123')
+  check('outbox pin never pins to a pseudo new: id', rr.outboxPinFor('new:m1_2') === '')
+  check(
+    'outbox pin of undefined/empty is unpinned',
+    rr.outboxPinFor(undefined) === '' && rr.outboxPinFor('') === '',
+  )
 
   console.log(`\n${pass} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)

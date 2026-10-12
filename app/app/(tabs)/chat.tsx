@@ -43,6 +43,7 @@ import {
   respondClarify,
   respondClarifyBatch,
   respondPrivileged,
+  pendingUntracked,
   openLocalChatIfNeeded,
   activeLiveId,
   chatBanner,
@@ -53,6 +54,7 @@ import {
   pushLocalMessage,
   type ToolItem,
   type ChatMessage,
+  type PendingRequest,
 } from '../../src/lib/chat'
 import { enqueueSend, removeQueued } from '../../src/lib/sendQueue'
 import { setQueuedAttachments, takeQueuedAttachments } from '../../src/lib/chat'
@@ -75,6 +77,7 @@ import { Mascot } from '../../src/components/Mascot'
 import { useMochiState } from '../../src/components/mochi/useMochiState'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
+import { tr } from '../../src/lib/strings'
 import { C, S, useStyles, useShape } from '../../src/lib/theme'
 
 /** Empty-state prompts, styled as plain icon rows the way ChatGPT does. */
@@ -185,6 +188,13 @@ export default function Chat() {
   const slashSeq = useRef(0)
   // BUG-043: the slash starter focuses the composer so the palette opens.
   const inputRef = useRef<TextInput>(null)
+  // BUG-086: questions from sessions this app isn't tracking (automation or
+  // a CLI on the host). Answering is a plain response frame keyed by the
+  // `srq-…` id — no session tracking needed — so they render as ONE
+  // aggregate card below the active chat's own question, expandable into
+  // the same answer machinery.
+  const foreign = useStore(pendingUntracked)
+  const [foreignOpen, setForeignOpen] = useState(false)
   // Mascot waterfall — recording (press-to-talk) and the composer text (any
   // keystroke is activity) feed the idle clock; everything else it subscribes
   // to itself.
@@ -762,22 +772,217 @@ export default function Chat() {
   // momentary state, so any turn start/end or chat switch re-collapses it.
   useEffect(() => { setToolsOpen(false) }, [storedId, busy])
 
+  // Reset the answer fields whenever the set of questions on screen changes
+  // (the active one, or the aggregate card's foreign ones).
+  const questionKey = `${req?.id ?? ''}|${foreign.map((f) => f.id).join(',')}`
   useEffect(() => {
     setAnswerText('')
     setSecretValue('')
     setBatchAnswers({})
-  }, [req?.id])
+  }, [questionKey])
 
-  const isBatchClarify = req?.method === 'clarify' && !!req.questions?.length
-  const approvalChoices = (() => {
-    if (req?.method !== 'approval') return []
-    const offered = req.choices?.length ? req.choices : ['once', 'session', 'always', 'deny']
+  // Per-request (BUG-086: the same machinery answers the active chat's
+  // question AND each foreign request from the aggregate card).
+  const isBatchClarifyOf = (r: PendingRequest) => r.method === 'clarify' && !!r.questions?.length
+  const approvalChoicesFor = (r: PendingRequest) => {
+    if (r.method !== 'approval') return []
+    const offered = r.choices?.length ? r.choices : ['once', 'session', 'always', 'deny']
     return offered.filter((c) => {
-      if (c === 'always' && req.allowPermanent === false) return false
-      if (c === 'session' && req.allowSession === false) return false
+      if (c === 'always' && r.allowPermanent === false) return false
+      if (c === 'session' && r.allowSession === false) return false
       return true
     })
-  })()
+  }
+
+  /** The approval / clarify / sudo-secret question card — one renderer for
+   *  every answerable question (the active session's own, and each foreign
+   *  request expanded from the BUG-086 aggregate card). */
+  const questionCard = (r: PendingRequest) => (
+    <>
+      {r.method === 'approval' ? (
+        <View style={s.sheet}>
+          <View style={s.sheetHead}>
+            <Icon name="shield-checkmark-outline" size={15} color={C.amber} />
+            <Text style={s.sheetTitle}>
+              Approval needed{r.replayed ? ' (restored)' : ''}
+            </Text>
+          </View>
+          {/* BUG-082: the body scrolls inside a height-capped card; the
+              choices row below stays pinned and always reachable, no
+              matter how long the command/description is. */}
+          <ScrollView style={s.sheetScroll} nestedScrollEnabled>
+            {r.toolName ? <Text style={s.sheetKicker}>{r.toolName}</Text> : null}
+            <Text style={s.sheetBody} selectable>
+              {r.command ?? r.description ?? 'The agent wants to run a command.'}
+            </Text>
+            {r.description && r.description !== r.command ? (
+              <Text style={s.sheetDesc}>{r.description}</Text>
+            ) : null}
+          </ScrollView>
+          <View style={s.sheetRow}>
+            {approvalChoicesFor(r).map((c) => {
+              const deny = c === 'deny'
+              return (
+                <Pressable
+                  key={c}
+                  style={({ pressed }) => [
+                    s.sheetBtn,
+                    deny ? s.denyBtn : { backgroundColor: c === 'always' ? C.accentDark : C.accent },
+                    pressed && s.btnPressed,
+                  ]}
+                  onPress={() => {
+                    // BUG-050: refusing the agent is a warning, not a
+                    // success — the haptic language must match the red
+                    // Deny styling (AlertDialog uses Warning for
+                    // destructive choices too).
+                    void Haptics.notificationAsync(
+                      deny ? Haptics.NotificationFeedbackType.Warning : Haptics.NotificationFeedbackType.Success,
+                    )
+                    void respondApproval(c as 'once' | 'session' | 'always' | 'deny', false, r)
+                  }}
+                  accessibilityLabel={c}
+                >
+                  <Text style={[s.sheetBtnText, !deny && { color: C.onAccent }]} numberOfLines={1}>
+                    {c === 'once' ? 'Allow' : c === 'session' ? 'Always this chat' : c === 'always' ? 'Always' : 'Deny'}
+                  </Text>
+                </Pressable>
+              )
+            })}
+          </View>
+        </View>
+      ) : null}
+
+      {r.method === 'clarify' ? (
+        <View style={s.sheet}>
+          <View style={s.sheetHead}>
+            <Icon name="help-circle-outline" size={15} color={C.accent} />
+            <Text style={s.sheetTitle}>Mochi needs you</Text>
+          </View>
+          {isBatchClarifyOf(r) ? (
+            <>
+              {/* BUG-082: unbounded question count — the list scrolls;
+                  the Send button below stays pinned. */}
+              <ScrollView style={s.sheetScroll} nestedScrollEnabled>
+              {r.questions!.map((q) => (
+                <View key={q.qid} style={{ marginBottom: 10 }}>
+                  <Text style={s.qText}>{q.question ?? q.qid}</Text>
+                  {q.choices?.map((o) => (
+                    <Pressable
+                      key={o}
+                      style={({ pressed }) => [s.clarifyBtn, batchAnswers[q.qid] === o && s.clarifyOn, pressed && s.btnPressed]}
+                      onPress={() => setBatchAnswers((a) => ({ ...a, [q.qid]: o }))}
+                    >
+                      <Text style={[s.clarifyText, batchAnswers[q.qid] === o && { color: C.onAccent }]}>{o}</Text>
+                    </Pressable>
+                  ))}
+                  {!q.choices?.length ? (
+                    <TextInput
+                      style={s.qInput}
+                      value={batchAnswers[q.qid] ?? ''}
+                      onChangeText={(t) => setBatchAnswers((a) => ({ ...a, [q.qid]: t }))}
+                      placeholder="Your answer…"
+                      placeholderTextColor={C.textFaint}
+                      // BUG-049: the question text, not an internal id.
+                      accessibilityLabel={`Answer: ${q.question ?? 'the question'}`}
+                    />
+                  ) : null}
+                </View>
+              ))}
+              </ScrollView>
+              <Pressable
+                style={({ pressed }) => [s.sheetBtn, { backgroundColor: C.accent }, pressed && s.btnPressed]}
+                onPress={() => { void respondClarifyBatch(batchAnswers, r) }}
+              >
+                <Text style={[s.sheetBtnText, { color: C.onAccent }]}>Send</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              {/* BUG-082: long question/many options scroll; the answer
+                  input stays pinned. */}
+              <ScrollView style={s.sheetScroll} nestedScrollEnabled>
+              <Text style={s.sheetBody}>{r.question ?? 'Clarification needed'}</Text>
+              {r.options?.map((o) => (
+                <Pressable
+                  key={o}
+                  style={({ pressed }) => [s.clarifyBtn, pressed && s.btnPressed]}
+                  onPress={() => { void respondClarify(o, r) }}
+                >
+                  <Text style={s.clarifyText}>{o}</Text>
+                </Pressable>
+              ))}
+              </ScrollView>
+              <View style={s.clarifyRow}>
+                <TextInput
+                  style={[s.qInput, { flex: 1 }]}
+                  value={answerText}
+                  onChangeText={setAnswerText}
+                  placeholder="Or type your answer…"
+                  placeholderTextColor={C.textFaint}
+                  accessibilityLabel="Clarification answer"
+                />
+                <Pressable
+                  style={({ pressed }) => [s.miniSend, pressed && s.btnPressed]}
+                  onPress={() => {
+                    // BUG-075: an empty tap used to wipe the field and do
+                    // nothing — keep the text, and only send a real answer.
+                    const t = answerText.trim()
+                    if (!t) return
+                    setAnswerText('')
+                    void respondClarify(t, r)
+                  }}
+                  accessibilityLabel="Send clarification"
+                >
+                  <Icon name="arrow-up" size={17} color={C.onAccent} />
+                </Pressable>
+              </View>
+            </>
+          )}
+        </View>
+      ) : null}
+
+      {(r.method === 'sudo' || r.method === 'secret') ? (
+        <View style={s.sheet}>
+          <View style={s.sheetHead}>
+            <Icon name="lock-closed-outline" size={15} color={C.red} />
+            <Text style={[s.sheetTitle, { color: C.red }]}>
+              {r.method === 'sudo' ? 'Sudo requested' : 'Secret requested'}
+            </Text>
+          </View>
+          {/* BUG-082: long prompt scrolls; the password field and the
+              Send/Deny row stay pinned. */}
+          <ScrollView style={s.sheetScroll} nestedScrollEnabled>
+            <Text style={s.sheetBody} selectable>
+              {r.prompt}
+            </Text>
+          </ScrollView>
+          <TextInput
+            style={s.qInput}
+            value={secretValue}
+            onChangeText={setSecretValue}
+            placeholder={r.method === 'sudo' ? 'sudo password…' : `Value for ${r.envVar ?? 'secret'}…`}
+            placeholderTextColor={C.textFaint}
+            secureTextEntry
+            accessibilityLabel="Secret value"
+          />
+          <View style={[s.sheetRow, { marginTop: 10 }]}>
+            <Pressable
+              style={({ pressed }) => [s.sheetBtn, { backgroundColor: C.accent }, pressed && s.btnPressed]}
+              onPress={() => { const v = secretValue; setSecretValue(''); void respondPrivileged(true, v || undefined, r) }}
+            >
+              <Text style={[s.sheetBtnText, { color: C.onAccent }]}>Send</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [s.sheetBtn, s.denyBtn, pressed && s.btnPressed]}
+              onPress={() => { setSecretValue(''); void respondPrivileged(false, undefined, r) }}
+            >
+              <Text style={[s.sheetBtnText, { color: C.red }]}>Deny</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+    </>
+  )
 
   // Text OR attachments — ChatGPT sends captionless photos.
   const canSend = !recording && (!!input.trim() || pendingAttachments.length > 0)
@@ -1161,186 +1366,30 @@ export default function Chat() {
           ) : null}
 
           {/* Question cards */}
-          {req?.method === 'approval' ? (
-            <View style={s.sheet}>
-              <View style={s.sheetHead}>
-                <Icon name="shield-checkmark-outline" size={15} color={C.amber} />
-                <Text style={s.sheetTitle}>
-                  Approval needed{req.replayed ? ' (restored)' : ''}
-                </Text>
-              </View>
-              {/* BUG-082: the body scrolls inside a height-capped card; the
-                  choices row below stays pinned and always reachable, no
-                  matter how long the command/description is. */}
-              <ScrollView style={s.sheetScroll} nestedScrollEnabled>
-                {req.toolName ? <Text style={s.sheetKicker}>{req.toolName}</Text> : null}
-                <Text style={s.sheetBody} selectable>
-                  {req.command ?? req.description ?? 'The agent wants to run a command.'}
-                </Text>
-                {req.description && req.description !== req.command ? (
-                  <Text style={s.sheetDesc}>{req.description}</Text>
-                ) : null}
-              </ScrollView>
-              <View style={s.sheetRow}>
-                {approvalChoices.map((c) => {
-                  const deny = c === 'deny'
-                  return (
-                    <Pressable
-                      key={c}
-                      style={({ pressed }) => [
-                        s.sheetBtn,
-                        deny ? s.denyBtn : { backgroundColor: c === 'always' ? C.accentDark : C.accent },
-                        pressed && s.btnPressed,
-                      ]}
-                      onPress={() => {
-                        // BUG-050: refusing the agent is a warning, not a
-                        // success — the haptic language must match the red
-                        // Deny styling (AlertDialog uses Warning for
-                        // destructive choices too).
-                        void Haptics.notificationAsync(
-                          deny ? Haptics.NotificationFeedbackType.Warning : Haptics.NotificationFeedbackType.Success,
-                        )
-                        void respondApproval(c as 'once' | 'session' | 'always' | 'deny')
-                      }}
-                      accessibilityLabel={c}
-                    >
-                      <Text style={[s.sheetBtnText, !deny && { color: C.onAccent }]} numberOfLines={1}>
-                        {c === 'once' ? 'Allow' : c === 'session' ? 'Always this chat' : c === 'always' ? 'Always' : 'Deny'}
-                      </Text>
-                    </Pressable>
-                  )
-                })}
-              </View>
-            </View>
-          ) : null}
+          {req ? questionCard(req) : null}
 
-          {req?.method === 'clarify' ? (
-            <View style={s.sheet}>
-              <View style={s.sheetHead}>
-                <Icon name="help-circle-outline" size={15} color={C.accent} />
-                <Text style={s.sheetTitle}>Mochi needs you</Text>
-              </View>
-              {isBatchClarify ? (
-                <>
-                  {/* BUG-082: unbounded question count — the list scrolls;
-                      the Send button below stays pinned. */}
-                  <ScrollView style={s.sheetScroll} nestedScrollEnabled>
-                  {req.questions!.map((q) => (
-                    <View key={q.qid} style={{ marginBottom: 10 }}>
-                      <Text style={s.qText}>{q.question ?? q.qid}</Text>
-                      {q.choices?.map((o) => (
-                        <Pressable
-                          key={o}
-                          style={({ pressed }) => [s.clarifyBtn, batchAnswers[q.qid] === o && s.clarifyOn, pressed && s.btnPressed]}
-                          onPress={() => setBatchAnswers((a) => ({ ...a, [q.qid]: o }))}
-                        >
-                          <Text style={[s.clarifyText, batchAnswers[q.qid] === o && { color: C.onAccent }]}>{o}</Text>
-                        </Pressable>
-                      ))}
-                      {!q.choices?.length ? (
-                        <TextInput
-                          style={s.qInput}
-                          value={batchAnswers[q.qid] ?? ''}
-                          onChangeText={(t) => setBatchAnswers((a) => ({ ...a, [q.qid]: t }))}
-                          placeholder="Your answer…"
-                          placeholderTextColor={C.textFaint}
-                          // BUG-049: the question text, not an internal id.
-                          accessibilityLabel={`Answer: ${q.question ?? 'the question'}`}
-                        />
-                      ) : null}
-                    </View>
-                  ))}
-                  </ScrollView>
-                  <Pressable
-                    style={({ pressed }) => [s.sheetBtn, { backgroundColor: C.accent }, pressed && s.btnPressed]}
-                    onPress={() => { void respondClarifyBatch(batchAnswers) }}
-                  >
-                    <Text style={[s.sheetBtnText, { color: C.onAccent }]}>Send</Text>
-                  </Pressable>
-                </>
-              ) : (
-                <>
-                  {/* BUG-082: long question/many options scroll; the answer
-                      input stays pinned. */}
-                  <ScrollView style={s.sheetScroll} nestedScrollEnabled>
-                  <Text style={s.sheetBody}>{req.question ?? 'Clarification needed'}</Text>
-                  {req.options?.map((o) => (
-                    <Pressable
-                      key={o}
-                      style={({ pressed }) => [s.clarifyBtn, pressed && s.btnPressed]}
-                      onPress={() => { void respondClarify(o) }}
-                    >
-                      <Text style={s.clarifyText}>{o}</Text>
-                    </Pressable>
-                  ))}
-                  </ScrollView>
-                  <View style={s.clarifyRow}>
-                    <TextInput
-                      style={[s.qInput, { flex: 1 }]}
-                      value={answerText}
-                      onChangeText={setAnswerText}
-                      placeholder="Or type your answer…"
-                      placeholderTextColor={C.textFaint}
-                      accessibilityLabel="Clarification answer"
-                    />
-                    <Pressable
-                      style={({ pressed }) => [s.miniSend, pressed && s.btnPressed]}
-                      onPress={() => {
-                        // BUG-075: an empty tap used to wipe the field and do
-                        // nothing — keep the text, and only send a real answer.
-                        const t = answerText.trim()
-                        if (!t) return
-                        setAnswerText('')
-                        void respondClarify(t)
-                      }}
-                      accessibilityLabel="Send clarification"
-                    >
-                      <Icon name="arrow-up" size={17} color={C.onAccent} />
-                    </Pressable>
-                  </View>
-                </>
-              )}
-            </View>
-          ) : null}
-
-          {(req?.method === 'sudo' || req?.method === 'secret') ? (
-            <View style={s.sheet}>
-              <View style={s.sheetHead}>
-                <Icon name="lock-closed-outline" size={15} color={C.red} />
-                <Text style={[s.sheetTitle, { color: C.red }]}>
-                  {req.method === 'sudo' ? 'Sudo requested' : 'Secret requested'}
-                </Text>
-              </View>
-              {/* BUG-082: long prompt scrolls; the password field and the
-                  Send/Deny row stay pinned. */}
-              <ScrollView style={s.sheetScroll} nestedScrollEnabled>
-                <Text style={s.sheetBody} selectable>
-                  {req.prompt}
-                </Text>
-              </ScrollView>
-              <TextInput
-                style={s.qInput}
-                value={secretValue}
-                onChangeText={setSecretValue}
-                placeholder={req.method === 'sudo' ? 'sudo password…' : `Value for ${req.envVar ?? 'secret'}…`}
-                placeholderTextColor={C.textFaint}
-                secureTextEntry
-                accessibilityLabel="Secret value"
-              />
-              <View style={[s.sheetRow, { marginTop: 10 }]}>
+          {/* BUG-086: ONE aggregate card for questions from sessions this
+              app isn't tracking (automation/CLI on the host) — collapsed it
+              only announces; expanded, each request renders through the same
+              answer machinery as the active chat's question above. */}
+          {foreign.length > 0 ? (
+            <View>
+              <View style={s.sheet}>
                 <Pressable
-                  style={({ pressed }) => [s.sheetBtn, { backgroundColor: C.accent }, pressed && s.btnPressed]}
-                  onPress={() => { const v = secretValue; setSecretValue(''); void respondPrivileged(true, v || undefined) }}
+                  style={({ pressed }) => [s.foreignHead, pressed && s.btnPressed]}
+                  onPress={() => setForeignOpen(!foreignOpen)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${tr('chat.foreign.title')} — ${foreign.length} question${foreign.length > 1 ? 's' : ''}. ${foreignOpen ? 'Hide' : 'Show'}`}
                 >
-                  <Text style={[s.sheetBtnText, { color: C.onAccent }]}>Send</Text>
+                  <Icon name="git-network-outline" size={15} color={C.amber} />
+                  <Text style={[s.sheetTitle, s.foreignTitle]} numberOfLines={2}>
+                    {tr('chat.foreign.title')} ({foreign.length})
+                  </Text>
+                  <Icon name={foreignOpen ? 'chevron-down' : 'chevron-up'} size={14} color={C.textFaint} />
                 </Pressable>
-                <Pressable
-                  style={({ pressed }) => [s.sheetBtn, s.denyBtn, pressed && s.btnPressed]}
-                  onPress={() => { setSecretValue(''); void respondPrivileged(false) }}
-                >
-                  <Text style={[s.sheetBtnText, { color: C.red }]}>Deny</Text>
-                </Pressable>
+                {!foreignOpen ? <Text style={s.sheetDesc}>{tr('chat.foreign.hint')}</Text> : null}
               </View>
+              {foreignOpen ? foreign.map((f) => <View key={f.id}>{questionCard(f)}</View>) : null}
             </View>
           ) : null}
 
@@ -1721,6 +1770,10 @@ const makeS = () => StyleSheet.create({
   // 'Always this chat' used to wrap into ragged left-aligned multi-line
   // pills that read as broken.
   sheetRow: { flexDirection: 'row', gap: 8 },
+  // BUG-086 aggregate foreign-question header: same card vocabulary, but the
+  // whole header row is the expander tap target.
+  foreignHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  foreignTitle: { flex: 1 },
   sheetBtn: { flex: 1, borderRadius: 22, paddingVertical: 11, paddingHorizontal: 8, alignItems: 'center', minHeight: 44, justifyContent: 'center' },
   denyBtn: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: C.red },
   sheetBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700', textAlign: 'center' },
