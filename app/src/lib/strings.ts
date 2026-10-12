@@ -98,6 +98,12 @@ const EN: Catalog = {
   'bot.delete.cta': 'Delete this bot',
   'bot.delete.confirm': 'Tap again to confirm deletion',
   'bot.delete.doing': 'Deleting…',
+
+  'pair.plain.title': 'Unencrypted connection',
+  'pair.plain.body':
+    'Connect to {host} without TLS? The connection is not encrypted, so your pairing token travels in the clear — anyone watching the network can read it.',
+  'pair.plain.confirm': 'Connect anyway',
+  'pair.plain.cancel': 'Cancel',
 }
 
 const AR: Catalog = {
@@ -157,6 +163,12 @@ const AR: Catalog = {
   'bot.delete.cta': 'احذف هذا البوت',
   'bot.delete.confirm': 'اضغط مرة أخرى للتأكيد',
   'bot.delete.doing': 'جارٍ الحذف…',
+
+  'pair.plain.title': 'اتصال غير مشفّر',
+  'pair.plain.body':
+    'الاتصال بـ {host} بدون TLS؟ الاتصال غير مشفّر، لذا سينتقل رمز الاقتران مكشوفًا — أي من يراقب الشبكة يستطيع قراءته.',
+  'pair.plain.confirm': 'اتصال رغم ذلك',
+  'pair.plain.cancel': 'إلغاء',
 }
 
 const CATALOGS: Record<Locale, Catalog> = { en: EN, ar: AR }
