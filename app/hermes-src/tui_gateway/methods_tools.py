@@ -1145,6 +1145,18 @@ def _(rid, params: dict) -> dict:
         return _ok(rid, json.loads(raw))
     if action in {"remove", "pause", "resume"}:
         return _ok(rid, json.loads(cronjob(action=action, job_id=jid)))
+    if action == "get":
+        # Edit-prefill read (#108): _format_job's prompt_preview caps at 100 chars and the
+        # app's /cron edit re-sends whatever its form shows — a truncated preview would
+        # silently rewrite the stored prompt. Same payload shape as pause/resume
+        # ({"success": True, "job": _format_job(...)}) plus the raw prompt; unknown refs
+        # quote the cronjob tool resolver's message, like every other action's errors.
+        if not jid:
+            return _ok(rid, {"success": False, "error": "job_id is required for action 'get'"})
+        job = _tools_mod("cron.jobs").get_job(jid)
+        if job is None:
+            return _ok(rid, {"success": False, "error": f"Job with ID or name '{jid}' not found. Use cronjob(action='list') to inspect jobs."})
+        return _ok(rid, {"success": True, "job": {**_tools_mod("tools.cronjob_job_args")._format_job(job), "prompt": job.get("prompt", "")}})
     return _err(rid, 4016, f"unknown cron action: {action}")
 
 

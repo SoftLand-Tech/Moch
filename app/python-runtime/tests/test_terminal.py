@@ -136,6 +136,49 @@ class TerminalTest(unittest.TestCase):
         terminal.write(_b64(f"echo {marker}\n"))
         self._wait_for(marker)
 
+    def test_replay_reset_across_kill_restart(self) -> None:
+        # BUG-115: start → emit → kill → start must replay NOTHING from the
+        # dead session — the JS cold-attach repaints from replay(), so a
+        # surviving bank painted the old scrollback into the fresh shell.
+        terminal.start(80, 24)
+        marker = f"DEAD_{os.getpid()}"
+        terminal.write(_b64(f"echo {marker}\n"))
+        self._wait_for(marker)
+        self.assertIn(marker, _unb64(terminal.replay()["chunk"]))
+        terminal.kill()
+        # Killed alone: replay is empty (kill clears the bank too) — no
+        # process exists, so this is deterministic.
+        rep = terminal.replay()
+        self.assertTrue(rep["ok"] and not rep["alive"])
+        self.assertEqual(_unb64(rep["chunk"]), "")
+        # Fresh boot: immediately after start the bank is empty again (the
+        # new bash's own prompt may race in, but the DEAD session's bytes
+        # must be gone)…
+        r = terminal.start(80, 24)
+        self.assertTrue(r["ok"] and not r.get("already_running"))
+        self.assertNotIn(marker, _unb64(terminal.replay()["chunk"]))
+        # …and the bank serves the NEW session's own output afterwards.
+        fresh = f"FRESH_{os.getpid()}"
+        terminal.write(_b64(f"echo {fresh}\n"))
+        self._wait_for(fresh)
+        rep2 = terminal.replay()
+        self.assertTrue(rep2["ok"] and rep2["alive"])
+        self.assertIn(fresh, _unb64(rep2["chunk"]))
+        self.assertNotIn(marker, _unb64(rep2["chunk"]))
+
+    def test_replay_survives_reattach_without_kill(self) -> None:
+        # The bank itself is NOT removed (BUG-115 fix keeps it): a WebView
+        # reload of a LIVE session still repaints from replay().
+        terminal.start(80, 24)
+        marker = f"LIVE_{os.getpid()}"
+        terminal.write(_b64(f"echo {marker}\n"))
+        self._wait_for(marker)
+        terminal.drain()  # the UI consumed the live chunks…
+        self.assertTrue(terminal.is_running())
+        rep = terminal.replay()  # …and repaints from the bank
+        self.assertTrue(rep["ok"] and rep["alive"])
+        self.assertIn(marker, _unb64(rep["chunk"]))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
