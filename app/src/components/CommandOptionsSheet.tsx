@@ -6,7 +6,7 @@
  * Mixed commands also take free text (e.g. `/queue add <prompt>`).
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Modal, View, Text, Pressable, TextInput, ScrollView, StyleSheet, Platform, ActivityIndicator } from 'react-native'
+import { Modal, View, Text, Pressable, TextInput, ScrollView, StyleSheet, ActivityIndicator } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { Ionicons } from '@expo/vector-icons'
 import { Icon } from './Icon'
@@ -86,7 +86,12 @@ export function CommandOptionsSheet({
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      {/* BUG-133: 'height' derives its lift from a measured frame — the exact
+          math this repo rejected (chat.tsx MIUI note). With a short options
+          list the custom-argument row + Run button sat at the screen bottom
+          where any undershoot left them under the IME. 'padding' on the
+          Modal's full-screen root is the connectors-proven exact variant. */}
+      <KeyboardAvoidingView style={s.flex} behavior="padding">
         <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: C.scrim }]} onPress={onClose} accessibilityLabel="Close" />
         <View style={s.sheet}>
           <View style={s.head}>

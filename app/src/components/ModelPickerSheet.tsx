@@ -7,7 +7,13 @@
  * providers the gateway knows but that have no key yet (ProviderKeyForm).
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Modal, View, Text, Pressable, TextInput, ScrollView, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native'
+import { Modal, View, Text, Pressable, TextInput, ScrollView, StyleSheet, ActivityIndicator } from 'react-native'
+// BUG-133: RN core's KeyboardAvoidingView with `behavior: undefined` on
+// Android renders a passthrough View (zero avoidance), and inside a Modal the
+// OS never resizes either — the keyboard rose straight over this sheet's
+// filter input and the API-key form. RNKC's KAV as the Modal's full-screen
+// root is the connectors-proven shape (exact lift, no frame math).
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { Ionicons } from '@expo/vector-icons'
 import { Icon } from './Icon'
 import { ProviderKeyForm } from './ProviderKeyForm'
@@ -189,7 +195,7 @@ export function ModelPickerSheet({
 
   return (
     <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={s.flex} behavior="padding">
         <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: C.scrim }]} onPress={onClose} accessibilityLabel="Close model picker" />
         <View style={s.sheet}>
           {/* Header */}

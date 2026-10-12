@@ -3,7 +3,8 @@ import { useFocusEffect } from 'expo-router'
 import { View, Text, FlatList, StyleSheet, Pressable, TextInput, ActivityIndicator, Modal, ScrollView, Image, Linking } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { MCP_LOGOS } from '../../src/lib/mcpLogos'
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
+import { KeyboardAvoidingView, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
+import Animated, { useAnimatedStyle } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useStore } from '@nanostores/react'
 import { ScreenShell } from '../../src/components/ScreenShell'
@@ -93,6 +94,10 @@ function TileAvatar({ name, size = 48, installed }: { name: string; size?: numbe
 
 export default function Connectors() {
   const s = useStyles(makeS)
+  // BUG-133: chat-pad pattern on the LISTS only — the filter field stays
+  // top-anchored while the results viewport ends at the keyboard's top edge.
+  const kb = useReanimatedKeyboardAnimation()
+  const kbPad = useAnimatedStyle(() => ({ paddingBottom: -kb.height.value }))
   const online = useStore(isConnectedAtom)
   const unsupported = useStore(mcpUnsupported)
   const servers = useStore(mcpServers)
@@ -254,6 +259,7 @@ export default function Connectors() {
           // Distinct keys: without them React reconciles the two lists into
           // one instance across the tab switch, and numColumns can't change
           // on the fly (RN throws).
+          <Animated.View style={[s.kbListWrap, kbPad]}>
           <FlatList
             key="yours"
             data={serverList}
@@ -289,7 +295,9 @@ export default function Connectors() {
               )
             }}
           />
+          </Animated.View>
         ) : (
+          <Animated.View style={[s.kbListWrap, kbPad]}>
           <FlatList
             key="browse"
             data={catalogList}
@@ -329,6 +337,7 @@ export default function Connectors() {
               </View>
             )}
           />
+          </Animated.View>
         )}
       </ScreenShell>
 
@@ -810,6 +819,7 @@ function KeySheet({
 
 const makeS = () => StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
+  kbListWrap: { flex: 1 },
   headRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8, gap: 8 },
   searchWrap: { flex: 1 },
   search: { backgroundColor: C.bgCard, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 12, color: C.text, fontSize: 15, minHeight: 44 },

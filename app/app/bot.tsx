@@ -1,5 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator, ScrollView } from 'react-native'
+import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator } from 'react-native'
+// BUG-133: desc + multiline SOUL inputs had zero avoidance (Save row and the
+// danger zone sat under the IME), and the missing keyboardShouldPersistTaps
+// made the first tap on Save just dismiss the keyboard (RN default ≡ 'never').
+// KeyboardAwareScrollView fixes both: viewport above the keys, focused field
+// scrolled in, taps delivered while the IME is open.
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller'
 import { Ionicons } from '@expo/vector-icons'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
@@ -128,7 +134,7 @@ export default function BotDetail() {
         {loading ? (
           <ActivityIndicator style={s.spin} />
         ) : (
-          <ScrollView contentContainerStyle={s.body}>
+          <KeyboardAwareScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
             <Pressable onPress={() => router.back()} hitSlop={8} style={s.backRow}>
               <Ionicons name="chevron-back" size={18} color={C.textDim} />
               <Text style={s.backText}>{tr("fleet.detail.back")}</Text>
@@ -186,7 +192,7 @@ export default function BotDetail() {
                 )}
               </Pressable>
             </View>
-          </ScrollView>
+          </KeyboardAwareScrollView>
         )}
       </ScreenShell>
     </SafeAreaView>
