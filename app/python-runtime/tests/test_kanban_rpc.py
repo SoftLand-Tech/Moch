@@ -26,6 +26,14 @@ os.environ.setdefault("MOCH_FLEET", "1")
 
 def _make_world(tmp: Path):
     os.environ["HERMES_HOME"] = str(tmp)
+    # REVIEW FIX: the world needs a hermes-home MARKER (config.yaml). Without
+    # one, the server stack's import-time home normalization rejects the bare
+    # temp dir as "not a real hermes home" (_HERMES_HOME_MARKERS) and rewrites
+    # HERMES_HOME to a scratch dir under the REAL ~/.hermes — every
+    # profile-dependent RPC then resolves against the machine's home and the
+    # suite fails (it passed on the author's machine only by accident of
+    # their real ~/.hermes contents).
+    (tmp / "config.yaml").write_text("# test world marker", "utf-8")
     from tui_gateway import server as tg
     from moch import rpc_fleet
     assert rpc_fleet.install(tg), "rpc_fleet.install returned False"
@@ -42,11 +50,16 @@ def _make_world(tmp: Path):
 
 class TestKanbanRpc(unittest.TestCase):
     def setUp(self):
+        # REVIEW FIX: world FIRST, import SECOND — same reason as
+        # test_rpc_fleet: the server import rewrites HERMES_HOME when the dir
+        # lacks a home marker, so it must see the test world already in place.
+        self._tmp = tempfile.TemporaryDirectory()
+        os.environ["HERMES_HOME"] = self._tmp.name
+        Path(self._tmp.name, "config.yaml").write_text("# test world marker", "utf-8")
         try:
             import tui_gateway.server  # noqa: F401
         except ImportError as exc:
             self.skipTest(f"hermes server deps unavailable: {exc}")
-        self._tmp = tempfile.TemporaryDirectory()
         self.tg, self.home = _make_world(Path(self._tmp.name))
         # dispatch poke → recorder (never run a real dispatch pass in tests:
         # without the boot spawn patch, dispatch_once would Popen)
