@@ -275,24 +275,12 @@ def _run_server(port: int) -> None:
                             "task back up yourself shortly. Keep the reply to one short sentence. Do "
                             "NOT use terminal curl as a replacement for browsing.]\n\n"
                         ) + text
-                        # Surface the wait: the app already renders attention
-                        # notices for sessions (toasts + the hermes-alerts
-                        # knock), so the gap between this turn and the
-                        # auto-continue is not a silent dead end.
-                        try:
-                            _notice_sid = str(params.get("session_id") or "")
-                            if _notice_sid:
-                                _tg_server._emit(
-                                    "status.update",
-                                    _notice_sid,
-                                    {
-                                        "busy": True,
-                                        "waiting_for": "browser",
-                                        "note": "Warming up the browser — Moch will continue automatically",
-                                    },
-                                )
-                        except Exception:
-                            pass
+                        # NOTE: a status.update emit here was removed — the
+                        # event payload is pydantic-validated and the extra
+                        # waiting_for/note fields raised extra_forbidden on
+                        # device (errors.log). The RN wait indicator should be
+                        # built against a SCHEMA-VALID event (or a dedicated
+                        # one) — see the tracker.
             except Exception:
                 pass
             return _note_upstream(req, transport)
