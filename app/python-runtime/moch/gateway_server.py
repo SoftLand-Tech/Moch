@@ -135,6 +135,12 @@ def _run_server(port: int) -> None:
                 # reclaim. Idempotent, flag-gated, daemon.
                 from moch import kanban_dispatch as _kd
                 _kd.start_heal_ticker()
+                # BUG-137 (M9.1a stage 3): register the spawn_bot tool onto
+                # the delegation toolset — bots can finally create their own
+                # helpers. Boot-time (pre-start_server) so every session's
+                # tool snapshot includes it; flag-gated, idempotent.
+                from moch import spawn_tool as _st
+                _st.install()
         except Exception:
             traceback.print_exc()
 
