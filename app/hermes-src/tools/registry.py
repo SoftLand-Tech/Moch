@@ -287,22 +287,14 @@ def _check_fn_cache_scope_base() -> Optional[str]:
 
 
 def check_fn_cache_scope() -> Optional[str]:
-    """BUG-132 (cause 3): the base scope partitioned by the browser-gate state.
-
-    The raw scope keys verdicts by (fn, profile-scope) ONLY — a pre-arm False
-    was served post-arm for its whole 30s TTL, and the first armed
-    get_tool_definitions then memoized a browser-less list UNDER THE ARMED key
-    (model_tools' key carries the env since BUG-132) with no TTL — poisoning
-    every new chat for the process lifetime. Folding the two gate env vars into
-    the scope makes a pre-arm verdict unreadable post-arm for every check_fn
-    consumer, mirroring what model_tools already does for the outer memo. The
-    bypass sentinel passes through untouched.
+    """BUG-132 (cause 3) — REVERTED on device evidence: returning a non-None
+    scope in a single-profile process made every check_fn-gated tool vanish
+    from the kit (3 visible vs 20 on the pre-change build; zero verdict lines),
+    because a non-None scope is meaningful beyond the cache key. The gate-env
+    partition survives in model_tools._tool_defs_cache_key + activate()'s
+    double clear + the 30s check_fn TTL, which bound the original poison window.
     """
-    scope = _check_fn_cache_scope_base()
-    if scope == CHECK_FN_CACHE_BYPASS:
-        return scope
-    gate = "br=%s|cdp=%s" % (os.environ.get("MOCH_BROWSER_RELAY", ""), os.environ.get("BROWSER_CDP_URL", ""))
-    return "%s|%s" % (scope, gate) if scope else gate
+    return _check_fn_cache_scope_base()
 
 
 def _run_check_fn_uncached(fn: Callable) -> bool:

@@ -151,6 +151,34 @@ def _run_server(port: int) -> None:
             _arm_browser_gate_from_relay_file(_Path(os.environ["HERMES_HOME"]))
         except Exception:
             pass
+
+        # BUG-132 (warm-up window): the first minutes after a cold boot resolve
+        # a MINIMAL kit (device-measured: 6 tools at T+60s vs 21 with all ten
+        # browser_* at T+5min, same build) — the tool registry matures late.
+        # Sessions built in the window snapshot the cold kit. Re-arm on a
+        # schedule: browser_gate.activate clears both caches AND walks the live
+        # sessions (refresh_agent_mcp_tools, append-only), so an early chat is
+        # healed in place and new chats compute the warm catalog.
+        def _warm_rearm() -> None:
+            try:
+                import json as _json
+                from pathlib import Path as _P
+
+                relay = _json.loads(
+                    (_P(os.environ["HERMES_HOME"]) / "browser" / "relay.json").read_text(encoding="utf-8")
+                )
+                if int(relay.get("pid") or 0) == os.getpid() and int(relay.get("port") or 0) > 0:
+                    from moch import browser_gate as _bg
+
+                    _bg.activate(int(relay["port"]), str(relay.get("token") or ""))
+            except Exception:
+                pass
+
+        for _delay in (45, 150, 420):
+            _timer = threading.Timer(_delay, _warm_rearm)
+            _timer.daemon = True
+            _timer.start()
+
         from hermes_cli.web_server import start_server
 
         start_server(host="127.0.0.1", port=port, open_browser=False, headless=True)

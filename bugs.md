@@ -1121,3 +1121,24 @@ whether registry.get_definitions drops the browser toolset members without loggi
 **Verified this round (keep):** platform 'mobile' expands via the composite (PC);
 desktop_project/todo_list/cronjob_manage appearing = _gui_surface_toolsets + composite both live;
 relay native-start + armed=true ticks=1 still hold; suite green; PR #61 carries everything.
+
+### BUG-132 RESOLVED (round 36) — the agent uses browser_navigate on a cold boot
+
+Root causes, final list: (1) the missing `hermes-mobile` composite collapsed toolset selection to
+{skills, terminal}; (2) a BOOT WARM-UP window — device-measured with the new kit instrument:
+6 tools at T+60s vs 21 (all ten browser_*) at T+5min on the SAME build — the tool registry matures
+minutes after boot, and sessions built in the window snapshot the cold kit.
+
+Fix (this round): scheduled warm-up re-arms in gateway_server — timers at 45/150/420 s re-run
+browser_gate.activate (pid-gated via relay.json), which clears both caches AND walks live sessions
+with refresh_agent_mcp_tools (append-only). An early chat is healed IN PLACE.
+
+VERIFIED ON DEVICE: fresh boot → chat created at T+64s curled ("no browser tools"); at T+105s the
+log shows `gate live-refresh: 1 session(s)`; the SAME chat's next turn used **browser_navigate** and
+answered "Example Domain". Kit instrument retained (logger.info in agent_init._load_tools) — the
+one line that made this diagnosable.
+
+Residual (cosmetic): the first ~1-2 min after boot still build cold kits (healed within ~90 s by the
+re-arm). A true pre-warm (loop the catalog build at boot until browser_* resolve) would close even
+that — queued as polish. Scope-partition experiment reverted with evidence (non-None scope broke
+check_fn evaluation; the env-in-key + TTL + activate clears bound the original poison window).
