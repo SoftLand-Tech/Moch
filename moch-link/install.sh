@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+# CANONICAL SOURCE: moch-link/install.sh in the SoftLand-Tech/Moch repo.
+# This docs/ copy is what https://moch.softland.tech/install.sh serves (docs are
+# deployed to the VPS web root — PROJECT.md "Always cmp the copies"). It must
+# stay BYTE-IDENTICAL to the canonical file: python3
+# app/python-runtime/tests/test_docs_sync.py enforces it. Regenerate on every
+# canonical change: cp moch-link/install.sh docs/install.sh
+# Canonical source: moch-link/install.sh — docs/install.sh is the published,
+# publicly served copy (moch.softland.tech/install.sh); regenerate it on EVERY
+# change (test_docs_sync.py enforces byte identity).
 # moch-link — expose your existing hermes agent to the Moch mobile app.
 #
 #   bash install.sh          link this machine's hermes serve to the Moch relay
@@ -24,6 +33,12 @@ SERVE_BIN="${MOCH_SERVE_BIN:-}"
 UNITP="${MOCH_LINK_UNIT_PREFIX:-moch-link}"
 UNIT_DIR="$HOME/.config/systemd/user"
 VENDOR_URL="https://raw.githubusercontent.com/SoftLand-Tech/Moch/40b563304b/server/scripts/vendor/qrcodegen.py"
+# C-07 / GitHub #97: the QR renderer is the one downloaded EXECUTABLE here
+# (imported and run by python3). The URL is commit-pinned (immutable git
+# content), and the sha256 below is verified after download — a mismatch
+# deletes the file and pairing degrades to the text values; unverified code
+# is never executed.
+VENDOR_SHA256="9f4ed1dd201dcb92b1bc0d6e14f46c754bcff0ce48580c5d7e8ace8f6926c8ef"
 QRGEN="$LINK_HOME/qrcodegen.py"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -31,6 +46,45 @@ info()    { echo -e "${CYAN}[moch-link]${NC} $*"; }
 success() { echo -e "${GREEN}[moch-link ✓]${NC} $*"; }
 warn()    { echo -e "${YELLOW}[moch-link !]${NC} $*"; }
 die()     { echo -e "${RED}[moch-link ✗]${NC} $*" >&2; exit 1; }
+
+# BH-000055 / GitHub #105: the moch-link units are systemd USER units —
+# probe for a real systemd user session, not just the binary. A container/
+# macOS/headless-cron box has no user bus and every later 'systemctl --user'
+# would die mid-install (after we already wrote half the tree).
+have_systemd() {
+    command -v systemctl >/dev/null 2>&1 || return 1
+    systemctl --user show-environment >/dev/null 2>&1
+}
+
+# no-systemd escape hatch (MOCH_LINK_NO_SYSTEMD=1): plain background
+# processes instead of units — pid files under $LINK_HOME, logs beside them.
+no_systemd() { [ "${MOCH_LINK_NO_SYSTEMD:-}" = "1" ]; }
+
+pid_alive() { [ -f "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null; }
+
+kill_pidfile() { # <pidfile>
+    pid_alive "$1" || { rm -f "$1"; return 0; }
+    kill "$(cat "$1")" 2>/dev/null || true
+    rm -f "$1"
+}
+
+launch_bg() { # <name> <cmd…> — nohup + pid file + log, one place
+    local name="$1"; shift
+    nohup "$@" >> "$LINK_HOME/$name.log" 2>&1 &
+    echo $! > "$LINK_HOME/$name.pid"
+    info "started $name (pid $(cat "$LINK_HOME/$name.pid"), log $LINK_HOME/$name.log)"
+}
+
+# C-07 / GitHub #97 — sha256 gate for downloaded executables.
+sha256_matches() { # <file> <expected>
+    if command -v sha256sum >/dev/null 2>&1; then
+        [ "$(sha256sum "$1" | cut -d' ' -f1)" = "$2" ]
+    elif command -v shasum >/dev/null 2>&1; then
+        [ "$(shasum -a 256 "$1" | cut -d' ' -f1)" = "$2" ]
+    else
+        return 1  # cannot verify → fail closed
+    fi
+}
 
 # --- the tunnel client (from the Moch backend, production-verified) ----------
 install_tunnel() {
@@ -387,6 +441,20 @@ mint_token() { head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n'; }
 cmd_install() {
     command -v node >/dev/null 2>&1 || die "node not found — the relay tunnel needs it."
     command -v npm  >/dev/null 2>&1 || die "npm not found — the relay tunnel needs it."
+    # BH-000055 / GitHub #105: check at the door, not mid-install — without a
+    # systemd user session the unit installs below die after half the tree is
+    # already written. MOCH_LINK_NO_SYSTEMD=1 is the escape hatch: it skips
+    # ALL unit installation and runs serve/proxy/tunnel as plain background
+    # processes (documented in README.md).
+    if ! no_systemd && ! have_systemd; then
+        die "no systemd user session on this machine — moch-link installs its
+  tunnel as systemd user units and needs a working 'systemctl --user'.
+  Requirement: systemd with a user session for this user
+  (XDG_RUNTIME_DIR=/run/user/<uid>, e.g. a logged-in Linux desktop/server).
+  Escape hatch: MOCH_LINK_NO_SYSTEMD=1 skips ALL unit installation and runs
+  hermes serve, the proxy and the tunnel as plain background processes
+  (no auto-start on boot; stop/start via 'bash install.sh stop|start')."
+    fi
     local launched_serve="" TOKEN="" HERMES_BIN=""
     mkdir -p "$LINK_HOME"
 
@@ -448,6 +516,13 @@ cmd_install() {
             [ -n "$TOKEN" ] || TOKEN="$(mint_token)"
             printf 'HERMES_DASHBOARD_SESSION_TOKEN=%s\nPORT=%s\n' "$TOKEN" "$SERVE_PORT" > "$LINK_HOME/hermes-serve.env"
             chmod 600 "$LINK_HOME/hermes-serve.env"
+            if no_systemd; then
+                kill_pidfile "$LINK_HOME/hermes-serve.pid"
+                launch_bg hermes-serve \
+                    env "HERMES_DASHBOARD_SESSION_TOKEN=$TOKEN" \
+                    "$HERMES_BIN" serve --host 127.0.0.1 --port "$SERVE_PORT"
+                info "starting hermes serve on port $SERVE_PORT (background pid $(cat "$LINK_HOME/hermes-serve.pid") — no systemd)"
+            else
             mkdir -p "$UNIT_DIR"
             cat > "$UNIT_DIR/${UNITP}-hermes-serve.service" <<EOF
 [Unit]
@@ -470,15 +545,21 @@ EOF
             systemctl --user enable "${UNITP}-hermes-serve.service" >/dev/null 2>&1 || true
             systemctl --user restart "${UNITP}-hermes-serve.service" >/dev/null 2>&1 || true
             info "starting hermes serve on port $SERVE_PORT (unit ${UNITP}-hermes-serve)"
+            fi
             launched_serve=1
             local i
             for i in $(seq 1 20); do
                 (exec 3<>"/dev/tcp/127.0.0.1/$SERVE_PORT" && exec 3>&-) 2>/dev/null && break
                 sleep 1
             done
-            (exec 3<>"/dev/tcp/127.0.0.1/$SERVE_PORT" && exec 3>&-) 2>/dev/null \
-                || { systemctl --user status "${UNITP}-hermes-serve.service" --no-pager -n 8 || true
-                     die "hermes serve did not come up — see above (journalctl --user -u ${UNITP}-hermes-serve -n 30)"; }
+            if (exec 3<>"/dev/tcp/127.0.0.1/$SERVE_PORT" && exec 3>&-) 2>/dev/null; then
+                :
+            elif no_systemd; then
+                die "hermes serve did not come up — see $LINK_HOME/hermes-serve.log"
+            else
+                systemctl --user status "${UNITP}-hermes-serve.service" --no-pager -n 8 || true
+                die "hermes serve did not come up — see above (journalctl --user -u ${UNITP}-hermes-serve -n 30)"
+            fi
         fi
     fi
 
@@ -518,7 +599,11 @@ EOF
     # and `enable --now` on an active unit is a no-op — the stale process would
     # keep serving its old port while everything else moved to the new one
     # (seen live: tunnel aimed at 9121, proxy still on 9120, ECONNREFUSED).
-    systemctl --user stop ${UNITP}-proxy.service 2>/dev/null || true
+    if no_systemd; then
+        kill_pidfile "$LINK_HOME/proxy.pid"
+    else
+        systemctl --user stop ${UNITP}-proxy.service 2>/dev/null || true
+    fi
     PROXY_PORT="${MOCH_LINK_PROXY_PORT:-9120}"
     while (exec 3<>"/dev/tcp/127.0.0.1/$PROXY_PORT" && exec 3>&-) 2>/dev/null; do
         PROXY_PORT=$((PROXY_PORT + 1))
@@ -988,6 +1073,23 @@ MOCH_LINK_PROXY_EOF
     [ -n "$RELAY_KEY" ] && printf 'MOCH_LINK_RELAY_KEY=%s\n' "$RELAY_KEY" >> "$LINK_HOME/env"
     chmod 600 "$LINK_HOME/env"
 
+    if no_systemd; then
+        # BH-000055 / GitHub #105 escape hatch: NO units — plain background
+        # processes (same programs, same env file, pid files instead of units).
+        kill_pidfile "$LINK_HOME/proxy.pid"
+        kill_pidfile "$LINK_HOME/tunnel.pid"
+        set -a
+        # shellcheck disable=SC1091  # the env file this script just wrote
+        . "$LINK_HOME/env"
+        set +a
+        launch_bg proxy node "$LINK_HOME/moch-link-proxy.js"
+        local relay_key_flag=""
+        [ -n "$RELAY_KEY" ] && relay_key_flag="--relay-key $MOCH_LINK_RELAY_KEY"
+        launch_bg tunnel node "$LINK_HOME/moch-tunnel.js" --relay "$RELAY" \
+            --token "$TOKEN" --target "$TARGET" $relay_key_flag \
+            --status "$LINK_HOME/status.json"
+        info "no-systemd mode: proxy + tunnel running as background pids (no units installed)"
+    else
     mkdir -p "$UNIT_DIR"
     cat > "$UNIT_DIR/${UNITP}-proxy.service" <<EOF
 [Unit]
@@ -1029,6 +1131,7 @@ EOF
     systemctl --user enable ${UNITP}-proxy.service ${UNITP}.service >/dev/null 2>&1 || true
     systemctl --user restart ${UNITP}-proxy.service
     systemctl --user restart ${UNITP}.service
+    fi
 
     info "connecting to the relay (outbound — no router config needed)…"
     local i connected=""
@@ -1038,8 +1141,12 @@ EOF
     done
     # (no `grep -q` here: it exits on first match, SIGPIPEs journalctl, and
     #  pipefail turns the whole condition false exactly when it should fire)
-    local dup_log
-    dup_log="$(journalctl --user -u ${UNITP}.service --since '-3 min' --no-pager 2>/dev/null || true)"
+    local dup_log=""
+    if ! no_systemd; then
+        dup_log="$(journalctl --user -u ${UNITP}.service --since '-3 min' --no-pager 2>/dev/null || true)"
+    else
+        dup_log="$(grep 'duplicate tokenHash' "$LINK_HOME/tunnel.log" 2>/dev/null || true)"
+    fi
     if [ -z "$connected" ] && printf '%s' "$dup_log" | grep 'duplicate tokenHash' >/dev/null; then
         # The token is already registered LIVE at the relay — either this machine
         # already exposes it (e.g. the moch backend's own tunnel), or the token
@@ -1052,17 +1159,42 @@ EOF
                 "$TOKEN" "127.0.0.1:$PROXY_PORT" "$RELAY" "$SERVE_PORT" "$PROXY_PORT" "$LINK_HOME" > "$LINK_HOME/env"
             [ -n "$RELAY_KEY" ] && printf 'MOCH_LINK_RELAY_KEY=%s\n' "$RELAY_KEY" >> "$LINK_HOME/env"
             chmod 600 "$LINK_HOME/env" "$LINK_HOME/hermes-serve.env"
-            systemctl --user restart ${UNITP}-hermes-serve.service ${UNITP}.service
+            if no_systemd; then
+                kill_pidfile "$LINK_HOME/hermes-serve.pid"
+                kill_pidfile "$LINK_HOME/tunnel.pid"
+                launch_bg hermes-serve \
+                    env "HERMES_DASHBOARD_SESSION_TOKEN=$TOKEN" \
+                    "$HERMES_BIN" serve --host 127.0.0.1 --port "$SERVE_PORT"
+                set -a; . "$LINK_HOME/env"; set +a
+                local dup_relay_key_flag=""
+                [ -n "$RELAY_KEY" ] && dup_relay_key_flag="--relay-key $MOCH_LINK_RELAY_KEY"
+                launch_bg tunnel node "$LINK_HOME/moch-tunnel.js" --relay "$RELAY" \
+                    --token "$TOKEN" --target "$TARGET" $dup_relay_key_flag \
+                    --status "$LINK_HOME/status.json"
+            else
+                systemctl --user restart ${UNITP}-hermes-serve.service ${UNITP}.service
+            fi
             for i in $(seq 1 20); do
                 grep -q '"connected": *true' "$LINK_HOME/status.json" 2>/dev/null && { connected=1; break; }
                 sleep 1
             done
-            [ -n "$connected" ] || { systemctl --user status ${UNITP}.service --no-pager -n 8 || true; die "still not connected — see above"; }
+            if [ -n "$connected" ]; then
+                :
+            elif no_systemd; then
+                die "still not connected — see $LINK_HOME/tunnel.log"
+            else
+                systemctl --user status ${UNITP}.service --no-pager -n 8 || true
+                die "still not connected — see above"
+            fi
         else
             # Their serve, their token, already exposed by a live tunnel (on this
             # machine or wherever the token came from): the registration IS the
             # link. Drop our duplicate tunnel and just use it.
-            systemctl --user disable --now ${UNITP}.service >/dev/null 2>&1 || true
+            if no_systemd; then
+                kill_pidfile "$LINK_HOME/tunnel.pid"
+            else
+                systemctl --user disable --now ${UNITP}.service >/dev/null 2>&1 || true
+            fi
             printf '{"connected":true,"host":"%s","secure":true,"machine":"(reused existing registration)","relay":"%s"}\n' \
                 "${RELAY#wss://}" "$RELAY" > "$LINK_HOME/status.json"
             success "this hermes is already linked to the relay by another tunnel — reusing that link"
@@ -1076,6 +1208,10 @@ EOF
     if [ -z "$connected" ]; then
         # a refused registration must not leave a crash-looping unit hammering
         # the relay every 3s forever — park it until the user re-runs
+        if no_systemd; then
+            kill_pidfile "$LINK_HOME/tunnel.pid"
+            die "tunnel did not connect — see $LINK_HOME/tunnel.log (fix it, then re-run moch-link)"
+        fi
         systemctl --user disable --now ${UNITP}.service >/dev/null 2>&1 || true
         systemctl --user status ${UNITP}.service --no-pager -n 8 || true
         die "tunnel did not connect — see the unit log above (fix it, then re-run moch-link)"
@@ -1102,6 +1238,13 @@ cmd_qr() {
     NAME_ENC=$(printf '%s' "$MACHINE" | python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' 2>/dev/null || printf '%s' "$MACHINE" | tr -c 'A-Za-z0-9._-' '-')
     if [ ! -f "$QRGEN" ]; then
         curl -fsSL "$VENDOR_URL" -o "$QRGEN" 2>/dev/null || warn "QR renderer unavailable — pair with the text values below"
+        # C-07 / GitHub #97: the renderer is DOWNLOADED CODE python3 imports —
+        # verify the pinned sha256 and delete on mismatch. Never execute an
+        # unverified artifact; pairing degrades to the text values instead.
+        if [ -f "$QRGEN" ] && ! sha256_matches "$QRGEN" "$VENDOR_SHA256"; then
+            rm -f "$QRGEN"
+            warn "QR renderer failed its sha256 pin — removed; pair with the text values below"
+        fi
     fi
     if [ -f "$QRGEN" ] && command -v python3 >/dev/null 2>&1; then
         python3 - "$QRGEN" "$host" "$TOKEN" "$NAME_ENC" <<'PY' || warn "QR rendering failed — use the text values below"
@@ -1136,20 +1279,74 @@ PY
 }
 
 cmd_status() {
-    systemctl --user is-active --quiet ${UNITP}.service 2>/dev/null && echo "service: active" || echo "service: $(systemctl --user is-active ${UNITP}.service 2>&1)"
+    if no_systemd; then
+        for name in tunnel proxy hermes-serve; do
+            if pid_alive "$LINK_HOME/$name.pid"; then
+                echo "$name: running (pid $(cat "$LINK_HOME/$name.pid"))"
+            elif [ -f "$LINK_HOME/$name.pid" ]; then
+                echo "$name: dead (stale pid file $LINK_HOME/$name.pid)"
+            fi
+        done
+    else
+        systemctl --user is-active --quiet ${UNITP}.service 2>/dev/null && echo "service: active" || echo "service: $(systemctl --user is-active ${UNITP}.service 2>&1)"
+    fi
     cat "$LINK_HOME/status.json" 2>/dev/null || echo "(no status yet)"
+}
+
+cmd_start() {
+    if no_systemd; then
+        # relaunch from the env files the installer wrote (same programs the
+        # units would run); existing live pids are left alone
+        if pid_alive "$LINK_HOME/proxy.pid"; then info "proxy already running (pid $(cat "$LINK_HOME/proxy.pid"))"
+        else
+            set -a; . "$LINK_HOME/env"; set +a
+            launch_bg proxy node "$LINK_HOME/moch-link-proxy.js"
+        fi
+        if pid_alive "$LINK_HOME/tunnel.pid"; then info "tunnel already running (pid $(cat "$LINK_HOME/tunnel.pid"))"
+        else
+            set -a; . "$LINK_HOME/env"; set +a
+            local start_relay_key_flag=""
+            [ -n "$MOCH_LINK_RELAY_KEY" ] && start_relay_key_flag="--relay-key $MOCH_LINK_RELAY_KEY"
+            launch_bg tunnel node "$LINK_HOME/moch-tunnel.js" --relay "$RELAY" \
+                --token "$TOKEN" --target "$TARGET" $start_relay_key_flag \
+                --status "$LINK_HOME/status.json"
+        fi
+        return 0
+    fi
+    systemctl --user start ${UNITP}-proxy.service ${UNITP}.service 2>/dev/null || true
+}
+
+cmd_stop() {
+    if no_systemd; then
+        kill_pidfile "$LINK_HOME/tunnel.pid"
+        kill_pidfile "$LINK_HOME/proxy.pid"
+        kill_pidfile "$LINK_HOME/hermes-serve.pid"
+        info "stopped background processes (hermes serve too, if moch-link launched it)"
+        return 0
+    fi
+    systemctl --user stop ${UNITP}.service ${UNITP}-proxy.service 2>/dev/null || true
+}
+
+cmd_uninstall() {
+    if no_systemd; then
+        kill_pidfile "$LINK_HOME/tunnel.pid"
+        kill_pidfile "$LINK_HOME/proxy.pid"
+        kill_pidfile "$LINK_HOME/hermes-serve.pid"
+    else
+        systemctl --user disable --now ${UNITP}.service ${UNITP}-proxy.service ${UNITP}-hermes-serve.service 2>/dev/null || true
+        rm -f "$UNIT_DIR/${UNITP}.service" "$UNIT_DIR/${UNITP}-proxy.service" "$UNIT_DIR/${UNITP}-hermes-serve.service"
+        systemctl --user daemon-reload
+    fi
+    rm -rf "$LINK_HOME"
+    success "removed — hermes itself untouched (if moch-link started a serve for you, that stops too)"
 }
 
 case "${1:-}" in
     "")           cmd_install ;;
     qr)           cmd_qr ;;
     status)       cmd_status ;;
-    stop)         systemctl --user stop ${UNITP}.service ${UNITP}-proxy.service 2>/dev/null || true ;;
-    start)        systemctl --user start ${UNITP}-proxy.service ${UNITP}.service 2>/dev/null || true ;;
-    uninstall)    systemctl --user disable --now ${UNITP}.service ${UNITP}-proxy.service ${UNITP}-hermes-serve.service 2>/dev/null || true
-                  rm -f "$UNIT_DIR/${UNITP}.service" "$UNIT_DIR/${UNITP}-proxy.service" "$UNIT_DIR/${UNITP}-hermes-serve.service"
-                  systemctl --user daemon-reload
-                  rm -rf "$LINK_HOME"
-                  success "removed — hermes itself untouched (if moch-link started a serve for you, that stops too)" ;;
+    stop)         cmd_stop ;;
+    start)        cmd_start ;;
+    uninstall)    cmd_uninstall ;;
     *)            echo "usage: bash install.sh [qr|status|stop|start|uninstall]"; exit 2 ;;
 esac
