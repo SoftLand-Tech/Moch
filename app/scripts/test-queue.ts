@@ -152,6 +152,103 @@ async function main() {
     rr.outboxPinFor(undefined) === '' && rr.outboxPinFor('') === '',
   )
 
+  // ── Outbox origin routing (BH-000019) ───────────────────────────────────
+  // An unpinned item composed in a provisional window carries the window's
+  // temp id as originId: while the window is still tracked the flush routes
+  // through IT (its own keyed create), never the flush-time active chat.
+  const liveWindow = new Set(['pending:new:m1_1', 'live-a', 'live-b'])
+  check(
+    'alive origin window -> route through its id',
+    JSON.stringify(rr.outboxTargetFor({ storedId: '', originId: 'pending:new:m1_1' }, liveWindow)) ===
+      JSON.stringify({ kind: 'origin', id: 'pending:new:m1_1' }),
+  )
+  check(
+    'swept origin window (newChat re-sweep) -> unpinned fallback',
+    rr.outboxTargetFor({ storedId: '', originId: 'pending:new:gone' }, liveWindow).kind === 'active',
+  )
+  check(
+    'swept origin window with a real pin -> pinned fallback',
+    rr.outboxTargetFor({ storedId: 'sess-9', originId: 'pending:new:gone' }, liveWindow).kind === 'pinned',
+  )
+  check(
+    'no origin (legacy item) -> today\'s behavior unchanged',
+    rr.outboxTargetFor({ storedId: 'sess-9' }, liveWindow).kind === 'pinned' &&
+      rr.outboxTargetFor({ storedId: '' }, liveWindow).kind === 'active',
+  )
+  check(
+    'origin wins over a same-chat pin while tracked (freshest identity)',
+    rr.outboxTargetFor({ storedId: 'sess-9', originId: 'live-a' }, liveWindow).kind === 'origin',
+  )
+  check(
+    'a live non-provisional origin is a valid origin route',
+    rr.outboxTargetFor({ storedId: '', originId: 'live-b' }, liveWindow).kind === 'origin',
+  )
+
+  // ── v1 transcript migration sweep (BH-000024) ───────────────────────────
+  const tm = await import('../src/lib/transcriptMigrate')
+  const v1 = (id: string) => `hermes.transcript.${id}.v1`
+  const v2 = (id: string) => `hermes.transcript.${id}.v2`
+  const migStore = new Map<string, string>()
+  const migStorage = {
+    getItem: async (k: string) => migStore.get(k) ?? null,
+    setItem: async (k: string, val: string) => void migStore.set(k, val),
+    removeItem: async (k: string) => void migStore.delete(k),
+  }
+  // Pure half: the live ids map to the stored id, newest first.
+  const sidMap = { 'live-old': 'store-1', 'live-mid': 'store-2', 'live-new': 'store-1' }
+  check(
+    'legacyV1KeysFor returns the mapped live ids, newest first',
+    JSON.stringify(tm.legacyV1KeysFor('store-1', sidMap)) === JSON.stringify(['live-new', 'live-old']),
+  )
+  check('legacyV1KeysFor for an unmapped stored id is []', tm.legacyV1KeysFor('store-x', sidMap).length === 0)
+
+  // Interim v1 + live-keyed v1s both present: the interim payload wins AND
+  // the legacy blobs are still swept (the old code returned early and
+  // stranded them forever).
+  migStore.clear()
+  migStore.set(v1('store-1'), '{"v":1,"title":"interim","messages":[]}')
+  migStore.set(v1('live-old'), '[{"old":true}]')
+  migStore.set(v1('live-new'), '[{"new":true}]')
+  const interimOut = await tm.migrateV1TranscriptWith(migStorage, 'store-1', { v1, v2 }, sidMap)
+  check('interim branch returns the interim payload', interimOut === '{"v":1,"title":"interim","messages":[]}')
+  check('interim branch writes v2', migStore.get(v2('store-1')) === '{"v":1,"title":"interim","messages":[]}')
+  check('interim branch removes its own key', !migStore.has(v1('store-1')))
+  check(
+    'BH-000024: interim branch ALSO sweeps the legacy live-keyed v1 blobs',
+    !migStore.has(v1('live-old')) && !migStore.has(v1('live-new')),
+    [...migStore.keys()].join(','),
+  )
+
+  // Legacy-only: newest vintage wins, every mapped key removed.
+  migStore.clear()
+  migStore.set(v1('live-old'), '[{"old":true}]')
+  migStore.set(v1('live-new'), '[{"new":true}]')
+  const legacyOut = await tm.migrateV1TranscriptWith(migStorage, 'store-1', { v1, v2 }, sidMap)
+  check('legacy branch returns the freshest vintage', legacyOut === '[{"new":true}]')
+  check('legacy branch writes v2 from the freshest vintage', migStore.get(v2('store-1')) === '[{"new":true}]')
+  check('legacy branch removes every mapped v1 key', !migStore.has(v1('live-old')) && !migStore.has(v1('live-new')))
+
+  // Nothing to migrate: null, no writes.
+  migStore.clear()
+  const noneOut = await tm.migrateV1TranscriptWith(migStorage, 'store-2', { v1, v2 }, sidMap)
+  check('no v1 blobs -> null and no v2 write', noneOut === null && !migStore.has(v2('store-2')))
+
+  // ── Batch clarify send gate (BH-000025) ────────────────────────────────
+  const cg = await import('../src/lib/clarifyGate')
+  const qs = [
+    { qid: 'q0', question: 'Plain', choices: ['a', 'b'] },
+    { qid: 'q1', question: 'Free text' },
+    { qid: 'q2', question: 'Multi', choices: ['x', 'y'], multi_select: true },
+  ]
+  check('no answers -> not ready (3 unanswered)', !cg.batchReady(qs, {}) && cg.countUnanswered(qs, {}) === 3)
+  check('empty string counts as unanswered', cg.countUnanswered(qs, { q0: 'a', q1: '', q2: 'x' }) === 1)
+  check('whitespace-only counts as unanswered', cg.countUnanswered(qs, { q0: 'a', q1: '   ', q2: 'x' }) === 1)
+  check('all answered -> ready', cg.batchReady(qs, { q0: 'a', q1: 'typed', q2: 'x' }))
+  check('multi_select with a selection list is answered', cg.countUnanswered(qs, { q0: 'a', q1: 'ok', q2: ['x', 'y'] }) === 0)
+  check('multi_select with an empty selection list is unanswered', cg.countUnanswered(qs, { q0: 'a', q1: 'ok', q2: [] }) === 1)
+  check('multi_select with only blank selections is unanswered', cg.countUnanswered(qs, { q0: 'a', q1: 'ok', q2: ['  '] }) === 1)
+  check('empty question list is trivially ready', cg.batchReady([], {}))
+
   console.log(`\n${pass} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)
 }

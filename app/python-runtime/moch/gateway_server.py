@@ -30,9 +30,29 @@ import time
 import traceback
 from typing import Any
 
-_STATE: dict[str, Any] = {"started": False, "starting": False, "port": None, "token": None, "error": None}
+_STATE: dict[str, Any] = {
+    "started": False,
+    "starting": False,
+    "port": None,
+    "token": None,
+    "error": None,
+    # BH-000047: terminal marker — the supervised boot exhausted its retry
+    # schedule. start()'s wait loop and info()'s self-heal key off it so a
+    # transient per-attempt error (about to be retried) is not reported as
+    # final, and a late successful attempt is never hidden behind a stale one.
+    "boot_gave_up": False,
+}
 _LOCK = threading.Lock()
 _READY_TIMEOUT_S = 90.0  # first boot extracts/compiles; phone storage is slow
+
+# BH-000047 / GitHub #101 — the boot chain used to be single-shot: a failure
+# anywhere in ``_run_server`` landed in ``_STATE['error']`` and the gateway
+# stayed dead for the life of the process (the Kotlin side's bootAttempted
+# AtomicBoolean never retries either, so cron knocks + the RN client just saw
+# a dead gateway). Bounded supervised retries with growing backoff: one
+# initial try plus one retry per scheduled delay. Pure data so tests can pin
+# the schedule; give-up leaves the error state exactly as before.
+_BOOT_RETRY_DELAYS_S: tuple[float, ...] = (5.0, 15.0, 60.0)
 
 
 def _free_port() -> int:
@@ -397,13 +417,80 @@ def _run_server(port: int) -> None:
         _STATE["error"] = traceback.format_exc(limit=12)
 
 
+def _boot_retry_delay_s(failed_attempt: int) -> float | None:
+    """Delay to sleep before the retry that follows ``failed_attempt`` (1-based),
+    or None when the retry schedule is exhausted — the supervisor gives up.
+    Pure: tests pin the schedule without a server."""
+    if failed_attempt < 1:
+        return None
+    idx = failed_attempt - 1
+    if idx >= len(_BOOT_RETRY_DELAYS_S):
+        return None
+    return _BOOT_RETRY_DELAYS_S[idx]
+
+
+def _supervised_server_boot(port: int) -> None:
+    """Run ``_run_server`` with bounded supervised retries (BH-000047 / GH #101).
+
+    ``_run_server`` blocks while the server serves and records a failure into
+    ``_STATE['error']`` when it dies — so returning from it means "this attempt
+    is over". Each failure is logged with its attempt number, per-attempt state
+    is reset (error cleared — the gateway is honestly "booting" again, not
+    dead), and the next attempt runs after the scheduled backoff. After the
+    last scheduled retry the final error stays set, exactly the pre-fix
+    give-up state. A clean error-free return (e.g. process shutdown asked the
+    server to stop) is not retried.
+    """
+    total = 1 + len(_BOOT_RETRY_DELAYS_S)
+    attempt = 1
+    while True:
+        _run_server(port)
+        error = _STATE.get("error")
+        if error is None:
+            return
+        delay = _boot_retry_delay_s(attempt)
+        if delay is None:
+            with _LOCK:
+                _STATE["boot_gave_up"] = True
+            print(
+                f"[moch] gateway boot gave up after attempt {attempt}/{total} — "
+                "error recorded in gateway state",
+                flush=True,
+            )
+            return
+        tail = error.strip().splitlines()[-1] if error.strip() else "unknown error"
+        print(
+            f"[moch] gateway boot attempt {attempt}/{total} failed: {tail} — "
+            f"retrying in {delay:.0f}s",
+            flush=True,
+        )
+        with _LOCK:
+            # Reset between attempts: info() reports an honest "booting"
+            # (running=true, no stale error) across the backoff window.
+            _STATE["error"] = None
+        time.sleep(delay)
+        attempt += 1
+
+
 def start(port: int = 0) -> dict:
     """Boot hermes (idempotent) and the gateway; returns connection info."""
+    # BH-000048 / GitHub #102: arm the boot state BEFORE any boot work — the
+    # RN client polls getGateway from the moment the process starts, and
+    # ``starting`` was never set True, so info_json reported running=false
+    # through the whole (slow) cold boot. A re-start also clears any stale
+    # terminal error/gave-up marker so the fresh attempt is judged on its own.
+    with _LOCK:
+        _STATE["starting"] = True
+        _STATE["error"] = None
+        _STATE["boot_gave_up"] = False
+
     from moch import hermes_boot
 
     boot = hermes_boot.boot()
     if not boot.get("ok"):
         _STATE["error"] = "hermes boot failed: " + "; ".join(boot.get("errors") or ["unknown"])
+        with _LOCK:
+            _STATE["starting"] = False
         return info()
 
     if not port:
@@ -418,7 +505,7 @@ def start(port: int = 0) -> dict:
     _STATE["token"] = token
 
     threading.Thread(
-        target=_run_server,
+        target=_supervised_server_boot,
         args=(port,),
         name="moch-hermes-gateway",
         daemon=True,
@@ -426,7 +513,10 @@ def start(port: int = 0) -> dict:
 
     waited = 0.0
     while waited < _READY_TIMEOUT_S:
-        if _STATE["error"]:
+        # Only a TERMINAL error ends the wait early: a per-attempt failure is
+        # about to be retried by the supervisor (BH-000047), and returning it
+        # as final would re-introduce the single-shot behavior.
+        if _STATE["error"] and _STATE.get("boot_gave_up"):
             with _LOCK:
                 _STATE["starting"] = False
             return info()
@@ -445,18 +535,43 @@ def start(port: int = 0) -> dict:
     return info()
 
 
+def _running_payload(state: dict) -> dict:
+    """Pure view of a gateway boot-state dict → the derived getGateway fields
+    (BH-000048 / GitHub #102, extracted for tests).
+
+    ``running`` is honest: true while starting OR started, but never once an
+    error is recorded (a failed/booting-out gateway must not look alive).
+    ``ready`` here is the port-independent half; info() adds the live accept
+    probe and the workspace env read.
+    """
+    started = bool(state.get("started"))
+    starting = bool(state.get("starting"))
+    error = state.get("error")
+    return {
+        "running": (started or starting) and error is None,
+        "ready": started and state.get("port") is not None,
+        "port": state.get("port"),
+        "token": state.get("token"),
+        "error": error,
+    }
+
+
 def info() -> dict:
     """Current gateway state for the bridge. Never raises."""
-    started = bool(_STATE["started"])
     port = _STATE["port"]
-    return {
-        "running": started or bool(_STATE["starting"]),
-        "ready": started and port is not None and _port_accepts(port),
-        "port": port,
-        "token": _STATE["token"],
-        "workspace": os.environ.get("MOCH_WORKSPACE"),
-        "error": _STATE["error"],
-    }
+    port_up = port is not None and _port_accepts(port)
+    if port_up and not _STATE["started"] and not _STATE.get("boot_gave_up"):
+        # A supervised attempt came up AFTER start() stopped waiting (the
+        # retry schedule can outlast the ready timeout): a listening port is
+        # the ground truth, so heal the stale timeout error instead of
+        # reporting a dead gateway that is actually serving (BH-000047).
+        with _LOCK:
+            _STATE["started"] = True
+            _STATE["error"] = None
+    payload = _running_payload(_STATE)
+    payload["ready"] = bool(_STATE["started"]) and port_up
+    payload["workspace"] = os.environ.get("MOCH_WORKSPACE")
+    return payload
 
 
 def info_json() -> str:

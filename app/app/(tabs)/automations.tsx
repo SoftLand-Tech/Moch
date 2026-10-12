@@ -9,6 +9,7 @@ import * as Clipboard from 'expo-clipboard'
 import { rpc, isConnected as isConnectedAtom } from '../../src/lib/gateway'
 import { ensureSession } from '../../src/lib/chat'
 import { runningAutomationCount, countRunningJobs } from '../../src/lib/automationsState'
+import { tr } from '../../src/lib/strings'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
 import { C, useStyles } from '../../src/lib/theme'
@@ -60,7 +61,7 @@ function fmtFull(iso?: string | null): string {
 
 /**
  * Scheduled automations — the Hermes equivalent of ChatGPT's "Scheduled".
- * Backed by the real surface: `cron.manage` (list/add/remove/pause/resume)
+ * Backed by the real surface: `cron.manage` (list/add/get/remove/pause/resume)
  * and `slash.exec /cron` for run-now and edit (edit flags are shell-quoted).
  */
 export default function Automations() {
@@ -74,7 +75,11 @@ export default function Automations() {
   const [busyJob, setBusyJob] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   // Add/edit form. editing === null → closed; job_id set → edit mode.
-  const [form, setForm] = useState<{ jobId: string | null; name: string; schedule: string; prompt: string; saving: boolean } | null>(null)
+  // loadedPrompt: the prompt exactly as loaded from the gateway (full text
+  // after the 'get' fetch) — the save dirty-check compares against it so a
+  // schedule-only edit never re-sends --prompt. promptDegraded: the full
+  // fetch failed and the field holds the 100-char preview.
+  const [form, setForm] = useState<{ jobId: string | null; name: string; schedule: string; prompt: string; loadedPrompt: string | null; promptDegraded: boolean; saving: boolean } | null>(null)
 
   const load = useCallback(async () => {
     if (!online) {
@@ -162,7 +167,12 @@ export default function Automations() {
     const schedule = form.schedule.trim()
     const prompt = form.prompt.trim()
     const name = form.name.trim()
-    if (!schedule || !prompt || (!form.jobId && !name)) {
+    // #108: an unmodified prompt is omitted from the edit command — the
+    // backend's /cron edit overwrites the stored prompt whenever --prompt is
+    // present, so a schedule-only edit must never re-send it (least of all
+    // the truncated preview).
+    const promptUnchanged = !!form.jobId && form.loadedPrompt !== null && prompt === form.loadedPrompt.trim()
+    if (!schedule || (!prompt && !promptUnchanged) || (!form.jobId && !name)) {
       showAlert('Missing fields', 'Name, schedule and prompt are all needed.')
       return
     }
@@ -170,7 +180,8 @@ export default function Automations() {
     try {
       if (form.jobId) {
         // /cron edit has no --name; schedule + prompt are the editable levers.
-        const out = await cronSlash(`/cron edit ${form.jobId} --schedule ${shq(schedule)} --prompt ${shq(prompt)}`)
+        const promptFlag = promptUnchanged ? '' : ` --prompt ${shq(prompt)}`
+        const out = await cronSlash(`/cron edit ${form.jobId} --schedule ${shq(schedule)}${promptFlag}`)
         setStatus(out.split('\n')[0] || 'Updated')
       } else {
         await rpc('cron.manage', { action: 'add', name, schedule, prompt })
@@ -184,9 +195,28 @@ export default function Automations() {
     }
   }
 
-  const openAdd = () => setForm({ jobId: null, name: '', schedule: '', prompt: '', saving: false })
-  const openEdit = (j: Job) =>
-    setForm({ jobId: j.job_id, name: j.name ?? '', schedule: j.schedule ?? '', prompt: j.prompt_preview ?? '', saving: false })
+  const openAdd = () => setForm({ jobId: null, name: '', schedule: '', prompt: '', loadedPrompt: null, promptDegraded: false, saving: false })
+
+  /**
+   * #108: prompt_preview is truncated at 100 chars — opening the editor from
+   * it and saving would silently rewrite the stored prompt to the truncated
+   * text. Fetch the full prompt via cron.manage 'get'; the preview is only a
+   * fallback (with a banner saying so, and the save dirty-check keeps it from
+   * being written back).
+   */
+  const openEdit = async (j: Job) => {
+    setForm({ jobId: j.job_id, name: j.name ?? '', schedule: j.schedule ?? '', prompt: j.prompt_preview ?? '', loadedPrompt: null, promptDegraded: false, saving: false })
+    try {
+      const r = await rpc<{ job?: { prompt?: string } }>('cron.manage', { action: 'get', name: j.job_id })
+      const full = r?.job?.prompt
+      if (typeof full !== 'string') throw new Error('cron.manage get: no job in response')
+      setForm((f) => (f && f.jobId === j.job_id ? { ...f, prompt: full, loadedPrompt: full } : f))
+    } catch {
+      // Older gateway (no 'get' action) or the RPC failed: keep the preview,
+      // mark the form degraded so the user knows it is truncated.
+      setForm((f) => (f && f.jobId === j.job_id ? { ...f, loadedPrompt: j.prompt_preview ?? '', promptDegraded: true } : f))
+    }
+  }
 
   const copyId = async (j: Job) => {
     await Clipboard.setStringAsync(j.job_id)
@@ -299,7 +329,7 @@ export default function Automations() {
                         label={paused ? 'Resume' : 'Pause'}
                         onPress={() => { void toggle(j) }}
                       />
-                      <Action icon="create-outline" label="Edit" onPress={() => openEdit(j)} />
+                      <Action icon="create-outline" label="Edit" onPress={() => { void openEdit(j) }} />
                       <Action icon="trash-outline" label="Delete" danger onPress={() => remove(j)} />
                     </>
                   )}
@@ -382,6 +412,9 @@ export default function Automations() {
 
               <View>
                 <Text style={s.fieldLabel}>PROMPT</Text>
+                {form?.promptDegraded ? (
+                  <Text style={s.warnLine}>{tr('automations.promptLoadFailed')}</Text>
+                ) : null}
                 <TextInput
                   style={[s.field, s.fieldMulti]}
                   value={form?.prompt ?? ''}
@@ -474,4 +507,5 @@ const makeS = () => StyleSheet.create({
   fieldMulti: { minHeight: 120, textAlignVertical: 'top' },
   fieldLocked: { color: C.textDim, fontSize: 15 },
   fieldHint: { color: C.textFaint, fontSize: 11.5, lineHeight: 16, marginTop: 6 },
+  warnLine: { color: C.amber, fontSize: 11.5, lineHeight: 16, marginBottom: 6 },
 })
