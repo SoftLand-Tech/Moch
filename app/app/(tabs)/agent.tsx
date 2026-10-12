@@ -14,7 +14,7 @@ import { activeSession, ensureSession, sessionsById } from '../../src/lib/chat'
 import {
   liveModel, liveProvider, fetchModelOptions, liveReasoningDisplay, modelOptions,
   modelOptionsLoading, rankProviders, disconnectProvider, fetchReasoningPrefs,
-  applyReasoning, fetchDefaultModel, saveProviderKey, REASONING_EFFORTS,
+  applyReasoning, fetchDefaultModel, saveProviderKey, liveWriteSid, REASONING_EFFORTS,
   type ProviderOption, type ReasoningEffort, type ReasoningScope, type ReasoningPrefs,
 } from '../../src/lib/modelState'
 import { log } from '../../src/lib/log'
@@ -56,8 +56,9 @@ export default function Controls() {
     if (!online) return
     // BUG-013: a provisional (unsent) chat has no server identity —
     // session-scoped reads skip rather than minting one; global defaults
-    // show until a real chat exists.
-    const liveSid = sid && !sessionsById.get()[sid]?.provisional ? sid : null
+    // show until a real chat exists. (BH-000088: liveWriteSid is the same
+    // rule the WRITE paths below use — one shared predicate.)
+    const liveSid = liveWriteSid(sid, sid ? sessionsById.get()[sid] : undefined)
     // Both reasoning layers (saved default + this chat's effective value) and
     // the saved everywhere-default model, alongside the provider inventory —
     // this screen is the preferences home, so it reads everything it can edit.
@@ -97,7 +98,23 @@ export default function Controls() {
     setEffort(v)
     setSaving(`effort:${v}`)
     try {
-      const res = await applyReasoning({ value: v as ReasoningEffort, scope: effortScope, sessionId: sid })
+      // BH-000088: the raw `sid` is the window's `pending:new:…` key while a
+      // new chat is unsent — the gateway holds no such session, its setters
+      // treat a sessionless scoped write as GLOBAL (the pick silently
+      // rewrites the profile-wide default, and a hardened server 4001s), so
+      // it must never reach the wire. Global picks need no session; a
+      // session-scoped pick CREATES the chat on demand (the BUG-013
+      // comment's promise), and a failed create blocks the pick with a hint
+      // instead of confirming a write that never landed where it claims.
+      let target = liveWriteSid(sid, sid ? sessionsById.get()[sid] : undefined)
+      if (!target && effortScope === 'session') {
+        try {
+          target = await ensureSession()
+        } catch {
+          throw new Error('This chat is not ready yet — try again in a moment.')
+        }
+      }
+      const res = await applyReasoning({ value: v as ReasoningEffort, scope: effortScope, sessionId: target ?? undefined })
       if (res.value !== v) setEffort(res.value)
       await refresh()
     } catch (e) {
@@ -116,7 +133,10 @@ export default function Controls() {
     try {
       // `config.set reasoning show|hide` is the documented toggle verb; it
       // writes the server's display config, so it already applies everywhere.
-      await rpc('config.set', { key: 'reasoning', value: next ? 'show' : 'hide', ...(sid ? { session_id: sid } : {}) })
+      // BH-000088: still never send a provisional window's raw id — the
+      // session pin is simply omitted until the chat is real.
+      const liveSid = liveWriteSid(sid, sid ? sessionsById.get()[sid] : undefined)
+      await rpc('config.set', { key: 'reasoning', value: next ? 'show' : 'hide', ...(liveSid ? { session_id: liveSid } : {}) })
     } catch (e) {
       liveReasoningDisplay.set(prev)
       void showAlert('Failed to save', e instanceof Error ? e.message : '')
@@ -141,7 +161,9 @@ export default function Controls() {
     if (!keyFor) return 'No provider selected'
     setSavingKey(true)
     try {
-      const freshSid = sid ?? (await ensureSession())
+      // BH-000088: same rule as every write here — a provisional window's
+      // id is not a wire-able session id; create the chat if needed.
+      const freshSid = liveWriteSid(sid, sid ? sessionsById.get()[sid] : undefined) ?? (await ensureSession())
       await saveProviderKey(keyFor.slug, apiKey, freshSid)
       await fetchModelOptions(freshSid, { force: true })
       const slug = keyFor.slug
@@ -194,7 +216,7 @@ export default function Controls() {
     setBusySlug(p.slug)
     try {
       await disconnectProvider(p.slug)
-      await fetchModelOptions(sid, { force: true }).catch(() => {})
+      await fetchModelOptions(liveWriteSid(sid, sid ? sessionsById.get()[sid] : undefined) ?? undefined, { force: true }).catch(() => {})
     } catch (e) {
       void showAlert('Disconnect failed', e instanceof Error ? e.message : String(e))
     } finally {

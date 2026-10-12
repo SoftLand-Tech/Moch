@@ -54,11 +54,12 @@ export function ModelPickerSheet({
 
   // Fresh inventory each time the sheet opens (cheap; also re-layers the
   // session's live provider after resumes). Cached rows render instantly —
-  // the spinner only gates a true first open — and the session id comes
-  // from activeLiveId(): a plain store read in the steady state (no boot
-  // RPC on the open path), while optimistic new-chat/switch windows resolve
-  // to a REAL live id so a pending/temp key is never sent as session_id.
-  // The apply/save paths ensure a session where one is actually required.
+  // the spinner only gates a true first open. The session id is OPTIONAL
+  // (#65/BUG-117): activeLiveId() resolves a real live id when one exists
+  // (never a pending/temp key), and a dead provisional window or a
+  // Settings-open with no chat resolves to null — the gateway serves the
+  // global inventory — instead of throwing "New chat is not ready" into the
+  // banner. The apply/save paths ensure a session where one is required.
   // initialSlug (Providers section → "pick a model") skips the provider
   // list and lands directly on that provider's models when it's usable.
   useEffect(() => {
@@ -71,7 +72,12 @@ export function ModelPickerSheet({
     setLoadError('')
     void (async () => {
       try {
-        const fresh = await fetchModelOptions(await activeLiveId(), { force: true })
+        // #65 / BUG-117: never gate the refresh on a live chat — a dead
+        // provisional window made activeLiveId() throw ("New chat is not
+        // ready") and the sheet opened with an internal-error banner.
+        // session_id is optional in model.options; null = global inventory.
+        const sid = await activeLiveId().catch(() => null)
+        const fresh = await fetchModelOptions(sid, { force: true })
         const preset = initialSlug ? fresh.providers.find((p) => p.slug === initialSlug) : null
         if (preset?.authenticated) {
           setProvider(preset)

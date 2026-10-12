@@ -68,6 +68,12 @@ export default function BotDetail() {
       await rpc('profiles.configure', { name: bot, soul, description: desc }, 20000)
       setSavedAt(Date.now())
       void refreshFleet()
+    } catch (e) {
+      // #107: try/finally with no catch let the rejection escape as an
+      // unhandled promise (silent on some surfaces) while the stale
+      // "saved" indicator stayed up from an earlier success.
+      setSavedAt(null)
+      showAlert(tr('bot.save.failed', { why: e instanceof Error ? e.message : String(e) }))
     } finally {
       setSaving(false)
     }
@@ -108,6 +114,12 @@ export default function BotDetail() {
       await setActiveBot(null)
       void refreshFleet()
       router.back()
+    } catch (e) {
+      // #107: surface the failure instead of swallowing it, and re-arm the
+      // wizard — otherwise the button sat on "Tap again to confirm deletion"
+      // with nothing to tap into.
+      setConfirmDelete(0)
+      showAlert(tr('bot.delete.failed', { why: e instanceof Error ? e.message : String(e) }))
     } finally {
       setDeleting(false)
     }

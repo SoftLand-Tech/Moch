@@ -477,6 +477,14 @@ _CONFIG_SETTERS = {
 def _(rid, params: dict) -> dict:
     key, value = params.get("key", ""), params.get("value", "")
     session = _sessions.get(params.get("session_id", ""))
+    # BH-000088: an explicitly session-scoped write naming a session we do NOT hold must fail
+    # with the standard stale-id shape (4001 "session not found", same as _sess_nowait) instead of
+    # silently degrading: the setters treat a missing session as "sessionless" and several of them
+    # (_set_reasoning, _set_fast) then persist the PROFILE-wide default — a session-scoped pick
+    # from a client-side provisional window rewrote the global config and reported success.
+    if (session is None and _word(params.get("scope")) == "session"
+            and str(params.get("session_id") or "").strip()):
+        return _err(rid, 4001, "session not found")
     handler = _CONFIG_SETTERS.get(key)
     if handler is None and key.startswith("details_mode."):
         handler = _set_details_section
