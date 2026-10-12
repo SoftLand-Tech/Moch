@@ -13,6 +13,9 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.nio.charset.StandardCharsets
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
@@ -38,8 +41,18 @@ import org.json.JSONObject
  * Active-tab filter (BUILD-PLAN decision #2): `/json/list` advertises at
  * most ONE target — the WebView whose URL matches the active URL when
  * unambiguous, else the first. Stock hermes attaches the first page target,
- * so a filtered list makes it land on the tab the user is looking at. Tab
- * creation/activation is RN-owned (`/json/new|close|activate` → 405).
+ * so a filtered list makes it land on the tab the user is looking at. The
+ * filter is unchanged by BUG-136; the additive `/json/moch-tabs` serves the
+ * FULL upstream page list when a tool needs to see every tab.
+ *
+ * Tab lifecycle (BUG-136): `/json/new|close|activate` used to 405 ("tab
+ * lifecycle is native-owned"), which left the agent with no way to move the
+ * tab strip. RN is STILL the single tab owner — the relay now round-trips:
+ * ONE "mochTabOp" RCTDeviceEventEmitter event (payload {requestId, op,
+ * url?, targetId?}), a CountDownLatch wait for the app's ack
+ * (BrowserRelayModule.tabOpAck), and for open a diff of the upstream
+ * /json/list to resolve the new page's DevTools target by URL. CDP never
+ * mutates the tab strip behind the owner's back.
  *
  * WebSocket tunneling: the client's upgrade request (its own
  * Sec-WebSocket-Key etc.) is forwarded with the token segment stripped; the
@@ -56,6 +69,20 @@ object CdpRelay {
   private const val MAX_LINE = 64 * 1024
   private const val MAX_HEADERS = 256 * 1024
   private const val PUMP_CHUNK = 1 shl 20
+
+  // BUG-136 tab-lifecycle round-trip (see class doc).
+  private const val TAB_OP_EVENT = "mochTabOp"
+  private const val TAB_OP_ACK_TIMEOUT_MS = 5_000L
+  private const val TAB_OPEN_RESOLVE_TIMEOUT_MS = 3_000L
+
+  // Mirror of AgentBrowserHost.tsx AGENT_START_URL — keep the two in
+  // lockstep (same contract as the hermesHomeDir mirror below). The hidden
+  // agent host page is a REAL upstream target but never a browserTabs-store
+  // tab; /json/moch-tabs and the open-diff filter it out so listings match
+  // the tab strip exactly. A user tab on the very same URL would be hidden
+  // from moch-tabs too — accepted (the boring-safe option): its target still
+  // exists upstream, only the listing folds the duplicate away.
+  private const val AGENT_TAB_URL_PREFIX = "https://example.com/"
 
   data class Status(
     val running: Boolean,
@@ -139,6 +166,39 @@ object CdpRelay {
     activeUrlPrefix = url?.take(2048)
   }
 
+  // ── Tab lifecycle round-trip (BUG-136) ───────────────────────────────────
+  //
+  // The RN tab store is the single owner of the tab strip; the relay ASKS it
+  // to mutate: one "mochTabOp" event, then this handler thread blocks on a
+  // CountDownLatch until BrowserRelayModule.tabOpAck lands (or the ~5 s
+  // timeout expires → honest 504). The sink is installed by
+  // BrowserRelayModule (it owns the ReactApplicationContext); a stale sink
+  // after an RN reload throws inside emit, which surfaces as an honest 502.
+
+  /** One in-flight tab op: the latch the HTTP handler waits on + its answer. */
+  class TabOpAck internal constructor {
+    internal val latch = CountDownLatch(1)
+    @Volatile internal var ok = false
+    @Volatile internal var error: String? = null
+    internal fun resolve(ackOk: Boolean, ackError: String?) {
+      ok = ackOk
+      error = ackError
+      latch.countDown()
+    }
+  }
+
+  private val pendingTabOps = ConcurrentHashMap<String, TabOpAck>()
+
+  /** Installed by BrowserRelayModule.init; emits (event, jsonPayload) to JS. */
+  @Volatile private var tabOpSink: ((String, JSONObject) -> Unit)? = null
+
+  fun setTabOpSink(sink: ((String, JSONObject) -> Unit)?) { tabOpSink = sink }
+
+  /** RN ack (BrowserRelayModule.tabOpAck): resolve the op's latch. */
+  fun tabOpAck(requestId: String, ok: Boolean, error: String?) {
+    pendingTabOps.remove(requestId)?.resolve(ok, error)
+  }
+
   // ── State file (read by moch/hermes_boot.py) ─────────────────────────────
 
   /**
@@ -207,9 +267,9 @@ object CdpRelay {
       when {
         inner == "/json/version" && head.method == "GET" -> handleJsonVersion(out)
         (inner == "/json/list" || inner == "/json") && head.method == "GET" -> handleJsonList(out)
+        inner == "/json/moch-tabs" && head.method == "GET" -> handleMochTabs(out)
         inner.startsWith("/json/new") || inner.startsWith("/json/close") ||
-          inner.startsWith("/json/activate") ->
-          writeSimpleResponse(out, 405, "tab lifecycle is native-owned in Moch")
+          inner.startsWith("/json/activate") -> handleTabLifecycle(out, head.method, inner, query)
         head.method == "GET" && inner.startsWith("/devtools/browser") -> {
           // No browser-level target exists upstream: tunnel the "browser" ws
           // to the ACTIVE page target's own socket (resolved NOW, per
@@ -264,13 +324,7 @@ object CdpRelay {
    * active URL when unambiguous, else the first. Null when none exist.
    */
   private fun chosenPageJson(): JSONObject? {
-    val body = fetchUpstreamBody("/json/list") ?: return null
-    val arr = try { JSONArray(body) } catch (_: Exception) { return null }
-    val pages = mutableListOf<JSONObject>()
-    for (i in 0 until arr.length()) {
-      val t = arr.optJSONObject(i) ?: continue
-      if (t.optString("type", "page") == "page") pages.add(t)
-    }
+    val pages = upstreamPages().map { it.json }
     val prefix = activeUrlPrefix
     val chosen = if (!prefix.isNullOrEmpty()) {
       val matching = pages.filter { it.optString("url", "").startsWith(prefix) }
@@ -278,11 +332,195 @@ object CdpRelay {
     } else {
       pages.firstOrNull()
     } ?: return null
-    chosen.put(
-      "webSocketDebuggerUrl",
-      "ws://127.0.0.1:$port/$token/devtools/page/${chosen.optString("id", "")}",
-    )
+    chosen.put("webSocketDebuggerUrl", pageWsUrl(chosen.optString("id", "")))
     return chosen
+  }
+
+  // ── Upstream page list (shared by moch-tabs, the open-diff, the bridge) ──
+
+  /** One upstream page target: its id, url and raw DevTools JSON. */
+  private class UpstreamPage(val id: String, val url: String, val json: JSONObject)
+
+  /** FULL (unfiltered) page-target list from upstream /json/list. */
+  private fun upstreamPages(): List<UpstreamPage> {
+    val body = fetchUpstreamBody("/json/list") ?: return emptyList()
+    val arr = try { JSONArray(body) } catch (_: Exception) { return emptyList() }
+    val pages = mutableListOf<UpstreamPage>()
+    for (i in 0 until arr.length()) {
+      val t = arr.optJSONObject(i) ?: continue
+      if (t.optString("type", "page") != "page") continue
+      val id = t.optString("id", "")
+      if (id.isNotEmpty()) pages.add(UpstreamPage(id, t.optString("url", ""), t))
+    }
+    return pages
+  }
+
+  /** The hidden agent host page (see AGENT_TAB_URL_PREFIX). */
+  private fun isHiddenAgentPage(url: String): Boolean = url.startsWith(AGENT_TAB_URL_PREFIX)
+
+  /** The relay's own tokenized ws URL for a page target. */
+  private fun pageWsUrl(id: String) = "ws://127.0.0.1:$port/$token/devtools/page/$id"
+
+  /**
+   * /json/moch-tabs — the FULL upstream page list, minus the hidden agent
+   * host page, each with the relay's own ws URL (BUG-136; additive). The
+   * classic /json/list stays active-tab-filtered — attach semantics depend
+   * on that — while the tab tools need every tab's id/url/title to
+   * list/close/switch them. Same data is exposed to the RN registry via
+   * [tabTargets].
+   */
+  private fun handleMochTabs(out: OutputStream) {
+    val arr = JSONArray()
+    for (p in upstreamPages()) {
+      if (isHiddenAgentPage(p.url)) continue
+      p.json.put("webSocketDebuggerUrl", pageWsUrl(p.id))
+      arr.put(p.json)
+    }
+    writeJsonResponse(out, arr)
+  }
+
+  /** The moch-tabs page list (same data as the endpoint) for the RN bridge. */
+  fun tabTargets(): List<JSONObject> =
+    upstreamPages().filter { !isHiddenAgentPage(it.url) }
+      .map { it.json.put("webSocketDebuggerUrl", pageWsUrl(it.id)) }
+
+  // ── /json/new|close|activate — the RN round-trip (BUG-136) ───────────────
+
+  /**
+   * Real tab lifecycle: forward the op to the RN tab owner and wait for the
+   * ack. GET or PUT both accepted (Chrome ≥63 uses PUT on /json/new;
+   * Python's _relay_lifecycle tries PUT first). Statuses: 200 on success —
+   * the new page's DevTools JSON for open (the shape Chromium returns for
+   * /json/new), "Target is closing"/"Target activated" text otherwise — 409
+   * when the app refuses (unknown target, last-tab guard), 502 when the
+   * event cannot reach JS, 504 when the ack never arrives. 400/405 for
+   * malformed requests. The token gate has already run (router order).
+   */
+  private fun handleTabLifecycle(out: OutputStream, method: String, inner: String, query: String) {
+    if (method != "GET" && method != "PUT") {
+      writeSimpleResponse(out, 405, "method not allowed: use GET or PUT on $inner")
+      return
+    }
+    val op: String
+    var url: String? = null
+    var targetId: String? = null
+    when {
+      inner.startsWith("/json/new") -> {
+        op = "open"
+        url = decodeRequestedUrl(query)
+        if (url.isEmpty()) {
+          writeSimpleResponse(out, 400, "/json/new needs the target url as its query string (/json/new?url=…)")
+          return
+        }
+      }
+      inner == "/json/close" || inner.startsWith("/json/close/") -> {
+        op = "close"
+        targetId = if (inner.length > "/json/close/".length) inner.removePrefix("/json/close/").trim() else ""
+      }
+      inner == "/json/activate" || inner.startsWith("/json/activate/") -> {
+        op = "activate"
+        targetId = if (inner.length > "/json/activate/".length) inner.removePrefix("/json/activate/").trim() else ""
+      }
+      else -> { writeSimpleResponse(out, 404, "no route: $inner"); return }
+    }
+    if (targetId != null && targetId.isEmpty()) {
+      writeSimpleResponse(out, 400, "/json/$op needs a target id: /json/$op/<id>")
+      return
+    }
+
+    val sink = tabOpSink
+    if (sink == null) {
+      writeSimpleResponse(out, 503, "tab lifecycle unavailable: the app's Browser relay module is not loaded (restart Moch)")
+      return
+    }
+
+    val requestId = UUID.randomUUID().toString()
+    val payload = JSONObject().put("requestId", requestId).put("op", op)
+    if (url != null) payload.put("url", url)
+    if (targetId != null) payload.put("targetId", targetId)
+
+    // Snapshot BEFORE the op so the open-diff sees exactly what the op added
+    // (a concurrent user-opened tab is disambiguated by the URL match).
+    val beforeIds = if (op == "open") upstreamPages().map { it.id }.toSet() else emptySet()
+
+    val ack = TabOpAck()
+    pendingTabOps[requestId] = ack
+    try {
+      sink(TAB_OP_EVENT, payload)
+    } catch (e: Exception) {
+      pendingTabOps.remove(requestId)
+      lastError = "tab op emit failed: $e"
+      writeSimpleResponse(out, 502, "tab op '$op' never reached the app UI (${e.message ?: e.javaClass.simpleName}) — is Moch running?")
+      return
+    }
+    if (!ack.latch.await(TAB_OP_ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+      pendingTabOps.remove(requestId)
+      writeSimpleResponse(out, 504, "tab op '$op' timed out: the Moch UI did not acknowledge within ${TAB_OP_ACK_TIMEOUT_MS / 1000}s")
+      return
+    }
+    if (!ack.ok) {
+      writeSimpleResponse(out, 409, ack.error ?: "tab op '$op' refused by the Moch tab strip")
+      return
+    }
+    when (op) {
+      "open" -> resolveOpenedPage(out, url!!, beforeIds)
+      "close" -> writeSimpleResponse(out, 200, "Target is closing")
+      else -> writeSimpleResponse(out, 200, "Target activated")
+    }
+  }
+
+  /** The URL a /json/new wants: the whole query (Chromium's classic shape),
+   *  optionally `url=`-prefixed, percent-decoded ONCE (Python sends it
+   *  quoted with :/?&= safe, so a literal % in the url arrives as %25). */
+  private fun decodeRequestedUrl(query: String): String {
+    val raw = if (query.startsWith("url=")) query.substring(4) else query
+    return try { android.net.Uri.decode(raw) } catch (_: Exception) { raw }
+  }
+
+  /**
+   * Resolve the just-opened page: RN added the store tab at ack time, the
+   * WebView and its DevTools target follow a render later — poll the
+   * upstream diff (≤ ~3 s) for a FRESH page serving `url`. Responds with
+   * that page's DevTools JSON (ws URL rewritten), or an honest 502 when no
+   * target shows up (e.g. the Browser screen is closed: the tab IS in the
+   * RN strip, but nothing mounts a WebView for it until the screen opens).
+   */
+  private fun resolveOpenedPage(out: OutputStream, url: String, beforeIds: Set<String>) {
+    val deadlineMs = System.currentTimeMillis() + TAB_OPEN_RESOLVE_TIMEOUT_MS
+    var freshLoading: JSONObject? = null
+    while (true) {
+      val fresh = upstreamPages()
+        .filter { it.id !in beforeIds && !isHiddenAgentPage(it.url) }
+      val match = fresh.firstOrNull { pageServesUrl(it.url, url) }?.json
+      if (match != null) {
+        match.put("webSocketDebuggerUrl", pageWsUrl(match.optString("id", "")))
+        writeJsonResponse(out, match)
+        return
+      }
+      // A brand-new WebView can sit at about:blank for a beat before its
+      // first navigation commits — remember a lone such target as fallback.
+      freshLoading = fresh.singleOrNull { it.url.isEmpty() || it.url == "about:blank" }?.json ?: freshLoading
+      if (System.currentTimeMillis() >= deadlineMs) break
+      Thread.sleep(250)
+    }
+    freshLoading?.let {
+      it.put("webSocketDebuggerUrl", pageWsUrl(it.optString("id", "")))
+      writeJsonResponse(out, it)
+      return
+    }
+    writeSimpleResponse(
+      out, 502,
+      "tab added to the Moch Browser strip, but no WebView DevTools target for $url appeared within " +
+        "${TAB_OPEN_RESOLVE_TIMEOUT_MS / 1000}s (the Browser screen may be closed — open it and the tab is there)",
+    )
+  }
+
+  /** URL match tolerant of trailing-slash and pre-redirect drift. */
+  private fun pageServesUrl(pageUrl: String, wanted: String): Boolean {
+    if (pageUrl.isEmpty() || wanted.isEmpty()) return false
+    val p = pageUrl.trimEnd('/')
+    val w = wanted.trimEnd('/')
+    return p == w || p.startsWith("$w/") || w.startsWith("$p/")
   }
 
   /** Fresh LocalSocket per request — see class doc for why. */
@@ -509,7 +747,10 @@ object CdpRelay {
     403 -> "Forbidden"
     404 -> "Not Found"
     405 -> "Method Not Allowed"
+    409 -> "Conflict"
     502 -> "Bad Gateway"
+    503 -> "Service Unavailable"
+    504 -> "Gateway Timeout"
     else -> "Error"
   }
 

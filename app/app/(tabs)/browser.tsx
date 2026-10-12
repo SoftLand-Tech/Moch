@@ -26,6 +26,7 @@ import {
   switchTab,
   updateTab,
   syncActiveUrl,
+  refreshTabTargetIds,
 } from '../../src/lib/browserRelay'
 import { shareInInbox, normalizeSharedPayload } from '../../src/lib/shareIn'
 
@@ -276,6 +277,11 @@ export default function Browser() {
                       onLoadEnd={() => updateTab(t.id, { ready: true })}
                       onRenderProcessGone={() => {
                         setRenderKeys((cur) => ({ ...cur, [t.id]: (cur[t.id] ?? 0) + 1 }))
+                        // BUG-136: the remounted WebView gets a NEW DevTools
+                        // target id — re-map the registry now and again once
+                        // the fresh renderer has registered upstream.
+                        void refreshTabTargetIds(true)
+                        setTimeout(() => void refreshTabTargetIds(true), 1500)
                       }}
                       userAgent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
                       javaScriptEnabled

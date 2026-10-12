@@ -6,12 +6,16 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.WritableMap
+import com.facebook.react.modules.core.DeviceEventManagerModule
+import org.json.JSONObject
 
 /**
  * RN surface of the WebView CDP relay (BUILD-PLAN.md).
  *
  * Typed promise methods + one map-returning status probe, mirroring the
- * HermesBridgeModule contract (no emitters; JS polls or calls on demand).
+ * HermesBridgeModule contract (JS polls or calls on demand) — plus the ONE
+ * exception, BUG-136's outbound "mochTabOp" event (the relay round-trips
+ * /json/new|close|activate to the RN tab owner; JS acks via [tabOpAck]).
  *
  * - [ensureRunning] starts the relay if needed and resolves with the full
  *   state (running/port/token/lastError) so JS can render real status and
@@ -26,6 +30,24 @@ class BrowserRelayModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
   override fun getName() = "BrowserRelay"
+
+  init {
+    // BUG-136: /json/new|close|activate round-trip to the RN tab owner —
+    // install the relay's emitter sink at module creation. A React reload
+    // constructs a fresh module (and thus re-installs over the stale sink);
+    // emitting through a destroyed catalyst context throws inside CdpRelay's
+    // handler, which answers with an honest 502 instead of hanging.
+    CdpRelay.setTabOpSink { event, payload -> emitToJs(event, payload) }
+  }
+
+  /** Emit one relay event to JS (payload is all-strings by construction). */
+  private fun emitToJs(event: String, payload: JSONObject) {
+    val map = Arguments.createMap()
+    for (key in payload.keys()) map.putString(key, payload.optString(key))
+    reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      .emit(event, map)
+  }
 
   @ReactMethod
   fun ensureRunning(preferPort: Int, promise: Promise) {
@@ -131,6 +153,39 @@ class BrowserRelayModule(reactContext: ReactApplicationContext) :
   }
 
   private var debugEnabled: Boolean = false
+
+  /**
+   * RN ack for a "mochTabOp" round-trip (BUG-136): the store op ran in JS
+   * (browserRelay.ts); resolve the relay's CountDownLatch so the waiting
+   * /json/new|close|activate handler can answer. Fire-and-forget — the relay
+   * already bounds the wait with its own timeout.
+   */
+  @ReactMethod
+  fun tabOpAck(requestId: String, ok: Boolean, error: String?) {
+    CdpRelay.tabOpAck(requestId, ok, error)
+  }
+
+  /**
+   * The relay's FULL upstream page list (the /json/moch-tabs data: every
+   * WebView page with id/url/title, hidden agent host page filtered out) —
+   * the JS tab⇔target registry maps store tabs to DevTools targetIds with it.
+   */
+  @ReactMethod
+  fun tabTargets(promise: Promise) {
+    try {
+      val arr = Arguments.createArray()
+      for (page in CdpRelay.tabTargets()) {
+        val m = Arguments.createMap()
+        m.putString("id", page.optString("id", ""))
+        m.putString("url", page.optString("url", ""))
+        m.putString("title", page.optString("title", ""))
+        arr.pushMap(m)
+      }
+      promise.resolve(arr)
+    } catch (e: Exception) {
+      promise.reject("cdp_relay_tab_targets", e.message, e)
+    }
+  }
 
   private fun statusMap(): WritableMap {
     val s = CdpRelay.status()

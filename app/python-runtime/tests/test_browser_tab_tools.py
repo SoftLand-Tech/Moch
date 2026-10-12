@@ -46,6 +46,9 @@ except ImportError:
 
 from tools import browser_webview as wv  # noqa: E402
 
+# _TabToolTestCase patches these; the direct-call tests need the REAL one.
+_REAL_ACTIVATE_TAB = wv._activate_tab
+
 _TABS = [
     {"id": "AAA111", "title": "First", "url": "https://first.example.com/"},
     {"id": "BBB222", "title": "Second", "url": "https://second.example.com/"},
@@ -379,11 +382,19 @@ class TabListTests(unittest.TestCase):
         p = mock.patch.object(wv, "_relay_down_error", _Recorder(None))
         p.start()
         self.addCleanup(p.stop)
+        # BUG-136: the /json/moch-tabs feature probe is cached per process —
+        # every test starts with a cold cache.
+        wv._moch_tabs_cache = None
+        self.addCleanup(setattr, wv, "_moch_tabs_cache", None)
 
-    def _relay(self, pages, *, browser_level_flag=None):
+    _MOCH_TABS_RAISE = object()  # sentinel: transport failure on that path
+
+    def _relay(self, pages, *, browser_level_flag=None, moch_tabs=None):
         """Fake `_relay_http`. ``browser_level_flag=None`` omits the
         Moch-Browser-Level key entirely (plain desktop DevTools); True/False set
-        it to that verdict (True = real browser-level endpoint)."""
+        it to that verdict (True = real browser-level endpoint). ``moch_tabs``
+        is the /json/moch-tabs payload (list = 200, None = 404 i.e. older
+        relay, _MOCH_TABS_RAISE = transport failure)."""
         class _Resp:
             def __init__(self, payload, status_code=200):
                 self._payload, self.status_code = payload, status_code
@@ -396,7 +407,20 @@ class TabListTests(unittest.TestCase):
                 if self.status_code >= 400:
                     raise RuntimeError(f"HTTP {self.status_code}")
 
+        moch_state = {"calls": 0}
+
         def fake_http(path, **kwargs):
+            if path == "/json/moch-tabs":
+                moch_state["calls"] += 1
+                if moch_tabs is None:
+                    return _Resp({}, status_code=404)
+                if moch_tabs is self._MOCH_TABS_RAISE:
+                    raise OSError("moch-tabs transport refused")
+                # First call = the feature probe (200); later calls may be
+                # told to fail to simulate a mid-call drop.
+                if isinstance(moch_tabs, dict) and moch_state["calls"] > 1:
+                    raise OSError(moch_tabs.get("fail_after_probe", "dropped"))
+                return _Resp(moch_tabs)
             if path == "/json/list":
                 return _Resp(pages)
             if path == "/json/version":
@@ -452,6 +476,67 @@ class TabListTests(unittest.TestCase):
         self.assertEqual(result["tabs"][0]["active"], True)
         self.assertEqual(result["tabs"][1]["active"], False)
 
+    def test_moch_tabs_list_is_preferred_over_the_filtered_list(self):
+        """BUG-136: /json/moch-tabs (the FULL page list) wins when present —
+        every tab is visible and Target.getTargets is never attempted."""
+        active = [{"id": "BBB222", "type": "page", "title": "Second", "url": "https://second.example/"}]
+        full = [
+            {"id": "AAA111", "type": "page", "title": "First", "url": "https://first.example/"},
+            {"id": "BBB222", "type": "page", "title": "Second", "url": "https://second.example/"},
+            {"id": "CCC333", "type": "page", "title": "Third", "url": "https://third.example/"},
+        ]
+        with mock.patch.object(wv, "_relay_http", self._relay(active, browser_level_flag=False, moch_tabs=full)), \
+                mock.patch.object(wv, "_supervisor", return_value=object()), \
+                mock.patch.object(wv, "_call", _Recorder({"targetInfos": []})) as cdp:
+            result = json.loads(wv.webview_tab_list(task_id="t"))
+        self.assertTrue(result["success"], result)
+        self.assertEqual([t["id"] for t in result["tabs"]], ["AAA111", "BBB222", "CCC333"],
+                         "the FULL list, not the 1-tab-filtered /json/list")
+        self.assertEqual(result["count"], 3)
+        self.assertEqual([t["active"] for t in result["tabs"]], [False, True, False],
+                         "the active marker still comes from the filtered /json/list")
+        self.assertNotIn("note", result, "a full listing has no backend limitation to note")
+        self.assertFalse(cdp.calls, "Target.getTargets must not run when moch-tabs answered")
+
+    def test_moch_tabs_absent_falls_back_to_the_legacy_merge(self):
+        """404 on /json/moch-tabs (older relay / desktop DevTools) → the
+        /json/list + Target.getTargets merge stays the source."""
+        relay_pages = [{"id": "BBB222", "type": "page", "title": "Second", "url": "https://second.example/"}]
+        cdp_infos = [{"targetId": "CCC333", "type": "page", "title": "Third", "url": "https://third.example/"}]
+        with mock.patch.object(wv, "_relay_http", self._relay(relay_pages, browser_level_flag=False)), \
+                mock.patch.object(wv, "_supervisor", return_value=object()), \
+                mock.patch.object(wv, "_call", _Recorder({"targetInfos": cdp_infos})) as cdp:
+            result = json.loads(wv.webview_tab_list(task_id="t"))
+        self.assertTrue(result["success"], result)
+        self.assertEqual([t["id"] for t in result["tabs"]], ["BBB222", "CCC333"])
+        self.assertTrue(cdp.calls, "the legacy widening must still run")
+
+    def test_moch_tabs_fetch_failure_after_probe_falls_back(self):
+        """Probe said 200 but the actual fetch drops → legacy merge, no crash."""
+        relay_pages = [{"id": "BBB222", "type": "page", "title": "Second", "url": "https://second.example/"}]
+        moch_tabs = {"fail_after_probe": "connection reset"}  # 200 once, then raise
+        with mock.patch.object(wv, "_relay_http", self._relay(relay_pages, browser_level_flag=False,
+                                                              moch_tabs=moch_tabs)), \
+                mock.patch.object(wv, "_supervisor", return_value=object()), \
+                mock.patch.object(wv, "_call", _Recorder({"targetInfos": []})):
+            result = json.loads(wv.webview_tab_list(task_id="t"))
+        self.assertTrue(result["success"], result)
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["tabs"][0]["id"], "BBB222")
+
+    def test_moch_tabs_close_sees_every_tab_so_last_tab_guard_counts_right(self):
+        """The BUG-136 regression: 5 tabs open, the relay's /json/list shows
+        only the active one — with moch-tabs the guard must see all 5."""
+        active = [{"id": "ACT1", "type": "page", "title": "A", "url": "https://a.example/"}]
+        full = [{"id": f"T{i}", "type": "page", "title": f"t{i}", "url": f"https://t{i}.example/"}
+                for i in range(5)] + active
+        with mock.patch.object(wv, "_relay_http", self._relay(active, browser_level_flag=False,
+                                                              moch_tabs=sorted(full, key=lambda t: t["id"]))), \
+                mock.patch.object(wv, "_supervisor", return_value=None):
+            result = json.loads(wv.webview_tab_list(task_id="t"))
+        self.assertTrue(result["success"], result)
+        self.assertEqual(result["count"], 6)
+
     def test_relay_down_returns_the_bug105_error(self):
         with mock.patch.object(wv, "_relay_http", side_effect=OSError("refused")), \
                 mock.patch.object(wv, "_supervisor", return_value=None), \
@@ -459,6 +544,67 @@ class TabListTests(unittest.TestCase):
             result = json.loads(wv.webview_tab_list(task_id="t"))
         self.assertFalse(result["success"])
         self.assertEqual(result["error"], "RELAY-DOWN-MARKER")
+
+
+class RelayLifecycleFallbackSkipTests(_TabToolTestCase):
+    """BUG-136: on the Moch relay the Target.* fallbacks are impossible (the
+    WebView page socket rejects the Target domain) — with _relay_filters_tabs()
+    True a failed HTTP round-trip IS the answer and must surface alone."""
+
+    def setUp(self):
+        super().setUp()
+        p = mock.patch.object(wv, "_relay_filters_tabs", return_value=True)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_create_skips_target_createtarget(self):
+        class _Resp:
+            status_code = 502
+            text = ("tab added to the Moch Browser strip, but no WebView DevTools "
+                    "target appeared within 3s")
+
+        with mock.patch.object(wv, "_relay_lifecycle", _Recorder(_Resp())), \
+                mock.patch.object(wv, "_supervisor", return_value=object()) as sup, \
+                mock.patch.object(wv, "_call", _Recorder({"targetId": "SHOULD-NOT-RUN"})) as call:
+            result = json.loads(wv.webview_tab_create("https://x.example", task_id="t"))
+        self.assertFalse(result["success"])
+        self.assertIn("/json/new", result["error"])
+        self.assertIn("no WebView DevTools target", result["error"],
+                      "the honest round-trip error surfaces")
+        self.assertIn("browser_navigate", result["error"])
+        self.assertFalse(sup.called, "the skipped fallback must not even consult the supervisor")
+        self.assertFalse(call.calls, "Target.createTarget must NOT run against the Moch relay")
+
+    def test_close_skips_target_closetarget(self):
+        self._http_tab_op_mock.result = (False, "HTTP 409: refusing to close the last remaining tab")
+        with mock.patch.object(wv, "_supervisor", return_value=object()), \
+                mock.patch.object(wv, "_cdp_tab_op", _Recorder((True, ""))) as cdp:
+            result = json.loads(wv.webview_tab_close(tab_id="AAA111", task_id="t"))
+        self.assertFalse(result["success"])
+        self.assertIn("/json/close", result["error"])
+        self.assertIn("refusing to close the last remaining tab", result["error"])
+        self.assertFalse(cdp.calls, "Target.closeTarget must NOT run against the Moch relay")
+
+    def test_activate_skips_target_activatetarget(self):
+        detail = "HTTP 504: tab op 'activate' timed out: the Moch UI did not acknowledge within 5s"
+        with mock.patch.object(wv, "_activate_tab", _REAL_ACTIVATE_TAB), \
+                mock.patch.object(wv, "_http_tab_op", _Recorder((False, detail))), \
+                mock.patch.object(wv, "_supervisor", return_value=object()), \
+                mock.patch.object(wv, "_cdp_tab_op", _Recorder((True, ""))) as cdp:
+            ok, out_detail = wv._activate_tab("AAA111", task_id="t")
+        self.assertFalse(ok)
+        self.assertEqual(out_detail, detail, "the honest HTTP error surfaces alone, no Target.* noise")
+        self.assertFalse(cdp.calls, "Target.activateTarget must NOT run against the Moch relay")
+
+    def test_desktop_endpoint_keeps_the_cdp_fallback(self):
+        """Non-Moch backends (_relay_filters_tabs False) keep today's behavior."""
+        self._http_tab_op_mock.result = (False, "HTTP 405: method not allowed")
+        with mock.patch.object(wv, "_relay_filters_tabs", return_value=False), \
+                mock.patch.object(wv, "_supervisor", return_value=object()), \
+                mock.patch.object(wv, "_cdp_tab_op", _Recorder((True, ""))) as cdp:
+            result = json.loads(wv.webview_tab_close(tab_id="AAA111", task_id="t"))
+        self.assertTrue(result["success"], result)
+        self.assertEqual(cdp.calls[0][0][1], "Target.closeTarget")
 
 
 class RegistrationTests(unittest.TestCase):
