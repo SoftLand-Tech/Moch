@@ -1,12 +1,11 @@
 import { atom } from 'nanostores'
-import { rpc } from './gateway'
 import { log } from './log'
-import { fleetProfiles, refreshFleet } from './fleet'
 import { joinRunningSessions, type ActiveListSession } from './sessionRunning'
 import { optimisticSessionRow, type SessionRow } from './sessionRowMeta'
 // Re-exported for every existing consumer; canonical definition (and its
 // docs) lives in lib/sessionRowMeta so the scripts suites can import rows
 // without pulling this module's gateway→RN graph into their tsconfig.
+// (fleet stays a LAZY import below — a static one re-breaks node-loading.)
 export type { SessionRow }
 /**
  * The server's conversation list.
@@ -52,7 +51,7 @@ export const runningStoredIds = atom<ReadonlySet<string>>(new Set())
  */
 export async function refreshRunningSessions(): Promise<void> {
   try {
-    const res = await rpc<{ sessions?: ActiveListSession[] }>('session.active_list', {})
+    const res = await sessionRpc<{ sessions?: ActiveListSession[] }>('session.active_list', {})
     runningStoredIds.set(joinRunningSessions(res?.sessions, sessionRows.get()))
   } catch (err) {
     log('info', 'sessions', `session.active_list failed: ${err instanceof Error ? err.message : String(err)}`)
@@ -98,6 +97,24 @@ async function lastActiveStorage(): Promise<StorageLike> {
   const mod = (await import('@react-native-async-storage/async-storage')) as unknown as
     StorageLike & { default?: StorageLike }
   return mod.default ?? mod
+}
+
+// ── Lazy gateway/fleet access (same contract as the storage loader above) ───
+// `./gateway` and `./fleet` pull AsyncStorage / expo / react-native in at
+// MODULE SCOPE, so a static import makes this module unloadable in plain
+// node — where the scripts/ suites exercise it. Both are imported lazily at
+// the (async) call sites instead; in the app both are always in the bundle
+// and the dynamic import resolves from the module cache.
+type RpcFn = typeof import('./gateway')['rpc']
+let rpcOverride: RpcFn | null = null
+/** Scripts inject a fake RPC here (offline suites); real apps never do. */
+export function _useSessionRpcForTests(r: RpcFn | null) {
+  rpcOverride = r
+}
+async function sessionRpc<T>(method: string, params: Record<string, unknown>, timeoutMs?: number): Promise<T> {
+  if (rpcOverride) return rpcOverride<T>(method, params, timeoutMs)
+  const { rpc } = await import('./gateway')
+  return rpc<T>(method, params, timeoutMs)
 }
 
 let lastActiveLoaded = false
@@ -197,6 +214,9 @@ const PROFILE_FANOUT_MAX = 8
 async function withOtherProfiles(base: SessionRow[]): Promise<SessionRow[]> {
   let names: string[] = []
   try {
+    // Lazy import (see the note by sessionRpc): fleet.ts loads RN-scope
+    // modules and must stay out of this module's static import graph.
+    const { fleetProfiles, refreshFleet } = await import('./fleet')
     // The roster is normally primed by the Fleet screen; on a cold start it is
     // empty, and an empty roster used to mean "no other profiles exist" — which
     // is exactly the restart case this fixes. Prime it once, best-effort.
@@ -209,6 +229,7 @@ async function withOtherProfiles(base: SessionRow[]): Promise<SessionRow[]> {
     return base
   }
   if (!names.length) return base
+  const { rpc } = await import('./gateway')
   const seen = new Set(base.map((r) => r.id))
   const extra: SessionRow[] = []
   const settled = await Promise.allSettled(
@@ -247,7 +268,7 @@ export function loadSessions(opts?: { force?: boolean }): Promise<SessionRow[]> 
     sessionListError.set(null)
     try {
       // `search` is NOT a valid param here (the contract is extra="forbid").
-      const res = await rpc<{ sessions?: SessionRow[] }>('session.list', { limit: LIST_LIMIT })
+      const res = await sessionRpc<{ sessions?: SessionRow[] }>('session.list', { limit: LIST_LIMIT })
       // Superseded (a newer force fetch, or a backend-switch reset) — never
       // write stale rows over fresher ones.
       if (gen !== loadGen) return sessionRows.get()
