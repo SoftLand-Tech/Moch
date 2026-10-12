@@ -9,12 +9,19 @@ import { ScreenShell } from '../../src/components/ScreenShell'
 import { C, useStyles } from '../../src/lib/theme'
 import { useRouter } from 'expo-router'
 import {
+  CreateChecklist,
+  DEFAULT_CHECKLIST,
+  LaunchSkill,
   createProfile,
   fleetError,
   fleetProfiles,
   fleetStatusAtom,
   freezeProfile,
+  listLaunchSkills,
+  loadCreateDefaults,
   refreshFleet,
+  saveCreateDefaults,
+  seedHasSkips,
   slugifyName,
   soulDraft,
   FleetProfile,
@@ -46,6 +53,13 @@ export default function Fleet() {
   const [creating, setCreating] = useState(false)
   const [job, setJob] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
+  // BUG-139 creation checklist: persisted defaults, launch-skill picker.
+  const [checklist, setChecklist] = useState<CreateChecklist>(DEFAULT_CHECKLIST)
+  const [skillsList, setSkillsList] = useState<LaunchSkill[]>([])
+  const [skillsLoaded, setSkillsLoaded] = useState(false)
+  const [skillsOpen, setSkillsOpen] = useState(false)
+  const [createErr, setCreateErr] = useState('')
+  const [partial, setPartial] = useState(false)
 
   const refresh = useCallback(() => {
     if (!online) return
@@ -54,16 +68,50 @@ export default function Fleet() {
 
   useEffect(refresh, [refresh])
 
+  // Open the create box → restore the user's last checklist + fetch skills
+  // (moch.skills.list; older gateways answer nothing and the picker renders
+  // its empty state — the checklist never blocks creation).
+  useEffect(() => {
+    if (!creating) return
+    void loadCreateDefaults().then(setChecklist)
+    if (!skillsLoaded) {
+      void listLaunchSkills().then((l) => {
+        setSkillsList(l)
+        setSkillsLoaded(true)
+      })
+    }
+  }, [creating, skillsLoaded])
+
   const frozenSet = new Set((status?.profiles ?? []).filter((p) => p.frozen).map((p) => p.name))
 
   const create = async () => {
     if (!job.trim() || busy) return
     setBusy('create')
+    setCreateErr('')
+    setPartial(false)
     try {
       const name = slugifyName(job)
-      await createProfile({ name, description: job.trim(), soul: soulDraft(job, name) })
+      const r = await createProfile({
+        name,
+        description: job.trim(),
+        soul: soulDraft(job, name),
+        checklist,
+      })
+      if (!r.ok) {
+        setCreateErr(tr('fleet.create.err', { why: r.error ?? 'profiles.create refused' }))
+        return
+      }
+      // Bot exists — seeding outcome is best-effort and reported, never fatal.
+      if (r.seedError) {
+        setCreateErr(tr('fleet.create.err', { why: r.seedError }))
+      } else if (r.seed && seedHasSkips(r.seed)) {
+        setPartial(true)
+      }
+      void saveCreateDefaults(checklist)
       setJob('')
       setCreating(false)
+    } catch (e) {
+      setCreateErr(tr('fleet.create.err', { why: e instanceof Error ? e.message : String(e) }))
     } finally {
       setBusy(null)
     }
@@ -127,6 +175,7 @@ export default function Fleet() {
             ) : null}
           </View>
         ) : null}
+        {partial ? <Text style={s.notice}>{tr('fleet.create.partial')}</Text> : null}
 
         {loading && online ? (
           <ActivityIndicator style={s.spin} />
@@ -221,6 +270,90 @@ export default function Fleet() {
                 autoFocus
               />
               <Text style={s.hint}>{tr("fleet.create.suggested")}: {slugifyName(job) || "…"}</Text>
+
+              {/* BUG-139 checklist: context/skills enter as FILES (USER.md,
+                  skills/), never prompt-stuffing — files persist, are
+                  visible/editable in bot detail, and ride hermes' memory
+                  machinery. Existing files are never overwritten. */}
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: checklist.copyUserMemory }}
+                style={[s.checkRow, isRTL() && { flexDirection: 'row-reverse' }]}
+                onPress={() =>
+                  setChecklist((c) => ({ ...c, copyUserMemory: !c.copyUserMemory }))}
+              >
+                <Ionicons
+                  name={checklist.copyUserMemory ? 'checkbox-outline' : 'square-outline'}
+                  size={18}
+                  color={checklist.copyUserMemory ? C.accent : C.textDim}
+                />
+                <View style={s.checkText}>
+                  <Text style={s.checkLabel}>{tr('fleet.create.ideas')}</Text>
+                  <Text style={s.checkHint}>{tr('fleet.create.ideas.hint')}</Text>
+                </View>
+              </Pressable>
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: checklist.copyMemory }}
+                style={[s.checkRow, isRTL() && { flexDirection: 'row-reverse' }]}
+                onPress={() =>
+                  setChecklist((c) => ({ ...c, copyMemory: !c.copyMemory }))}
+              >
+                <Ionicons
+                  name={checklist.copyMemory ? 'checkbox-outline' : 'square-outline'}
+                  size={18}
+                  color={checklist.copyMemory ? C.accent : C.textDim}
+                />
+                <View style={s.checkText}>
+                  <Text style={s.checkLabel}>{tr('fleet.create.memory')}</Text>
+                  <Text style={s.checkHint}>{tr('fleet.create.memory.hint')}</Text>
+                </View>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ expanded: skillsOpen }}
+                style={[s.checkRow, isRTL() && { flexDirection: 'row-reverse' }]}
+                onPress={() => setSkillsOpen((v) => !v)}
+              >
+                <Ionicons
+                  name={skillsOpen ? 'chevron-down-outline' : 'chevron-forward-outline'}
+                  size={16}
+                  color={C.textDim}
+                />
+                <Text style={s.checkLabel}>{tr('fleet.create.skills')}</Text>
+                {checklist.skills.length > 0 ? (
+                  <Text style={s.checkCount}>{checklist.skills.length}</Text>
+                ) : null}
+              </Pressable>
+              {skillsOpen ? (
+                skillsLoaded && skillsList.length === 0 ? (
+                  <Text style={s.checkHint}>{tr('fleet.create.skills.empty')}</Text>
+                ) : (
+                  <View style={[s.chips, isRTL() && { flexDirection: 'row-reverse' }]}>
+                    {skillsList.map((sk) => {
+                      const on = checklist.skills.includes(sk.name)
+                      return (
+                        <Pressable
+                          key={sk.path}
+                          accessibilityRole="checkbox"
+                          accessibilityState={{ checked: on }}
+                          style={[s.chip, on && s.chipActive]}
+                          onPress={() =>
+                            setChecklist((c) => ({
+                              ...c,
+                              skills: on
+                                ? c.skills.filter((n) => n !== sk.name)
+                                : [...c.skills, sk.name],
+                            }))}
+                        >
+                          <Text style={s.chipText} numberOfLines={1}>{sk.name}</Text>
+                        </Pressable>
+                      )
+                    })}
+                  </View>
+                )
+              ) : null}
+              {createErr ? <Text style={s.createErr}>{createErr}</Text> : null}
               <View style={s.rowBtns}>
                 <Pressable style={s.btnGhost} onPress={() => setCreating(false)}>
                   <Text style={s.btnGhostText}>{tr("fleet.cancel")}</Text>
@@ -239,7 +372,7 @@ export default function Fleet() {
               </View>
             </View>
           ) : (
-            <Pressable accessibilityRole="button" style={s.fab} onPress={() => setCreating(true)} disabled={!online}>
+            <Pressable accessibilityRole="button" style={s.fab} onPress={() => { setCreateErr(''); setPartial(false); setCreating(true) }} disabled={!online}>
               <Ionicons name="add" size={20} color={C.bg} />
               <Text style={s.fabText}>{tr("fleet.create")}</Text>
             </Pressable>
@@ -294,6 +427,16 @@ const makeS = () =>
       backgroundColor: C.bg,
     },
     hint: { color: C.textDim, fontSize: 11, marginTop: 6 },
+    checkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginTop: 10 },
+    checkText: { flex: 1 },
+    checkLabel: { color: C.text, fontSize: 13, fontWeight: '500' },
+    checkHint: { color: C.textFaint, fontSize: 11, marginTop: 2, lineHeight: 15 },
+    checkCount: {
+      color: C.bg, backgroundColor: C.accent, borderRadius: 8,
+      paddingHorizontal: 7, paddingVertical: 1, fontSize: 11, overflow: 'hidden',
+    },
+    createErr: { color: C.red, fontSize: 11, marginTop: 8 },
+    notice: { color: C.accent, fontSize: 12, paddingHorizontal: 16, paddingBottom: 6 },
     rowBtns: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 10 },
     btn: {
       backgroundColor: C.accent,

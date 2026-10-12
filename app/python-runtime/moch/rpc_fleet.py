@@ -180,6 +180,129 @@ def _install(tg_server) -> bool:
         except Exception as exc:  # noqa: BLE001
             return _err(rid, 5022, f"kanban read failed: {exc}")
 
+    def moch_skills_list(rid, params):
+        """BUG-139 checklist picker: skills installed in the LAUNCH home
+        (os.environ HERMES_HOME — under multiplex that is the launch profile
+        by contract). Read-only walk of skills/ via upstream's own iterator
+        (org-mirror aware), name = SKILL.md's parent dir (identity rule,
+        methods_profiles.py). Description: top-level frontmatter line,
+        display-truncated — parse-light by design (no yaml import on this path).
+        Params: {limit?: 50}"""
+        home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
+        skills_dir = home / "skills"
+        out = []
+        if skills_dir.is_dir():
+            try:
+                from agent.skill_utils import iter_skill_index_files
+            except ImportError as exc:
+                return _err(rid, 5067, f"skill utils unavailable: {exc}")
+            limit = max(1, min(int(params.get("limit") or 50), 200))
+            for md in iter_skill_index_files(skills_dir, "SKILL.md"):
+                rel = md.parent.relative_to(skills_dir)
+                desc = ""
+                try:
+                    text = md.read_text(encoding="utf-8", errors="replace")
+                    if text.startswith("---"):
+                        for line in text.split("---", 2)[1].splitlines():
+                            ls = line.strip()
+                            if ls.startswith("description:"):
+                                desc = ls[len("description:"):].strip().strip("'\"")[:140]
+                                break
+                except OSError:
+                    pass
+                out.append({"name": str(rel.name), "description": desc,
+                            "path": str(rel)})
+                if len(out) >= limit:
+                    break
+        return _ok(rid, {"skills": out})
+
+    def moch_profiles_seed(rid, params):
+        """BUG-139 checklist: copy identity files / selected skills from the
+        LAUNCH home into a named profile — as real files, post-create.
+        Never clone_from: that copies the whole .env/config.yaml (mirroring
+        then skips the non-stub .env — §2.8's model-key-only default silently
+        upgrades to full credential sharing) and is all-skills-all-memory.
+        Params: {profile, copy_user_memory?: bool, copy_memory?: bool,
+                 skills?: [names]} → per-item copied/skipped-exists/missing.
+        Vendored helpers are import-only (no core edits); ImportError is a
+        clean refusal, not a crash."""
+        from moch import fleet  # noqa: F401 — consistency with sibling methods
+        name = str(params.get("profile") or "").strip()
+        if not name or name == "default":
+            return _err(rid, 4061, "a non-default profile is required")
+        want_user = bool(params.get("copy_user_memory"))
+        want_memory = bool(params.get("copy_memory"))
+        skills = [str(x).strip() for x in (params.get("skills") or [])
+                  if str(x).strip()]
+        if not (want_user or want_memory or skills):
+            return _err(rid, 4062, "nothing to seed")
+        try:
+            from hermes_cli.profiles import get_profile_dir
+        except ImportError as exc:
+            return _err(rid, 5066, f"profile helpers unavailable: {exc}")
+        dst = Path(get_profile_dir(name))
+        if not dst.is_dir():
+            return _err(rid, 4063, f"profile '{name}' not found")
+        launch = Path(os.environ.get("HERMES_HOME",
+                                     str(Path.home() / ".hermes")))
+        try:
+            from hermes_cli.profiles import (_clone_file,
+                                             _copytree_keep_junctions,
+                                             _non_exportable_entries)
+        except ImportError as exc:
+            return _err(rid, 5066, f"vendored copy helpers unavailable: {exc}")
+
+        out = {"profile": name, "userMemory": None, "memory": None, "skills": []}
+        for flag, rel, key in ((want_user, "memories/USER.md", "userMemory"),
+                               (want_memory, "memories/MEMORY.md", "memory")):
+            if not flag:
+                continue
+            if not (launch / rel).is_file():
+                out[key] = "missing"
+            elif (dst / rel).exists():
+                out[key] = "skipped-exists"
+            else:
+                _clone_file(launch, dst, rel)
+                out[key] = "copied"
+
+        if skills:
+            from agent.skill_utils import iter_skill_index_files
+            launch_skills = launch / "skills"
+            # name → (SKILL.md, rel): first match wins on category collisions
+            found: dict[str, tuple] = {}
+            if launch_skills.is_dir():
+                for md in iter_skill_index_files(launch_skills, "SKILL.md"):
+                    rel = md.parent.relative_to(launch_skills)
+                    found.setdefault(str(rel.name), (md, rel))
+            for want in skills:
+                if want not in found:
+                    out["skills"].append({"name": want, "result": "missing"})
+                    continue
+                md, rel = found[want]
+                dst_dir = dst / "skills" / rel
+                if dst_dir.exists():
+                    # merge would duplicate a same-named candidate and
+                    # _locate_skill refuses to guess (#113471) — skip.
+                    out["skills"].append({"name": want,
+                                          "result": "skipped-exists"})
+                    continue
+                if md.parent.is_symlink():
+                    # symlinked source copies as a write-through link into
+                    # the launch tree — never link a bot into Moch's files.
+                    out["skills"].append({"name": want,
+                                          "result": "skipped-symlink"})
+                    continue
+                dst_dir.parent.mkdir(parents=True, exist_ok=True)
+                _copytree_keep_junctions(md.parent, dst_dir,
+                                         _non_exportable_entries,
+                                         dirs_exist_ok=True)
+                out["skills"].append({"name": want, "result": "copied"})
+
+        audit.record("profile.seeded", profile=name, userMemory=out["userMemory"],
+                     memory=out["memory"],
+                     skills={x["name"]: x["result"] for x in out["skills"]})
+        return _ok(rid, out)
+
     def moch_runs_timeline(rid, params):
         """Merged read-side run ledger (§2.1: a VIEW, not a store):
         kanban tasks + cron executions + delegation records, newest first.
@@ -261,6 +384,8 @@ def _install(tg_server) -> bool:
         "moch.kanban.tasks": moch_kanban_tasks,
         "moch.profiles.mirror_model_key": moch_profiles_mirror_model_key,
         "moch.profiles.delete": moch_profiles_delete,
+        "moch.profiles.seed": moch_profiles_seed,
+        "moch.skills.list": moch_skills_list,
         "moch.fleet.freeze": moch_fleet_freeze,
         "moch.fleet.budgets": moch_fleet_budgets,
         "moch.runs.timeline": moch_runs_timeline,

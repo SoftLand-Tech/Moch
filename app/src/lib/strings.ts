@@ -50,6 +50,18 @@ const EN: Catalog = {
   'fleet.create.job': 'Describe the job — e.g. watch price drops daily',
   'fleet.create.suggested': 'Suggested name',
   'fleet.create.cta': 'Create bot',
+  'fleet.create.ideas': 'Ideas about me',
+  'fleet.create.ideas.hint':
+    'Copy what Moch knows about you (USER.md) into this bot — it starts familiar instead of a stranger.',
+  'fleet.create.memory': "Moch's work memory",
+  'fleet.create.memory.hint':
+    "Also copy Moch's accumulated MEMORY.md — usually noisy; leave off unless the bot needs the history.",
+  'fleet.create.skills': 'Skills to give it',
+  'fleet.create.skills.empty': 'No skills found in Moch',
+  'fleet.create.skills.unavailable': 'Skill list unavailable on this gateway',
+  'fleet.create.err': 'Could not create the bot: {why}',
+  'fleet.create.partial':
+    'Bot created — some checklist items were skipped (existing files are never overwritten).',
   'fleet.cancel': 'Cancel',
   'fleet.offline': 'Fleet offline',
   'fleet.runtime.idle': 'fleet runtime idle on this gateway',
@@ -86,6 +98,18 @@ const AR: Catalog = {
   'fleet.create.job': 'صِف المهمة — مثال: تابع تخفيضات الأسعار يوميًا',
   'fleet.create.suggested': 'اسم مقترح',
   'fleet.create.cta': 'أنشئ البوت',
+  'fleet.create.ideas': 'معرفة من أنا',
+  'fleet.create.ideas.hint':
+    'انسخ ما يعرفه موك عنك (USER.md) إلى هذا البوت — يبدأ عارفًا بك بدلًا من غريب.',
+  'fleet.create.memory': 'ذاكرة موك العاملة',
+  'fleet.create.memory.hint':
+    'انسخ أيضًا ذاكرة موك المتراكمة (MEMORY.md) — عادة مشوشة؛ اتركها مطفأة ما لم يحتج البوت التاريخ.',
+  'fleet.create.skills': 'مهارات تمنحها له',
+  'fleet.create.skills.empty': 'لا توجد مهارات لدى موك',
+  'fleet.create.skills.unavailable': 'قائمة المهارات غير متاحة على هذه البوابة',
+  'fleet.create.err': 'تعذّر إنشاء البوت: {why}',
+  'fleet.create.partial':
+    'تم إنشاء البوت — تم تخطي بعض عناصر القائمة (الملفات الموجودة لا تُستبدل أبدًا).',
   'fleet.cancel': 'إلغاء',
   'fleet.offline': 'الأسطول غير متصل',
   'fleet.runtime.idle': 'وقت تشغيل الأسطول خامل على هذه البوابة',

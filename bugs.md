@@ -1196,6 +1196,112 @@ Deferred (documented, not shipped): Tier B anydoc wheel (+3.4MB, unlocks doc ext
 read_file's schema CLAIMS anydoc is bundled but it never was: drift), Tier C ddgs/lxml/primp
 (+4-5MB, lights web_search/web_extract — or configure a search API key instead).
 
+## BUG-134 [HIGH] (NEW, WIP) Terminal ≠ agent environment — gh auth done in the terminal is invisible to the agent
+
+User report (2026-10-12): "the terminal is not the same as the terminal that the agent do commands on, for
+example i installed gh cli and i authed with my account in the terminal, and i told the agent to check if
+i am authed or not, it said no not authed!"
+Intake: the user's Terminal screen (persistent `bash -i` via `moch/terminal.py`) and the agent's one-shot
+`exec_in_guest` are supposed to share ONE Moch Linux guest — same rootfs, same HOME, same PATH-relevant
+env. Something diverges (HOME, PATH, env sanitization, GH_* override, separate proot launch env) so state
+written from the terminal (gh auth → `~/.config/gh/hosts.yml`) is not what the agent's exec sees.
+Verification wave pending (read-only, scope: `app/python-runtime/moch/{terminal.py,linux_env.py,
+linux_session.py}`, `HermesRuntime.kt`/`HermesBridgeModule.kt` exec paths, hermes-src exec tool).
+
+**Verified (read-only adversarial agent, 2026-10-12): CONFIRM, worse than reported — the intake's
+"same HOME" assumption is FALSE.** Same proot rootfs, DIFFERENT $HOME: the Terminal's bash gets
+HOME=/root (terminal.py:159-161 sets it explicitly); the agent's guest shells inherit the Chaquopy
+process HOME=/data/user/0/<pkg>/files — a path that does NOT exist inside the guest rootfs (only
+workspace/scratch/dev/proc are bound). Terminal gh auth writes guest /root/.config/gh/hosts.yml; the
+agent's `gh auth status` reads /data/…/files/.config/gh/hosts.yml → ENOENT → "not logged in"
+(truthful). Chain: agent tool → environments/local.py:907-928 `_run_bash` → PATH-shim bash
+(hermes_boot.py:105-107) → HERMES_EXEC_TRAMPOLINE /system/bin/sh → _shim_body (linux_env.py:220-242,
+exports ONLY LD_LIBRARY_PATH/PROOT_LOADER/PROOT_TMP_DIR — never HOME/PATH) → `apply_subprocess_home_env`
+no-ops on Android host (hermes_constants.py:936-971). EVERY $HOME-relative class diverges: ~/.gitconfig,
+~/.ssh, ~/.netrc, ~/.aws, ~/.npmrc, ~/.config/*, ~/.cache…; agent-side $HOME writes inside the guest
+create a phantom /data tree (proot -0 fake-root allows it) — silent state forking in BOTH directions.
+Bridge `exec_in_guest` (linux_env.py:554-569) = a THIRD env (raw os.environ). linux_session.py has the
+correct env but ZERO production callers (dead code). GH_TOKEN override and not-in-guest hypotheses
+DISPROVEN. Open sub-question: the terminal's guest PATH works only by accident (lazy
+hermes_cli.gateway import appends /bin dirs to os.environ at runtime — unpinned by any test).
+Fix shape (choke point = the shim): `build_guest_launch` (linux_env.py:192-196) sets HOME=/root +
+prepends guest PATH; `_shim_body` exports the same; bump SHIM_FORMAT 5→6 so the existing repair gate
+(hermes_boot.py:91-104) rewrites installed shims; with HOME=/root the agent's login bash natively
+sources /root/.profile + /root/.bashrc ⇒ dotfile parity for free; pin with test_linux_exec.py
+assertions. Deferred (documented): user-terminal env leak (raw os.environ incl. session token into the
+PTY — the terminal is the leaky surface, agent scrubs), cwd divergence (/root vs workspace), rc-file
+semantics triple (terminal misses login exports), dead linux_session.py, bot profile homes unbound in
+guest, PAGER/TERM asymmetries.
+
+## BUG-135 [MEDIUM] (NEW, WIP) Links in agent responses and terminal output are dead text — must be tappable and open in the built-in browser in a new tab
+
+User report (2026-10-12): "the terminal/agent responses give me a link to open or something they should be
+clickable and open in the built-in browser in a new tab!"
+Intake: two surfaces render URLs as plain text today — chat message bubbles (`Chat.tsx`) and the xterm.js
+terminal WebView (`app/android/app/src/main/assets/term/index.html`). Both need URL detection + tap →
+open the URL as a NEW TAB in Moch's built-in Browser screen (not the OS browser). Verification wave
+pending (read-only scope: Chat.tsx message rendering + any existing link handling, term/index.html +
+`src/lib/terminal.ts` plumbing, Browser screen tab-open API).
+
+**Verified (read-only adversarial agent, 2026-10-12): CONFIRM, understated.** (a) Bare URLs are dead
+text everywhere: assistant text renders `@ronradtke/react-native-markdown-display` with NO
+`markdownit`/`onLinkPress` props (Chat.tsx:223, CommandOutput.tsx:195) and the lib ships linkify
+DISABLED (createMarkdownIt.ts:18-19) — zero autolink/Linking.openURL anywhere in src. (b) Markdown
+`[text](url)` links in completed text ARE tappable — but open the OS BROWSER (lib default
+openUrl.ts:14) — wrong target even where "working". (c) Terminal: bundled xterm has OSC-8 parsing +
+auto-registered OscLinkProvider but no `linkHandler` (default confirm()+window.open — both unhandled
+in the RN WebView) and NO web-links addon for bare URLs; worse, the WebView sits in a
+`pointerEvents:"box-only"` wrapper (terminal.tsx:385, BUG-100) so taps NEVER reach xterm — every tap
+re-focuses the hidden input. (d) NO path exists to open the Browser screen WITH a URL: no route
+params (browser.tsx has no useLocalSearchParams), `addTab` (browserRelay.ts:147, module-level
+nanostore — callable from anywhere, mounts the tab when the screen opens) is only called in-screen.
+Fix shape: `openInAppBrowserTab(url)` helper beside addTab + `router.navigate('/(tabs)/browser')`;
+Chat/CommandOutput get `markdownit = MarkdownIt({typographer,linkify})` (re-exported by the lib, zero
+new deps) + `onLinkPress` → helper, return false (kills OS-browser default); terminal: OSC-8
+`linkHandler` + inlined web-links UMD both `say({type:'link',url})` over the EXISTING postMessage
+channel, RN-side hit-test via the box-only wrapper's onTouchEnd → `window.__linkAt(x,y)` (px→cell via
+renderService dimensions, fit-addon precedent), `{type:'link'}` branch in handleWebMsg → helper;
+link-tap gesture must suppress the IME refocus. Adjacent dead-text surfaces noted: streaming tail
+(BUG-040 trade — leave), thinking text, ToolRow preview, CommandCard error/usage/notice, clarify
+question. Agent-side new-tab is BUG-136's root (relay 405).
+
+## BUG-136 [HIGH] (NEW, WIP) Browser tab control tools fail with 405 — only the tab list works
+
+User report (2026-10-12): "the browser tab control tools don't work, they return 405 error, only the tab
+list that works!"
+Intake: PR #120 shipped tab management tools; the CDP relay (`CdpRelay.kt`) deliberately 405s
+`/json/new|close|activate` as "native-owned" and `browser_webview.py` is supposed to fall back to
+native/CDP paths — on device the agent still surfaces the 405 for every lifecycle op while `/json/list`
+works. Verify which link in the fallback chain is missing (relay endpoints unimplemented vs bridge tab
+ops unwired vs `Target.*` fallback impossible on WebView) and what the minimal working route is (tab ops
+must end at the RN/Kotlin tab owner). Scope: `app/hermes-src/tools/browser_webview.py`, tab-tool
+registration, `app/src/lib/browserRelay.ts`, `CdpRelay.kt`/`BrowserRelayModule.kt`, RN browser screen,
+`app/python-runtime/tests/test_browser_tab_tools.py`.
+
+**Verified (read-only adversarial agent, 2026-10-12): CONFIRMED, worse than reported.** The literal 405
+surfaces for `browser_tab_create`/`browser_tab_switch`; `browser_tab_close` fails EARLIER with a
+misleading "refusing to close the last remaining tab" (the relay's `/json/list` is filtered to exactly
+ONE tab, so the close-guard always fires) — and "only the list works" is itself generous: the list can
+only ever show the ACTIVE tab (1-tab fiction). Net: 3/4 tools fail, the 4th is degraded. Knowingly
+shipped: PR #120's message lists the Kotlin/RN endpoints as follow-ups; its 165 green tests ran against
+a SIMULATED relay/headless Chromium, never the real one (test_browser_tab_tools.py stubs
+`_webview_tab_targets`→3 tabs, `_relay_lifecycle`→200, `Target.*` fallbacks — all impossible on device).
+Mechanism: `CdpRelay.kt:210-212` 405s `/json/new|close|activate` by design; `browser_webview.py`'s
+`Target.*` fallbacks run over the "browser" ws which the relay tunnels to the ACTIVE PAGE's socket
+(`CdpRelay.kt:213-226`) — WebView has no browser-level target, so every fallback is impossible. MISSING
+WIRE: tabs are owned by RN nanostores (`browserRelay.ts:147-174` addTab/closeTab/switchTab +
+`(tabs)/browser.tsx:262-290` WebView pool) but NOTHING connects Python/Kotlin to them — no bridge
+methods, no DeviceEventEmitter listener (only ShareInModule emits). FEATURE-BROWSER.md:125-127 designed
+"tab switch via bridge call, not CDP" — never built. Fix shape: relay implements the three lifecycle
+endpoints via a `mochTabOp` DeviceEventEmitter round-trip (op+requestId, latch ~5s) acked by
+`browserRelay.ts` after driving the nanostores; needs a tabs⇔targets registry (targetId per BrowserTab;
+relay diffs upstream `/json/list` to answer `/json/new` with the new page's JSON); zero Python changes
+required (it already PUTs and parses 200s). Adjacent defects found: silent wrong-tab driving after any
+manual tab switch (supervisor stays pinned to the old page; resync only runs after a successful
+activate/close); AgentBrowserHost/browser.tsx active-URL last-writer-wins race; `chosenPageJson`
+first-page fallback on ambiguous/stale URL match; tab ids go stale after onRenderProcessGone remount;
+fixed port 9334 squattable (confusion/DoS only).
+
 ## BUG-133 [HIGH] Keyboard opens over inputs app-wide — the input and everything at the bottom must rise ABOVE the keyboard
 
 User report (2026-10-12): "find all inputs/anything that will open the keyboard, and make sure when the
@@ -1217,3 +1323,9 @@ pending user's next dev build; JS-only, Metro reload is enough.)*
 
 Deferred: SessionToasts render under open sheet Modals (RNKC OverKeyboardView is the fix surface);
 chat pathological tall-stack overflow in clarify cards (flexShrink on s.sheet/s.runFooter).
+
+## M9 crew-loop slice (2026-10-12) — close the headline demo chain
+
+- [ ] **BUG-137 [HIGH] M9 headline false: bots cannot spawn sub-bots — SpawnBotService has no tool door (M9.1a stage 3 never landed)** — `app/python-runtime/moch/spawn_bot.py:81` (service + tests only; zero registration in `hermes-src` tools/plugins, no wiring in `gateway_server.py` boot) — "bots create their own sub-bots" is a service without a caller — wire the stage-3 toolset wrapper (Moch-side, flag-gated, no vendored edit) + surface the first-spawn-of-day `approval-required` refusal through the existing approval card machinery.
+- [ ] **BUG-138 [HIGH] Crew board is read-only from the app — the "user puts work on the board" loop cannot close** — `app/app/(tabs)/crew.tsx:15` (write ops deferred), `app/python-runtime/moch/rpc_fleet.py:157` (`moch.kanban.tasks` is read-only) — bots have board tools but the user has no write surface — add `moch.kanban.create/assign/complete` RPCs + Crew screen buttons.
+- [ ] **BUG-139 [MEDIUM] Bot creation has no checklist — context/skills/model knobs exist at the RPC layer but are unreachable from the UI** — `app/src/lib/fleet.ts:101` (`createProfile` sends only name/description/soul), `hermes-src/tui_gateway/methods_profiles.py:366` (`clone_from`/`no_skills`/`model`/`provider` accepted but unused by the app) — new bots always start strangers with default skills — checklist UI ("ideas about me" = USER.md copy as a file, selective skills, model pin) + small selective-copy additions in `moch/rpc_fleet.py` (not vendored edits).

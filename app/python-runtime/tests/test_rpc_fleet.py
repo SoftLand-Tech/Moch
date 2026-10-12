@@ -139,6 +139,77 @@ class TestRpcFleet(unittest.TestCase):
         res2 = self.tg._methods["moch.profiles.delete"](2, {"profile": "x"})
         self.assertIn("error", res2)
 
+    # -- BUG-139: moch.profiles.seed / moch.skills.list ----------------------
+
+    def _seed_world(self):
+        """Launch identity + one skill + a target profile; returns paths."""
+        launch = self.home
+        (launch / "memories").mkdir(exist_ok=True)
+        (launch / "memories" / "USER.md").write_text("# user\nlikes tea", "utf-8")
+        (launch / "memories" / "MEMORY.md").write_text("# memory\nold digest", "utf-8")
+        skill = launch / "skills" / "research" / "deep-dive"
+        skill.mkdir(parents=True, exist_ok=True)
+        (skill / "SKILL.md").write_text(
+            "---\nname: deep-dive\ndescription: Long-form research passes\n---\n"
+            "# deep-dive\nbody", "utf-8")
+        link = launch / "skills" / "research" / "linked-skill"
+        if not link.exists():
+            link.symlink_to(skill, target_is_directory=True)
+        prof = launch / "profiles" / "watcher"
+        prof.mkdir(parents=True, exist_ok=True)
+        (prof / "memories").mkdir(exist_ok=True)
+        return launch, skill, prof
+
+    def test_seed_copies_identity_and_skills(self):
+        launch, skill, prof = self._seed_world()
+        res = self.tg._methods["moch.profiles.seed"](1, {
+            "profile": "watcher", "copy_user_memory": True,
+            "skills": ["deep-dive"]})
+        self.assertNotIn("error", res, res)
+        r = res["result"]
+        self.assertEqual(r["userMemory"], "copied")
+        self.assertIsNone(r["memory"])  # not requested
+        self.assertEqual(r["skills"], [{"name": "deep-dive", "result": "copied"}])
+        self.assertEqual((prof / "memories" / "USER.md").read_text("utf-8"),
+                         "# user\nlikes tea")
+        self.assertTrue((prof / "skills" / "research" / "deep-dive" / "SKILL.md").is_file())
+
+    def test_seed_guardrails_and_edges(self):
+        launch, skill, prof = self._seed_world()
+        # default / unnamed / nothing-to-seed refused
+        for bad in ({"profile": "default", "copy_user_memory": True},
+                    {"profile": "", "copy_user_memory": True},
+                    {"profile": "watcher"}):
+            self.assertIn("error", self.tg._methods["moch.profiles.seed"](1, bad))
+        # unknown profile refused
+        self.assertIn("error", self.tg._methods["moch.profiles.seed"](
+            1, {"profile": "ghost", "copy_user_memory": True}))
+        # unknown skill → missing; symlinked skill → skipped-symlink
+        res = self.tg._methods["moch.profiles.seed"](1, {
+            "profile": "watcher", "skills": ["nope", "linked-skill"]})
+        results = {x["name"]: x["result"] for x in res["result"]["skills"]}
+        self.assertEqual(results["nope"], "missing")
+        self.assertEqual(results["linked-skill"], "skipped-symlink")
+        # dst-exists → skipped (never merge over an existing identity file):
+        # first copy lands, the repeat is refused.
+        res2 = self.tg._methods["moch.profiles.seed"](
+            1, {"profile": "watcher", "copy_user_memory": True,
+                "copy_memory": True})
+        self.assertEqual(res2["result"]["userMemory"], "copied")
+        self.assertEqual(res2["result"]["memory"], "copied")
+        res3 = self.tg._methods["moch.profiles.seed"](
+            1, {"profile": "watcher", "copy_user_memory": True})
+        self.assertEqual(res3["result"]["userMemory"], "skipped-exists")
+
+    def test_skills_list_shape(self):
+        launch, skill, prof = self._seed_world()
+        res = self.tg._methods["moch.skills.list"](1, {})
+        self.assertNotIn("error", res, res)
+        names = {s["name"]: s for s in res["result"]["skills"]}
+        self.assertIn("deep-dive", names)
+        self.assertEqual(names["deep-dive"]["description"],
+                         "Long-form research passes")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
