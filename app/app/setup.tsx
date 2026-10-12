@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from 'react'
-import { View, Text, Pressable, ScrollView, StyleSheet, ActivityIndicator, TextInput, Switch } from 'react-native'
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, TextInput, Switch } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+// BUG-133: plain ScrollView + no OS resize (edge-to-edge) left the API-key
+// form and the Import-step CTAs under the IME. KeyboardAwareScrollView keeps
+// the viewport above the keys and scrolls the focused input into view.
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller'
 import { router } from 'expo-router'
 import { Icon } from '../src/components/Icon'
 import { C, useStyles } from '../src/lib/theme'
@@ -47,7 +51,7 @@ export default function Setup() {
   const step = steps[Math.min(stepIdx, steps.length - 1)]
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
-      <ScrollView style={s.root} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollView style={s.root} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
         <Text style={s.kicker}>FIRST-RUN SETUP</Text>
         <Text style={s.title}>{step.title}</Text>
         <View style={s.stepsRow}>
@@ -56,7 +60,7 @@ export default function Setup() {
           ))}
         </View>
         {step.render()}
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   )
 }

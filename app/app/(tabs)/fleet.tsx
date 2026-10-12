@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { View, Text, FlatList, StyleSheet, Pressable, TextInput, ActivityIndicator } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
+import Animated, { useAnimatedStyle } from 'react-native-reanimated'
 import { useStore } from '@nanostores/react'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { C, useStyles } from '../../src/lib/theme'
@@ -79,8 +81,22 @@ export default function Fleet() {
 
   const waiting = status?.queue.waiting ?? []
 
+  // BUG-133: edge-to-edge means the OS never resizes this screen for the IME —
+  // the create-bot box (input + hint + Cancel/Create) docked at the bottom was
+  // fully covered the instant autoFocus opened the keyboard. Port of the chat
+  // composer's proven pad: the root gets paddingBottom = keyboard height (0
+  // closed → full IME open), and createWrap becomes the SINGLE bottom-inset
+  // owner (chat's BUG-037/BUG-133 clamp — resting gap above the nav bar, 0
+  // while the keys are up, continuous ramp between).
+  const insets = useSafeAreaInsets()
+  const kb = useReanimatedKeyboardAnimation()
+  const kbPad = useAnimatedStyle(() => ({ paddingBottom: -kb.height.value }))
+  const createPad = useAnimatedStyle(() => ({
+    paddingBottom: Math.max(Math.max(insets.bottom, 10) + kb.height.value, 0),
+  }))
+
   return (
-    <SafeAreaView style={s.safe} edges={['bottom']}>
+    <SafeAreaView style={s.safe} edges={[]}>
       <ScreenShell
         title={tr("fleet.title")}
         showBrand
@@ -95,6 +111,7 @@ export default function Fleet() {
           </Pressable>
         }
       >
+        <Animated.View style={[s.body, kbPad]}>
         {error ? <Text style={s.banner}>{tr("fleet.offline")}: {error}</Text> : null}
         {status ? (
           <View style={s.statusRow}>
@@ -180,7 +197,7 @@ export default function Fleet() {
           />
         )}
 
-        <View style={s.createWrap}>
+        <Animated.View style={[s.createWrap, createPad]}>
           {creating ? (
             <View style={s.createBox}>
               <View style={[s.chips, isRTL() && { flexDirection: 'row-reverse' }]}>
@@ -227,7 +244,8 @@ export default function Fleet() {
               <Text style={s.fabText}>{tr("fleet.create")}</Text>
             </Pressable>
           )}
-        </View>
+        </Animated.View>
+        </Animated.View>
       </ScreenShell>
     </SafeAreaView>
   )
@@ -236,6 +254,7 @@ export default function Fleet() {
 const makeS = () =>
   StyleSheet.create({
     safe: { flex: 1, backgroundColor: C.bg },
+    body: { flex: 1 },
     banner: { color: C.red, fontSize: 12, paddingHorizontal: 16, paddingVertical: 6 },
     statusRow: { paddingHorizontal: 16, paddingBottom: 6 },
     statusText: { color: C.textDim, fontSize: 12 },

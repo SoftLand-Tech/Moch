@@ -165,13 +165,14 @@ export default function Chat() {
   // measured view frame, which doesn't line up on every device (MIUI et al).
   const kb = useReanimatedKeyboardAnimation()
   const kbPad = useAnimatedStyle(() => ({ paddingBottom: -kb.height.value }))
-  // BUG-037: the keyboard lifts the composer via the root pad, and at that
-  // point the safe-area bottom inset is COVERED by the keyboard — the
-  // composer's own inset padding must zero out while the IME is open (it
-  // previously stacked, floating the pill ~2× the gesture-bar height above
-  // the keys with dead background between).
+  // BUG-037 → BUG-133: composerPad is the SINGLE bottom-inset owner. The old
+  // ternary (`kb.height.value < 0 ? 0 : …`) flipped the instant the IME
+  // animation started, hopping the pill down a full nav-bar inset and back —
+  // and the SafeAreaView below still added its own static inset on top. The
+  // clamp ramps continuously: max(insets,10) at rest, 0 once the IME passes
+  // that height, so the pill lands flush on the keys with no dead gap.
   const composerPad = useAnimatedStyle(() => ({
-    paddingBottom: kb.height.value < 0 ? 0 : Math.max(insets.bottom, 10),
+    paddingBottom: Math.max(Math.max(insets.bottom, 10) + kb.height.value, 0),
   }))
   const recorder = useAudioRecorder(REC_OPTIONS)
   const [recording, setRecording] = useState(false)
@@ -836,7 +837,11 @@ export default function Chat() {
   )
 
   return (
-    <SafeAreaView style={s.safe} edges={['bottom']}>
+    // BUG-133: edges={[]} — the SafeAreaView's static bottom inset stacked on
+    // top of the kbPad while the IME was open (composer floated one nav-bar
+    // inset above the keys) and doubled the resting gap. ScreenShell already
+    // pads the top; composerPad above owns the bottom inset exclusively.
+    <SafeAreaView style={s.safe} edges={[]}>
       <ScreenShell
         title={title || 'Moch'}
         onSearch={() => router.navigate('/(tabs)/sessions')}
@@ -967,7 +972,11 @@ export default function Chat() {
             extraData={extraData}
             contentContainerStyle={s.listContent}
             keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="interactive"
+            // BUG-133: "interactive" is a documented Android no-op (RN's
+            // ScrollView source maps it to 'none'), so drag-to-dismiss never
+            // worked. "on-drag" actually dismisses when the transcript drag
+            // begins.
+            keyboardDismissMode="on-drag"
             onScroll={readScroll}
             onScrollBeginDrag={() => {
               // The user takes the wheel: let position evaluations speak

@@ -1,6 +1,10 @@
 import React from 'react'
-import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native'
+import { View, Text, Pressable, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+// BUG-133: this screen barely exceeds one viewport — with the IME up there
+// was almost no scroll slack and Connect was unreachable. KeyboardAwareScrollView
+// shrinks the viewport to the keyboard's top and scrolls the focused field in.
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller'
 import { router } from 'expo-router'
 import { Icon } from '../src/components/Icon'
 import { PairForm } from '../src/components/PairForm'
@@ -14,7 +18,7 @@ export default function AddComputer() {
   const s = useStyles(makeS)
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
-      <ScrollView style={s.root} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollView style={s.root} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
         <Pressable
           style={({ pressed }) => [s.back, pressed && s.pressed]}
           onPress={() => router.back()}
@@ -28,7 +32,7 @@ export default function AddComputer() {
         <Text style={s.sub}>Scan the QR from that machine — the current one stays saved, and you can switch any time in Settings.</Text>
 
         <PairForm onPaired={() => router.back()} />
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   )
 }

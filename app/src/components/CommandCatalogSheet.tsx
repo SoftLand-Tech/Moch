@@ -19,7 +19,7 @@
  * bare /help into this same sheet.
  */
 import React, { useEffect, useMemo, useState } from 'react'
-import { Modal, View, Text, Pressable, TextInput, SectionList, StyleSheet, Platform, ActivityIndicator } from 'react-native'
+import { Modal, View, Text, Pressable, TextInput, SectionList, StyleSheet, ActivityIndicator } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { Ionicons } from '@expo/vector-icons'
 import { Icon } from './Icon'
@@ -126,7 +126,11 @@ export function CommandCatalogSheet({
 
   return (
     <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      {/* BUG-133: 'height' derives its lift from a measured frame — the exact
+          math this repo rejected (chat.tsx MIUI note) — and could undershoot,
+          leaving the bottom rows under the IME. 'padding' on the Modal's
+          full-screen root is the connectors-proven exact variant. */}
+      <KeyboardAvoidingView style={s.flex} behavior="padding">
         <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: C.scrim }]} onPress={onClose} accessibilityLabel="Close command browser" />
         <View style={s.sheet}>
           {/* Header */}

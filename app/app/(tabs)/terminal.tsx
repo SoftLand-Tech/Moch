@@ -80,7 +80,9 @@ function TerminalMenu({ onKill, onClear }: { onKill: () => void; onClear: () => 
 function TerminalInner() {
   const s = useStyles(makeS)
   // IME visibility truth (RN focus lies on Android — see focusInput).
-  const keyboard = useKeyboardState()
+  // BUG-133: selector form — the object form re-rendered on every per-frame
+  // keyboard animation field; only isVisible is consumed here.
+  const keyboardVisible = useKeyboardState((k) => k.isVisible)
   const [gate, setGate] = useState<Gate>('checking')
   const [gateMsg, setGateMsg] = useState('')
   const [snap, setSnap] = useState<{ state: TermState; alive: boolean }>({ state: 'idle', alive: false })
@@ -296,10 +298,10 @@ function TerminalInner() {
   // not be torn down.
   const focusInput = useCallback(() => {
     const el = inputRef.current
-    if (!el || keyboard.isVisible) return
+    if (!el || keyboardVisible) return
     el.blur()
     requestAnimationFrame(() => el.focus())
-  }, [keyboard.isVisible])
+  }, [keyboardVisible])
 
   const submitLine = useCallback(() => {
     send(TERM_KEYS.ENTER)
