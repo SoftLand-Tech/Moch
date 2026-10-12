@@ -2,6 +2,12 @@ import { atom } from 'nanostores'
 import { rpc } from './gateway'
 import { log } from './log'
 import { fleetProfiles, refreshFleet } from './fleet'
+import { joinRunningSessions, type ActiveListSession } from './sessionRunning'
+import { optimisticSessionRow, type SessionRow } from './sessionRowMeta'
+// Re-exported for every existing consumer; canonical definition (and its
+// docs) lives in lib/sessionRowMeta so the scripts suites can import rows
+// without pulling this module's gateway→RN graph into their tsconfig.
+export type { SessionRow }
 /**
  * The server's conversation list.
  *
@@ -22,25 +28,6 @@ import { fleetProfiles, refreshFleet } from './fleet'
  * actively-used old chats under newer-but-idle ones (BUG-012).
  */
 
-export interface SessionRow {
-  /** Durable id — the one `session.resume` takes. */
-  id: string
-  title?: string
-  preview?: string
-  /** Unix SECONDS, with a fractional part. */
-  started_at?: number
-  message_count?: number
-  source?: string
-  /**
-   * Owning profile (M9.2 bots). Absent or `default` = the default agent.
-   * BUG-112: `session.list` is profile-scoped server-side and the client used
-   * to ask for the active profile only, so a bot's conversations disappeared
-   * from the drawer and Chats screen after an app restart even though they were
-   * still on disk. Rows now carry the profile they came from.
-   */
-  profile?: string
-}
-
 /** Live id for each stored id, so overlays can be matched. */
 const liveIds = atom<Record<string, string>>({})
 export const sessionRows = atom<SessionRow[]>([])
@@ -50,6 +37,27 @@ export const sessionListError = atom<string | null>(null)
  *  only a complete list proves a session's ABSENCE (BUG-025 reconciliation
  *  must not prune chats that a truncated fetch simply didn't include). */
 export const sessionListComplete = atom(false)
+
+// ── Gateway-live "running" overlay (BUG-131, client half) ────────────────────
+// Stored ids with a live session actively working ON THE GATEWAY right now —
+// including sessions this app instance never opened (another device, the
+// desktop app, a prior launch). Fetched from the previously-unused
+// `session.active_list` RPC and joined against the loaded rows by the pure
+// helper in lib/sessionRunning; refreshed alongside every session.list poll.
+export const runningStoredIds = atom<ReadonlySet<string>>(new Set())
+
+/**
+ * Refresh the running overlay. Never throws: a failed call keeps the previous
+ * set (the ≤60s poll retries) — the dot is an enhancement, never a blocker.
+ */
+export async function refreshRunningSessions(): Promise<void> {
+  try {
+    const res = await rpc<{ sessions?: ActiveListSession[] }>('session.active_list', {})
+    runningStoredIds.set(joinRunningSessions(res?.sessions, sessionRows.get()))
+  } catch (err) {
+    log('info', 'sessions', `session.active_list failed: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
 
 /** `started_at` is fractional seconds; be defensive about the unit. */
 export function toMs(ts?: number | null): number {
@@ -295,6 +303,9 @@ export function resetSessionList() {
   liveIds.set({})
   sessionListError.set(null)
   sessionListComplete.set(false)
+  // Backend switch: live-session keys belong to the machine that minted
+  // them — a running dot from the old gateway is noise here.
+  runningStoredIds.set(new Set())
 }
 
 /**
@@ -315,10 +326,12 @@ export function upsertOptimisticRow(storedId: string, title: string) {
     }
     return
   }
-  sessionRows.set([
-    { id: storedId, title, started_at: Date.now() / 1000, message_count: 0, source: 'mobile' },
-    ...rows,
-  ])
+  // BUG-074/#111: message_count stays UNDEFINED — the client cannot know it,
+  // and the old `message_count: 0` made every fresh chat read "0 msgs" until
+  // the next poll. The honest "— msgs" renders instead; the server row
+  // replaces this one on the next session.list fetch (≤60s) — no bump
+  // machinery, the poll self-heals it.
+  sessionRows.set([optimisticSessionRow(storedId, title, Date.now() / 1000), ...rows])
 }
 
 /**

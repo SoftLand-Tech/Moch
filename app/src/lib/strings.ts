@@ -121,6 +121,35 @@ const EN: Catalog = {
     'Connect to {host} without TLS? The connection is not encrypted, so your pairing token travels in the clear — anyone watching the network can read it.',
   'pair.plain.confirm': 'Connect anyway',
   'pair.plain.cancel': 'Cancel',
+
+  // BUG-074 / #111 / #131: Chats-screen row meta. Known `source` tokens the
+  // gateway itself mints are localized (anything else falls back to the raw
+  // token); unknown message counts render "—" instead of a lying 0; the
+  // delete-while-running refusal gets friendly copy instead of raw server
+  // English ("cannot delete an active session").
+  'sessions.source.mobile': 'Phone',
+  'sessions.source.tui': 'Terminal (TUI)',
+  'sessions.source.cli': 'CLI',
+  'sessions.source.webui': 'Web',
+  'sessions.source.desktop': 'Desktop',
+  'sessions.source.cron': 'Scheduled',
+  'sessions.source.kanban': 'Crew board',
+  'sessions.source.subagent': 'Sub-agent',
+  'sessions.source.test': 'Test',
+  'sessions.source.local': 'Local',
+  'sessions.source.acp': 'ACP',
+  'sessions.source.webhook': 'Webhook',
+  'sessions.source.api_server': 'API',
+  'sessions.source.msgraph_webhook': 'MS Graph',
+  'sessions.source.telegram': 'Telegram',
+  'sessions.source.discord': 'Discord',
+  'sessions.source.whatsapp': 'WhatsApp',
+  'sessions.source.slack': 'Slack',
+  'sessions.source.signal': 'Signal',
+  'sessions.source.email': 'Email',
+  'sessions.source.sms': 'SMS',
+  'sessions.delete.failed': 'Delete failed',
+  'sessions.delete.busy': 'This chat is busy on the computer — stop it there before deleting.',
 }
 
 const AR: Catalog = {
@@ -202,6 +231,31 @@ const AR: Catalog = {
     'الاتصال بـ {host} بدون TLS؟ الاتصال غير مشفّر، لذا سينتقل رمز الاقتران مكشوفًا — أي من يراقب الشبكة يستطيع قراءته.',
   'pair.plain.confirm': 'اتصال رغم ذلك',
   'pair.plain.cancel': 'إلغاء',
+
+  // BUG-074 / #111 / #131 (see the EN block above).
+  'sessions.source.mobile': 'الهاتف',
+  'sessions.source.tui': 'الطرفية (TUI)',
+  'sessions.source.cli': 'سطر الأوامر',
+  'sessions.source.webui': 'الويب',
+  'sessions.source.desktop': 'سطح المكتب',
+  'sessions.source.cron': 'مجدولة',
+  'sessions.source.kanban': 'لوحة الطاقم',
+  'sessions.source.subagent': 'وكيل فرعي',
+  'sessions.source.test': 'اختبار',
+  'sessions.source.local': 'محلي',
+  'sessions.source.acp': 'ACP',
+  'sessions.source.webhook': 'Webhook',
+  'sessions.source.api_server': 'API',
+  'sessions.source.msgraph_webhook': 'MS Graph',
+  'sessions.source.telegram': 'تيليجرام',
+  'sessions.source.discord': 'ديسكورد',
+  'sessions.source.whatsapp': 'واتساب',
+  'sessions.source.slack': 'سلاك',
+  'sessions.source.signal': 'سيجنال',
+  'sessions.source.email': 'البريد',
+  'sessions.source.sms': 'رسائل نصية',
+  'sessions.delete.failed': 'تعذّر الحذف',
+  'sessions.delete.busy': 'هذه المحادثة تعمل الآن على الحاسوب — أوقفها هناك قبل الحذف.',
 }
 
 const CATALOGS: Record<Locale, Catalog> = { en: EN, ar: AR }
