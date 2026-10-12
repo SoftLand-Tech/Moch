@@ -660,5 +660,73 @@ class RegistrationTests(unittest.TestCase):
         self.assertFalse(webview.webview_tab_create.called, "a flagged URL must never reach the backend")
 
 
+class WebViewEvalRoutingTests(unittest.TestCase):
+    """BUG-126: ``browser_console(expression=…)`` in WebView mode must route
+    to the webview backend (attach dance + ``webview_eval``) and NEVER reach
+    the agent-browser CLI probe — on-device that path can only answer
+    "agent-browser CLI not found (cached)", an error naming a Node CLI that
+    cannot exist on Android."""
+
+    _CLI_ERROR = {"success": False, "error": "agent-browser CLI not found (cached)"}
+
+    def _patches(self):
+        from tools import browser_tool
+
+        return (
+            mock.patch.object(browser_tool, "_is_camofox_mode", return_value=False),
+            mock.patch.object(browser_tool._eval_policy, "_enforce_browser_eval_policy", return_value=None),
+            mock.patch.object(browser_tool._eval_policy, "_eval_ssrf_guard_active", return_value=False),
+            mock.patch.object(browser_tool._session, "_run_browser_command", _Recorder(self._CLI_ERROR)),
+        )
+
+    def test_expression_routes_to_webview_backend_never_the_cli(self):
+        from tools import browser_tool
+
+        patches = self._patches()
+        with patches[0], patches[1], patches[2], patches[3] as cli, \
+                mock.patch.object(browser_tool, "_webview") as webview:
+            webview.is_webview_mode.return_value = True
+            webview.ensure_webview_supervisor = _Recorder()
+            webview.webview_eval.return_value = '{"success": true, "result": 2}'
+            out = json.loads(browser_tool.browser_console(expression="1+1", task_id="t"))
+        self.assertTrue(out["success"], out)
+        self.assertEqual(out["result"], 2)
+        self.assertEqual(webview.webview_eval.call_args, mock.call("1+1", "t"))
+        self.assertEqual(webview.ensure_webview_supervisor.calls, [(("t",), {})],
+                         "the webview_navigate attach dance runs before the eval")
+        self.assertFalse(cli.calls, "the CLI subprocess probe must never run in webview mode")
+
+    def test_expression_without_supervisor_yields_attach_error_not_cli(self):
+        """No supervisor + relay down ⇒ the BUG-105 open-the-Browser-screen
+        error, never CLI wording."""
+        from tools import browser_tool, browser_tool_cdp
+        from tools import browser_webview as wv
+
+        patches = self._patches()
+        with patches[0], patches[1], patches[2], patches[3] as cli, \
+                mock.patch.dict(os.environ, {"MOCH_BROWSER_RELAY": "1"}), \
+                mock.patch.object(wv, "_supervisor", return_value=None), \
+                mock.patch.object(wv, "_relay_down_error", _Recorder("RELAY-DOWN-MARKER")), \
+                mock.patch.object(wv, "_active_tab_id", _Recorder(None)), \
+                mock.patch.object(browser_tool_cdp, "_ensure_cdp_supervisor", _Recorder()):
+            out = json.loads(browser_tool.browser_console(expression="1+1", task_id="t"))
+        self.assertFalse(out["success"], out)
+        self.assertEqual(out["error"], "RELAY-DOWN-MARKER")
+        self.assertNotIn("agent-browser", out["error"])
+        self.assertNotIn("CLI not found", out["error"])
+        self.assertFalse(cli.calls, "a failed attach must not fall through to the CLI probe")
+
+    def test_console_stub_note_names_the_real_tool(self):
+        """The webview_console stub note used to point at a nonexistent
+        ``browser_eval`` tool — it must name ``browser_console(expression=…)``."""
+        sup = object()
+        with mock.patch.object(wv, "_supervisor", return_value=sup), \
+                mock.patch.object(wv, "_action", _Recorder('{"success": true}')) as action:
+            json.loads(wv.webview_console(task_id="t"))
+        js = action.calls[0][0][1]
+        self.assertIn("browser_console(expression=", js)
+        self.assertNotIn("browser_eval", js)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

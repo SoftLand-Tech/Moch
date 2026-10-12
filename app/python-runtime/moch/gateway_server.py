@@ -28,7 +28,7 @@ import socket
 import threading
 import time
 import traceback
-from typing import Any
+from typing import Any, Optional
 
 _STATE: dict[str, Any] = {"started": False, "starting": False, "port": None, "token": None, "error": None}
 _LOCK = threading.Lock()
@@ -81,6 +81,59 @@ def _load_or_mint_token() -> str:
 _ROOT_SHIM_PATH = "/{full_path:path}"
 # Marker attr set on the replacement endpoint so re-runs recognise their own work.
 _ROOT_SHIM_MARKER = "_moch_root_shim_neutralized"
+
+
+# ── BUG-121: capability notes riding prompt.submit ──────────────────────────
+#
+# The warming half shipped first (BUG-132): while the relay is armed but the
+# tool registry has not matured, a bracketed system note tells the model the
+# browser will continue automatically. BUG-121's gate-off half: with the relay
+# NOT armed (MOCH_BROWSER_RELAY unset / browser_navigate missing from the
+# catalog), nothing told the model the Moch Browser exists at all — it burned
+# terminal calls on /system/bin/am, then improvised with curl instead of
+# saying "open the Browser screen". Same channel, second note.
+
+_MOCH_WARMING_NOTE = (
+    "[SYSTEM: The in-app browser is still starting up (a minute or two after "
+    "the app launches). If the user is asking you to open or browse a web "
+    "page, tell them you will CONTINUE AUTOMATICALLY the moment the browser "
+    "is ready — they do NOT need to resend or do anything; you will pick the "
+    "task back up yourself shortly. Keep the reply to one short sentence. Do "
+    "NOT use terminal curl as a replacement for browsing.]"
+)
+
+_MOCH_GATE_OFF_NOTE = (
+    "[SYSTEM: The in-app Moch Browser exists on this phone but its tools are "
+    "not available right now — the browser relay is not running. Tell the "
+    "user to open the Browser screen in Moch once (drawer → Browser); the "
+    "browser tools activate the moment it opens and the browsing task can be "
+    "retried then. Do NOT use terminal curl as a replacement for browsing, "
+    "and do NOT conclude the capability does not exist. Keep the reply to "
+    "one short sentence.]"
+)
+
+
+def _moch_platform() -> bool:
+    """True when this process is the embedded Moch gateway (not desktop hermes)."""
+    return (
+        os.environ.get("MOCH_EMBEDDED", "").strip() == "1"
+        or os.environ.get("MOCH_FLEET", "").strip() == "1"
+    )
+
+
+def _moch_prompt_note(*, relay_armed: bool, moch_platform: bool, tools_ready: bool) -> Optional[str]:
+    """Which capability note (if any) rides a prompt.submit; ``None`` = none.
+
+    Warming: relay armed but the catalog has not matured → the auto-continue
+    note. Gate off (BUG-121): Moch platform and the browser tools are absent
+    from the catalog → the open-the-Browser-screen note. Tools present →
+    never a note (both windows are closed).
+    """
+    if not tools_ready and relay_armed:
+        return _MOCH_WARMING_NOTE
+    if not tools_ready and moch_platform:
+        return _MOCH_GATE_OFF_NOTE
+    return None
 
 
 def _neutralize_root_token_handshake(application: Any) -> bool:
@@ -280,7 +333,11 @@ def _run_server(port: int) -> None:
                 return False
 
         def _browser_warming() -> bool:
-            """Armed but not yet usable — the window the user must be told about."""
+            """Armed but not yet usable — the window the user must be told about.
+
+            (The prompt-riding decision now lives in the module-level
+            ``_moch_prompt_note`` so it is unit-testable; this predicate stays
+            for readers of the warm-up loop below.)"""
             return os.environ.get("MOCH_BROWSER_RELAY", "") == "1" and not _browser_tools_ready()
 
         def _prewarm_browser() -> None:
@@ -338,42 +395,57 @@ def _run_server(port: int) -> None:
 
         # While warming, MOCHI tells the user — no silent curl fallback, no
         # "Moch looks down". A bracketed system note rides the prompt (the
-        # established out-of-band pattern) only while the window is live.
+        # established out-of-band pattern) while the warming window is live,
+        # and (BUG-121, gate-off half) also when the platform is Moch but the
+        # browser tools are absent from the catalog outright.
         def _moch_note_dispatch(req, transport=None):
             try:
-                if isinstance(req, dict) and req.get("method") == "prompt.submit" and _browser_warming():
+                if isinstance(req, dict) and req.get("method") == "prompt.submit":
                     params = req.get("params") or {}
                     text = str(params.get("text") or "")
-                    if text and not text.startswith("["):
-                        _sid = str(params.get("session_id") or "")
-                        if _sid:
-                            _warm_waiters.add(_sid)
-                        params["text"] = (
-                            "[SYSTEM: The in-app browser is still starting up (a minute or two after "
-                            "the app launches). If the user is asking you to open or browse a web "
-                            "page, tell them you will CONTINUE AUTOMATICALLY the moment the browser "
-                            "is ready — they do NOT need to resend or do anything; you will pick the "
-                            "task back up yourself shortly. Keep the reply to one short sentence. Do "
-                            "NOT use terminal curl as a replacement for browsing.]\n\n"
-                        ) + text
-                        # Surface the wait: the app already renders attention
-                        # notices for sessions (toasts + the hermes-alerts
-                        # knock), so the gap between this turn and the
-                        # auto-continue is not a silent dead end.
-                        try:
-                            _notice_sid = str(params.get("session_id") or "")
-                            if _notice_sid:
-                                _tg_server._emit(
-                                    "status.update",
-                                    _notice_sid,
-                                    {
-                                        "busy": True,
-                                        "waiting_for": "browser",
-                                        "note": "Warming up the browser — Moch will continue automatically",
-                                    },
-                                )
-                        except Exception:
-                            pass
+                    # The catalog probe can force a fresh (memoized) build —
+                    # run it at most once per call, and only when a note is
+                    # even possible (desktop hermes never pays for this).
+                    relay_armed = os.environ.get("MOCH_BROWSER_RELAY", "") == "1"
+                    if text and not text.startswith("[") and (relay_armed or _moch_platform()):
+                        tools_ready = None
+
+                        def _tools_ready() -> bool:
+                            nonlocal tools_ready
+                            if tools_ready is None:
+                                tools_ready = _browser_tools_ready()
+                            return tools_ready
+
+                        note = _moch_prompt_note(
+                            relay_armed=relay_armed,
+                            moch_platform=_moch_platform(),
+                            tools_ready=_tools_ready(),
+                        )
+                        if note is not None:
+                            warming = note is _MOCH_WARMING_NOTE
+                            _sid = str(params.get("session_id") or "")
+                            if warming and _sid:
+                                _warm_waiters.add(_sid)
+                            params["text"] = note + "\n\n" + text
+                            # Surface the wait: the app already renders attention
+                            # notices for sessions (toasts + the hermes-alerts
+                            # knock), so the gap between this turn and the
+                            # auto-continue is not a silent dead end.
+                            if warming:
+                                try:
+                                    _notice_sid = str(params.get("session_id") or "")
+                                    if _notice_sid:
+                                        _tg_server._emit(
+                                            "status.update",
+                                            _notice_sid,
+                                            {
+                                                "busy": True,
+                                                "waiting_for": "browser",
+                                                "note": "Warming up the browser — Moch will continue automatically",
+                                            },
+                                        )
+                                except Exception:
+                                    pass
             except Exception:
                 pass
             return _note_upstream(req, transport)

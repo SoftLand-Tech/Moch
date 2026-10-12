@@ -104,6 +104,9 @@ const EN: Catalog = {
   // the card is bilingual from day one.
   'chat.foreign.title': 'Another session on this machine is asking you something',
   'chat.foreign.hint': 'Tap to review and answer it here.',
+  // BUG-118 (BH-000093): the Browser screen's relay-failure retry button —
+  // the error branch used to be a dead end.
+  'browser.retry': 'Retry',
   'pair.plain.title': 'Unencrypted connection',
   'pair.plain.body':
     'Connect to {host} without TLS? The connection is not encrypted, so your pairing token travels in the clear — anyone watching the network can read it.',
@@ -173,6 +176,8 @@ const AR: Catalog = {
   // tracking (automation/CLI on the host).
   'chat.foreign.title': 'جلسة أخرى على هذا الجهاز تطلب منك إجابة',
   'chat.foreign.hint': 'اضغط لمراجعتها والإجابة عليها من هنا.',
+  // BUG-118 (BH-000093): the Browser screen's relay-failure retry button.
+  'browser.retry': 'إعادة المحاولة',
   'pair.plain.title': 'اتصال غير مشفّر',
   'pair.plain.body':
     'الاتصال بـ {host} بدون TLS؟ الاتصال غير مشفّر، لذا سينتقل رمز الاقتران مكشوفًا — أي من يراقب الشبكة يستطيع قراءته.',

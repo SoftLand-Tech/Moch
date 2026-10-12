@@ -30,6 +30,7 @@ import asyncio
 import json
 import os
 import sys
+import threading
 import types
 import unittest
 from pathlib import Path
@@ -196,6 +197,158 @@ class PerPageAttachTests(unittest.TestCase):
         # The KeyError fires at attach["result"]["sessionId"] — before any assignment —
         # so the supervisor never registers and webview tools see "no session".
         self.assertIsNone(sup._page_session_id)
+
+
+class _Recorder:
+    """Callable that records (args, kwargs) and returns ``result``."""
+
+    def __init__(self, result=None):
+        self.calls = []
+        self.result = result
+
+    def __call__(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+class _FakeRegistryEntry:
+    """Duck-typed registry entry for ``get_or_start``'s health check: a LIVE
+    thread running a REAL asyncio loop, with ``_active`` chosen by the test —
+    ``active=False`` is exactly the reconnect-backoff park (BUG-127)."""
+
+    def __init__(self, active: bool, cdp_url: str = _CDP_WS_URL):
+        import asyncio
+
+        self.cdp_url = cdp_url
+        self._state_lock = threading.Lock()
+        self._active = active
+        self.stopped = False
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._loop.run_forever, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self.stopped = True
+        self._loop.call_soon_threadsafe(self._loop.stop)
+
+
+class GetOrStartBackoffHealthTests(unittest.TestCase):
+    """BUG-127 companion: a supervisor parked in reconnect backoff (alive
+    thread + running loop, NO attached page) must NOT pass get_or_start's
+    health check — the self-heal path depends on replacing it."""
+
+    def setUp(self):
+        from tools import browser_supervisor as bs
+
+        self.bs = bs
+        self.registry = bs._SupervisorRegistry()
+        self.addCleanup(self.registry.stop_all)
+
+    def _get_or_start(self):
+        with mock.patch.object(self.bs, "CDPSupervisor") as sup_cls:
+            return self.registry.get_or_start("t", _CDP_WS_URL), sup_cls
+
+    def test_backoff_parked_supervisor_is_replaced(self):
+        """The regression: thread.is_alive() + loop.is_running() were the whole
+        check, so an inactive (backoff) supervisor was 'healthy' and every
+        later tool call answered 'supervisor is not active'."""
+        fake = _FakeRegistryEntry(active=False)
+        self.registry._by_task["t"] = fake
+        replacement, sup_cls = self._get_or_start()
+        self.assertIsNot(replacement, fake, "a backoff-parked supervisor must be replaced")
+        self.assertTrue(fake.stopped, "the parked supervisor is stopped on replacement")
+        self.assertTrue(sup_cls.called)
+
+    def test_active_supervisor_is_kept(self):
+        fake = _FakeRegistryEntry(active=True)
+        self.registry._by_task["t"] = fake
+        replacement, sup_cls = self._get_or_start()
+        self.assertIs(replacement, fake, "an attached supervisor is healthy — no churn")
+        self.assertFalse(sup_cls.called)
+
+    def test_dead_thread_still_replaced(self):
+        fake = _FakeRegistryEntry(active=True)
+        fake.stop()
+        fake._thread.join(timeout=2)
+        self.registry._by_task["t"] = fake
+        replacement, _ = self._get_or_start()
+        self.assertIsNot(replacement, fake)
+
+
+class WebViewSelfHealTests(unittest.TestCase):
+    """BUG-127: non-navigate verbs self-heal the attach once before reporting
+    no-session, and the error names the relay's CURRENT target."""
+
+    def setUp(self):
+        from tools import browser_tool_cdp, browser_webview
+
+        self.cdp = browser_tool_cdp
+        self.wv = browser_webview
+        self.ensure = _Recorder()
+        ensure_patcher = mock.patch.object(self.cdp, "_ensure_cdp_supervisor", self.ensure)
+        ensure_patcher.start()
+        self.addCleanup(ensure_patcher.stop)
+
+    def tearDown(self):
+        # _no_session_error caches nothing, but _moch_tabs_cache is per-process
+        self.wv._moch_tabs_cache = None
+
+    def test_verb_attempts_one_self_heal_before_no_session(self):
+        with mock.patch.object(self.wv, "_supervisor", return_value=None), \
+                mock.patch.object(self.wv, "_relay_down_error", _Recorder(None)), \
+                mock.patch.object(self.wv, "_active_tab_id", _Recorder(None)):
+            result = json.loads(self.wv.webview_click("e1", task_id="t"))
+        self.assertFalse(result["success"])
+        self.assertEqual(self.ensure.calls, [(("t",), {})],
+                         "exactly ONE _ensure_cdp_supervisor attempt, keyed by the raw task id")
+        self.assertIn("No browser page", result["error"])
+
+    def test_verb_succeeds_when_self_heal_attaches(self):
+        sup = object()
+
+        def supervisor_then_attached(task_id=None):
+            return sup if self.ensure.calls else None
+
+        with mock.patch.object(self.wv, "_supervisor", side_effect=supervisor_then_attached), \
+                mock.patch.object(self.wv, "_relay_down_error", _Recorder(None)), \
+                mock.patch.object(self.wv, "_call", _Recorder({"value": '{"ok": true, "clicked": "e1"}'})):
+            result = json.loads(self.wv.webview_click("e1", task_id="t"))
+        self.assertTrue(result, result)
+        self.assertEqual(result["action"], "click")
+
+    def test_no_session_error_names_the_current_target(self):
+        """A live /json/list target must be named so the model can re-attach
+        (browser_navigate) knowing which tab it will land on."""
+        with mock.patch.object(self.wv, "_relay_down_error", _Recorder(None)), \
+                mock.patch.object(self.wv, "_active_tab_id", _Recorder("TGT42")):
+            error = self.wv._no_session_error("t")
+        self.assertIn("TGT42", error)
+        self.assertIn("browser_navigate", error)
+
+    def test_no_session_error_prefers_relay_down_when_unreachable(self):
+        with mock.patch.object(self.wv, "_relay_down_error", _Recorder("RELAY-DOWN-MARKER")), \
+                mock.patch.object(self.wv, "_active_tab_id", _Recorder("TGT42")):
+            self.assertEqual(self.wv._no_session_error("t"), "RELAY-DOWN-MARKER")
+
+    def test_no_session_error_generic_when_nothing_live(self):
+        with mock.patch.object(self.wv, "_relay_down_error", _Recorder(None)), \
+                mock.patch.object(self.wv, "_active_tab_id", _Recorder(None)):
+            self.assertEqual(self.wv._no_session_error("t"), self.wv._NO_SESSION)
+
+    def test_eval_self_heals_before_reporting_no_session(self):
+        """BUG-126 companion: webview_eval shares the dance — with no
+        supervisor and no target the error is the no-session contract, never
+        CLI wording."""
+        with mock.patch.object(self.wv, "_supervisor", return_value=None), \
+                mock.patch.object(self.wv, "_relay_down_error", _Recorder("RELAY-DOWN-MARKER")), \
+                mock.patch.object(self.wv, "_active_tab_id", _Recorder(None)):
+            result = json.loads(self.wv.webview_eval("1+1", task_id="t"))
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error"], "RELAY-DOWN-MARKER")
+        self.assertNotIn("agent-browser", result["error"])
+        self.assertNotIn("CLI", result["error"])
 
 
 if __name__ == "__main__":
