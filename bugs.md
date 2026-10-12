@@ -348,7 +348,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   `errors.log`: `SQLite FTS5 unavailable for …/state.db; full-text session search disabled … (no such module: fts5)`. Measured: drawer/Chats search matches **titles** (`AGENT-ISOLATION`) but not a phrase that exists only in a message body (`reachable from my side` → `No matches`, phrase verified in the transcript); `GET /api/sessions/search?q=…` returns `{"results":[]}` even for a title term. No UI hint that search is title-only.
   *Fix:* ship an FTS5-capable SQLite/Python in the embedded runtime, or add a LIKE-based fallback for message search and label the degraded mode.
 
-- [ ] **BUG-115 [MEDIUM] Terminal: Kill → Retry replays the dead session's scrollback into the fresh shell** — `app/python-runtime/moch/terminal.py:202-203` + `app/src/lib/terminal.ts:226-250`
+- [x] **BUG-115 [MEDIUM] Terminal: Kill → Retry replays the dead session's scrollback into the fresh shell** — `app/python-runtime/moch/terminal.py:202-203` + `app/src/lib/terminal.ts:226-250` *(fixed in PR #PR_NUMBER_PLACEHOLDER — start() and kill() now clear `_state.replay`/`replay_bytes` alongside the chunks (bank kept for live WebView reload repaints); 2 regression tests added to tests/test_terminal.py; on-device check pending)*
   `start()` clears `_state.chunks` but not `_state.replay` (the WebView-refill bank), and the JS immediately re-banks `native.replay()` into the new xterm. Repro: echo a marker → Kill → Retry → the previous session's output (`uname -a`, `TICK-1..4`, marker) is on screen again from a bash that never ran it. Also makes the kill affordance look broken.
   *Fix:* clear `_state.replay`/`replay_bytes` in `start()` (or scope the replay bank to WebView reloads only).
 
@@ -356,7 +356,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   Grep over the app finds only the definitions; Settings has no language row (whole screen scrolled). The atom is therefore always `'en'`, so the Arabic catalog and the RTL flag are dead code; forcing the app locale (`cmd locale set-app-locales … ar`) + relaunch leaves the UI English and LTR. M9.2's "RTL pass on the new screens" is untestable as shipped.
   *Fix:* call `loadLocale()` once at boot and add the language row (EN/العربية) that calls `setLocale()` + reloads the RN layout direction.
 
-- [ ] **BUG-117 [MEDIUM] Model picker opened from Settings shows an internal error banner** — `app/(tabs)/settings.tsx` → model sheet
+- [x] **BUG-117 [MEDIUM] Model picker opened from Settings shows an internal error banner** — `app/(tabs)/settings.tsx` → model sheet *(fixed in PR #PR_NUMBER_PLACEHOLDER — the sheet's open-path refresh no longer gates on activeLiveId(): a dead provisional window resolves to null and model.options is fetched sessionless (sessionId is optional per modelState); the internal-error banner stays for genuine inventory failures; on-device check pending)*
   `Couldn't refresh the model inventory (New chat is not ready). Showing the last known list.` The cached list still renders, but an internal precondition leaks into a Settings screen and the inventory can stay stale for anyone who never opens the picker from a chat.
   *Fix:* refresh the inventory without a live chat (gateway `models.*`), or phrase/scope the fallback so it never surfaces raw state.
 
@@ -364,7 +364,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   Connectors → Browse: `Catalog is empty`; `GET /api/mcp/catalog` → `{"entries":[],"diagnostics":[]}`; RPC `mcp.catalog` → `{"servers":[]}`; `…/AssetFinder/app/optional-mcps` does not exist. The screen invites browsing a catalog that never ships.
   *Fix:* bundle `optional-mcps/` in the Python sources, or replace the empty state with an honest "catalog not bundled in this build" + the manual add-server path.
 
-- [ ] **BUG-119 [LOW] About shows `Moch v1.0`, not the installed build** — `app/(tabs)/settings.tsx`
+- [x] **BUG-119 [LOW] About shows `Moch v1.0`, not the installed build** — `app/(tabs)/settings.tsx` *(fixed in PR #PR_NUMBER_PLACEHOLDER — About row and copyDiagnostics now render `Moch v${nativeAppVersion ?? expoConfig.version} (${nativeBuildVersion})`; on-device check pending)*
   Installed APK is `1.0.15-browser` (versionCode 18) and the runtime reports `Mochi 0.21.3`; the About row says `Moch v1.0`, so neither the user nor support can read the build from the UI.
   *Fix:* render `Constants.expoConfig?.version` + the Android versionName/versionCode.
 
@@ -1406,6 +1406,14 @@ chat pathological tall-stack overflow in clarify cards (flexShrink on s.sheet/s.
   while the process stays alive, "reopen the app to wake her" needs a process
   restart — MainApplication auto-start only runs on process creation; a
   MainActivity.onResume restart hook is deliberately out of scope here.
+
+## BH bug-hunt wave (2026-10-12) — screens error surfaces, GH #64/#65/#66/#106/#107/#108/#112/#115
+
+- [x] **BH-000080 [MEDIUM] Fleet freeze/unfreeze swallows every failure — the row silently snaps back** — `app/app/(tabs)/fleet.tsx:120-128` (`toggleFreeze` try/finally with NO catch) — *(fixed in PR #PR_NUMBER_PLACEHOLDER — freeze-half fixed here (create-half was already fixed in #122/BUG-139): catch → localized `fleet.freeze.failed` alert with name+why, busy cleared in finally; on-device check pending)*
+- [x] **BH-000081 [MEDIUM] Bot detail Save/Delete failures vanish (unhandled rejections, stale UI state)** — `app/app/bot.tsx:64-74,103-114` (both handlers try/finally with NO catch) — *(fixed in PR #PR_NUMBER_PLACEHOLDER — catch → localized `bot.save.failed`/`bot.delete.failed` alerts with why; save failure clears the stale "saved" indicator, delete failure re-arms the wizard (confirmDelete=0); on-device check pending)*
+- [x] **BH-000082 [HIGH] Automations edit destroys long prompts — schedule-only edits rewrite the stored prompt to the truncated preview** — `app/app/(tabs)/automations.tsx:171-189` (prefill from `prompt_preview`, edit ALWAYS sends `--prompt`) + `hermes-src/tools/cronjob_job_args.py:377` (preview capped at 100 chars + literal "...") + `hermes-src/tools/cronjob_tools.py` (`update` overwrites the stored prompt whenever `--prompt` is present) — *(fixed in PR #PR_NUMBER_PLACEHOLDER — new vendored `cron.manage` action `get` (contract updated) returns the `_format_job` row + the FULL prompt; edit prefills from it, falls back to the preview + `automations.promptLoadFailed` banner when get fails; save omits `--prompt` unless the field was actually modified (dirty-check against the loaded prompt); tests/test_cron_get.py green; on-device check pending)*
+- [x] **BH-000086 [MEDIUM] Crew pull-to-refresh is wired to `loading`, and an offline mount spins forever with no banner** — `app/app/(tabs)/crew.tsx` (RefreshControl used `refreshing={loading}`; the offline early-return left `loading=true`) — *(fixed in PR #PR_NUMBER_PLACEHOLDER — dedicated `refreshing` state (automations pattern) set in onRefresh/cleared in the loader's tail; the offline early-return clears `loading` so from-mount offline renders the `crew.offline` banner over the last board instead of a stuck spinner; on-device check pending)*
+- [x] **BH-000089 [MEDIUM] Settings Linux install/reset rows are fire-and-forget — failures change nothing and say nothing** — `app/app/(tabs)/settings.tsx:62-78` (`linuxBootstrap().finally(...)` / bare `void linuxReset()`) — *(fixed in PR #PR_NUMBER_PLACEHOLDER — BUG-016 pattern ported from setup.tsx: async handlers honor the `{ok,steps}|null` result (`!r || r.ok === false` → error) and catch throws → localized `linux.install.failed`/`linux.reset.failed` alerts with why; busy cleared in finally; on-device check pending)*
 
 - [x] **C-04 / BH-000037 [HIGH→MEDIUM, security] Release builds silently fell back to the publicly tracked debug.keystore; keystore.properties was never gitignored** — build.gradle:140, plugins/with-android-release.js — *(fixed in PR #133 — release now fails fast without keystore.properties (plugin mirrored), debug signingConfig + tracked debug.keystore removed (AGP default auto-creates), keystore.properties gitignored; PUBLIC RELEASE IMPACT REFUTED: v1.0.0 APK verified signed by a different key (0598c942…); residual = local dev sideloads + future local-gradle releases, now blocked)*
 

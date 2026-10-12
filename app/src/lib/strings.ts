@@ -70,6 +70,7 @@ const EN: Catalog = {
   'fleet.chat': 'Chat with {name}',
   'fleet.freeze': 'Freeze {name}',
   'fleet.unfreeze': 'Unfreeze {name}',
+  'fleet.freeze.failed': "Couldn't freeze/unfreeze {name}: {why}",
   'fleet.refresh': 'Refresh fleet',
   'fleet.detail.back': 'Fleet',
   'crew.hint':
@@ -84,6 +85,7 @@ const EN: Catalog = {
   'crew.assign': 'Reassign',
   'crew.moch': 'Moch',
   'crew.err': 'Action failed: {why}',
+  'crew.offline': 'Crew offline — showing the last board',
   'crew.timeline': 'Run ledger',
   'crew.timeline.empty': 'No runs recorded yet.',
 
@@ -91,13 +93,23 @@ const EN: Catalog = {
   'bot.soul': 'SOUL.md — the job description',
   'bot.save': 'Save',
   'bot.saved': 'saved',
+  'bot.save.failed': "Couldn't save: {why}",
   'bot.chat': 'Chat with {name}',
+  'bot.delete.failed': "Couldn't delete this bot: {why}",
   'bot.delete.title': 'Danger zone',
   'bot.delete.body':
     'Deleting tombstones this bot: its scheduled jobs stop firing (ticker skips tombstones), running turns stop at the next boundary. Kanban tasks it holds stay on the board until the M9.4 crew board offers reassignment.',
   'bot.delete.cta': 'Delete this bot',
   'bot.delete.confirm': 'Tap again to confirm deletion',
   'bot.delete.doing': 'Deleting…',
+
+  // Linux guest install/reset failures (Settings rows, BUG-016 pattern).
+  'linux.install.failed': "The install didn't finish — check the connection and try again. ({why})",
+  'linux.reset.failed': "The reset didn't finish — check the connection and try again. ({why})",
+
+  // #108 automations edit: the full prompt couldn't be fetched — the form
+  // shows the 100-char preview instead.
+  'automations.promptLoadFailed': "Couldn't load the full prompt — showing a truncated preview",
 
   // BUG-086 aggregate card for questions from sessions this app isn't
   // tracking (automation/CLI on the host) — chat-surface keys live here so
@@ -169,6 +181,7 @@ const AR: Catalog = {
   'fleet.chat': 'تحدث مع {name}',
   'fleet.freeze': 'تجميد {name}',
   'fleet.unfreeze': 'إلغاء تجميد {name}',
+  'fleet.freeze.failed': 'تعذّر تجميد/إلغاء تجميد {name}: {why}',
   'fleet.refresh': 'تحديث الأسطول',
   'fleet.detail.back': 'الأسطول',
   'crew.hint':
@@ -183,6 +196,7 @@ const AR: Catalog = {
   'crew.assign': 'إعادة تعيين',
   'crew.moch': 'موك',
   'crew.err': 'فشل الإجراء: {why}',
+  'crew.offline': 'طاقم العمل غير متصل — يُعرض آخر لوح',
   'crew.timeline': 'سجل الأدوار',
   'crew.timeline.empty': 'لا أدوار مسجلة بعد.',
 
@@ -190,13 +204,23 @@ const AR: Catalog = {
   'bot.soul': 'SOUL.md — وصف المهمة',
   'bot.save': 'حفظ',
   'bot.saved': 'تم الحفظ',
+  'bot.save.failed': 'فشل الحفظ: {why}',
   'bot.chat': 'تحدث مع {name}',
+  'bot.delete.failed': 'تعذّر حذف هذا البوت: {why}',
   'bot.delete.title': 'منطقة الخطر',
   'bot.delete.body':
     'الحذف يضع علامة قبر على هذا البوت: مهامه المجدولة تتوقف (الجدول يتخطى الملفات الموابَرة)، والأدوار الجارية تتوقف عند الحد التالي. مهام كانبان تبقى على اللوحة حتى توفر لوحة الطاقم (M9.4) إعادة الإسناد.',
   'bot.delete.cta': 'احذف هذا البوت',
   'bot.delete.confirm': 'اضغط مرة أخرى للتأكيد',
   'bot.delete.doing': 'جارٍ الحذف…',
+
+  // Linux guest install/reset failures (Settings rows, BUG-016 pattern).
+  'linux.install.failed': 'لم يكتمل التثبيت — تحقّق من الاتصال وحاول مجددًا. ({why})',
+  'linux.reset.failed': 'لم يكتمل إعادة التعيين — تحقّق من الاتصال وحاول مجددًا. ({why})',
+
+  // #108 automations edit: the full prompt couldn't be fetched — the form
+  // shows the 100-char preview instead.
+  'automations.promptLoadFailed': 'تعذّر تحميل الأمر الكامل — يُعرض مقتطعًا',
 
   // BUG-086 aggregate card for questions from sessions this app isn't
   // tracking (automation/CLI on the host).
