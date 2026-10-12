@@ -254,18 +254,59 @@ export function parseSlashCommand(text: string): ParsedCommand | null {
  * leading-slash text ("/usr/bin/env", "/etc/hosts — what's in there?") is a
  * normal message the user wants ANSWERED, not a dispatch that errors out and
  * eats the typed text. Checks the loaded gateway registry (canonical +
- * skill commands); an EMPTY registry (offline / not yet loaded) keeps the
- * legacy dispatch behavior rather than guessing.
+ * skill commands).
+ *
+ * BH-000023: an EMPTY registry no longer guesses "command" (the legacy
+ * behavior) — offline or pre-boot, that guess made every "/…" text dispatch
+ * into a dead `Command failed` alert and bypass the offline outbox
+ * entirely. The send path holds on 'unknown registry' and resolves through
+ * resolveSlashRoute() instead; this predicate is only honest once the
+ * registry has loaded (empty registry ⇒ nothing is known).
  */
 export function isKnownSlashCommand(text: string): boolean {
   const parsed = parseSlashCommand(text)
   if (!parsed) return false
+  const catalog = commandCatalog.get()
+  if (Object.keys(catalog).length === 0) return false
   const canon = canonicalName(parsed.name)
   const present = (rec: Record<string, unknown>): boolean =>
     Object.prototype.hasOwnProperty.call(rec, canon) || Object.prototype.hasOwnProperty.call(rec, `/${canon}`)
-  const catalog = commandCatalog.get()
-  if (Object.keys(catalog).length === 0) return true
   return present(catalog) || present(skillCommands.get())
+}
+
+/** How the send path should treat a leading-slash text, sync slice. */
+export type SlashRoute = 'command' | 'message' | 'hold'
+
+/** 'hold' = it parses as a command but the registry is empty (offline /
+ *  not yet loaded) — the caller must try loadCatalog() once and re-decide
+ *  (resolveSlashRoute) instead of guessing either way. */
+export function slashRouteFor(text: string): SlashRoute {
+  if (!text.startsWith('/')) return 'message'
+  const parsed = parseSlashCommand(text)
+  if (!parsed) return 'message'
+  if (Object.keys(commandCatalog.get()).length === 0) return 'hold'
+  return isKnownSlashCommand(text) ? 'command' : 'message'
+}
+
+/**
+ * BH-000023: the send-path decision with the hold resolved. A held text
+ * awaits ONE loadCatalog() (it fails fast offline and never throws); then:
+ *  - registry loaded + known  → 'command' (identical to the loaded case)
+ *  - registry loaded + unknown → 'message' (BUG-042 behavior)
+ *  - registry STILL empty (load failed — offline) → 'message', so the text
+ *    flows through sendPrompt and the offline machinery owns it (failed row
+ *    + outbox retry) instead of a dead-end "Command failed" alert.
+ */
+export async function resolveSlashRoute(text: string): Promise<'command' | 'message'> {
+  const route = slashRouteFor(text)
+  if (route !== 'hold') return route
+  try {
+    await loadCatalog()
+  } catch {
+    /* loadCatalog swallows its own failures; an empty registry below is the
+       offline answer */
+  }
+  return slashRouteFor(text) === 'command' ? 'command' : 'message'
 }
 
 /**

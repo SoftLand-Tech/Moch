@@ -104,6 +104,10 @@ const EN: Catalog = {
   // the card is bilingual from day one.
   'chat.foreign.title': 'Another session on this machine is asking you something',
   'chat.foreign.hint': 'Tap to review and answer it here.',
+  // BH-000025: the batch-clarify card's gate hint — missing answers are
+  // indistinguishable from deliberate skips on the server, so Send waits.
+  'chat.clarify.pending.one': '1 question still needs an answer before sending.',
+  'chat.clarify.pending.many': '{n} questions still need answers before sending.',
   'pair.plain.title': 'Unencrypted connection',
   'pair.plain.body':
     'Connect to {host} without TLS? The connection is not encrypted, so your pairing token travels in the clear — anyone watching the network can read it.',
@@ -173,6 +177,9 @@ const AR: Catalog = {
   // tracking (automation/CLI on the host).
   'chat.foreign.title': 'جلسة أخرى على هذا الجهاز تطلب منك إجابة',
   'chat.foreign.hint': 'اضغط لمراجعتها والإجابة عليها من هنا.',
+  // BH-000025: the batch-clarify card's gate hint.
+  'chat.clarify.pending.one': 'سؤال واحد لا يزال بحاجة إلى إجابة قبل الإرسال.',
+  'chat.clarify.pending.many': '{n} أسئلة لا تزال بحاجة إلى إجابات قبل الإرسال.',
   'pair.plain.title': 'اتصال غير مشفّر',
   'pair.plain.body':
     'الاتصال بـ {host} بدون TLS؟ الاتصال غير مشفّر، لذا سينتقل رمز الاقتران مكشوفًا — أي من يراقب الشبكة يستطيع قراءته.',

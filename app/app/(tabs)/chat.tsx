@@ -67,7 +67,7 @@ import { draftFor, setDraft } from '../../src/lib/drafts'
 import { activeBotAtom, setActiveBot } from '../../src/lib/fleet'
 import { shareInInbox, ackShareIn, applySharedToDraft, type SharedFile } from '../../src/lib/shareIn'
 import { isConnected as isConnectedAtom, connectionState, gatewayError, retryNow } from '../../src/lib/gateway'
-import { completeSlash, loadCatalog, runCommand, parseSlashCommand, canonicalName, interactiveTarget, describeCommand, subsFor, argumentModeFor, slashLabel, localCompleteSync, isKnownSlashCommand, type CompletionItem, type SlashOutcome } from '../../src/lib/slash'
+import { completeSlash, loadCatalog, runCommand, parseSlashCommand, canonicalName, interactiveTarget, describeCommand, subsFor, argumentModeFor, slashLabel, localCompleteSync, resolveSlashRoute, type CompletionItem, type SlashOutcome } from '../../src/lib/slash'
 import { liveModel, liveReasoning, liveReasoningDisplay, fetchReasoningDisplay } from '../../src/lib/modelState'
 import { ModelPickerSheet } from '../../src/components/ModelPickerSheet'
 import { CommandOptionsSheet } from '../../src/components/CommandOptionsSheet'
@@ -78,6 +78,7 @@ import { useMochiState } from '../../src/components/mochi/useMochiState'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
 import { tr } from '../../src/lib/strings'
+import { countUnanswered } from '../../src/lib/clarifyGate'
 import { C, S, useStyles, useShape } from '../../src/lib/theme'
 
 /** Empty-state prompts, styled as plain icon rows the way ChatGPT does. */
@@ -628,7 +629,13 @@ export default function Chat() {
     // BUG-042: only KNOWN commands dispatch — any other leading-slash text
     // ("/usr/bin/env — what's in there?") is a normal message the user wants
     // answered, not a command error that eats the typed text.
-    if (text.startsWith('/') && pendingAttachments.length === 0 && isKnownSlashCommand(text)) {
+    // BH-000023: an empty catalog (offline / pre-boot) must not guess
+    // "command" either — that dead-end alert ate the text AND bypassed the
+    // offline outbox. Hold for ONE loadCatalog() (it fails fast offline),
+    // then re-decide: known → dispatch; unknown or still unloaded → fall
+    // through, so the text reaches sendPrompt and the offline machinery
+    // (failed row + outbox retry) owns it.
+    if (text.startsWith('/') && pendingAttachments.length === 0 && (await resolveSlashRoute(text)) === 'command') {
       updateInput('')
       await runSlash(text)
       return
@@ -797,7 +804,13 @@ export default function Chat() {
   /** The approval / clarify / sudo-secret question card — one renderer for
    *  every answerable question (the active session's own, and each foreign
    *  request expanded from the BUG-086 aggregate card). */
-  const questionCard = (r: PendingRequest) => (
+  const questionCard = (r: PendingRequest) => {
+    // BH-000025: the batch Send gate — a missing qid is indistinguishable
+    // from a DELIBERATE skip on the server (clarify_tool maps it to "" with
+    // no timed_out flag) and retire() makes the question unrecoverable, so
+    // Send stays off until EVERY question has a real answer.
+    const batchMissing = isBatchClarifyOf(r) ? countUnanswered(r.questions ?? [], batchAnswers) : 0
+    return (
     <>
       {r.method === 'approval' ? (
         <View style={s.sheet}>
@@ -889,11 +902,20 @@ export default function Chat() {
                 </View>
               ))}
               </ScrollView>
+              {batchMissing > 0 ? (
+                <Text style={s.qHint}>
+                  {batchMissing === 1
+                    ? tr('chat.clarify.pending.one')
+                    : tr('chat.clarify.pending.many', { n: batchMissing })}
+                </Text>
+              ) : null}
               <Pressable
-                style={({ pressed }) => [s.sheetBtn, { backgroundColor: C.accent }, pressed && s.btnPressed]}
-                onPress={() => { void respondClarifyBatch(batchAnswers, r) }}
+                disabled={batchMissing > 0}
+                accessibilityState={{ disabled: batchMissing > 0 }}
+                style={({ pressed }) => [s.sheetBtn, batchMissing > 0 ? s.sheetBtnOff : { backgroundColor: C.accent }, pressed && s.btnPressed]}
+                onPress={() => { if (batchMissing > 0) return; void respondClarifyBatch(batchAnswers, r) }}
               >
-                <Text style={[s.sheetBtnText, { color: C.onAccent }]}>Send</Text>
+                <Text style={[s.sheetBtnText, batchMissing > 0 ? { color: C.textDim } : { color: C.onAccent }]}>Send</Text>
               </Pressable>
             </>
           ) : (
@@ -982,7 +1004,8 @@ export default function Chat() {
         </View>
       ) : null}
     </>
-  )
+    )
+  }
 
   // Text OR attachments — ChatGPT sends captionless photos.
   const canSend = !recording && (!!input.trim() || pendingAttachments.length > 0)
@@ -1776,6 +1799,10 @@ const makeS = () => StyleSheet.create({
   foreignTitle: { flex: 1 },
   sheetBtn: { flex: 1, borderRadius: 22, paddingVertical: 11, paddingHorizontal: 8, alignItems: 'center', minHeight: 44, justifyContent: 'center' },
   denyBtn: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: C.red },
+  // BH-000025: the batch Send's waiting state — answered in full restores
+  // the accent CTA above.
+  sheetBtnOff: { backgroundColor: C.inputBg, borderWidth: 1, borderColor: C.border },
+  qHint: { color: C.textFaint, fontSize: 11.5, marginTop: 8, marginBottom: 2, textAlign: 'center' },
   sheetBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700', textAlign: 'center' },
   qText: { color: C.text, fontSize: 14.5, marginBottom: 6, lineHeight: 20 },
   qInput: { backgroundColor: C.bgCard, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 11, color: C.text, fontSize: 15, marginTop: 8, minHeight: 44 },
