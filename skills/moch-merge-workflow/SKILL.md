@@ -124,6 +124,14 @@ Another agent session works this repo concurrently. Rules that prevent disasters
 
 - **Never move the branch the main checkout stands on.** Do your work in
   `worktrees/pr-review`; build releases in `worktrees/release`.
+- **ACTIVE worktrees are untouchable.** Some worktrees belong to live sessions
+  mid-iteration. Detect activity: uncommitted tracked changes OR files modified
+  in the last ~10 minutes (`find <wt> -newermt "-10 minutes" -not -path
+  "*/node_modules/*" -type f`). Do not remove, reset, branch-switch, or "clean
+  up" an active worktree — even when its branch looks mergeable. You may still
+  merge its COMMITTED tip via a PR (reading a branch never disturbs a worktree),
+  but expect the session to stack follow-ups; say so in the report. Idle + clean
+  + PR-merged worktrees are safe to remove — verify all three conditions.
 - If local `main` diverged with unique commits, check whether their CONTENT is
   already upstream before judging: a doc commit landed separately can be
   content-identical to a PR's file. Reset local main only when content-identical
@@ -133,6 +141,10 @@ Another agent session works this repo concurrently. Rules that prevent disasters
 - Untracked files blocking a merge are often byte-identical leftovers of the same
   work: diff each against the incoming version (`git show <rev>:<path> | diff - <path>`);
   remove only if identical.
+- **Watch for PRs appearing mid-review** — the other session opens PRs while you
+  work (it opened three during one review round, including a branch that was
+  about to be PR'd). Re-run `gh pr list` before creating any PR to avoid
+  duplicates.
 
 ## 7. Reconcile after merging (every time)
 
