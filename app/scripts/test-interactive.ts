@@ -16,7 +16,7 @@ import ws from 'ws'
 import {
   buildModelValue, scopeFlag, interpretModelSwitch, rankProviders, rankModels,
   applyModel, fetchModelOptions, saveProviderKey, disconnectProvider,
-  fetchReasoningPrefs, applyReasoning, fetchDefaultModel, REASONING_EFFORTS,
+  fetchReasoningPrefs, applyReasoning, fetchDefaultModel, liveWriteSid, REASONING_EFFORTS,
   liveModel, liveProvider, liveReasoning, liveReasoningDisplay, modelOptions,
   _useGatewayForTests,
 } from '../src/lib/modelState'
@@ -307,11 +307,58 @@ async function testPreferenceFlow() {
   })
 }
 
+async function testProvisionalWriteGate() {
+  console.log('\n— wire: BH-000088 scoped writes from a provisional chat —')
+  liveReasoning.set('')
+  modelOptions.set(null)
+
+  await withFakeGateway({
+    'config.set': (p) => ({ key: p.key, value: p.value }),
+    'config.get': () => ({}),
+  }, async (sent) => {
+    sent.length = 0
+    // The exact resolution agent.tsx performs for the active window: the
+    // provisional entry (a `pending:new:…` temp key with a `new:…` pseudo
+    // stored id) yields NO wire-able session id.
+    const provisionalSid = liveWriteSid('pending:new:m1_1', { provisional: true })
+    check('a provisional window resolves to no write target', provisionalSid === null)
+    check('a live session resolves to itself', liveWriteSid('live-1', { provisional: false }) === 'live-1')
+    check('a missing id is no target', liveWriteSid('', undefined) === null && liveWriteSid(null, null) === null)
+
+    // Session-scoped pick from a provisional chat with no create (the
+    // ensureSession() leg lives in agent.tsx against chat.ts — not drivable
+    // in plain node): the wire layer REFUSES instead of letting the server
+    // escalate a sessionless scoped write to the GLOBAL default.
+    let refused = false
+    try {
+      await applyReasoning({ value: 'high', scope: 'session', sessionId: provisionalSid })
+    } catch {
+      refused = true
+    }
+    check('session-scoped pick with no live session is refused', refused)
+    check('the refusal sent no frame at all', !sent.some((f) => f.method === 'config.set'))
+
+    // Global pick from a provisional chat: nothing to target — the frame
+    // ships WITHOUT a session_id (the global default needs no session, and
+    // a pseudo id on the wire is 4001-or-silent-global bait either way).
+    await applyReasoning({ value: 'high', scope: 'global', sessionId: provisionalSid })
+    const frames = sent.filter((f) => f.method === 'config.set')
+    check('global pick from a provisional chat fires one frame', frames.length === 1, `${frames.length}`)
+    check('that frame carries no session_id', !('session_id' in (frames[0]?.params ?? {})), JSON.stringify(frames[0]?.params))
+
+    // The wire-wide invariant this fix pins.
+    check('no pending:new:/new: session_id ever hits the wire',
+      sent.every((f) => typeof f.params.session_id !== 'string' ||
+        (!f.params.session_id.startsWith('pending:new:') && !f.params.session_id.startsWith('new:'))))
+  })
+}
+
 async function main() {
   await testPureHelpers()
   await testInteractiveTargets()
   await testModelWireFlow()
   await testPreferenceFlow()
+  await testProvisionalWriteGate()
   console.log(`\n${pass} passed, ${fail} failed`)
   process.exit(fail ? 1 : 0)
 }

@@ -6,6 +6,7 @@ import { useStore } from '@nanostores/react'
 import { Ionicons } from '@expo/vector-icons'
 import { Icon } from '../../src/components/Icon'
 import * as Clipboard from 'expo-clipboard'
+import Constants from 'expo-constants'
 import * as Haptics from 'expo-haptics'
 import { router } from 'expo-router'
 import { connConfig, connectionState, gatewayError, disconnect, retryNow, redactedUrl,
@@ -19,7 +20,7 @@ import {
 import { getEmbeddedGateway, mochiRuntimeStatus, restartEmbeddedRuntime, stopEmbeddedRuntime, requestBatteryExemption, linuxStatus, linuxReset, linuxBootstrap, type LinuxGuestStatus } from '../../src/lib/mochiRuntime'
 import { C, useStyles, setTheme, THEME_OPTIONS, themeId, type ThemeId } from '../../src/lib/theme'
 import { ScreenShell } from '../../src/components/ScreenShell'
-import { localeAtom, setLocale } from '../../src/lib/strings'
+import { localeAtom, setLocale, tr } from '../../src/lib/strings'
 import { showAlert } from '../../src/components/AlertDialog'
 
 export default function Settings() {
@@ -48,6 +49,39 @@ function LinuxSectionRows() {
     return () => { alive = false; clearInterval(t) }
   }, [])
   const installed = !!st?.bootstrapped
+  // #112 / BUG-016 pattern (setup.tsx): the bootstrap/reset are long, fallible
+  // operations — the old handlers fired-and-forgot, so a failed install left
+  // the row silently unchanged with no retry hint.
+  const runInstall = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const r = await linuxBootstrap('ubuntu-24.04')
+      if (!r || r.ok === false) {
+        showAlert(tr('linux.install.failed', { why: r?.steps || 'no result from the runtime' }))
+        return
+      }
+    } catch (e) {
+      showAlert(tr('linux.install.failed', { why: e instanceof Error ? e.message : String(e) }))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const runReset = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const r = await linuxReset()
+      if (!r) {
+        showAlert(tr('linux.reset.failed', { why: 'the runtime refused or is unavailable' }))
+        return
+      }
+    } catch (e) {
+      showAlert(tr('linux.reset.failed', { why: e instanceof Error ? e.message : String(e) }))
+    } finally {
+      setBusy(false)
+    }
+  }
   return (
     <>
       <Row
@@ -59,11 +93,7 @@ function LinuxSectionRows() {
         icon="download-outline"
         label={installed ? 'Update / reinstall environment' : 'Install Linux environment'}
         sub="Downloads the base system (needs network, few minutes)"
-        onPress={() => {
-          if (busy) return
-          setBusy(true)
-          void linuxBootstrap('ubuntu-24.04').finally(() => setBusy(false))
-        }}
+        onPress={() => { void runInstall() }}
       />
       {installed ? (
         <Row
@@ -74,7 +104,7 @@ function LinuxSectionRows() {
           onPress={() => {
             showAlert('Reset Linux environment?', 'Deletes the guest rootfs and all packages inside it.', [
               { text: 'Cancel', style: 'cancel' },
-              { text: 'Reset', style: 'destructive', onPress: () => { void linuxReset() } },
+              { text: 'Reset', style: 'destructive', onPress: () => { void runReset() } },
             ])
           }}
         />
@@ -227,6 +257,20 @@ function ThemeCard({ id, name, desc, swatches, onPick }: {
 
 // ── Screen ──────────────────────────────────────────────────────────────────
 
+/** Installed app version (#66 / BUG-119): native first, expo config fallback. */
+function appVersion(): string {
+  // nativeAppVersion still ships on the native module's constants but is
+  // untyped in expo-constants v57's surface — read it through a narrow cast.
+  const c = Constants as typeof Constants & { nativeAppVersion?: string | null }
+  return c.nativeAppVersion ?? Constants.expoConfig?.version ?? '—'
+}
+
+/** Native build/versionCode (Android versionCode, iOS build number). */
+function appBuild(): string {
+  const c = Constants as typeof Constants & { nativeBuildVersion?: string | null }
+  return c.nativeBuildVersion ?? '—'
+}
+
 function SettingsInner() {
   const s = useStyles(makeS)
   const cfg = useStore(connConfig)
@@ -263,7 +307,8 @@ function SettingsInner() {
 
   const copyDiagnostics = async () => {
     const text = [
-      `Moch v1.0`,
+      // #66 / BUG-119: the real installed build (was a hardcoded "Moch v1.0").
+      `Moch v${appVersion()} (${appBuild()})`,
       `Server: ${cfg ? redactedUrl(cfg) : '—'}`,
       `Computers saved: ${savedServers.length}`,
       `State: ${state}${err ? ` (${err.slice(0, 200)})` : ''}`,
@@ -475,7 +520,7 @@ function SettingsInner() {
           <Divider />
           <Row
             icon="information-circle-outline"
-            label="Moch v1.0"
+            label={`Moch v${appVersion()} (${appBuild()})`}
             sub="Mobile client for your self-hosted Mochi agent. Pair from the Add computer screen or your PC's pairing tool."
             disabled
           />

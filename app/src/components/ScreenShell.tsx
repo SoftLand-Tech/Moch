@@ -46,7 +46,7 @@ import {
   sessionsSummaryKey,
 } from '../lib/chat'
 import { loadCatalog } from '../lib/slash'
-import { loadLastActive, loadSessions, lastActiveByStoredId, lastActiveFor, patchRowTitle, sessionRows, toMs } from '../lib/sessionList'
+import { loadLastActive, loadSessions, lastActiveByStoredId, lastActiveFor, patchRowTitle, refreshRunningSessions, sessionRows, toMs } from '../lib/sessionList'
 import { forgetChatMarks, loadChatMarks, toggleArchive, togglePin } from '../lib/chatListState'
 
 /**
@@ -524,6 +524,10 @@ export function ScreenShell({
           // created on another surface (or by a cron job) shows up without
           // waiting for the background poll.
           void loadSessions()
+          // BUG-131 (client half): same for the gateway-running overlay — a
+          // turn started on another device marks its row the moment the
+          // drawer opens, not at the next 60s tick.
+          void refreshRunningSessions()
         }}
         onClose={() => setOpen(false)}
         onRequestOpen={() => setOpen(true)}

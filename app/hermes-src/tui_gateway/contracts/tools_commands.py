@@ -413,6 +413,7 @@ method("rollback.diff", params=RollbackDiffParams, result=RollbackDiffResult,
 class CronAction(WireEnum):
     list = "list"
     add = "add"
+    get = "get"
     remove = "remove"
     pause = "pause"
     resume = "resume"
@@ -438,6 +439,9 @@ class CronJobRow(_Open):
     skill: str | None = None
     skills: list[str] = Field(default_factory=list)
     prompt_preview: str = ""
+    # Only on cron.manage get: the full stored prompt (edit prefill); every other
+    # action ships the 100-char preview above.
+    prompt: str | None = None
     model: str | None = None
     provider: str | None = None
     base_url: str | None = None
@@ -477,7 +481,8 @@ class CronRemovedJob(Result):
 class CronManageResult(_Open):
     """Pass-through of ``tools/cronjob_tools.py::cronjob`` JSON: ``list`` → ``jobs``/``count``
     (+ ``scoped`` when profile-scoped); ``add`` → the created job's summary + ``job``; ``remove`` →
-    ``removed_job``; ``pause``/``resume`` → ``job``. A tool-level failure lands in ``error``."""
+    ``removed_job``; ``pause``/``resume`` → ``job``; ``get`` → ``job`` with the full ``prompt``.
+    A tool-level failure lands in ``error``."""
 
     success: bool | None = None
     error: str | None = None
@@ -501,7 +506,7 @@ class CronManageResult(_Open):
 
 
 method("cron.manage", params=CronManageParams, result=CronManageResult,
-       doc="List/add/remove/pause/resume cron jobs in the (optionally profile-scoped) cron store.")
+       doc="List/add/get/remove/pause/resume cron jobs in the (optionally profile-scoped) cron store.")
 
 
 # ── browser.manage ────────────────────────────────────────────────────────────────────────────
