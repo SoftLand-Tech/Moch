@@ -275,6 +275,13 @@ def _tool_defs_cache_key(
         frozenset(disabled_toolsets) if disabled_toolsets else None, registry._generation, cfg_fp,
         bool(os.environ.get("HERMES_KANBAN_TASK")), bool(skip_tool_search_assembly),
         _is_delegated_child_context(), _is_dispatcher_owned_worker(), profile_scope,
+        # BUG-132: the browser gate flips these two env vars mid-process (the
+        # agent boots the relay itself). The assembled catalog differs between
+        # the two states — browser_* enter/leave via check_fn — so the key MUST
+        # carry them, else a catalog computed pre-arm is replayed post-arm for
+        # the life of the process (the memo has no TTL; browser_gate.activate's
+        # double-clear loses any compute-in-flight race).
+        os.environ.get("MOCH_BROWSER_RELAY", ""), os.environ.get("BROWSER_CDP_URL", ""),
     )
 
 

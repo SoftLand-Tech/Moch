@@ -34,13 +34,41 @@ class BrowserRelayModule(reactContext: ReactApplicationContext) :
         if (!CdpRelay.status().running) CdpRelay.start(reactApplicationContext, preferPort)
         val s = CdpRelay.status()
         if (s.running) {
-          // Tell the RUNNING hermes process now — relay.json alone only helps
-          // at next boot, and the agent must see the browser tools this
-          // session (the user opens the Browser screen after gateway boot).
-          val py = com.chaquo.python.Python.getInstance()
-          py.getModule("moch.browser_gate").callAttr("activate", s.port, s.token)
+          // BUG-132: on a cold app start this runs while the hermes Python is
+          // still booting (the AgentBrowserHost mounts long before the gateway
+          // finishes importing), so the one-shot activate threw, the promise
+          // rejected, and the browser tools stayed hidden for the WHOLE run —
+          // the exact "new chats have no browser tools" report. The relay is
+          // already up at this point, so arm it on a retry loop instead: keep
+          // trying until Python is started and acknowledges, regardless of
+          // boot order. The promise resolves immediately — the caller only
+          // needs the relay state.
+          promise.resolve(statusMap())
+          // First-boot-after-install cold starts can take >60 s to reach a
+          // started Python; a fixed 30 s window exhausted on exactly those
+          // boots (observed on device). Poll cheaply instead: 1 s ticks, up
+          // to 120 s, arming the moment Python exists.
+          var armed = false
+          var ticks = 0
+          while (ticks < 120) {
+            ticks++
+            if (com.chaquo.python.Python.isStarted()) {
+              try {
+                com.chaquo.python.Python.getInstance()
+                  .getModule("moch.browser_gate")
+                  .callAttr("activate", s.port, s.token)
+                armed = true
+                break
+              } catch (e: Throwable) {
+                // Python started but the module import raced the boot — retry.
+              }
+            }
+            Thread.sleep(1000)
+          }
+          android.util.Log.i("MochBrowserRelay", "gate arm retry: armed=$armed ticks=$ticks pid=${android.os.Process.myPid()}")
+        } else {
+          promise.resolve(statusMap())
         }
-        promise.resolve(statusMap())
       } catch (e: Exception) {
         promise.reject("cdp_relay_start", e.message, e)
       }

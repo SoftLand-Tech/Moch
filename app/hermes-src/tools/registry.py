@@ -5,6 +5,7 @@ Cycle-safe import chain: this module imports nothing from model_tools or tool fi
 tools/*.py import it at module level; model_tools.py imports both; run_agent/cli import
 model_tools."""
 
+import os
 import ast
 import functools
 import importlib
@@ -259,7 +260,7 @@ def _prune_check_fn_caches(now: float) -> None:
             cache.pop(next(iter(cache)))
 
 
-def check_fn_cache_scope() -> Optional[str]:
+def _check_fn_cache_scope_base() -> Optional[str]:
     """Return the active profile key when availability is profile-scoped. Browser-controller
     availability is request-bound (changes on every attach/detach), so a fully bound
     browser-control request bypasses this cache AND model_tools' outer definition cache (same
@@ -283,6 +284,17 @@ def check_fn_cache_scope() -> Optional[str]:
         # Fail closed: bypass both cache layers rather than aliasing requests
         # whose multiplex profile identity could not be resolved.
         return CHECK_FN_CACHE_BYPASS
+
+
+def check_fn_cache_scope() -> Optional[str]:
+    """BUG-132 (cause 3) — REVERTED on device evidence: returning a non-None
+    scope in a single-profile process made every check_fn-gated tool vanish
+    from the kit (3 visible vs 20 on the pre-change build; zero verdict lines),
+    because a non-None scope is meaningful beyond the cache key. The gate-env
+    partition survives in model_tools._tool_defs_cache_key + activate()'s
+    double clear + the 30s check_fn TTL, which bound the original poison window.
+    """
+    return _check_fn_cache_scope_base()
 
 
 def _run_check_fn_uncached(fn: Callable) -> bool:

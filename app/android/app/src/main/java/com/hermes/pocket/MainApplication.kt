@@ -59,6 +59,20 @@ class MainApplication : Application(), ReactApplication {
     }
     loadReactNative(this)
     ApplicationLifecycleDispatcher.onApplicationCreate(this)
+    // BUG-132 (cause 1): start the CDP relay NATIVELY, before the Python boot
+    // reads relay.json. Every arming path is then guaranteed a live file
+    // within milliseconds of process creation — including START_STICKY
+    // service restarts, where the process comes back WITHOUT MainActivity and
+    // no RN UI ever mounts (the previous, RN-only start left the gateway
+    // serving a browser-less catalog until the user next opened the app).
+    // WebView debugging becomes process-wide from boot: the accepted posture
+    // of the always-available browser (see PR #61).
+    try {
+      android.webkit.WebView.setWebContentsDebuggingEnabled(true)
+      com.hermes.pocket.hermes.CdpRelay.start(this, 9334)
+    } catch (e: Exception) {
+      android.util.Log.w("MochBrowserRelay", "native relay boot-start failed", e)
+    }
     // Boot the embedded Hermes runtime (Chaquopy CPython) off the main thread;
     // MochHermes logcat tag is the on-device proof.
     HermesRuntime.start(this)
