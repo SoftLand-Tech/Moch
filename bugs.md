@@ -1023,3 +1023,43 @@ Fix applied (build in progress, unverified on device yet): the native arm loop n
 catalogs are unreachable once the gate flips) this closes the race without ordering assumptions:
 whichever of {native retry, gateway pre-serve re-arm} lands first arms the gate, and no pre-arm
 catalog survives the flip.
+
+---
+
+## BUG-133 [HIGH] (NEW, WIP) Keyboard opens over inputs app-wide — the input and everything at the bottom must rise ABOVE the keyboard
+
+User report (2026-10-12): "find all inputs/anything that will open the keyboard, and make sure when
+the keyboard opens the input (and everything in bottom) will go above the keyboard and not stay with it."
+Intake: app-wide keyboard-avoidance audit — enumerate EVERY keyboard-opening surface (TextInput,
+autoFocus, WebView focus, sheets with inputs) and the avoidance each one has today; fix so the focused
+input and everything below it lift above the keyboard on every screen. Verification wave: 5 read-only
+subagents on disjoint scopes (chat composer / forms+onboarding / tab screens+shell / sheets+modals /
+platform wiring+terminal+webview+native RNKC sources). Build in worktree `worktrees/keyboard-avoidance`
+from origin/main.
+
+### BUG-132 round 33 — DECISIVE NEGATIVE: the tools are absent from the callable kit itself
+
+Full fix package installed and verified live (native relay start in MainApplication.onCreate:
+socket up at boot, `armed=true ticks=1 pid=<live>`; check_fn scope partition; live-session refresh;
+Fragment hoist; 118 tests OK; build 02:45). Acceptance still fails:
+
+- turn: "Use your browser tools to open example.com…" → `tool_search` + `terminal` (curl), no browser_*.
+- DECISIVE PROBE: *"Call the tool named browser_navigate with url https://example.com — if that
+  tool does not exist in your toolset, reply exactly NO-SUCH-TOOL."* → the agent answered
+  **"No browser tool in my kit, but I can grab it with a fetch instead."**
+
+That eliminates the arm/env/cache/check_fn/live-refresh layers entirely — the model's CALLABLE SET
+lacks browser_* even when named explicitly. The remaining suspects, for the next session:
+
+1. **Toolset selection on device**: `_load_enabled_toolsets(platform)` → `_get_platform_tools(cfg, "cli")`
+   with the on-device config.yaml being EMPTY (verified) — does the empty-config path really yield the
+   hermes-cli composite including `browser`, or does it fall back to a minimal set? The static analysis
+   said composite, but it was never verified against an empty config on device.
+2. **The APK's baked toolsets.py** vs the tree: does the baked copy's `_HERMES_CORE_TOOLS` contain the
+   browser names? (An earlier check said byte-identical — re-verify against the 02:45 APK.)
+3. **Instrument the truth**: one log line of the resolved tool names at agent build (agent_init._load_tools,
+   even in quiet_mode) would have made every round of this diagnosable from agent.log alone; add it first.
+
+Also requested by the user (new feature, not yet started): browser tab management tools —
+navigate BETWEEN tabs, create/delete/manage multiple tabs (the Browser screen already has a tab
+strip; needs browser_tab_* tools + relay support for target selection).
