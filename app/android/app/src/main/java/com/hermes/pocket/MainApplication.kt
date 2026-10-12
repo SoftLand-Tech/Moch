@@ -13,6 +13,7 @@ import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint
 import com.hermes.pocket.hermes.BrowserRelayPackage
 import com.hermes.pocket.hermes.HermesBridgePackage
 import com.hermes.pocket.hermes.HermesRuntime
+import com.hermes.pocket.hermes.MochLogs
 import com.hermes.pocket.sharein.ShareInPackage
 
 import expo.modules.ApplicationLifecycleDispatcher
@@ -39,15 +40,14 @@ class MainApplication : Application(), ReactApplication {
     // Crash telemetry for the embedded runtime process: last crash lands in
     // files/Moch/logs/crash-last.txt (the agent itself can read it back).
     // Recovery is START_STICKY on HermesService — the system restarts the
-    // service, and with it the process and the Python runtime.
+    // service, and with it the process and the Python runtime. The write
+    // itself goes through MochLogs, shared with HermesService's FGS-timeout
+    // marker (BH-000046) so both files come from one code path.
     val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
     Thread.setDefaultUncaughtExceptionHandler { t, e ->
       try {
         android.util.Log.e("MochHermes", "uncaught exception on ${t.name}", e)
-        java.io.File(filesDir, "Moch/logs/crash-last.txt").apply {
-          parentFile?.mkdirs()
-          writeText("${java.util.Date()} thread=${t.name}\n${android.util.Log.getStackTraceString(e)}")
-        }
+        MochLogs.write(this, "crash-last.txt", "${java.util.Date()} thread=${t.name}\n${android.util.Log.getStackTraceString(e)}")
       } catch (_: Exception) {
       }
       previousHandler?.uncaughtException(t, e)

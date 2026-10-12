@@ -476,7 +476,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   *Fix:* a scheme-specific message: "only http(s) URLs can be driven; data:,
   javascript:, file: and blobs are refused".
 
-- [ ] **BUG-129 [MEDIUM] Settings → "Stop runtime" does nothing — the app keeps running and the gateway keeps serving, with the failure swallowed** — `app/app/(tabs)/settings.tsx:125-131` → `src/lib/mochiRuntime.ts:55-58` → `android/.../hermes/HermesBridgeModule.kt:58-65` (`HermesService.stop`)
+- [x] **BUG-129 [MEDIUM] Settings → "Stop runtime" does nothing — the app keeps running and the gateway keeps serving, with the failure swallowed** — `app/app/(tabs)/settings.tsx:125-131` → `src/lib/mochiRuntime.ts:55-58` → `android/.../hermes/HermesBridgeModule.kt:58-65` (`HermesService.stop`)
   On device, with the runtime healthy: tapping the row (label: *"Ends the background service
   and exits the app"*) produced no dialog, no toast, no exit — same pid, app still
   foreground, `/` on `127.0.0.1:9119` still answering 200, ten seconds later.
@@ -488,6 +488,13 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   *Fix:* make `HermesService.stop` actually tear the runtime down (and exit like
   Restart does), or relabel the row to what it really does; surface the rejection
   instead of `.catch(() => {})`.
+  *(fixed in PR #PR_NUMBER_PLACEHOLDER — `HermesService.stop` now delivers the
+  service's ACTION_STOP command (the exact machinery the notification's Stop
+  action uses): stopForeground(STOP_FOREGROUND_REMOVE) + stopService + process
+  exit(0), so the gateway dies and the app exits like Restart; falls back to the
+  direct `shutdownProcess` teardown if startService is refused. The settings row
+  already said "Ends the background service and exits the app" — now honest.
+  Source-level only — on-device check pending next dev build.)*
 
 - [x] **BUG-130 [MEDIUM, CORRECTED] The composer's accessibility subtree freezes while a turn runs — the Steer chip and the Stop button are rendered but invisible to a11y, and the EditText keeps reporting the last submitted text** — `app/(tabs)/chat.tsx:1414-1427` (Steer chip, `busy`-gated), `:1469-1478` (Stop button, `busy`-gated), composer `TextInput` a11y text
   **Correction first:** this entry was originally filed as "a running turn shows no busy state, the Stop control is unreachable". That was wrong, and the mistake is instructive: the instrument was `uiautomator`, not the screen. Re-checked with a screenshot of the composer band while a run was provably in flight (a `terminal` call to `sleep 600`; transcript timestamps 17:08:28 → 17:18:xx): the band reads **"Steer"**, and `chat.tsx:1414` renders that chip only when `busy` is true — so `busy` is tracked locally and the code path that swaps the voice slot for the **Stop** button (`chat.tsx:1469`) is live too. The UI is fine; the accessibility tree is not.
@@ -1371,10 +1378,37 @@ chat pathological tall-stack overflow in clarify cards (flexShrink on s.sheet/s.
 
 ## Security audit fixes (2026-10-12) — C-04 / GitHub #94
 
+- [x] **C-04 / BH-000037 [HIGH→MEDIUM, security] Release builds silently fell back to the publicly tracked debug.keystore; keystore.properties was never gitignored** — build.gradle:140, plugins/with-android-release.js — *(fixed in PR #133 — release now fails fast without keystore.properties (plugin mirrored), debug signingConfig + tracked debug.keystore removed (AGP default auto-creates), keystore.properties gitignored; PUBLIC RELEASE IMPACT REFUTED: v1.0.0 APK verified signed by a different key (0598c942…); residual = local dev sideloads + future local-gradle releases, now blocked)*
+
+## BH bug-hunt wave (2026-10-12) — always-on runtime survival, GH #100
+
+- [x] **BH-000046 [HIGH] Always-on dataSync FGS has no onTimeout — 6h/24h Android 15+ cap crashes the runtime (and sticky-restart + swallowed ForegroundServiceStartNotAllowedException = silent death)** — AndroidManifest:39, HermesService.kt:124 — *(fixed in PR #134 — migrated to specialUse FGS (no 6h cap, honest type for an embedded runtime gateway) + onTimeout(int[,fgsType]) defense-in-depth (marker file, sleep notification, immediate stop) + BUG-129: Stop runtime now fully tears down; source-level only — on-device check pending next dev build)*
+  Implementation notes: `FOREGROUND_SERVICE_SPECIAL_USE` permission added (dataSync
+  permission kept for the API 29-33 `startForeground` branch); subtype property
+  `android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE=embedded_agent_runtime_gateway`.
+  Timeout defense: `onTimeout(startId)` (API 34+) + `onTimeout(startId, fgsType)`
+  — the latter is the **compileSdk 36 signature**: API 35's
+  `onTimeout(int, Service.StartArgToken)` was replaced by `onTimeout(int, int)`
+  in API 36 and `Service.StartArgToken` no longer resolves against the API 36
+  SDK (verified against `$ANDROID_HOME/platforms/android-36/android.jar` and
+  AOSP main `Service.java`; the briefed StartArgToken override would not
+  compile). Handler order, all in one callback: write
+  `files/Moch/logs/fgs-timeout.txt` (timestamp + startId + type, shared
+  `MochLogs` writer with the crash handler), build the "Mochi went to sleep —
+  Android's 6-hour background limit was reached; reopen the app to wake her"
+  notification (reuses buildNotification + Stop action, non-ongoing),
+  `stopForeground(STOP_FOREGROUND_REMOVE)` + `stopSelf()` immediately (the
+  system throws ForegroundServiceDidNotStopInTimeException if we linger), then
+  re-post the sleep notice via NotificationManager after the REMOVE (posting
+  before it would cancel the same id). Known residual: if the timeout fires
+  while the process stays alive, "reopen the app to wake her" needs a process
+  restart — MainApplication auto-start only runs on process creation; a
+  MainActivity.onResume restart hook is deliberately out of scope here.
+
 - [x] **C-04 / BH-000037 [HIGH→MEDIUM, security] Release builds silently fell back to the publicly tracked debug.keystore; keystore.properties was never gitignored** — build.gradle:140, plugins/with-android-release.js — *(fixed in PR #PR_NUMBER_PLACEHOLDER — release now fails fast without keystore.properties (plugin mirrored), debug signingConfig + tracked debug.keystore removed (AGP default auto-creates), keystore.properties gitignored; PUBLIC RELEASE IMPACT REFUTED: v1.0.0 APK verified signed by a different key (0598c942…); residual = local dev sideloads + future local-gradle releases, now blocked)*
 
 ## Security audit (C-items) — relay wave, GH #91/#92/#93
 
-- [x] **C-01 / BH-000034 [MEDIUM, security] Relay treated knowledge of tokenHash as machine identity — no proof-of-possession at /control (state.json leak = machine-takeover + victim crash-loop lockout)** — relay/moch-relay-server.js:183-204 — *(fixed in PR #PR_NUMBER_PLACEHOLDER — registration that creates a credential or takes over a hash must discharge a verify challenge: relay sends {"t":"verify","nonce"} and the machine opens /tunnel/<nonce> with the raw token (sha256 proof) within the window; failure → close 4003, offline twin KEEPS its slot (no more eviction-based lockout). Returning (id, tokenHash) pairs reconnect hash-only — existing tunnels unaffected. state.json now 0600 in a 0700 dir (any-local-VPS-user read closed). DEFERRED: full sha256→HMAC(relaySecret,token) verifier migration — needs every machine to re-run install.sh + legacy grandfathering (protocol decision))* 
-- [x] **C-02 / BH-000035 [MEDIUM, security] Raw pairing token (and Expo push token) traveled in relay URL query strings on both legs — lands in reverse-proxy access logs; 'relay never sees the token' comments were false** — relay:308-312,377-381; gateway.ts:148-158; install.sh:222-223 — *(fixed in PR #PR_NUMBER_PLACEHOLDER — phone dial sends token+push as X-Hermes-Session-Token/X-Hermes-Push-Token upgrade HEADERS (never a URL); relay routes by header and re-injects ?token=&push= into the FORWARDED request line only (in-memory, on the tunnel leg) so old homes and moch-link's push capture keep working; phone falls back to legacy query once on refusal (old relays). Tunnel leg sends its key as X-Moch-Tunnel-Key header with ?key= 403-fallback for old relays. All lying comments/READMEs/docs corrected; nginx log-scrub snippet added to relay/README)*
-- [x] **C-03 / BH-000036 [MEDIUM, security] Relay registration open by default; unauthenticated /control sockets had no lifecycle cap; XFF first-entry trust voided the per-IP cap** — relay:61,268-287,433-435,273-279 — *(fixed in PR #PR_NUMBER_PLACEHOLDER — 10s register deadline (close 4001) + parked-socket caps (5/IP after last-entry XFF trust, 100 global; close 4002); /health keeps {"ok":true} public but machine/connection counts only behind the relay key (?key= or X-Moch-Relay-Key); --bind flag (default unchanged — direct-exposure self-hosters keep working, loopback-behind-nginx documented); OPEN REGISTRATION now logs a loud DEPRECATION banner with migration instructions (--open-registration opts out). DEFERRED: flipping require-key default to closed — hard-breaks every tunnel lacking --relay-key (crash-loop); one-release deprecation window instead, MOCH_LINK_RELAY_KEY plumbing already added to install.sh)*
+- [x] **C-01 / BH-000034 [MEDIUM, security] Relay treated knowledge of tokenHash as machine identity — no proof-of-possession at /control (state.json leak = machine-takeover + victim crash-loop lockout)** — relay/moch-relay-server.js:183-204 — *(fixed in PR #135 — registration that creates a credential or takes over a hash must discharge a verify challenge: relay sends {"t":"verify","nonce"} and the machine opens /tunnel/<nonce> with the raw token (sha256 proof) within the window; failure → close 4003, offline twin KEEPS its slot (no more eviction-based lockout). Returning (id, tokenHash) pairs reconnect hash-only — existing tunnels unaffected. state.json now 0600 in a 0700 dir (any-local-VPS-user read closed). DEFERRED: full sha256→HMAC(relaySecret,token) verifier migration — needs every machine to re-run install.sh + legacy grandfathering (protocol decision))* 
+- [x] **C-02 / BH-000035 [MEDIUM, security] Raw pairing token (and Expo push token) traveled in relay URL query strings on both legs — lands in reverse-proxy access logs; 'relay never sees the token' comments were false** — relay:308-312,377-381; gateway.ts:148-158; install.sh:222-223 — *(fixed in PR #135 — phone dial sends token+push as X-Hermes-Session-Token/X-Hermes-Push-Token upgrade HEADERS (never a URL); relay routes by header and re-injects ?token=&push= into the FORWARDED request line only (in-memory, on the tunnel leg) so old homes and moch-link's push capture keep working; phone falls back to legacy query once on refusal (old relays). Tunnel leg sends its key as X-Moch-Tunnel-Key header with ?key= 403-fallback for old relays. All lying comments/READMEs/docs corrected; nginx log-scrub snippet added to relay/README)*
+- [x] **C-03 / BH-000036 [MEDIUM, security] Relay registration open by default; unauthenticated /control sockets had no lifecycle cap; XFF first-entry trust voided the per-IP cap** — relay:61,268-287,433-435,273-279 — *(fixed in PR #135 — 10s register deadline (close 4001) + parked-socket caps (5/IP after last-entry XFF trust, 100 global; close 4002); /health keeps {"ok":true} public but machine/connection counts only behind the relay key (?key= or X-Moch-Relay-Key); --bind flag (default unchanged — direct-exposure self-hosters keep working, loopback-behind-nginx documented); OPEN REGISTRATION now logs a loud DEPRECATION banner with migration instructions (--open-registration opts out). DEFERRED: flipping require-key default to closed — hard-breaks every tunnel lacking --relay-key (crash-loop); one-release deprecation window instead, MOCH_LINK_RELAY_KEY plumbing already added to install.sh)*
