@@ -13,6 +13,10 @@
 set -euo pipefail
 
 RELAY="${MOCH_LINK_RELAY:-wss://api.moch.softland.tech}"
+# Relay registration key — set when the relay runs --require-key (self-hosted
+# invite-only relays). Carried through $LINK_HOME/env into the tunnel unit's
+# --relay-key so keyed relays work end-to-end from one install flag.
+RELAY_KEY="${MOCH_LINK_RELAY_KEY:-}"
 LINK_HOME="${MOCH_LINK_HOME:-$HOME/.moch-link}"
 ENV_FILE_SRC="${MOCH_LINK_ENV:-}"
 SERVE_PORT="${MOCH_LINK_PORT:-}"
@@ -37,16 +41,23 @@ install_tunnel() {
 //
 // Dials the relay OUTBOUND over one control WebSocket (no router config, works
 // behind any NAT), registers this machine by the sha256 of the local gateway's
-// pairing token — the token itself never leaves the machine except as the
-// /tunnel leg key — and then, whenever a phone knocks on wss://<relay>/api/ws,
+// pairing token, and then, whenever a phone knocks on wss://<relay>/api/ws,
 // opens a tunnel leg and pipes raw bytes to the local gateway. The phone's
-// WebSocket handshake, token included, completes end to end at the home
-// gateway; the relay never interprets it.
+// WebSocket handshake completes end to end at the home gateway; the relay
+// splices it without interpreting it. The raw token DOES leave this machine —
+// as the /tunnel leg key (X-Moch-Tunnel-Key header; ?key= query is the legacy
+// fallback for old relays) and on the register verify leg below. The relay
+// holds it only in memory for those legs and persists sha256(token) alone
+// (state.json, 0600).
 //
 //   control:  <relay>/control  {"t":"register","machine":<id>,"tokenHash":<sha256(token)>}
 //             ack {"t":"registered","host":...}; knock {"t":"conn","id}, {"t":"cancel","id}
-//   legs:     <relay>/tunnel/<id>?key=<gateway token>  (proves possession: the
-//             service holds sha256(token) from registration)
+//             A register that would create a credential or take over a hash is
+//             challenged: {"t":"verify","nonce":...} -> open /tunnel/<nonce>
+//             keyed with the raw token within the window (proof of possession).
+//   legs:     <relay>/tunnel/<id>  key: X-Moch-Tunnel-Key: <gateway token>
+//             (legacy: ?key=<gateway token>; proves possession — the service
+//             holds sha256(token) from registration)
 //
 // Reconnects with exponential backoff 1s -> 30s; the machine's registration at
 // the relay survives disconnects, and the machine id is persisted locally so
@@ -177,9 +188,16 @@ function connectControl() {
       backoffMs = 1000
       lastPongAt = Date.now()
       writeStatus(true)
-      log('registered as', cfg.machine, '— relay ack host:', msg.host, '(phones dial wss://' + msg.host + '/api/ws?token=<gateway-token>)')
+      log('registered as', cfg.machine, '— relay ack host:', msg.host, '(phones dial wss://' + msg.host + '/api/ws, token via X-Hermes-Session-Token header; ?token= is the legacy form)')
     } else if (msg.t === 'conn' && msg.id) {
       openLeg(String(msg.id))
+    } else if (msg.t === 'verify' && msg.nonce) {
+      // Relay proof-of-possession challenge (new registration or token
+      // takeover): opening /tunnel/<nonce> keyed with the RAW token is the
+      // proof; the relay then commits the registration and acks 'registered'
+      // on this control socket. Missing the window closes us with 4003 and
+      // the reconnect loop retries.
+      openVerifyLeg(String(msg.nonce))
     } else if (msg.t === 'cancel' && msg.id) {
       closeLeg(String(msg.id), 'cancelled by relay (phone gone)')
     } else if (msg.t === 'error') {
@@ -191,8 +209,9 @@ function connectControl() {
 
   ctl.on('pong', () => { lastPongAt = Date.now() })
 
-  ctl.on('close', () => {
+  ctl.on('close', (code) => {
     if (shuttingDown) return
+    if (code === 4003) log('relay rejected registration: possession verify failed (no/wrong proof leg)')
     log('control closed — reconnecting in', backoffMs + 'ms (registration at the relay survives)')
     writeStatus(false)
     for (const id of [...legs.keys()]) closeLeg(id, 'control lost')
@@ -214,13 +233,70 @@ function connectControl() {
 
 // ---- tunnel legs -------------------------------------------------------------------
 
+// One-shot verify leg: proves this machine holds the RAW token for a pending
+// registration (see the "verify" knock on /control).
+function openVerifyLeg(nonce) {
+  const u = new URL(relayOrigin + '/tunnel/' + encodeURIComponent(nonce))
+  const ws = new WS(u, { maxPayload: 1024, headers: { 'X-Moch-Tunnel-Key': cfg.token } })
+  log('verify leg for nonce', String(nonce).slice(0, 8) + '… — presenting raw token')
+  ws.on('open', () => log('verify leg open — possession proven, awaiting registered ack'))
+  const gone = () => { try { ws.terminate() } catch {} }
+  ws.on('close', gone)
+  ws.on('error', (e) => { log('verify leg error:', e.message); gone() })
+}
+
+// Dial one tunnel leg. `useHeader` sends the machine secret (the raw pairing
+// token) in the X-Moch-Tunnel-Key header — URLs carrying ?key= land in proxy
+// access logs; headers don't. An auth-shaped 401/403 from a relay that never
+// learned the header falls back once to the legacy query form.
+function dialLeg(id, leg, useHeader) {
+  leg.retrying = false
+  const tu = new URL(relayOrigin + '/tunnel/' + encodeURIComponent(id))
+  const opts = { maxPayload: 2 * 1024 * 1024 }
+  if (useHeader) opts.headers = { 'X-Moch-Tunnel-Key': cfg.token }
+  else tu.searchParams.set('key', cfg.token) // legacy: relay checks sha256(key) === registered hash
+
+  const ws = new WS(tu, opts)
+  leg.ws = ws
+  ws.on('open', () => {
+    leg.wsOpen = true
+    log('tunnel', id.slice(0, 8), 'open ->', cfg.target)
+    const held = Buffer.concat(leg.buf)
+    leg.buf = []
+    leg.bufLen = 0
+    if (held.length) ws.send(held, { binary: true })
+    leg.tcp.resume()
+  })
+  ws.on('message', (data) => {
+    if (leg.tcp.destroyed) return
+    leg.inB += data.length
+    const ok = leg.tcp.write(data)
+    if (!ok && ws._socket) ws._socket.pause()
+  })
+  leg.tcp.on('drain', () => { if (leg.ws && leg.ws._socket) leg.ws._socket.resume() })
+  // Keepalive on this leg: ping every 20s (relay auto-pongs); pings/pongs are
+  // ws control frames and never disturb the spliced payload.
+  const hb = setInterval(() => { if (ws.readyState === WS.OPEN) { try { ws.ping() } catch {} } }, 20000)
+  ws.on('close', () => { clearInterval(hb); if (!leg.retrying) closeLeg(id, 'tunnel closed') })
+  ws.on('error', (e) => {
+    clearInterval(hb)
+    if (useHeader && /unexpected server response: 40[13]/i.test(e.message)) {
+      // Old relay without header support (or a plain refusal): retry once
+      // with the legacy ?key= form before giving up on this leg.
+      log('tunnel', id.slice(0, 8), 'header key refused (' + e.message + ') — retrying with legacy query key')
+      leg.retrying = true
+      setTimeout(() => { if (legs.get(id) === leg && !leg.wsOpen) dialLeg(id, leg, false) }, 250)
+      return
+    }
+    log('tunnel', id.slice(0, 8), 'error:', e.message)
+    if (!leg.retrying) closeLeg(id, 'tunnel error')
+  })
+}
+
 function openLeg(id) {
   if (legs.has(id)) return
-  const leg = { ws: null, tcp: null, buf: [], bufLen: 0, wsOpen: false, inB: 0, outB: 0, openedAt: Date.now() }
+  const leg = { ws: null, tcp: null, buf: [], bufLen: 0, wsOpen: false, inB: 0, outB: 0, openedAt: Date.now(), retrying: false }
   legs.set(id, leg)
-
-  const tu = new URL(relayOrigin + '/tunnel/' + encodeURIComponent(id))
-  tu.searchParams.set('key', cfg.token) // machine secret: raw pairing token; relay checks sha256(key) === registered hash
 
   const tcp = net.connect({ host: target.host, port: target.port })
   // CONNECT timeout only — a one-shot timer cancelled on connect. socket
@@ -238,29 +314,7 @@ function openLeg(id) {
   tcp.on('connect', () => {
     clearTimeout(connectTimer)
     tcp.setTimeout(0)
-    const ws = new WS(tu, { maxPayload: 2 * 1024 * 1024 })
-    leg.ws = ws
-    ws.on('open', () => {
-      leg.wsOpen = true
-      log('tunnel', id.slice(0, 8), 'open ->', cfg.target)
-      const held = Buffer.concat(leg.buf)
-      leg.buf = []
-      leg.bufLen = 0
-      if (held.length) ws.send(held, { binary: true })
-      tcp.resume()
-    })
-    ws.on('message', (data) => {
-      if (tcp.destroyed) return
-      leg.inB += data.length
-      const ok = tcp.write(data)
-      if (!ok && ws._socket) ws._socket.pause()
-    })
-    tcp.on('drain', () => { if (leg.ws && leg.ws._socket) leg.ws._socket.resume() })
-    // Keepalive on this leg: ping every 20s (relay auto-pongs); pings/pongs are
-    // ws control frames and never disturb the spliced payload.
-    const hb = setInterval(() => { if (ws.readyState === WS.OPEN) { try { ws.ping() } catch {} } }, 20000)
-    ws.on('close', () => { clearInterval(hb); closeLeg(id, 'tunnel closed') })
-    ws.on('error', (e) => { clearInterval(hb); log('tunnel', id.slice(0, 8), 'error:', e.message); closeLeg(id, 'tunnel error') })
+    dialLeg(id, leg, true)
   })
 
   tcp.on('data', (chunk) => {
@@ -931,6 +985,7 @@ MOCH_LINK_PROXY_EOF
 
     printf 'TOKEN=%s\nTARGET=127.0.0.1:%s\nRELAY=%s\nUP_PORT=%s\nLISTEN=%s\nLINK_HOME=%s\n' \
         "$TOKEN" "$PROXY_PORT" "$RELAY" "$SERVE_PORT" "$PROXY_PORT" "$LINK_HOME" > "$LINK_HOME/env"
+    [ -n "$RELAY_KEY" ] && printf 'MOCH_LINK_RELAY_KEY=%s\n' "$RELAY_KEY" >> "$LINK_HOME/env"
     chmod 600 "$LINK_HOME/env"
 
     mkdir -p "$UNIT_DIR"
@@ -949,6 +1004,10 @@ RestartSec=2
 [Install]
 WantedBy=default.target
 EOF
+    # keyed relay: --relay-key rides $LINK_HOME/env (MOCH_LINK_RELAY_KEY) so
+    # the value never appears in the unit file itself
+    local relay_key_flag=""
+    [ -n "$RELAY_KEY" ] && relay_key_flag="--relay-key \$MOCH_LINK_RELAY_KEY"
     cat > "$UNIT_DIR/${UNITP}.service" <<EOF
 [Unit]
 Description=Moch Link — hermes serve via the Moch relay (api.moch.softland.tech)
@@ -957,7 +1016,7 @@ After=network-online.target ${UNITP}-proxy.service
 [Service]
 WorkingDirectory=$LINK_HOME
 EnvironmentFile=$LINK_HOME/env
-ExecStart=/usr/bin/env node $LINK_HOME/moch-tunnel.js --relay \$RELAY --token \$TOKEN --target \$TARGET --status $LINK_HOME/status.json
+ExecStart=/usr/bin/env node $LINK_HOME/moch-tunnel.js --relay \$RELAY --token \$TOKEN --target \$TARGET $relay_key_flag --status $LINK_HOME/status.json
 Restart=always
 RestartSec=3
 
@@ -991,6 +1050,7 @@ EOF
             printf 'HERMES_DASHBOARD_SESSION_TOKEN=%s\nPORT=%s\n' "$TOKEN" "$SERVE_PORT" > "$LINK_HOME/hermes-serve.env"
             printf 'TOKEN=%s\nTARGET=%s\nRELAY=%s\nUP_PORT=%s\nLISTEN=%s\nLINK_HOME=%s\n' \
                 "$TOKEN" "127.0.0.1:$PROXY_PORT" "$RELAY" "$SERVE_PORT" "$PROXY_PORT" "$LINK_HOME" > "$LINK_HOME/env"
+            [ -n "$RELAY_KEY" ] && printf 'MOCH_LINK_RELAY_KEY=%s\n' "$RELAY_KEY" >> "$LINK_HOME/env"
             chmod 600 "$LINK_HOME/env" "$LINK_HOME/hermes-serve.env"
             systemctl --user restart ${UNITP}-hermes-serve.service ${UNITP}.service
             for i in $(seq 1 20); do

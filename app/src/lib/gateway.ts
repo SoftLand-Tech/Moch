@@ -144,19 +144,83 @@ export function validateConfig(c: ConnConfig): ConnConfig {
   }
 }
 
-function wsUrl(c: ConnConfig): string {
-  const base = `${c.tls ? 'wss' : 'ws'}://${c.host}/api/ws?token=${encodeURIComponent(c.token)}`
-  // Advertise the Expo push token on the dial URL so the backend can knock
-  // while the socket is down. `./push` is required LAZILY, never imported:
-  // plain-node suites import this module, and push.ts drags in
-  // expo/react-native modules that cannot load outside the app runtime.
+// ---- dial transport (C-02: token off the URL) --------------------------------------
+// The dial URL comes in two forms: 'headers' carries the session/push tokens
+// in X-Hermes-Session-Token / X-Hermes-Push-Token upgrade headers (they never
+// appear in a URL, so no proxy access log or browser history sees them); the
+// relay routes header-auth phones and rewrites the FORWARDED request line for
+// the home. 'query' is the legacy ?token=&push= form every older peer
+// understands — kept as the fallback dial() retries once on refusal.
+export type DialTransport = 'headers' | 'query'
+let headerDial = true
+let pendingDialHeaders: Record<string, string> | null = null
+let lastDialTransport: DialTransport | null = null
+/** Test seam: force the legacy query transport (simulates old-peer-only). */
+export function _setHeaderDialForTests(v: boolean): void { headerDial = v }
+/** Which transport the last SUCCESSFUL dial used (null before the first). */
+export function lastDialMode(): DialTransport | null { return lastDialTransport }
+
+function currentPushToken(): string | null {
+  // `./push` is required LAZILY, never imported: plain-node suites import
+  // this module, and push.ts drags in expo/react-native modules that cannot
+  // load outside the app runtime.
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const push = require('./push') as typeof import('./push') | undefined
-    const pushToken = push?.currentPushToken?.()
-    if (pushToken) return `${base}&push=${encodeURIComponent(pushToken)}`
-  } catch {}
-  return base
+    return push?.currentPushToken?.() ?? null
+  } catch {
+    return null
+  }
+}
+
+function wsUrl(c: ConnConfig, mode: DialTransport): string {
+  const base = `${c.tls ? 'wss' : 'ws'}://${c.host}/api/ws`
+  const pushToken = currentPushToken()
+  if (mode === 'headers') {
+    if (!pushToken) return base // token/push ride the upgrade headers — see dialHeaders()
+    // The client no-ops a redial to the SAME URL while its socket is open,
+    // and the push re-advertise path (below) relies on the URL changing when
+    // the push token does. A short salted fingerprint of the push token
+    // changes exactly then — without putting the token itself on the URL.
+    return `${base}?pushfp=${fnv1a(PUSHFP_SALT + pushToken)}`
+  }
+  // Legacy: token on the query, so the backend can knock while the socket is
+  // down. Direct gateway connections and pre-header relays still need this.
+  let u = `${base}?token=${encodeURIComponent(c.token)}`
+  if (pushToken) u += `&push=${encodeURIComponent(pushToken)}`
+  return u
+}
+
+/** Per-process salt so push-token fingerprints can't be correlated across installs. */
+const PUSHFP_SALT = Math.random().toString(36).slice(2)
+/** Tiny FNV-1a — this is a change-detector, not a crypto hash. */
+function fnv1a(s: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(16).padStart(8, '0')
+}
+
+/** Upgrade-request headers for a header-mode dial: the session token always,
+ *  the Expo push token when the app holds one (the relay forwards it onto the
+ *  request line it rebuilds for the home, so the push watcher keeps working). */
+function dialHeaders(c: ConnConfig): Record<string, string> {
+  const h: Record<string, string> = { 'X-Hermes-Session-Token': c.token }
+  const pushToken = currentPushToken()
+  if (pushToken) h['X-Hermes-Push-Token'] = pushToken
+  return h
+}
+
+/** Auth-shaped dial failure: the peer answered/refused the upgrade (error or
+ *  close BEFORE open) rather than us timing out — exactly the shape a
+ * direct-to-gateway home or an old relay produces for a header-auth dial.
+ * Timeouts are deliberately excluded: a second attempt would only double the
+ * wait. */
+function isHandshakeRefusal(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return /closed during handshake|error before open/i.test(msg)
 }
 
 /** Scrubbed URL safe for logs/UI — never prints the token. */
@@ -414,7 +478,13 @@ export async function clearConfig() {
 function ensureClient(): JsonRpcGatewayClient {
   if (client) return client
   const cli = new JsonRpcGatewayClient({
-    socketFactory: (url: string) => new RnWebSocketAdapter(url) as unknown as WebSocket,
+    socketFactory: (url: string) => {
+      // pendingDialHeaders is set by dialSocket() right before connect() —
+      // the factory runs synchronously inside it — and carries the token
+      // headers for header-mode dials (null for legacy query dials).
+      const headers = pendingDialHeaders
+      return new RnWebSocketAdapter(url, undefined, headers ?? undefined) as unknown as WebSocket
+    },
     connectTimeoutMs: 12_000,
     requestTimeoutMs: 120_000,
     onRequestHandlerError: (err, req) => log('error', 'gateway', `server request ${req.method} handler crashed: ${String(err)}`),
@@ -487,12 +557,15 @@ export async function retryNow(): Promise<void> {
 // ---- push token re-advertisement ---------------------------------------------
 // A token acquired MID-SESSION (the first-message ask, armPushOnFirstSend) is
 // otherwise invisible to the machine until the NEXT dial: the socket is
-// already open, so wsUrl() already ran without it. If the OEM freezes the
-// process before a reconnect, the machine holds no token and every knock
-// no-ops for the whole pocket session. Watching the token atom and re-dialing
-// advertises &push= on the fresh upgrade request line, which the machine-side
-// proxy captures. Deduped per token value — connect() no-ops for the same URL
-// and cleanly supersedes a different one (the added query makes it different).
+// already open, so the dial's headers/query already ran without it. If the
+// OEM freezes the process before a reconnect, the machine holds no token and
+// every knock no-ops for the whole pocket session. Watching the token atom
+// and re-dialing advertises it on the fresh dial (X-Hermes-Push-Token header,
+// which the relay forwards as &push= on the request line it rebuilds for the
+// home; legacy dials put &push= on the query directly) — the machine-side
+// proxy captures it either way. Deduped per token value — connect() no-ops
+// for the same URL and cleanly supersedes a different one (the header set or
+// query makes it different).
 let readvertiseStarted = false
 let lastAdvertisedToken: string | null = null
 function ensureTokenReadvertise(): void {
@@ -575,14 +648,15 @@ async function dial(c: ConnConfig, opts?: { isRetry?: boolean; plaintextConfirme
     try { await hook(v) } catch (err) { log('warn', 'gateway', `dial hook failed: ${String(err)}`) }
   }
   // Persistence runs CONCURRENTLY with the dial, not before it: the writes
-  // are pure side effects for the handshake (the token rides the URL; the
-  // connect path below reads none of what they write), so the reconnect tap
-  // starts the WebSocket immediately. The computer is still remembered even
-  // while unreachable, exactly as before — a saveConfig failure skips the
-  // upsert just like the old early-abort did. Each dial awaits its tail on
-  // the exits callers observe (throw / happy end); superseded early-returns
-  // skip the await because whatever dial superseded us awaits a chain that
-  // already contains our writes.
+  // are pure side effects for the handshake (the token rides the dial —
+  // upgrade headers, or the legacy query on fallback; the connect path below
+  // reads none of what they write), so the reconnect tap starts the WebSocket
+  // immediately. The computer is still remembered even while unreachable,
+  // exactly as before — a saveConfig failure skips the upsert just like the
+  // old early-abort did. Each dial awaits its tail on the exits callers
+  // observe (throw / happy end); superseded early-returns skip the await
+  // because whatever dial superseded us awaits a chain that already contains
+  // our writes.
   const persist = (persistChain = persistChain.then(async () => {
     await saveConfig(v)
     // Remember this computer (even if it's unreachable right now — it should
@@ -597,18 +671,17 @@ async function dial(c: ConnConfig, opts?: { isRetry?: boolean; plaintextConfirme
   }
 
   const cli = ensureClient()
-  const url = wsUrl(v)
   log('info', 'gateway', `connecting ${redactedUrl(v)}${opts?.isRetry ? ' (retry)' : ''}`)
 
   let ready = false
   const stopReady = cli.onAny((e) => {
     if (e.type === 'gateway.ready') ready = true
   })
-  try {
-    await cli.connect(url)
-  } catch (err) {
+  /** Shared failure exit of both dial attempts — the original error path:
+   *  superseded dials return quietly, everything else surfaces + reconnects. */
+  const failOnce = async (err: unknown): Promise<'superseded'> => {
     stopReady()
-    if (gen !== connectGen) return // superseded by newer dial
+    if (gen !== connectGen) return 'superseded'
     connectionState.set('error')
     const msg = err instanceof Error ? err.message : 'Connection failed'
     gatewayError.set(`${redactedUrl(v)} — ${msg}`)
@@ -616,6 +689,33 @@ async function dial(c: ConnConfig, opts?: { isRetry?: boolean; plaintextConfirme
     scheduleReconnect()
     await persist
     throw err
+  }
+  const connectOnce = async (transport: DialTransport): Promise<void> => {
+    pendingDialHeaders = transport === 'headers' ? dialHeaders(v) : null
+    try {
+      await cli.connect(wsUrl(v, transport))
+    } finally {
+      pendingDialHeaders = null
+    }
+    lastDialTransport = transport
+    log('info', 'gateway', `socket up via ${transport === 'headers' ? 'header auth (token off the URL)' : 'legacy ?token= query'}`)
+  }
+  try {
+    await connectOnce(headerDial ? 'headers' : 'query')
+  } catch (err) {
+    // Header-auth refused before open: the peer only understands the legacy
+    // ?token= query (direct-to-gateway homes; old self-hosted relays). One
+    // retry, then the failure surfaces as usual.
+    if (headerDial && gen === connectGen && isHandshakeRefusal(err)) {
+      log('warn', 'gateway', 'header-auth dial refused before open — retrying once with legacy ?token= query')
+      try {
+        await connectOnce('query')
+      } catch (err2) {
+        if (await failOnce(err2) === 'superseded') return
+      }
+    } else if (await failOnce(err) === 'superseded') {
+      return
+    }
   }
   if (gen !== connectGen) { stopReady(); return }
 
