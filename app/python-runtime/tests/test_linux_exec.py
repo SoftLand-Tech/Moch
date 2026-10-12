@@ -243,6 +243,22 @@ class TestBuildGuestLaunch(MochLinuxExecTest):
         self.assertEqual(env["PROOT_TMP_DIR"], str(self.linux / "tmp"))
         self.assertNotIn("LD_PRELOAD", env)
 
+    def test_env_home_and_guest_path(self):
+        """BUG-134: ONE HOME (/root) + a guest-sane PATH prefix for every
+        host-built launch — the terminal PTY and the bridge's exec_in_guest
+        share this builder. The inherited Chaquopy HOME is a HOST path that
+        does not exist inside the guest (only workspace/scratch/dev/proc
+        are bound), so ~/.config/gh, ~/.gitconfig, ~/.ssh … read ENOENT
+        under it while the user's Terminal saw them fine."""
+        os.environ["HOME"] = "/data/user/0/com.moch/files"  # hostile inherit
+        os.environ["PATH"] = "/host/only/bin"
+        argv, env = le.build_guest_launch(["/bin/bash", "-i"])
+        self.assertEqual(env["HOME"], "/root")
+        # guest system dirs first, inherited tail preserved after them
+        self.assertEqual(
+            env["PATH"],
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/host/only/bin")
+
 
 # --------------------------------------------------------------------------
 # §9.1.2 — shim generation
@@ -277,6 +293,14 @@ class TestShims(MochLinuxExecTest):
             self.assertIn("--sysvipc", body)
             self.assertIn("--kernel-release='", body)
             self.assertIn('resolv.conf" ] || printf', body)
+            # v6 (BUG-134): guest HOME + PATH exported inside the shim —
+            # the trampoline's inherited HOME is a host path absent in the
+            # guest, which made gh/git/ssh credentials invisible to agent
+            # exec and background procs (both enter through this shim)
+            self.assertIn("export HOME=/root", body)
+            self.assertIn(
+                'export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"',
+                body)
 
     def test_ensure_shims_creates_proot_tmp_dir(self):
         # On-device 2026-10-06: wizard-only installs never ran a
@@ -291,9 +315,13 @@ class TestShims(MochLinuxExecTest):
     def test_older_format_shim_is_stale(self):
         # The exact field-upgrade path: older shim bodies must be detected
         # stale so the boot-time repair gate rewrites them (v2 lacked the
-        # mkdir, v3 lacked the self-binds, v4 lacked the parity flags).
+        # mkdir, v3 lacked the self-binds, v4 lacked the parity flags, v5
+        # lacked the BUG-134 HOME/PATH exports — installed guests must pick
+        # up /root parity on the first post-update boot, not only on
+        # reinstall).
+        self.assertEqual(le.SHIM_FORMAT, 6, "BUG-134 requires the v6 HOME/PATH shim")
         for stale_marker in ("# moch-shim-format: 2", "# moch-shim-format: 3",
-                             "# moch-shim-format: 4"):
+                             "# moch-shim-format: 4", "# moch-shim-format: 5"):
             shim = self.linux / "bin" / "sh"
             shim.parent.mkdir(parents=True, exist_ok=True)
             shim.write_text(
@@ -305,6 +333,8 @@ class TestShims(MochLinuxExecTest):
                 le.ensure_shims()
             self.assertTrue(le.shims_current(self.linux / "bin"), stale_marker)
             self.assertIn('-b "$WS:$WS"', shim.read_text(encoding="utf-8"))
+            self.assertIn("export HOME=/root", shim.read_text(encoding="utf-8"),
+                          f"{stale_marker} must be repaired to the v6 HOME export")
 
     def test_repoint_guest_bin_sh_to_bash(self):
         rootfs = self.linux / "rootfs"
