@@ -256,12 +256,31 @@ def _run_server(port: int) -> None:
                         if _sid:
                             _warm_waiters.add(_sid)
                         params["text"] = (
-                            "[SYSTEM: The in-app browser is still starting up — it becomes available "
-                            "a minute or two after the app launches. If the user is asking you to open "
-                            "or browse a web page, tell them the browser will be ready shortly and to "
-                            "send the request again in a minute. Do NOT use terminal curl as a "
-                            "replacement for browsing.]\n\n"
+                            "[SYSTEM: The in-app browser is still starting up (a minute or two after "
+                            "the app launches). If the user is asking you to open or browse a web "
+                            "page, tell them you will CONTINUE AUTOMATICALLY the moment the browser "
+                            "is ready — they do NOT need to resend or do anything; you will pick the "
+                            "task back up yourself shortly. Keep the reply to one short sentence. Do "
+                            "NOT use terminal curl as a replacement for browsing.]\n\n"
                         ) + text
+                        # Surface the wait: the app already renders attention
+                        # notices for sessions (toasts + the hermes-alerts
+                        # knock), so the gap between this turn and the
+                        # auto-continue is not a silent dead end.
+                        try:
+                            _notice_sid = str(params.get("session_id") or "")
+                            if _notice_sid:
+                                _tg_server._emit(
+                                    "status.update",
+                                    _notice_sid,
+                                    {
+                                        "busy": True,
+                                        "waiting_for": "browser",
+                                        "note": "Warming up the browser — Moch will continue automatically",
+                                    },
+                                )
+                        except Exception:
+                            pass
             except Exception:
                 pass
             return _note_upstream(req, transport)
