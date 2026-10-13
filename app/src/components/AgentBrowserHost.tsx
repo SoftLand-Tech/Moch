@@ -42,7 +42,11 @@ import { WebView } from 'react-native-webview'
 import { ensureBrowserRelay, relayStatus, syncActiveUrl } from '../lib/browserRelay'
 import { log } from '../lib/log'
 
-const AGENT_START_URL = 'https://example.com/'
+// Speed pass: about:blank registers as a page DevTools target exactly like
+// example.com did, with ZERO network on every cold start (DNS+TLS+HTML fetch
+// used to run at each launch just to keep this target alive). CdpRelay hides
+// BOTH prefixes from tab listings (lockstep pair — see AGENT_TAB_URL_PREFIXES).
+const AGENT_START_URL = 'about:blank'
 
 /** BH-000091: bounded boot retry — attempts and backoff (1s → 16s exponential). */
 const BOOT_ATTEMPTS = 5

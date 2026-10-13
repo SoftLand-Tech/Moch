@@ -202,11 +202,16 @@ def webview_snapshot(task_id: Optional[str] = None, full: bool = False) -> str:
         lines.append(f"[{el['ref']}] {el['type']}{f' {chr(34)}{label}{chr(34)}' if label else ''}{href}")
     text = "\n".join(lines)
     response: Dict[str, Any] = {"success": True, "snapshot": text}
-    try:
-        from tools.browser_tool_snapshot import _truncate_snapshot
-        response.update(_truncate_snapshot(text, full=full) if full else {"snapshot": text})
-    except Exception:  # noqa: BLE001 — truncation is an optimization
-        pass
+    if not full:
+        # Compact mode: apply the snapshot threshold (the full text spills to
+        # cache/web with a paging note). The old call passed a `full=` kwarg
+        # this function never took — TypeError, swallowed — so the threshold
+        # never ran in webview mode and snapshot payloads were unbounded.
+        try:
+            from tools.browser_tool_snapshot import _truncate_snapshot
+            response["snapshot"] = _truncate_snapshot(text)
+        except Exception:  # noqa: BLE001 — truncation is an optimization
+            pass
     return json.dumps(response)
 
 
@@ -230,22 +235,44 @@ def webview_navigate(url: str, task_id: Optional[str] = None) -> str:
             return json.dumps({"success": False, "error": _relay_down_error() or _NO_SESSION})
     try:
         _call(sup, "Page.navigate", {"url": url}, timeout=20.0)
-        # Settle: wait for load in small polls instead of a fixed sleep.
+        # Settle: ONE eval per poll (href + title + readyState together — the
+        # old loop paid three serial CDP round-trips after every navigate) at
+        # a 0.1 s cadence (0.4 s quantized the perceived nav time). Same break
+        # semantics: interactive/complete counts as settled.
         deadline = time.time() + 15.0
+        title = ""
+        final = ""
         while time.time() < deadline:
             probe = sup.evaluate_runtime(
-                "document.readyState === 'complete' || document.readyState === 'interactive' ? "
-                "location.href : ''", timeout=3.0)
-            if probe.get("ok") and probe.get("result"):
-                break
-            time.sleep(0.4)
-        title = sup.evaluate_runtime("document.title", timeout=3.0)
-        final = sup.evaluate_runtime("location.href", timeout=3.0)
-        return json.dumps({
+                "JSON.stringify({u: location.href, t: document.title, "
+                "r: document.readyState === 'interactive' || "
+                "document.readyState === 'complete' ? 1 : 0})", timeout=3.0)
+            if probe.get("ok"):
+                try:
+                    data = json.loads(probe.get("result") or "{}")
+                except Exception:  # noqa: BLE001 — malformed eval result, keep polling
+                    data = {}
+                final = data.get("u") or ""
+                title = data.get("t") or ""
+                if data.get("r"):
+                    break
+            time.sleep(0.1)
+        response: Dict[str, Any] = {
             "success": True,
-            "url": final.get("result") or url,
-            "title": title.get("result") or "",
-        })
+            "url": final or url,
+            "title": title,
+        }
+        # The tool schema promises a compact snapshot on navigate ("no need
+        # to call browser_snapshot separately"); the webview path returned
+        # none, forcing an extra snapshot round-trip after EVERY navigation.
+        # Best-effort: a snapshot failure must never fail the navigation.
+        try:
+            snap = json.loads(webview_snapshot(task_id))
+            if snap.get("success") and snap.get("snapshot"):
+                response["snapshot"] = snap["snapshot"]
+        except Exception:  # noqa: BLE001 — auto-snapshot is an optimization
+            pass
+        return json.dumps(response)
     except Exception as exc:  # noqa: BLE001
         return json.dumps({"success": False, "error": f"navigate failed: {exc}"})
 
@@ -727,11 +754,15 @@ def _poll_new_tab(new_id: str, url: str, task_id: Optional[str], timeout: float 
             entry = next((t for t in _webview_tab_targets(task_id)["tabs"] if t["id"] == new_id), None)
             if entry is not None:
                 tab = entry
-                if entry.get("url") not in ("", "about:blank") and entry.get("title"):
+                # URL populated = the tab is live and navigable. Titles arrive
+                # asynchronously and used to pin the whole tool response for
+                # the full 5 s deadline; the response already falls back to a
+                # best-effort title, so break the moment the URL lands.
+                if entry.get("url") not in ("", "about:blank"):
                     break
         except Exception:  # noqa: BLE001 — readback is an optimization
             break
-        time.sleep(0.4)
+        time.sleep(0.15)
     return tab
 
 
