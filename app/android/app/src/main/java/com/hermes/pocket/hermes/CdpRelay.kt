@@ -199,7 +199,7 @@ object CdpRelay {
   // after an RN reload throws inside emit, which surfaces as an honest 502.
 
   /** One in-flight tab op: the latch the HTTP handler waits on + its answer. */
-  class TabOpAck internal constructor {
+  internal class TabOpAck {
     internal val latch = CountDownLatch(1)
     @Volatile internal var ok = false
     @Volatile internal var error: String? = null

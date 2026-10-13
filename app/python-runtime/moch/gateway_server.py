@@ -447,25 +447,12 @@ def _run_server(port: int) -> None:
                             if warming and _sid:
                                 _warm_waiters.add(_sid)
                             params["text"] = note + "\n\n" + text
-                            # Surface the wait: the app already renders attention
-                            # notices for sessions (toasts + the hermes-alerts
-                            # knock), so the gap between this turn and the
-                            # auto-continue is not a silent dead end.
-                            if warming:
-                                try:
-                                    _notice_sid = str(params.get("session_id") or "")
-                                    if _notice_sid:
-                                        _tg_server._emit(
-                                            "status.update",
-                                            _notice_sid,
-                                            {
-                                                "busy": True,
-                                                "waiting_for": "browser",
-                                                "note": "Warming up the browser — Moch will continue automatically",
-                                            },
-                                        )
-                                except Exception:
-                                    pass
+                            # NOTE (PR #139): the status.update emit here was
+                            # removed — the event payload is pydantic-validated
+                            # and the extra waiting_for/note fields raised
+                            # extra_forbidden on device (errors.log). Build the
+                            # RN wait indicator against a SCHEMA-VALID event
+                            # (or a dedicated one) — see the tracker.
             except Exception:
                 pass
             return _note_upstream(req, transport)
