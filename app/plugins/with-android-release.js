@@ -2,8 +2,13 @@
 // prebuild regenerates the gradle files and silently reverts hand-applied
 // edits, so everything this repo needs beyond the stock template is re-applied
 // here on every prebuild:
-//   1. release signing read from android/keystore.properties (gitignored;
-//      keystore itself lives outside the repo), debug-key fallback otherwise
+//   1. release signing requires android/keystore.properties (gitignored;
+//      keystore itself lives outside the repo) — NO debug-key fallback: a
+//      release task without it fails the gradle build at configuration time
+//      (C-04 / GitHub #94); EAS Build injects its own signing via
+//      eas-build.gradle, so it is exempt from the gate. The stock template's
+//      explicit debug signingConfig (committed debug.keystore) is removed —
+//      AGP auto-creates the default ~/.android/debug.keystore
 //   2. ndkVersion pinned to the full 27.1 install (RN's catalog default can
 //      resolve to 27.0.12077973, which exists on some machines as a broken
 //      stub without source.properties)
@@ -23,14 +28,35 @@ const NDK_VERSION = "27.1.12297006";
 
 const KEYSTORE_PROPS_BLOCK = `
 
-// Managed by plugins/with-android-release.js. Release signing lives in
-// keystore.properties (gitignored) so the keystore never enters the repo.
-// Absent the file, release falls back to the debug key so contributor
-// builds still run.
+// Managed by plugins/with-android-release.js. Release signing requires
+// android/keystore.properties (gitignored — see app/android/.gitignore) so
+// the real keystore never enters the repo. There is NO debug-key fallback
+// (C-04 / #94): release tasks fail fast below when the file is missing —
+// use assembleDebug for local development builds.
 def keystorePropertiesFile = rootProject.file("keystore.properties")
 def keystoreProperties = new Properties()
 if (keystorePropertiesFile.exists()) {
     keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
+// C-04 / #94: fail fast at CONFIGURATION time when the requested tasks
+// build a release variant but keystore.properties is absent — release
+// signing used to silently fall back to the debug key here. Gated on the
+// requested task names so \`assembleDebug\`, \`:app:tasks\` and IDE sync
+// configure fine. EAS Build is exempt: with EAS-managed credentials it
+// never writes keystore.properties — it appends \`apply from:
+// "./eas-build.gradle"\` which injects release signing from credentials.json
+// after this script has run.
+def requestedTasks = gradle.startParameter.taskNames.collect { it.substring(it.lastIndexOf(':') + 1).toLowerCase(Locale.ROOT) }
+def wantsReleaseTask = requestedTasks.any { it.contains("release") || it in ["assemble", "bundle", "build"] }
+if (wantsReleaseTask && !keystorePropertiesFile.exists()
+        && !file("eas-build.gradle").exists()
+        && System.getenv("EAS_BUILD") != "true") {
+    throw new GradleException(
+        "Release signing requires android/keystore.properties (storeFile, storePassword, keyAlias, keyPassword), which is missing. " +
+        "See app/plugins/with-android-release.js and app/README.md. " +
+        "Refusing to fall back to the debug signing key (C-04 / GitHub #94). " +
+        "For local development builds use :app:assembleDebug instead.")
 }`;
 
 const RELEASE_SIGNING_CONFIG_BLOCK = `        release {
@@ -43,11 +69,33 @@ const RELEASE_SIGNING_CONFIG_BLOCK = `        release {
         }
 `;
 
+// The stock expo template pins its own debug.keystore ('android'
+// passwords) with an explicit debug signingConfig — the file used to be
+// committed here. C-04 / #94: drop the block so AGP falls back to the
+// default auto-created ~/.android/debug.keystore instead.
+const STOCK_DEBUG_SIGNING_CONFIG_BLOCK = `        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+`;
+
+const DEBUG_SIGNING_CONFIG_REPLACEMENT = `        // No explicit debug signingConfig (C-04 / #94): AGP auto-creates and
+        // signs debug builds with the default ~/.android/debug.keystore. The
+        // old block pinned the stock-template debug.keystore ('android'
+        // passwords) that used to be committed at app/debug.keystore — it is
+        // untracked now.
+`;
+
 const RELEASE_BUILD_TYPE_SNIPPET = `            // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
             signingConfig signingConfigs.debug`;
 
-const RELEASE_BUILD_TYPE_REPLACEMENT = `            signingConfig keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug`;
+const RELEASE_BUILD_TYPE_REPLACEMENT = `            // C-04 / #94: no debug-key fallback — keystore.properties is
+            // required (the gate at the top of this file fails the build
+            // without it).
+            signingConfig signingConfigs.release`;
 
 const PROJECT_GRADLE_OVERRIDE = `
 // Managed by plugins/with-android-release.js. expo-updates never sets
@@ -86,6 +134,12 @@ const withAndroidRelease = (config) => {
         "    signingConfigs {\n        debug {",
         `    signingConfigs {
 ${RELEASE_SIGNING_CONFIG_BLOCK}        debug {`
+      );
+      // C-04 / #94: also drop the stock debug signingConfig (template
+      // debug.keystore) — see the constants above.
+      contents = contents.replace(
+        STOCK_DEBUG_SIGNING_CONFIG_BLOCK,
+        DEBUG_SIGNING_CONFIG_REPLACEMENT
       );
       contents = contents.replace(
         RELEASE_BUILD_TYPE_SNIPPET,

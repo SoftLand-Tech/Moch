@@ -51,7 +51,14 @@ interface HermesBridgeModule {
 
 const bridge = NativeModules.HermesBridge as HermesBridgeModule | undefined
 
-/** Stop the background agent runtime (foreground service teardown). */
+/**
+ * Stop the background agent runtime — FULL teardown (BUG-129): the native
+ * side removes the foreground service + its notification and exits the
+ * process (the runtime IS the process; Chaquopy can't unload Python
+ * in-process). The app closes shortly after resolve(); the next launch
+ * auto-starts the runtime fresh. No TS behavior change — native semantics
+ * only; this comment documents them.
+ */
 export function stopEmbeddedRuntime(): Promise<void> {
   if (!bridge) return Promise.resolve()
   return bridge.stop().then(() => undefined)

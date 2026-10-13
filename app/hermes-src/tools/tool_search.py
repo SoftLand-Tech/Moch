@@ -12,6 +12,7 @@ import functools
 import json
 import logging
 import math
+import os
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -430,6 +431,18 @@ def _string_list_arg(args: Dict[str, Any], key: str, *, dedupe: bool, max_items:
     return out, None
 
 
+def _moch_browser_gate_off() -> bool:
+    """True on the embedded Moch gateway with the browser relay NOT armed
+    (BUG-121): browser tools are genuinely absent from the catalog, not a
+    lexical miss — the no-match hint must say the Browser screen exists
+    instead of pushing another retry."""
+    moch = (
+        os.environ.get("MOCH_EMBEDDED", "").strip() == "1"
+        or os.environ.get("MOCH_FLEET", "").strip() == "1"
+    )
+    return moch and os.environ.get("MOCH_BROWSER_RELAY", "").strip() != "1"
+
+
 def dispatch_tool_search(args: Dict[str, Any], *, current_tool_defs: List[Dict[str, Any]],
                          config: Optional[ToolSearchConfig] = None,
                          connector_search: Optional[Any] = None) -> str:
@@ -469,6 +482,17 @@ def dispatch_tool_search(args: Dict[str, Any], *, current_tool_defs: List[Dict[s
                 "are connected and their tools remain available. Retry "
                 "tool_search with the service name plus a concrete action or "
                 "object before concluding the capability is unavailable.")
+            # BUG-121 (Moch, gate off): a query that reaches for the browser
+            # finds nothing exactly because the Moch Browser relay is not
+            # running — append the honest capability note rather than letting
+            # the retry hint above push an endless loop.
+            if _moch_browser_gate_off() and "browser" in query.lower():
+                group["hint"] += (
+                    " Note: the in-app Moch Browser exists on this phone but its "
+                    "tools are not available right now — tell the user to open "
+                    "the Browser screen in Moch once; the tools activate the "
+                    "moment it opens. Do not use terminal curl as a replacement "
+                    "for browsing.")
         results.append(group)
     remote_count = sum(1 for name in tools_map if is_connector_name(name))
     return json.dumps({"queries": queries, "total_available": len(catalog) + remote_count, "results": results,

@@ -1,12 +1,84 @@
 import { atom } from 'nanostores'
-import AsyncStorage from '@react-native-async-storage/async-storage'
-import * as Device from 'expo-device'
-import Constants from 'expo-constants'
-import { isRunningInExpoGo } from 'expo'
-import { AppState, Platform } from 'react-native'
 import { log } from './log'
 
 type NotificationsModule = typeof import('expo-notifications')
+
+/**
+ * AsyncStorage is loaded LAZILY too (same contract as sessionList.ts /
+ * sendQueue.ts): scripts/ run in plain node where the RN package cannot
+ * load; tests inject a fake.
+ */
+type StorageLike = {
+  getItem: (key: string) => Promise<string | null>
+  setItem: (key: string, value: string) => Promise<void>
+}
+let storageOverride: StorageLike | null = null
+/** Scripts inject a fake storage here; real apps never call this. */
+export function _usePushStorageForTests(s: StorageLike | null) {
+  storageOverride = s
+}
+async function storage(): Promise<StorageLike> {
+  if (storageOverride) return storageOverride
+  const mod = require('@react-native-async-storage/async-storage') as StorageLike & { default?: StorageLike }
+  return mod.default ?? mod
+}
+
+/**
+ * Platform facts this module branches on (os / expo-go / device / EAS
+ * project). Every one of them sits behind a LAZY require, never a top-level
+ * import — react-native, expo, expo-device and expo-constants all drag in
+ * native modules that cannot load outside the app runtime, and this file
+ * must import cleanly in plain node for the scripts suites. In the app the
+ * requires resolve from the bundle; nothing is loaded until first use.
+ */
+export interface PushPlatformFacts {
+  os: string
+  expoGo: boolean
+  isDevice: boolean
+  projectId: string | null
+}
+let platformOverride: Partial<PushPlatformFacts> | null = null
+/** Scripts pin platform facts here (offline suites); real apps never do. */
+export function _usePushPlatformForTests(p: Partial<PushPlatformFacts> | null) {
+  platformOverride = p
+  expoGoCache = null // re-evaluate the memoized gate under the new facts
+}
+function fact<K extends keyof PushPlatformFacts>(key: K, load: () => PushPlatformFacts[K]): PushPlatformFacts[K] {
+  if (platformOverride && key in platformOverride) return platformOverride[key] as PushPlatformFacts[K]
+  return load()
+}
+function currentOs(): string {
+  return fact('os', () => {
+    try {
+      const rn = require('react-native') as { Platform?: { OS?: string } }
+      return rn.Platform?.OS ?? 'unknown'
+    } catch {
+      return 'unknown'
+    }
+  })
+}
+function isAndroid(): boolean {
+  return currentOs() === 'android'
+}
+function isPhysicalDevice(): boolean {
+  return fact('isDevice', () => {
+    try {
+      const Device = require('expo-device') as { isDevice?: boolean }
+      return !!Device.isDevice
+    } catch {
+      return false
+    }
+  })
+}
+/** True when the app is foregrounded (remote pushes are muted then). */
+function appStateActive(): boolean {
+  try {
+    const rn = require('react-native') as { AppState?: { currentState?: string } }
+    return rn.AppState?.currentState === 'active'
+  } catch {
+    return false
+  }
+}
 
 /**
  * `expo-notifications` is loaded LAZILY, never with a top-level import.
@@ -21,6 +93,11 @@ type NotificationsModule = typeof import('expo-notifications')
  */
 let notificationsModule: NotificationsModule | null = null
 let notificationsLoadFailed = false
+/** Scripts inject a fake expo-notifications module here; real apps never do. */
+export function _useNotificationsForTests(mod: NotificationsModule | null) {
+  notificationsModule = mod
+  notificationsLoadFailed = false
+}
 
 /**
  * True when this environment cannot support notifications at all. Checked
@@ -30,11 +107,23 @@ let notificationsLoadFailed = false
  * requiring expo-notifications throws. Chat is the product — a notification
  * library must never be able to stand in front of it.
  */
-const expoGoAndroid = Platform.OS === 'android' && isRunningInExpoGo()
+let expoGoCache: boolean | null = null
+function expoGoAndroid(): boolean {
+  if (expoGoCache !== null) return expoGoCache
+  expoGoCache = fact('expoGo', () => {
+    try {
+      const expo = require('expo') as { isRunningInExpoGo?: () => boolean }
+      return currentOs() === 'android' && !!expo.isRunningInExpoGo?.()
+    } catch {
+      return false
+    }
+  })
+  return expoGoCache
+}
 
 function N(): NotificationsModule | null {
   if (notificationsModule || notificationsLoadFailed) return notificationsModule
-  if (expoGoAndroid) {
+  if (expoGoAndroid()) {
     notificationsLoadFailed = true
     // `info`, never `warn`: in dev, console.warn opens a blocking LogBox
     // overlay. An expected, already-explained environment limitation should
@@ -55,13 +144,18 @@ function N(): NotificationsModule | null {
 /**
  * Remote (server-driven) push was removed from Expo Go on Android in SDK 53.
  * Local notifications still work there on a real build, so this gate only
- * describes the remote half.
+ * describes the remote half. (Function, not const: the facts load lazily —
+ * see PushPlatformFacts.)
  */
-export const remotePushSupported = !expoGoAndroid
+export function remotePushSupported(): boolean {
+  return !expoGoAndroid()
+}
 
-export const remotePushBlockedReason = remotePushSupported
-  ? null
-  : 'Remote push needs a development build on Android. Run `npx expo run:android` (or an EAS build) — Expo Go cannot receive server pushes since SDK 53.'
+export function remotePushBlockedReason(): string | null {
+  return remotePushSupported()
+    ? null
+    : 'Remote push needs a development build on Android. Run `npx expo run:android` (or an EAS build) — Expo Go cannot receive server pushes since SDK 53.'
+}
 
 /** True once we know notifications cannot work at all in this environment. */
 export function notificationsAvailable(): boolean {
@@ -89,7 +183,7 @@ function ensureHandler(): boolean {
         // push carries `{ type: 'push' }`.
         const trigger = notification?.request?.trigger as { type?: string } | null | undefined
         const push = trigger?.type === 'push'
-        if (push && AppState.currentState === 'active') {
+        if (push && appStateActive()) {
           return { shouldShowBanner: false, shouldShowList: false, shouldPlaySound: false, shouldSetBadge: false }
         }
         return { shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: true }
@@ -131,12 +225,14 @@ export function currentPushToken(): string | null {
 
 export async function initPush(): Promise<void> {
   try {
-    const raw = await AsyncStorage.getItem(ENABLED_KEY)
+    const s = await storage()
+    const raw = await s.getItem(ENABLED_KEY)
     if (raw !== null) notificationsEnabled.set(raw === '1')
   } catch {}
   let restoredToken = false
   try {
-    const tok = await AsyncStorage.getItem(TOKEN_KEY)
+    const s = await storage()
+    const tok = await s.getItem(TOKEN_KEY)
     if (tok) {
       expoPushToken.set(tok)
       restoredToken = true
@@ -151,7 +247,7 @@ export async function initPush(): Promise<void> {
   ensureHandler()
   trackOurNotifications()
 
-  if (Platform.OS === 'android') {
+  if (isAndroid()) {
     // One channel per knock loudness. Importance/sound are only settable at
     // CREATE — later calls update mutable fields only, which is fine: these
     // values are the ones we want on first create and never change after.
@@ -195,7 +291,7 @@ const CHANNEL_KEEPALIVE = 'connection'
  *  instead of deferred by battery-saving heuristics. Posted whenever push is
  *  armed and the app connects; dismissed never (it IS the lifeline). */
 export async function ensureKeepAlive(): Promise<void> {
-  if (Platform.OS !== 'android') return
+  if (!isAndroid()) return
   const n = N()
   if (!n) return
   if (!expoPushToken.get()) return // nothing to keep alive until push is armed
@@ -228,7 +324,8 @@ const keepAliveId = atom<string | null>(null)
 export async function setNotificationsEnabled(on: boolean) {
   notificationsEnabled.set(on)
   try {
-    await AsyncStorage.setItem(ENABLED_KEY, on ? '1' : '0')
+    const s = await storage()
+    await s.setItem(ENABLED_KEY, on ? '1' : '0')
   } catch {}
   if (!on) {
     const n = N()
@@ -266,7 +363,7 @@ export async function ensureNotificationPermission(): Promise<boolean> {
  *  dial; fresh installs (or denied) are left for the first-message prompt
  *  below — the user asked for the ask to ride the first send, not boot. */
 export async function registerPushIfGranted(): Promise<void> {
-  if (!remotePushSupported) return
+  if (!remotePushSupported()) return
   const n = N()
   if (!n) return
   try {
@@ -286,17 +383,18 @@ export async function registerPushIfGranted(): Promise<void> {
  *  only on a DEFINITIVE outcome (user answered the dialog, or the token was
  *  fetched): a transient failure must not burn the one-per-install ask. */
 export async function armPushOnFirstSend(): Promise<void> {
-  if (!remotePushSupported) return
+  if (!remotePushSupported()) return
   const n = N()
   if (!n) return
   try {
     if (expoPushToken.get()) return
-    const armed = await AsyncStorage.getItem(PUSH_ARMED_KEY)
+    const s = await storage()
+    const armed = await s.getItem(PUSH_ARMED_KEY)
     if (armed !== null) return // already asked once — never nag
     const ok = await ensureNotificationPermission()
     if (!ok) {
       // The dialog was answered with a denial — definitive: latch, never nag.
-      await AsyncStorage.setItem(PUSH_ARMED_KEY, '1')
+      await s.setItem(PUSH_ARMED_KEY, '1')
       return
     }
     await fetchPushToken()
@@ -304,7 +402,7 @@ export async function armPushOnFirstSend(): Promise<void> {
     // — transient network, provider hiccup — falls to the catch below WITHOUT
     // latching, so the next send retries; permission is already granted, so
     // no second dialog ever shows.)
-    await AsyncStorage.setItem(PUSH_ARMED_KEY, '1')
+    await s.setItem(PUSH_ARMED_KEY, '1')
   } catch (e) {
     log('info', 'push', `first-send push arm skipped: ${e instanceof Error ? e.message : String(e)}`)
   }
@@ -454,8 +552,20 @@ export function onNotificationResponse(handler: (target: NotificationTarget) => 
 }
 
 function projectId(): string | null {
-  const cfg = Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined
-  return cfg?.eas?.projectId ?? (Constants as unknown as { easConfig?: { projectId?: string } }).easConfig?.projectId ?? null
+  return fact('projectId', () => {
+    try {
+      const mod = require('expo-constants') as {
+        default?: { expoConfig?: { extra?: { eas?: { projectId?: string } } } }
+        expoConfig?: { extra?: { eas?: { projectId?: string } } }
+        easConfig?: { projectId?: string }
+      }
+      const C = (mod.default ?? mod) as typeof mod & { easConfig?: { projectId?: string } }
+      const cfg = C.expoConfig?.extra as { eas?: { projectId?: string } } | undefined
+      return cfg?.eas?.projectId ?? C.easConfig?.projectId ?? null
+    } catch {
+      return null
+    }
+  })
 }
 
 export function easProjectId(): string | null {
@@ -471,12 +581,12 @@ export function easProjectId(): string | null {
 export async function fetchPushToken(): Promise<string> {
   // Checked first: `getExpoPushTokenAsync` throws hard on Android in Expo Go,
   // and the raw message is easy to miss in a log.
-  if (!remotePushSupported) {
-    throw new Error(remotePushBlockedReason ?? 'Remote push is unavailable in this environment.')
+  if (!remotePushSupported()) {
+    throw new Error(remotePushBlockedReason() ?? 'Remote push is unavailable in this environment.')
   }
   const n = N()
   if (!n) throw new Error('expo-notifications is unavailable in this build.')
-  if (!Device.isDevice) throw new Error('Push tokens need a physical device (not a simulator).')
+  if (!isPhysicalDevice()) throw new Error('Push tokens need a physical device (not a simulator).')
   const ok = await ensureNotificationPermission()
   if (!ok) throw new Error('Notification permission denied.')
   const pid = projectId()
@@ -487,7 +597,8 @@ export async function fetchPushToken(): Promise<string> {
   const token = t.data
   expoPushToken.set(token)
   try {
-    await AsyncStorage.setItem(TOKEN_KEY, token)
+    const s = await storage()
+    await s.setItem(TOKEN_KEY, token)
   } catch {}
   log('info', 'push', 'Expo push token acquired')
   // Push is armed — post the OEM keep-alive so MIUI & friends can't

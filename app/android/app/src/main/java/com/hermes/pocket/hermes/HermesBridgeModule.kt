@@ -53,7 +53,15 @@ class HermesBridgeModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  /** User-controlled teardown of the background runtime (M6). */
+  /**
+   * User-controlled teardown of the background runtime (M6). BUG-129: this
+   * is a FULL stop — HermesService.stop routes through the same ACTION_STOP
+   * machinery as the notification's Stop action (stopForeground +
+   * stopService + process exit(0)), so the Python runtime and gateway
+   * really die. The app closing is the intended UX: the brain IS the
+   * process (Chaquopy can't unload it), and the next launch auto-starts
+   * the runtime fresh.
+   */
   @ReactMethod
   fun stop(promise: Promise) {
     try {

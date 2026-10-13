@@ -26,6 +26,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import types
 import unittest
 from pathlib import Path
@@ -166,6 +167,114 @@ class RelayDownErrorTests(unittest.TestCase):
 
         os.environ.pop("BROWSER_CDP_URL")
         self.assertIsNone(browser_webview._relay_down_error())
+
+
+class GateDeactivateTests(unittest.TestCase):
+    """BUG-99 / BH-000045: ``moch.browser_gate.deactivate`` — the exact mirror
+    of ``activate`` an in-process relay stop needs (``BrowserRelayModule.stop``
+    calls it after ``CdpRelay.stop()``): env gates cleared, BOTH tool caches
+    cleared, idempotent. Without it a stopped relay left tools advertised
+    against an endpoint that never answers — every call dying as
+    "No browser page…"."""
+
+    _ENV_KEYS = ("BROWSER_CDP_URL", "MOCH_BROWSER_RELAY")
+
+    def setUp(self) -> None:
+        from moch import browser_gate
+
+        self.gate = browser_gate
+        self._env_snapshot = dict(os.environ)
+        for key in self._ENV_KEYS:
+            os.environ.pop(key, None)
+        # Deterministic cache-clear witnesses: the heavy imports inside
+        # _broadcast_catalog_change are faked (model_tools pulls httpx; the
+        # live-session refresh pulls the whole gateway).
+        calls = {"check_fn": 0, "tool_defs": 0}
+        fake_model_tools = types.ModuleType("model_tools")
+        fake_model_tools._clear_tool_defs_cache = lambda: calls.__setitem__("tool_defs", calls["tool_defs"] + 1)
+        fake_tg_server = types.ModuleType("tui_gateway.server")
+        fake_tg_server._sessions, fake_tg_server._sessions_lock = {}, threading.Lock()
+        fake_tg_server._emit = lambda *a, **k: None
+        fake_tg_server._session_info = lambda *a, **k: {}
+        fake_mcp = types.ModuleType("tools.mcp_tool_agent")
+        fake_mcp.refresh_agent_mcp_tools = lambda *a, **k: None
+        modules = {
+            "model_tools": fake_model_tools,
+            "tui_gateway": types.ModuleType("tui_gateway"),
+            "tui_gateway.server": fake_tg_server,
+            "tools.mcp_tool_agent": fake_mcp,
+        }
+        patcher = mock.patch.dict(sys.modules, modules)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.calls = calls
+        import tools.registry as registry_mod
+
+        def _count_check_fn() -> None:
+            calls["check_fn"] += 1
+
+        reg_patcher = mock.patch.object(registry_mod, "invalidate_check_fn_cache", _count_check_fn)
+        reg_patcher.start()
+        self.addCleanup(reg_patcher.stop)
+        # Reset the module state so tests are order-independent.
+        self.gate._STATE.update(active=False, url=None, port=0, activated_at=None)
+        self.addCleanup(self.gate.deactivate)
+
+    def tearDown(self) -> None:
+        os.environ.clear()
+        os.environ.update(self._env_snapshot)
+
+    # ── the regression ───────────────────────────────────────────────────────
+
+    def test_deactivate_clears_env_and_state(self):
+        self.gate.activate(9334, _TOKEN)
+        self.assertEqual(os.environ.get("MOCH_BROWSER_RELAY"), "1")
+        status = self.gate.deactivate(9334, _TOKEN)
+        for key in self._ENV_KEYS:
+            self.assertNotIn(key, os.environ,
+                             f"a stopped relay must not leave {key} armed behind it")
+        self.assertFalse(status["active"])
+        self.assertIsNone(status["url"])
+        self.assertFalse(self.gate.is_active())
+
+    def test_deactivate_clears_both_caches(self):
+        """The BUG-107/BUG-132 pair: check_fn verdicts AND the assembled
+        tool-defs memo — a one-sided clear keeps replaying the stale catalog."""
+        self.gate.activate(9334, _TOKEN)
+        self.calls["check_fn"] = 0
+        self.calls["tool_defs"] = 0
+        self.gate.deactivate(9334, _TOKEN)
+        self.assertGreaterEqual(self.calls["check_fn"], 1, "check_fn cache must be invalidated")
+        self.assertGreaterEqual(self.calls["tool_defs"], 1, "tool-defs cache must be invalidated")
+
+    def test_deactivate_is_idempotent(self):
+        self.gate.activate(9334, _TOKEN)
+        first = self.gate.deactivate(9334, _TOKEN)
+        second = self.gate.deactivate(9334, _TOKEN)  # must not raise
+        for key in self._ENV_KEYS:
+            self.assertNotIn(key, os.environ)
+        self.assertEqual(first, second)
+        self.assertFalse(second["active"])
+
+    def test_deactivate_preserves_manual_env_override(self):
+        """A hand-set PC ``BROWSER_CDP_URL`` that does not point at the
+        activated relay survives the relay's stop (only what the relay armed
+        is cleared); ``MOCH_BROWSER_RELAY`` never survives."""
+        manual = "http://127.0.0.1:9222/json"
+        self.gate.activate(9334, _TOKEN)
+        os.environ["BROWSER_CDP_URL"] = manual  # re-pointed by hand after arming
+        self.gate.deactivate(9334, _TOKEN)
+        self.assertEqual(os.environ.get("BROWSER_CDP_URL"), manual)
+        self.assertNotIn("MOCH_BROWSER_RELAY", os.environ)
+
+    def test_deactivate_without_activate_still_disarms_boot_armed_env(self):
+        """Boot armed the env from relay.json (no in-process activate yet) —
+        the stop's deactivate still clears it (url is unknown, not mismatched)."""
+        os.environ["BROWSER_CDP_URL"] = f"http://127.0.0.1:9334/{_TOKEN}"
+        os.environ["MOCH_BROWSER_RELAY"] = "1"
+        self.gate.deactivate(9334, _TOKEN)
+        for key in self._ENV_KEYS:
+            self.assertNotIn(key, os.environ)
 
 
 if __name__ == "__main__":

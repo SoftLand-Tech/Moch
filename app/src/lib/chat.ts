@@ -13,6 +13,8 @@ import { getActiveBot } from './fleet'
 import { sendQueue, peekQueued, removeQueued, clearSendQueue, queueFor, enqueueSend, type QueuedSend } from './sendQueue'
 import { extractMedia, isDataUrlPath, joinedTextOf, appendRefText, stripMediaFromText, mediaSegment } from './media'
 import { processAttachments, detachImages, type PendingAttachment } from './mediaSend'
+import { isGatewayTimeout, isUnconfirmedSubmit, outboxPinFor, outboxTargetFor, shouldAutoRetry, UnconfirmedSubmitError } from './rpcRetry'
+import { migrateV1TranscriptWith } from './transcriptMigrate'
 // Type-only: erased at runtime, so chat.ts stays free of slash.ts's atom graph
 // (chat.ts already cannot load in plain node — react-native/AsyncStorage at
 // import time — and this keeps it that way).
@@ -56,7 +58,11 @@ export interface ChatMessage {
   segments?: ChatSegment[]
   streaming?: boolean
   ts: number
-  status?: 'ok' | 'failed'
+  /** 'unconfirmed' (BUG-036): a submit-phase timeout — the frame left the
+   *  device but no ack ever came back, so the turn may be running remotely
+   *  right now. Renders like a failed row (with retry) but says so
+   *  honestly, and is never retried automatically. */
+  status?: 'ok' | 'failed' | 'unconfirmed'
   error?: string
   /** Command output card label — set once at row creation by
    *  pushLocalMessage, never mutated afterwards (terminal write-once rows).
@@ -183,10 +189,16 @@ const pendingBySession = atom<Record<string, PendingRequest[]>>({})
 /** Queued prompts that could not be sent yet (offline). */
 /** One outbox entry: text composed offline, pinned to the chat it was
  *  composed for (BUG-008). `storedId: ''` = legacy unpinned entry from an
- *  older install — flushed with the old active-chat contract. */
+ *  older install — flushed with the old active-chat contract.
+ *  `originId` (BH-000019) = the live/temp id of the chat the text was
+ *  COMPOSED in — for an optimistic new-chat window the pseudo stored id is
+ *  unpinnable (BH-000018), so this is the only record of which chat the
+ *  text belongs to; a flush routes through it while the window still
+ *  exists (see outboxTargetFor). */
 export interface OutboxItem {
   storedId: string
   text: string
+  originId?: string
 }
 export const outbox = atom<OutboxItem[]>([])
 
@@ -259,6 +271,25 @@ export const pendingStoredIds = computed([sessionsById, pendingBySession], (map,
       const stored = map[liveId]?.storedId
       if (stored) out.push(stored)
     }
+  }
+  return out
+})
+
+/** BUG-086: pendingBySession keys that no sessionsById entry tracks — the
+ *  raw live id of a session started elsewhere (automation/CLI on the host).
+ *  These questions are perfectly answerable (the answer is a JSON-RPC
+ *  response frame keyed by the `srq-…` id — no session tracking needed);
+ *  they just have no row, so the chat screen renders ONE aggregate card. */
+export const pendingUntrackedIds = computed([sessionsById, pendingBySession], (map, pend): string[] =>
+  Object.keys(pend).filter((liveId) => pend[liveId]?.length && !map[liveId]),
+)
+
+/** The untracked questions themselves (BUG-086), in arrival order — the
+ *  aggregate card's payload. */
+export const pendingUntracked = computed([sessionsById, pendingBySession], (map, pend): PendingRequest[] => {
+  const out: PendingRequest[] = []
+  for (const [liveId, list] of Object.entries(pend)) {
+    if (!map[liveId] && list?.length) out.push(...list)
   }
   return out
 })
@@ -608,45 +639,15 @@ async function persistSession(s: SessionState) {
 }
 
 /**
- * One-time v1→v2 migration, run lazily when a v2 read misses. v1 blobs were
- * keyed two ways: by a LIVE id (which rotates on every resume — one stored
- * chat routinely has several v1 keys of different vintages, the FRESHEST
- * under the most recently mapped live id) and, from an interim build, by the
- * stored id itself. Scan newest-first so a stale vintage never paints over
- * the last one written, and remove EVERY v1 key mapped to this stored id.
- * Pairs that fell out of the 200-entry map cap are unreachable junk —
- * bounded and best-effort by design (no key enumeration API is in use).
+ * One-time v1→v2 migration, run lazily when a v2 read misses. The sweep
+ * itself lives node-safe in transcriptMigrate.ts (pinned in
+ * scripts/test-queue.ts); Pairs that fell out of the 200-entry map cap are
+ * unreachable junk — bounded and best-effort by design (no key enumeration
+ * API is in use).
  */
 async function migrateV1Transcript(storedId: string): Promise<string | null> {
   if (!storedIdMapLoaded) await loadStoredIdMap()
-  try {
-    // Interim-build key: stored-keyed but still .v1 — freshest format.
-    const interim = await AsyncStorage.getItem(transcriptKey(storedId))
-    if (interim) {
-      await AsyncStorage.setItem(transcriptV2Key(storedId), interim)
-      await AsyncStorage.removeItem(transcriptKey(storedId))
-      return interim
-    }
-    // Legacy: keyed by a live id that has since rotated. storedIdMap appends
-    // per resume, so the LAST pair mapping here holds the newest write.
-    const lives = Object.entries(storedIdMap)
-      .filter(([, st]) => st === storedId)
-      .map(([live]) => live)
-      .reverse()
-    let found: string | null = null
-    for (const live of lives) {
-      const raw = await AsyncStorage.getItem(transcriptKey(live))
-      if (raw) {
-        found = raw
-        await AsyncStorage.setItem(transcriptV2Key(storedId), raw)
-        break
-      }
-    }
-    for (const live of lives) await AsyncStorage.removeItem(transcriptKey(live))
-    return found
-  } catch {
-    return null
-  }
+  return migrateV1TranscriptWith(AsyncStorage, storedId, { v1: transcriptKey, v2: transcriptV2Key }, storedIdMap)
 }
 
 /** Load a cached transcript for a chat we have no messages for yet. Takes
@@ -777,8 +778,12 @@ async function persistOutbox() {
   }
 }
 
-function enqueueOffline(text: string, storedId = '') {
-  outbox.set([...outbox.get(), { storedId, text }].slice(0, MAX_OUTBOX))
+function enqueueOffline(text: string, storedId = '', originId?: string) {
+  // BH-000018: never pin to a pseudo stored id (`new:…`) — flushOutbox can
+  // neither match a live entry for one nor resume it, so a pseudo-pinned
+  // item sat undeliverable forever. Fall back to the unpinned contract.
+  const pin = outboxPinFor(storedId)
+  outbox.set([...outbox.get(), { storedId: pin, text, ...(originId ? { originId } : {}) }].slice(0, MAX_OUTBOX))
   void persistOutbox()
 }
 
@@ -789,13 +794,22 @@ export async function loadOutbox() {
       const list = JSON.parse(raw) as unknown
       if (Array.isArray(list)) {
         // Accept both shapes: legacy `string[]` entries (storedId '') and
-        // pinned `OutboxItem[]` entries.
+        // pinned `OutboxItem[]` entries. Pins to pseudo `new:` ids (written
+        // before the BH-000018 fix) normalize to unpinned here, so an
+        // upgraded install can never carry a forever-undeliverable item.
+        // BH-000019's `originId` survives the reload (it is a live/temp id —
+        // after a restart nothing tracks it and outboxTargetFor falls back).
         const items: OutboxItem[] = []
         for (const x of list) {
           if (typeof x === 'string') items.push({ storedId: '', text: x })
           else if (x && typeof x === 'object' && typeof (x as { text?: unknown }).text === 'string') {
             const rawStored = (x as { storedId?: unknown }).storedId
-            items.push({ storedId: typeof rawStored === 'string' ? rawStored : '', text: (x as { text: string }).text })
+            const rawOrigin = (x as { originId?: unknown }).originId
+            items.push({
+              storedId: outboxPinFor(typeof rawStored === 'string' ? rawStored : undefined),
+              text: (x as { text: string }).text,
+              ...(typeof rawOrigin === 'string' && rawOrigin ? { originId: rawOrigin } : {}),
+            })
           }
         }
         outbox.set(items.slice(0, MAX_OUTBOX))
@@ -825,22 +839,50 @@ export async function flushOutbox(): Promise<void> {
     const [item, ...rest] = outbox.get()
     outbox.set(rest)
     await persistOutbox()
+    // BH-000019: the flush catch below decides "did sendPrompt already
+    // re-enqueue this text?" by snapshot — an origin-routed send that fails
+    // re-enqueues under the chat's REAL stored id (not this item's pin), so
+    // the old same-storedId check missed it and re-added the item too,
+    // double-delivering the text.
+    const beforeCount = outbox.get().length
     try {
-      if (item.storedId) {
+      // BH-000019: route through the chat the text was COMPOSED in whenever
+      // that window/session is still tracked — an unpinned item from an
+      // optimistic new-chat window used to flush through ensureSession()
+      // against the flush-time ACTIVE chat, so text typed in window B landed
+      // in chat A while B kept the stale 'failed' row.
+      const target = outboxTargetFor(item, new Set(Object.keys(sessionsById.get())))
+      let deliveredVia = ''
+      if (target.kind === 'origin') {
+        const state = sessionsById.get()[target.id]
+        if (state?.provisional) {
+          // The window is still provisional: resolve through ITS keyed
+          // create (starting one if none is in flight), then send pinned to
+          // the fresh live id — never the active chat.
+          const sid = await createForWindow(target.id)
+          await sendPrompt(item.text, { session: sid })
+          deliveredVia = sid
+        } else {
+          // A live (non-provisional) origin entry: the exact chat it was
+          // composed in, by live id.
+          await sendPrompt(item.text, { session: target.id })
+          deliveredVia = target.id
+        }
+      } else if (target.kind === 'pinned') {
         // Pinned (BUG-008): deliver to the chat it was composed for, never
         // to whichever chat happens to be active at flush time.
-        const live = Object.values(sessionsById.get()).find((s) => s.storedId === item.storedId)?.id
+        const live = Object.values(sessionsById.get()).find((s) => s.storedId === target.storedId)?.id
         if (live) {
           await sendPrompt(item.text, { session: live })
         } else {
           // Not tracked (cold boot / evicted handle): a quiet resume brings
           // the handle back; a not-found answer means the chat is gone.
           try {
-            const fresh = await resumeShared(item.storedId)
+            const fresh = await resumeShared(target.storedId)
             await sendPrompt(item.text, { session: fresh.sessionId })
           } catch (resumeErr) {
             if (!isSessionNotFound(resumeErr)) throw resumeErr
-            log('warn', 'chat', `outbox item dropped — chat ${item.storedId} no longer exists`)
+            log('warn', 'chat', `outbox item dropped — chat ${target.storedId} no longer exists`)
           }
         }
       } else {
@@ -848,13 +890,23 @@ export async function flushOutbox(): Promise<void> {
       }
       // The stale 'failed' row from the original offline failure would
       // duplicate the freshly delivered message — drop it (BUG-008).
-      dropMatchingFailedRow(item.storedId, item.text)
+      // BH-000019: an origin-routed delivery re-keys the composing window
+      // onto the real session (carrying its failed row along), so clean up
+      // by the LIVE id we delivered through, not just the stored-id match
+      // (an unpinned item's storedId is '' and matches nothing).
+      dropMatchingFailedRow(item.storedId, item.text, deliveredVia || undefined)
     } catch (err) {
       // sendPrompt's offline path re-enqueued the failed item; if it threw
       // for a reason that did NOT re-enqueue (e.g. the pinned guard), put
       // it back so nothing is lost. Either way, stop — remaining items
       // stay queued for the next flush.
-      if (!outbox.get().some((x) => x.text === item.text && x.storedId === item.storedId)) {
+      // BUG-036: EXCEPT an unconfirmed submit — the text may be running on
+      // the machine right now, the visible row keeps the manual retry, and
+      // a re-enqueued copy would silently fire again on the next flush.
+      if (
+        shouldAutoRetry('submit', err) &&
+        !(outbox.get().length > beforeCount && outbox.get().some((x) => x.text === item.text))
+      ) {
         outbox.set([...outbox.get(), item].slice(0, MAX_OUTBOX))
         void persistOutbox()
       }
@@ -864,9 +916,13 @@ export async function flushOutbox(): Promise<void> {
 }
 
 /** Remove the first failed user row matching a just-flushed outbox item so
- *  the transcript doesn't show the text twice (failed row + sent row). */
-function dropMatchingFailedRow(storedId: string, text: string) {
-  const entry = Object.values(sessionsById.get()).find((s) => s.storedId === storedId)
+ *  the transcript doesn't show the text twice (failed row + sent row).
+ *  `liveId` (BH-000019) matches the entry an origin-routed delivery just
+ *  delivered through — the composing window's failed row re-keyed onto it —
+ *  which a storedId of '' (unpinned pseudo-composed item) can never name. */
+function dropMatchingFailedRow(storedId: string, text: string, liveId?: string) {
+  const map = sessionsById.get()
+  const entry = (liveId ? map[liveId] : undefined) ?? Object.values(map).find((s) => s.storedId === storedId)
   if (!entry) return
   const idx = entry.messages.findIndex((m) => m.role === 'user' && m.status === 'failed' && m.text === text)
   if (idx < 0) return
@@ -1181,14 +1237,10 @@ export async function ensureSession(opts?: { create?: boolean }): Promise<string
     // server and never shows in the saved list.
     if (state?.provisional) {
       if (!create) return current
-      if (inflightCreate) return await inflightCreate
-      const tempId = current
-      const pseudo = state.storedId
-      const p = runNewChat(tempId, pseudo).finally(() => {
-        if (inflightCreate === p) inflightCreate = null
-      })
-      inflightCreate = p
-      return await p
+      // BH-000018: reuse only THIS window's in-flight create (keyed by its
+      // temp id) — the old global made a send in a second new-chat window
+      // resolve to (and land in) the first window's session.
+      return await createForWindow(current)
     }
     // A released session still has a usable stored id — bring it back rather
     // than letting the next send fail against a dead handle.
@@ -1245,8 +1297,13 @@ export async function activeLiveId(): Promise<string> {
   const cur = activeSession.get()
   const state = cur ? sessionsById.get()[cur] : undefined
   if (state?.provisional) {
-    if (!inflightCreate) throw new Error('New chat is not ready')
-    return await inflightCreate
+    // BH-000018: keyed by THIS window's temp id — never adopt another
+    // window's create. (The old global let a surface opened in window 2 —
+    // e.g. the model picker's open-path fetch — silently target window 1's
+    // brand-new session.)
+    const inflight = inflightCreates.get(cur!)
+    if (!inflight) throw new Error('New chat is not ready')
+    return await inflight
   }
   if (state?.detached && state.storedId) {
     return (await resumeShared(state.storedId)).sessionId
@@ -1255,10 +1312,31 @@ export async function activeLiveId(): Promise<string> {
   return ensureSession()
 }
 
-// The optimistic new-chat window's in-flight create (resolves to the REAL
-// live id). Two rapid New taps each get their own session (cleared only when
-// still current); a stale awaiter just gets a valid session.
-let inflightCreate: Promise<string> | null = null
+// In-flight session.create per provisional window, keyed by the window's
+// temp id (BH-000018). The old single global made every window share
+// whichever create happened to be in flight: send in a second new-chat
+// window awaited the FIRST window's create, so the message landed in the
+// first window's session while the screen stayed on the (now empty) second
+// window. Contract: an entry is created for — and only ever adopted by —
+// ITS window; newChat's sweep drops a swept window's entry (an abandoned
+// window's create must never be adopted), and each entry removes itself in
+// its create's finally.
+const inflightCreates = new Map<string, Promise<string>>()
+
+/** Get-or-start THIS provisional window's keyed create — the single seam
+ *  both ensureSession and the outbox flush's origin routing (BH-000019)
+ *  resolve through, so nothing can adopt another window's create or mint a
+ *  second one for a window that already has one in flight. */
+function createForWindow(tempId: string): Promise<string> {
+  const existing = inflightCreates.get(tempId)
+  if (existing) return existing
+  const pseudo = sessionsById.get()[tempId]?.storedId ?? ''
+  const p = runNewChat(tempId, pseudo).finally(() => {
+    if (inflightCreates.get(tempId) === p) inflightCreates.delete(tempId)
+  })
+  inflightCreates.set(tempId, p)
+  return p
+}
 
 /**
  * New chat, optimistically: the screen swaps to a placeholder THIS tick and
@@ -1280,6 +1358,10 @@ export function newChat(): Promise<string> {
     let pendDirty = false
     for (const k of dead) {
       delete swept[k]
+      // BH-000018: a swept window is abandoned — its in-flight create (if
+      // any) must never be adopted by a later window; drop the keyed entry
+      // so nothing awaits or lands in it.
+      inflightCreates.delete(k)
       if (pend[k]) {
         delete pend[k]
         pendDirty = true
@@ -1544,8 +1626,11 @@ export async function forgetSession(liveId: string) {
 export async function resetSessionCaches(): Promise<void> {
   for (const t of persistTimers.values()) clearTimeout(t)
   persistTimers.clear()
-  // Resumes keyed by old stored ids must not land their merge after the wipe.
+  // Resumes keyed by old stored ids must not land their merge after the wipe;
+  // likewise creates keyed by old provisional windows (BH-000018) must not
+  // re-key entries into the fresh map.
   inflightResumes.clear()
+  inflightCreates.clear()
   sessionsById.set({})
   activeSession.set(null)
   sessionLoadings.set({})
@@ -1692,6 +1777,11 @@ const SESSION_NOT_FOUND_RE = /session not found/i
 export const isSessionNotFound = (err: unknown): boolean =>
   err instanceof Error && SESSION_NOT_FOUND_RE.test(err.message)
 
+/** BUG-036 row copy for a submit whose ack timed out after the frame left —
+ *  honest about the ambiguity, unlike a plain 'failed' marker. */
+const UNCONFIRMED_SEND_TEXT =
+  'Sent — no confirmation from the computer; it may have gone through. Retry only if it did not.'
+
 export async function sendPrompt(
   rawText: string,
   opts?: {
@@ -1736,7 +1826,10 @@ export async function sendPrompt(
       }
       // Queue full — fall through to the outbox so the text still survives.
     }
-    enqueueOffline(text, lockedStored ?? '')
+    // BH-000019: record the chat the text was COMPOSED in (the lock key is
+    // the pinned session or the active one) so a later flush routes through
+    // it while that window/session is still tracked.
+    enqueueOffline(text, lockedStored ?? '', lockKey === '_boot' ? undefined : lockKey)
     return
   }
   sendingSessions.add(lockKey)
@@ -1751,6 +1844,10 @@ export async function sendPrompt(
 
   let sid = ''
   let rowId = ''
+  // BUG-036: flips when a prompt.submit frame was SENT and then timed out —
+  // the turn may be running remotely. The row becomes 'unconfirmed' instead
+  // of 'failed', and nothing downstream retries it automatically.
+  let submitUnconfirmed = false
   try {
     try {
       const ps = pinned ? sessionsById.get()[pinned] : undefined
@@ -1796,7 +1893,10 @@ export async function sendPrompt(
       }
       // BUG-008: re-enqueue pinned to the chat the send was bound for, so a
       // later flush delivers it HERE and not to whichever chat is active.
-      enqueueOffline(text, t0?.storedId ?? '')
+      // BH-000019: `target` (the provisional window's temp id included) is
+      // the origin — the pseudo stored id is unpinnable, but the window is
+      // still tracked and a flush can route through its own keyed create.
+      enqueueOffline(text, t0?.storedId ?? '', target ?? undefined)
       throw err
     }
 
@@ -1844,9 +1944,18 @@ export async function sendPrompt(
       submitText = appendRefText(text, outcome.refTexts)
       patchRowMediaPaths(sid, rowId, attachments, outcome.pathsById)
     }
+    // One submit leg, twice at most: the session-not-found retry below is a
+    // deliberate single re-fire (that error is a definitive NOT-delivered
+    // answer, so resubmitting cannot duplicate the text). Both legs flag a
+    // timeout as unconfirmed.
+    const submitRpc = () =>
+      rpc('prompt.submit', { session_id: sid, text: submitText }).catch((err: unknown) => {
+        if (isGatewayTimeout(err)) submitUnconfirmed = true
+        throw err
+      })
     try {
       try {
-        await rpc('prompt.submit', { session_id: sid, text: submitText })
+        await submitRpc()
       } catch (err) {
         if (!isSessionNotFound(err)) throw err
         // The live handle died server-side (serve restart / reinstall) while
@@ -1859,10 +1968,12 @@ export async function sendPrompt(
         log('warn', 'chat', `session not found (${sid}) — re-resuming ${stored} and retrying the send`)
         const fresh = await resumeShared(stored)
         sid = fresh.sessionId
-        await rpc('prompt.submit', { session_id: sid, text: submitText })
+        await submitRpc()
       }
     } catch (err) {
-      if (attachedImagePaths.length) void detachImages(sid, attachedImagePaths)
+      // Detach only when the submit definitively did NOT land — a delivered
+      // (unconfirmed) turn is still using those images server-side.
+      if (attachedImagePaths.length && !submitUnconfirmed) void detachImages(sid, attachedImagePaths)
       throw err
     }
     // Revive-to-top: the send just made this chat the most recently active
@@ -1881,13 +1992,29 @@ export async function sendPrompt(
         : [...list].reverse().findIndex((m) => m.role === 'user' && m.text === text)
       if (idx >= 0) {
         const real = rowId ? idx : list.length - 1 - idx
-        list[real] = { ...list[real], status: 'failed', error: err instanceof Error ? err.message : 'Send failed' }
+        // BUG-036: a submit-phase timeout is UNCONFIRMED, not failed — the
+        // frame was already on the wire (the channel sends before it waits
+        // and has no cancellation), so the turn may be running remotely.
+        // Distinct copy + status; the retry affordance stays (rendered like
+        // a failed row), but nothing retries automatically.
+        list[real] = {
+          ...list[real],
+          status: submitUnconfirmed ? 'unconfirmed' : 'failed',
+          error: submitUnconfirmed
+            ? UNCONFIRMED_SEND_TEXT
+            : err instanceof Error ? err.message : 'Send failed',
+        }
         patchSession(sid, { messages: list })
       }
     } else {
       patchActive({ busy: false })
     }
-    throw err
+    // Automated callers (queue/outbox flush) match on this wrapper so they
+    // never blind-retry a maybe-delivered submit; manual callers just see
+    // the message.
+    throw submitUnconfirmed && isGatewayTimeout(err)
+      ? new UnconfirmedSubmitError(err)
+      : err
   } finally {
     sendingSessions.delete(lockKey)
   }
@@ -1901,6 +2028,19 @@ export async function retryMessage(id: string) {
   // Media rows are not retryable (design finding 9): the attachments can't be
   // re-picked from here, so a text-only retry would silently drop them.
   if (m.segments?.some((seg) => seg.kind === 'media')) return
+  // BUG-036: retrying an UNCONFIRMED row stays manual but is warned — the
+  // earlier attempt may have been delivered, so this resend can duplicate
+  // it. Same warn vocabulary as the attention toasts (amber 'input').
+  if (m.status === 'unconfirmed') {
+    const st = sessionsById.get()[sid]?.storedId
+    pushToast({
+      kind: 'input',
+      title: 'Retrying an unconfirmed message',
+      body: 'The earlier attempt may have gone through — this can send it twice.',
+      storedId: st && !isPseudoStoredId(st) ? st : '',
+      chatTitle: sessionsById.get()[sid]?.title,
+    })
+  }
   patchSession(sid, { messages: messages.get().filter((x) => x.id !== id) })
   // BUG-008: drop this chat's outbox copy of the same text first — the old
   // code resent while the outbox entry survived, so the reconnect flush
@@ -1998,10 +2138,21 @@ function maybeFlushQueue(liveId: string): void {
       // No recursion here: the submit only ACKed — busy is already true, and
       // the new turn's end edge (or its failure) drives the next release.
     } catch (err) {
-      // BUG-073: a session deleted mid-flush throws "not tracked" here —
-      // say so instead of a silent empty catch (acceptable for a deleted
-      // chat, but it should be visible in the log).
-      log('warn', 'chat', `queued head flush failed for ${liveId}: ${String(err)}`)
+      if (!shouldAutoRetry('submit', err)) {
+        // BUG-036: the head's submit timed out AFTER its frame was sent —
+        // it may be running on the machine right now. The delivered turn's
+        // own end events re-release this queue, and leaving the head here
+        // would resubmit the SAME text with zero user action. Drop it; the
+        // visible 'unconfirmed' row carries the manual retry affordance.
+        removeQueued(s.storedId, head.id)
+        queuedAttachments.delete(head.id)
+        log('warn', 'chat', `queued head submit unconfirmed for ${liveId} — removed from the queue (row marked unconfirmed)`)
+      } else {
+        // BUG-073: a session deleted mid-flush throws "not tracked" here —
+        // say so instead of a silent empty catch (acceptable for a deleted
+        // chat, but it should be visible in the log).
+        log('warn', 'chat', `queued head flush failed for ${liveId}: ${String(err)}`)
+      }
     } finally {
       queueFlushes.delete(liveId)
     }
@@ -2040,8 +2191,10 @@ function retire(req: PendingRequest) {
   }
 }
 
-export async function respondApproval(choice: 'once' | 'session' | 'always' | 'deny', all = false) {
-  const req = pendingRequest.get()
+export async function respondApproval(choice: 'once' | 'session' | 'always' | 'deny', all = false, reqIn?: PendingRequest) {
+  // BUG-086: an explicit request wins — the aggregate foreign card answers a
+  // question that is not (and can never be) the active session's.
+  const req = reqIn ?? pendingRequest.get()
   if (!req || req.method !== 'approval') return
   // v7 answer shape: { choice, all? }
   answer(req.id, { choice, all: all || undefined })
@@ -2049,10 +2202,10 @@ export async function respondApproval(choice: 'once' | 'session' | 'always' | 'd
   log('info', 'chat', `approval answered: ${choice}`)
 }
 
-export async function respondClarify(answerText: string) {
+export async function respondClarify(answerText: string, reqIn?: PendingRequest) {
   const t = answerText.trim().slice(0, 4000)
   if (!t) return
-  const req = pendingRequest.get()
+  const req = reqIn ?? pendingRequest.get()
   if (!req || req.method !== 'clarify') return
   // v7 answer shape: { answer } — or { answers } for a batch.
   answer(req.id, { answer: t })
@@ -2061,16 +2214,16 @@ export async function respondClarify(answerText: string) {
 }
 
 /** Answer a batch clarify with one answer per question id. */
-export async function respondClarifyBatch(answers: Record<string, string>) {
-  const req = pendingRequest.get()
+export async function respondClarifyBatch(answers: Record<string, string>, reqIn?: PendingRequest) {
+  const req = reqIn ?? pendingRequest.get()
   if (!req || req.method !== 'clarify') return
   answer(req.id, { answers })
   retire(req)
   log('info', 'chat', `clarify batch answered: ${req.id}`)
 }
 
-export async function respondPrivileged(allow: boolean, value?: string) {
-  const req = pendingRequest.get()
+export async function respondPrivileged(allow: boolean, value?: string, reqIn?: PendingRequest) {
+  const req = reqIn ?? pendingRequest.get()
   if (!req || (req.method !== 'sudo' && req.method !== 'secret')) return
   // v7 answer shape: { value }. A deny is an empty value — the backend treats
   // a blank secret as "not provided".
@@ -2241,7 +2394,21 @@ function flagAttention(
   opts?: { suppress?: boolean },
 ) {
   const s = sessionsById.get()[liveId]
-  if (!s?.storedId) return
+  if (!s?.storedId) {
+    // BUG-086: the question belongs to a session this app isn't tracking
+    // (automation/CLI on the host started it). It is answerable from the
+    // chat screen's aggregate card, so still surface it — toast (or
+    // notification when backgrounded) with NO deep link: there is no stored
+    // id to open, and no row to mark. Tap just lands on the chat tab.
+    if (opts?.suppress) return
+    const body = notify.body.replace(/\s+/g, ' ').trim().slice(0, 180)
+    if (isBackgrounded()) {
+      void notifyLocal(notify.title, body, { screen: 'chat', kind })
+    } else {
+      pushToast({ kind, title: notify.title, body, storedId: '', chatTitle: '' })
+    }
+    return
+  }
   // "Showing" must mean the user can actually see it: the chat route stays
   // focused while the app is backgrounded, so route-focus alone suppressed
   // every completion notification (the turn-done knock never fired from the
@@ -2303,6 +2470,27 @@ export function hookChatEvents() {
 
     const eSid = e.session_id
     if (!eSid) return
+
+    // BUG-086: handle `request.cancel` BEFORE the untracked guard below.
+    // Foreign live ids (automation/CLI on the host) hold entries in
+    // pendingBySession, and the old guard made their withdrawn questions
+    // immortal — the card never cleared, pendingCount (footer + OS badge)
+    // lied forever. Tracked sessions flow through the same teardown; only
+    // the attention/queue release below is a no-op for them when idle.
+    if (e.type === 'request.cancel') {
+      const rid = String(p.id ?? '')
+      const list = pendingBySession.get()[eSid] ?? []
+      if (rid && list.some((r) => r.id === rid)) {
+        log('info', 'chat', `question withdrawn (${String(p.reason ?? 'unknown')})`)
+        withPending(eSid, (l) => l.filter((r) => r.id !== rid))
+        if (!(pendingBySession.get()[eSid]?.length)) {
+          clearAttentionLive(eSid)
+          maybeFlushQueue(eSid)
+        }
+      }
+      return
+    }
+
     const s = sessionsById.get()[eSid]
     if (!s) return // event for a session we're not tracking
 
@@ -2553,22 +2741,6 @@ export function hookChatEvents() {
           durationS: typeof p.duration_s === 'number' ? p.duration_s : undefined,
           status: failed ? 'failed' : 'done',
         })
-        break
-      }
-
-      case 'request.cancel': {
-        // The backend withdrew a question (timeout / interrupt / session closed).
-        // Tear the card down so the composer is not blocked by a dead question.
-        const rid = String(p.id ?? '')
-        const list = pendingBySession.get()[eSid] ?? []
-        if (list.some((r) => r.id === rid)) {
-          log('info', 'chat', `question withdrawn (${String(p.reason ?? 'unknown')})`)
-          withPending(eSid, (l) => l.filter((r) => r.id !== rid))
-          if (!(pendingBySession.get()[eSid]?.length)) {
-            clearAttentionLive(eSid)
-            maybeFlushQueue(eSid)
-          }
-        }
         break
       }
 

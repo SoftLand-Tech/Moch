@@ -28,6 +28,7 @@ import {
 } from '../../src/lib/fleet'
 import { isConnected } from '../../src/lib/gateway'
 import { tr, isRTL } from '../../src/lib/strings'
+import { showAlert } from '../../src/components/AlertDialog'
 
 /** §2.7 starter templates: tappable job seeds — zero typing path. */
 const STARTERS: { label: string; job: string }[] = [
@@ -122,6 +123,10 @@ export default function Fleet() {
     setBusy(pf.name)
     try {
       await freezeProfile(pf.name, !frozenSet.has(pf.name))
+    } catch (e) {
+      // #106: freeze/unfreeze failure used to vanish (no catch) — the row
+      // just went back to normal with no hint the state never changed.
+      showAlert(tr('fleet.freeze.failed', { name: pf.name, why: e instanceof Error ? e.message : String(e) }))
     } finally {
       setBusy(null)
     }

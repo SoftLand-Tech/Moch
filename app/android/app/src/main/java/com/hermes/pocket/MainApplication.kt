@@ -13,6 +13,7 @@ import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint
 import com.hermes.pocket.hermes.BrowserRelayPackage
 import com.hermes.pocket.hermes.HermesBridgePackage
 import com.hermes.pocket.hermes.HermesRuntime
+import com.hermes.pocket.hermes.MochLogs
 import com.hermes.pocket.sharein.ShareInPackage
 
 import expo.modules.ApplicationLifecycleDispatcher
@@ -39,15 +40,14 @@ class MainApplication : Application(), ReactApplication {
     // Crash telemetry for the embedded runtime process: last crash lands in
     // files/Moch/logs/crash-last.txt (the agent itself can read it back).
     // Recovery is START_STICKY on HermesService — the system restarts the
-    // service, and with it the process and the Python runtime.
+    // service, and with it the process and the Python runtime. The write
+    // itself goes through MochLogs, shared with HermesService's FGS-timeout
+    // marker (BH-000046) so both files come from one code path.
     val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
     Thread.setDefaultUncaughtExceptionHandler { t, e ->
       try {
         android.util.Log.e("MochHermes", "uncaught exception on ${t.name}", e)
-        java.io.File(filesDir, "Moch/logs/crash-last.txt").apply {
-          parentFile?.mkdirs()
-          writeText("${java.util.Date()} thread=${t.name}\n${android.util.Log.getStackTraceString(e)}")
-        }
+        MochLogs.write(this, "crash-last.txt", "${java.util.Date()} thread=${t.name}\n${android.util.Log.getStackTraceString(e)}")
       } catch (_: Exception) {
       }
       previousHandler?.uncaughtException(t, e)
@@ -66,7 +66,14 @@ class MainApplication : Application(), ReactApplication {
     // no RN UI ever mounts (the previous, RN-only start left the gateway
     // serving a browser-less catalog until the user next opened the app).
     // WebView debugging becomes process-wide from boot: the accepted posture
-    // of the always-available browser (see PR #61).
+    // of the always-available browser (see PR #61). SECURITY NOTE (C-06 /
+    // BH-000039): this CANNOT be gated on BuildConfig.DEBUG — CdpRelay's
+    // upstream IS the DevTools abstract socket (CdpRelay.connectUpstream),
+    // so a release gate would kill every browser tool. Verified surface:
+    // abstract unix socket (no network path), SO_PEERCRED rejects other
+    // apps, the relay's loopback TCP is token-gated; the only real path is
+    // an adb-AUTHORIZED host (USB debugging + prior RSA trust). Full
+    // analysis + conditions for changing this posture: SECURITY.md (root).
     try {
       android.webkit.WebView.setWebContentsDebuggingEnabled(true)
       com.hermes.pocket.hermes.CdpRelay.start(this, 9334)

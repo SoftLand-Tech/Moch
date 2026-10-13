@@ -7,7 +7,10 @@ import { CameraView, useCameraPermissions } from 'expo-camera'
 import { connect, normalizeHost } from '../lib/gateway'
 import { getEmbeddedGateway } from '../lib/mochiRuntime'
 import { parseConnectUrl } from '../lib/pairing'
+import { needsPlaintextConfirm } from '../lib/transportGate'
 import { ensureNotificationPermission } from '../lib/push'
+import { tr } from '../lib/strings'
+import { showAlert } from './AlertDialog'
 import { C, useStyles } from '../lib/theme'
 
 /**
@@ -50,10 +53,31 @@ export function PairForm({ onPaired }: { onPaired: () => void }) {
       setError('That token looks too short — pairing tokens are usually longer. Check it and try again.')
       return
     }
+    // C-05 (#95): a plaintext connection to a PUBLIC host (QR with tls=0,
+    // pasted link, or manual entry with TLS unchecked) is never silent — the
+    // pairing token would travel the URL in clear text. Loopback/LAN hosts
+    // (including "Use this phone") are the documented plaintext flow and
+    // never see this dialog.
+    const plain = needsPlaintextConfirm(h, useTls)
+    if (plain) {
+      const btn = await showAlert({
+        title: tr('pair.plain.title'),
+        message: tr('pair.plain.body', { host: h }),
+        buttons: [
+          { text: tr('pair.plain.cancel'), style: 'cancel' },
+          { text: tr('pair.plain.confirm'), style: 'destructive' },
+        ],
+      })
+      if (btn.style !== 'destructive') return // user declined — abort silently
+    }
     setBusy(true)
     setError(null)
     try {
-      await connect({ host: h, token: t, tls: useTls, name: override?.name })
+      await connect({
+        host: h, token: t, tls: useTls,
+        ...(override?.name ? { name: override.name } : {}),
+        ...(plain ? { plaintextConfirmed: true } : {}),
+      })
       onPaired()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Check host and token')
@@ -62,7 +86,7 @@ export function PairForm({ onPaired }: { onPaired: () => void }) {
     }
   }
 
-  const useThisPhone = async () => {
+  const pairThisPhone = async () => {
     if (busy) return
     setBusy(true)
     setError(null)
@@ -138,7 +162,7 @@ export function PairForm({ onPaired }: { onPaired: () => void }) {
 
       <Pressable
         style={({ pressed }) => [s.localBtn, pressed && s.pressed]}
-        onPress={() => void useThisPhone()}
+        onPress={() => void pairThisPhone()}
         disabled={busy}
         accessibilityRole="button"
         accessibilityLabel="Use this phone as the agent host"

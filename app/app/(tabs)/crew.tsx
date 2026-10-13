@@ -67,6 +67,9 @@ export default function Crew() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [runs, setRuns] = useState<Run[]>([])
   const [loading, setLoading] = useState(true)
+  // #115: dedicated pull-to-refresh flag (was `loading`, so every RPC retry
+  // spun the RefreshControl and a real pull-to-refresh fought the loader).
+  const [refreshing, setRefreshing] = useState(false)
   const [err, setErr] = useState('')
   const [actionErr, setActionErr] = useState('')
   // create box
@@ -80,7 +83,13 @@ export default function Crew() {
   const [busyTask, setBusyTask] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
-    if (!online) return
+    if (!online) {
+      // #115: a from-mount offline start must land here with the spinner
+      // cleared, or the banner never renders and the screen spins forever.
+      setLoading(false)
+      setRefreshing(false)
+      return
+    }
     setErr('')
     try {
       const t = await rpc<{ tasks: Task[] }>('moch.kanban.tasks', { limit: 120 }, 15000)
@@ -95,6 +104,7 @@ export default function Crew() {
       // timeline needs the fleet runtime armed — board alone is still useful
     }
     setLoading(false)
+    setRefreshing(false)
   }, [online])
 
   useEffect(() => { void refresh() }, [refresh])
@@ -193,6 +203,7 @@ export default function Crew() {
     <SafeAreaView style={s.safe} edges={[]}>
       <ScreenShell title="Crew" showBrand>
         <Animated.View style={[s.body, kbPad]}>
+        {!online ? <Text style={s.offline}>{tr('crew.offline')}</Text> : null}
         {err ? <Text style={s.err}>{err}</Text> : null}
         {actionErr ? <Text style={s.err}>{actionErr}</Text> : null}
         {loading && online ? (
@@ -202,7 +213,11 @@ export default function Crew() {
             data={COLUMNS}
             keyExtractor={(c) => c.key}
             refreshControl={
-              <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={C.textDim} />
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => { setRefreshing(true); void refresh() }}
+                tintColor={C.textDim}
+              />
             }
             ListHeaderComponent={
               <Text style={s.hint}>{tr('crew.hint')}</Text>
@@ -383,6 +398,7 @@ const makeS = () =>
     safe: { flex: 1, backgroundColor: C.bg },
     body: { flex: 1 },
     err: { color: C.red, fontSize: 12, paddingHorizontal: 16, paddingVertical: 6 },
+    offline: { color: C.amber, fontSize: 12, paddingHorizontal: 16, paddingVertical: 6 },
     spin: { marginTop: 24 },
     hint: { color: C.textFaint, fontSize: 11, paddingHorizontal: 16, paddingBottom: 8 },
     column: {

@@ -95,6 +95,12 @@ object CdpRelay {
   private val running = AtomicBoolean(false)
   private var server: ServerSocket? = null
 
+  // BH-000045: live WS tunnels by id — the client leg of each pump pair.
+  // Closing the server socket does NOT close accepted connections, so stop()
+  // needs this registry to tear tunnels down with the relay.
+  private val liveTunnels = ConcurrentHashMap<String, Socket>()
+  private val tunnelSeq = java.util.concurrent.atomic.AtomicInteger(0)
+
   @Volatile var port: Int = 0; private set
   @Volatile var token: String = ""; private set
   @Volatile var activeUrlPrefix: String? = null
@@ -152,10 +158,27 @@ object CdpRelay {
   }
 
   fun stop() {
+    // BH-000045 (BUG-99): an in-process stop used to leave TWO armed things
+    // behind: (a) relay.json still describing a "live" relay (pid == this
+    // process, so hermes_boot's pid gate would arm BROWSER_CDP_URL on the
+    // next boot against a relay that never answers), and (b) every live WS
+    // tunnel (closing the server socket does NOT close accepted ones — the
+    // pumps keep both legs alive until the page dies). Rewrite the state
+    // file with pid:0 (stale by definition; the token stays — it is
+    // deliberately stable per install) and close the tunnels.
     running.set(false)
     try { server?.close() } catch (_: Exception) {}
     server = null
-    log("relay stopped")
+    val tunnels = liveTunnels.size
+    for ((_, tunnel) in liveTunnels) {
+      try { tunnel.close() } catch (_: Exception) {}
+    }
+    liveTunnels.clear()
+    // Guard: stop() can run before any start() (fresh process, RN calls stop
+    // anyway) — stateFile() needs appContext, so only a relay that started
+    // here rewrites its state file.
+    if (appContext != null) writeStoppedStateFile()
+    log("relay stopped ($tunnels tunnel(s) closed${if (appContext != null) ", state file pid:0" else ""})")
   }
 
   fun status(): Status =
@@ -240,6 +263,26 @@ object CdpRelay {
           .put("token", token)
           .put("port", port)
           .put("pid", android.os.Process.myPid())
+          .toString(),
+      )
+    } catch (e: Exception) {
+      lastError = "state write failed: $e"
+    }
+  }
+
+  /**
+   * BH-000045 (BUG-99): the stopped state file — same shape, pid forced to 0
+   * so `moch/hermes_boot.py`'s pid gate (pid must equal getpid) treats it as
+   * stale and never arms BROWSER_CDP_URL from a relay this process stopped.
+   * The token is kept: it is deliberately stable per install.
+   */
+  private fun writeStoppedStateFile() {
+    try {
+      stateFile().writeText(
+        JSONObject()
+          .put("token", token)
+          .put("port", port)
+          .put("pid", 0)
           .toString(),
       )
     } catch (e: Exception) {
@@ -594,6 +637,11 @@ object CdpRelay {
         return
       }
 
+      // BH-000045: this tunnel is now live — register the client leg so
+      // stop() can close it (see liveTunnels).
+      val tunnelId = "t${tunnelSeq.incrementAndGet()}"
+      liveTunnels[tunnelId] = client
+
       val cin = client.getInputStream()
       val uout = upstream.outputStream
       val uin = upstream.inputStream
@@ -601,6 +649,7 @@ object CdpRelay {
       val done = AtomicBoolean(false)
       val closeBoth = Runnable {
         done.set(true)
+        liveTunnels.remove(tunnelId)
         try { client.close() } catch (_: Exception) {}
         try { upstream.close() } catch (_: Exception) {}
       }

@@ -6,6 +6,11 @@
        mediaPlayback; without this permission its startForeground throws
        SecurityException at targetSdk 34+ (EXEC-DESIGN.md §4.6). -->
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+  <!-- BH-000046 / GH #100: HermesService runs as specialUse from API 34
+       (see the service declaration below) — needs its own permission.
+       FOREGROUND_SERVICE_DATA_SYNC above stays: the API 29-33
+       startForeground branch still passes the dataSync type. -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
   <uses-permission android:name="android.permission.INTERNET"/>
   <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" tools:replace="android:maxSdkVersion"/>
@@ -36,7 +41,15 @@
         <action android:name="androidx.media3.session.MediaSessionService"/>
       </intent-filter>
     </service>
-    <service android:name=".hermes.HermesService" android:exported="false" android:foregroundServiceType="dataSync"/>
+    <!-- BH-000046 / GH #100: migrated dataSync → specialUse — dataSync has
+         a ~6h/24h hard timeout at targetSdk 35+ (Android 15) that kills the
+         always-on runtime; specialUse has none and is the honest type for
+         an embedded agent runtime gateway (subtype declared below).
+         Hand-edited prebuilt manifest: a future expo prebuild regeneration
+         must preserve these hand-edited lines (re-edit per app/AGENTS.md). -->
+    <service android:name=".hermes.HermesService" android:exported="false" android:foregroundServiceType="specialUse">
+      <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="embedded_agent_runtime_gateway"/>
+    </service>
     <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|smallestScreenSize|assetsPaths" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="portrait">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>

@@ -18,6 +18,7 @@ import tempfile
 import threading
 import time
 from typing import Dict, Any, Optional, Union
+from urllib.parse import urlparse as _urlparse_scheme_check
 from pathlib import Path
 from agent.redact import redact_cdp_url
 from hermes_constants import get_hermes_home, hermes_home_key
@@ -704,6 +705,17 @@ def _url_policy_error(url: str, *, auto_local: bool = False) -> Optional[dict]:
     # local Chromium on a cloud VM still reaches the host IMDS).
     if _is_always_blocked_url(url):
         return _err("Blocked: URL targets a cloud metadata endpoint")
+    # BUG-128 / GH #73: non-navigable schemes (data:, file:, javascript:, …)
+    # used to fall through to the _is_safe_url floor, which rejects any
+    # non-HTTP scheme at ITS bottom — so the caller reported the WRONG reason
+    # ("private or internal address") for what is actually an unsupported
+    # scheme. Refuse them here, first, with the honest, actionable reason.
+    scheme = (_urlparse_scheme_check(url).scheme or "").strip().lower()
+    if scheme and scheme not in ("http", "https"):
+        return _err(
+            f"Blocked: {scheme}: URLs are not supported by the browser tools "
+            f"(only http/https are navigable)"
+        )
     if not local and not auto_local and not _cloud._allow_private_urls() and not _is_safe_url(url):
         return _err("Blocked: URL targets a private or internal address")
     blocked = check_website_access(url)
@@ -1211,6 +1223,18 @@ def _browser_eval(expression: str, task_id: Optional[str] = None) -> str:
     # Camofox keeps its own raw-task_id-keyed session map, so pass the raw id.
     if _is_camofox_mode():
         return _camofox_eval(expression, task_id)
+
+    # BUG-126 (BH-000045-adjacent): WebView mode has NO agent-browser CLI —
+    # on-device the subprocess path below can only answer "agent-browser CLI
+    # not found (cached)". Route the expression to the webview backend
+    # instead, running the same attach dance as browser_navigate first so the
+    # FIRST eval of a turn works even with no supervisor attached yet (the
+    # supervisor fast path below returns None in exactly that case, which is
+    # how the CLI probe used to be reached). Never fall through to the CLI
+    # here: webview_eval reports the honest attach/relay-down error.
+    if _webview.is_webview_mode():
+        _webview.ensure_webview_supervisor(task_id)
+        return _webview.webview_eval(expression, task_id)
 
     fast = _eval_supervisor_fast_path(effective_task_id, expression)
     if fast is not None:
