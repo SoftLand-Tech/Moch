@@ -151,6 +151,66 @@ export function b64encodeText(s: string): string {
   return out
 }
 
+// ── URL hit-test for the link seam (BUG-135) ────────────────────────────────
+
+/**
+ * Matches one bare URL inside a line of terminal text: http(s):// or www.
+ * prefixed, running until whitespace or a wrapping/quote delimiter.
+ *
+ * NOTE: an INLINE COPY of this regex (+ normalizeTerminalUrl) lives in the
+ * xterm asset (android/app/src/main/assets/term/index.html, window.__linkAt)
+ * — that asset is deliberately self-contained, no imports. Keep the two in
+ * sync; these unit tests cover only the TS copy.
+ */
+export const TERM_URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>"'`]+/i
+
+/** Trailing sentence punctuation that never belongs to a URL. */
+const URL_TRAIL_PUNCT = '.,;:!?'
+
+function countChar(s: string, ch: string): number {
+  let n = 0
+  for (let i = 0; i < s.length; i++) if (s[i] === ch) n++
+  return n
+}
+
+/**
+ * Sanitize one raw URL match into something loadable: trim wrapping angle
+ * brackets and trailing sentence punctuation (a trailing ")" only belongs
+ * to the URL when a "(" inside it opened the paren), promote www. →
+ * https://, and require an http(s) scheme (case-insensitive). Returns null
+ * when the result is not a web URL — callers then treat the tap as a miss.
+ */
+export function normalizeTerminalUrl(raw: string): string | null {
+  let u = raw.trim()
+  if (u.startsWith('<') && u.endsWith('>') && u.length > 1) u = u.slice(1, -1)
+  while (u !== '' && URL_TRAIL_PUNCT.includes(u[u.length - 1] ?? '')) u = u.slice(0, -1)
+  while (u.endsWith(')') && countChar(u, '(') < countChar(u, ')')) u = u.slice(0, -1)
+  if (/^www\./i.test(u)) u = `https://${u}`
+  return /^https?:\/\//i.test(u) ? u : null
+}
+
+/**
+ * Pure hit-test behind the Terminal screen's tap arbitration (BUG-135):
+ * does string column `col` of `line` fall inside a URL match? Returns the
+ * sanitized URL, or null for "no link here → re-focus the IME as before".
+ * Columns are STRING indices (translateToString coordinates); a wide glyph
+ * spans two cells but one index, so columns after the first wide glyph on
+ * a line skew — URLs before it hit exactly.
+ */
+export function findTerminalUrlAt(line: string, col: number): string | null {
+  let off = 0
+  while (off < line.length) {
+    const m = TERM_URL_RE.exec(line.slice(off))
+    if (!m || m[0] === '') return null
+    const start = off + m.index
+    const end = start + m[0].length
+    if (start > col) return null
+    if (col < end) return normalizeTerminalUrl(m[0])
+    off = end
+  }
+  return null
+}
+
 // ── Controller ───────────────────────────────────────────────────────────────
 
 export type TermState = 'idle' | 'starting' | 'live' | 'dead'

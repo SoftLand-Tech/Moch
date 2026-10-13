@@ -15,6 +15,40 @@ import { formatThinkMeta, type ChatMessage, type ChatSegment, type ToolItem } fr
 import { MediaSegmentView } from './media/MediaSegmentView'
 import { useReduceMotion } from './useReduceMotion'
 import { CommandCard } from './CommandOutput'
+import { openInAppBrowserTab } from '../lib/openInBrowser'
+
+// BUG-135 interop: the package's dist DOES re-export the raw MarkdownIt
+// constructor (dist/index.js `exports.MarkdownIt = markdown_it_1.default`),
+// but its CJS-with-JSX shape loses NAMED import bindings under tsx/node ESM
+// interop — the test:imports gate dies with "(MarkdownIt) is not a
+// function". require() keeps the REAL exports object in both runtimes
+// (Metro require + tsx), so the constructor is reachable either way.
+type MarkdownItCtor = (typeof import('@ronradtke/react-native-markdown-display'))['MarkdownIt']
+const { MarkdownIt } = require('@ronradtke/react-native-markdown-display') as {
+  MarkdownIt: MarkdownItCtor
+}
+
+/**
+ * BUG-135: the markdown lib's built-in MarkdownIt runs with linkify
+ * DISABLED (createMarkdownIt), so bare URLs rendered as dead text, and its
+ * default link open is Linking.openURL → the OS browser (wrong target).
+ * ONE shared instance with linkify on makes bare URLs tappable; the shared
+ * handler below routes every tap into the built-in Browser screen.
+ * (CommandOutput's result card reuses both — keep it ONE instance.)
+ */
+const mdLinkified = MarkdownIt({ typographer: true, linkify: true })
+export { mdLinkified }
+
+/**
+ * Route markdown link taps to a new built-in Browser tab. Returning false
+ * suppresses the lib's own openUrl default (it only calls Linking.openURL
+ * when the callback returns true — see its openUrl.ts).
+ */
+const onMdLinkPress = (url: string): boolean => {
+  openInAppBrowserTab(url)
+  return false
+}
+export { onMdLinkPress }
 
 /** A message's renderable content: explicit segments, else its plain text. */
 function segmentsOf(m: ChatMessage): ChatSegment[] {
@@ -220,7 +254,11 @@ export const MessageBubble = React.memo(function MessageBubble({
             // growing paragraph.
             <Text key={i} style={s.streamText}>{seg.text}▍</Text>
           ) : (
-            <Markdown key={i} style={md}>{seg.text}</Markdown>
+            // BUG-135: completed text renders through the linkified
+            // markdown-it + in-app link handler (see mdLinkified above).
+            <Markdown key={i} style={md} markdownit={mdLinkified} onLinkPress={onMdLinkPress}>
+              {seg.text}
+            </Markdown>
           ),
         )}
         {m.streaming && !hasVisibleText ? <ThinkingDots /> : null}
