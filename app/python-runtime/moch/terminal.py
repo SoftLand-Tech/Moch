@@ -157,8 +157,10 @@ def _spawn(cols: int, rows: int) -> dict:
 
     argv, env = _build_launch(["/bin/bash", "-i"])
     env = dict(env)
+    # TERM only: HOME=/root and the guest PATH prefix come from
+    # build_guest_launch now (BUG-134 — one HOME for every guest path, so
+    # gh/git/ssh credentials written here are visible to agent exec too).
     env["TERM"] = "xterm-256color"
-    env["HOME"] = "/root"
     master_fd, slave_fd = pty.openpty()
     _set_winsize(slave_fd, cols, rows)
     try:
@@ -201,6 +203,13 @@ def start(cols: int = 80, rows: int = 24) -> dict:
         _state.master_fd = spawned["master_fd"]
         _state.chunks.clear()
         _state.chunks_bytes = 0
+        # BUG-115: the replay bank must reset with the session it belonged to
+        # — start() boots a NEW shell, and the JS cold-attach repaints from
+        # replay(); leaving the dead session's scrollback banked repainted it
+        # into the fresh shell. (The bank itself stays: a WebView reload of a
+        # LIVE session still needs it.)
+        _state.replay.clear()
+        _state.replay_bytes = 0
         _state.dead = False
         _state.cols = int(cols) or 80
         _state.rows = int(rows) or 24
@@ -293,6 +302,10 @@ def kill() -> dict:
         _close_locked()
         _state.chunks.clear()
         _state.chunks_bytes = 0
+        # BUG-115, symmetry with "boots fresh": the replay bank dies with the
+        # session (see start()).
+        _state.replay.clear()
+        _state.replay_bytes = 0
     _log("interactive shell killed")
     return {"ok": True}
 

@@ -14,6 +14,7 @@ import sqlite3
 import sys
 import tempfile
 import time
+import types
 import unittest
 from pathlib import Path
 
@@ -27,10 +28,83 @@ for _p in (str(_PY_RUNTIME), "../hermes-src"):
 
 os.environ.setdefault("MOCH_FLEET", "1")
 
+# Fake-server fallback (tracker BH-000030): created ONCE per process —
+# rpc_fleet.install latches (_REGISTERED), so a fresh stub per test would
+# carry no handlers from the second setUp on.
+_FAKE_TG = None
+
+
+def _fake_tg_server():
+    """Stub tui_gateway.server carrying only `_methods = {}`.
+
+    The moch/rpc_fleet handlers import ONLY moch.* + stdlib, so on a bare
+    interpreter (no hermes deps) their method logic and result shapes can be
+    pinned by registering them onto this stub instead of skipping.
+    """
+    global _FAKE_TG
+    if _FAKE_TG is None:
+        stub = types.ModuleType("tui_gateway.server")
+        stub._methods = {}
+        sys.modules["tui_gateway.server"] = stub
+        import tui_gateway as _pkg
+        _pkg.server = stub
+        _FAKE_TG = stub
+    _stub_kanban_db_if_missing()
+    return _FAKE_TG
+
+
+def _stub_kanban_db_if_missing():
+    """Faithful hermes_cli.kanban_db stand-in for bare interpreters only.
+
+    moch.runs.timeline resolves the kanban DB via
+    ``hermes_cli.kanban_db.kanban_db_path``; without hermes deps that import
+    fails and the kanban source silently vanishes. The stub mirrors the REAL
+    resolver's contract (default board -> ``<root>/kanban.db``, named board
+    -> ``<root>/kanban/boards/<slug>/kanban.db``, HERMES_KANBAN_DB override)
+    so the handler runs its real SQL against the seeded sqlite. The real
+    module, when importable, is never shadowed.
+    """
+    try:
+        from hermes_cli import kanban_db  # noqa: F401
+        return
+    except ImportError:
+        pass
+
+    stub = types.ModuleType("hermes_cli.kanban_db")
+
+    def _kanban_home() -> Path:
+        override = os.environ.get("HERMES_KANBAN_HOME", "").strip()
+        if override:
+            return Path(override).expanduser()
+        return Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
+
+    def kanban_db_path(board=None) -> Path:
+        pinned = os.environ.get("HERMES_KANBAN_DB", "").strip()
+        if pinned:
+            return Path(pinned).expanduser()
+        slug = (board or "default").strip() or "default"
+        if slug == "default":
+            return _kanban_home() / "kanban.db"
+        return _kanban_home() / "kanban" / "boards" / slug / "kanban.db"
+
+    stub.kanban_db_path = kanban_db_path
+    sys.modules["hermes_cli.kanban_db"] = stub
+    try:
+        import hermes_cli as _hc
+        _hc.kanban_db = stub
+    except ImportError:
+        _hc = types.ModuleType("hermes_cli")
+        _hc.kanban_db = stub
+        sys.modules["hermes_cli"] = _hc
+
 
 def _make_world(tmp: Path):
     """Seed kanban + cron + delegation ledgers; return (tg._methods-like, home)."""
     os.environ["HERMES_HOME"] = str(tmp)
+    # REVIEW FIX: hermes-home MARKER — without it the server import rewrites
+    # HERMES_HOME to scratch under the REAL ~/.hermes (see test_kanban_rpc's
+    # note) and the timeline/seed/profile lookups go to the machine's home.
+    (tmp / "config.yaml").write_text("# test world marker", "utf-8")
     sys.path.insert(0, str(_PY_RUNTIME.parent / "hermes-src"))
     try:
         from hermes_cli import kanban_db as kb, kanban_db_connect as kbc
@@ -38,19 +112,20 @@ def _make_world(tmp: Path):
             kb.create_task(conn, title="crew task", body="x", assignee="alpha")
     except ImportError:
         # system interpreter without hermes deps: seed the minimal columns the
-        # timeline SELECT reads (schema-faithful subset of kanban_db.tasks)
-        kbdir = tmp / "kanban" / "boards" / "default"
-        kbdir.mkdir(parents=True, exist_ok=True)
-        c = sqlite3.connect(kbdir / "kanban.db")
-        c.execute(
+        # timeline SELECT reads (schema-faithful subset of kanban_db.tasks).
+        # The DEFAULT board's DB lives at <root>/kanban.db — kanban_db_path's
+        # contract (boards/<slug>/ only holds NAMED boards); the fake-mode
+        # stub in this file resolves exactly here.
+        kb = sqlite3.connect(tmp / "kanban.db")
+        kb.execute(
             "CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT, body TEXT,"
             " assignee TEXT, status TEXT, priority INT DEFAULT 0, created_by TEXT,"
             " created_at INT, started_at INT, completed_at INT)")
         now = int(time.time())
-        c.execute("INSERT INTO tasks (id, title, body, assignee, status, created_at)"
-                  " VALUES ('k1','crew task','x','alpha','ready',?)", (now,))
-        c.commit()
-        c.close()
+        kb.execute("INSERT INTO tasks (id, title, body, assignee, status, created_at)"
+                   " VALUES ('k1','crew task','x','alpha','ready',?)", (now,))
+        kb.commit()
+        kb.close()
 
     exdir = tmp / "cron"
     exdir.mkdir(exist_ok=True)
@@ -92,11 +167,23 @@ def _make_world(tmp: Path):
 
 class TestRpcFleet(unittest.TestCase):
     def setUp(self):
+        # REVIEW FIX: world FIRST, import SECOND. The server import rewrites
+        # HERMES_HOME when the dir lacks a home marker — it must see the test
+        # world (env + config.yaml) already in place, or everything profile-
+        # dependent resolves against the machine's real ~/.hermes.
+        self._tmp = tempfile.TemporaryDirectory()
+        os.environ["HERMES_HOME"] = self._tmp.name
+        Path(self._tmp.name, "config.yaml").write_text("# test world marker", "utf-8")
         try:
             import tui_gateway.server  # noqa: F401
-        except ImportError as exc:
-            self.skipTest(f"hermes server deps unavailable: {exc}")
-        self._tmp = tempfile.TemporaryDirectory()
+        except ImportError:
+            # Honest scope (tracker BH-000030): with the hermes server deps
+            # missing (dotenv & co), run against the fake `_methods` stub so
+            # the 13 moch.* HANDLERS still register and answer. This pins
+            # method logic + result shapes — NOT the real server's dispatch,
+            # validation or session glue, which keep running against the true
+            # server wherever the venv deps exist (unchanged path above).
+            _fake_tg_server()
         self.tg, self.home = _make_world(Path(self._tmp.name))
 
     def tearDown(self):
@@ -138,6 +225,77 @@ class TestRpcFleet(unittest.TestCase):
         # confirm required
         res2 = self.tg._methods["moch.profiles.delete"](2, {"profile": "x"})
         self.assertIn("error", res2)
+
+    # -- BUG-139: moch.profiles.seed / moch.skills.list ----------------------
+
+    def _seed_world(self):
+        """Launch identity + one skill + a target profile; returns paths."""
+        launch = self.home
+        (launch / "memories").mkdir(exist_ok=True)
+        (launch / "memories" / "USER.md").write_text("# user\nlikes tea", "utf-8")
+        (launch / "memories" / "MEMORY.md").write_text("# memory\nold digest", "utf-8")
+        skill = launch / "skills" / "research" / "deep-dive"
+        skill.mkdir(parents=True, exist_ok=True)
+        (skill / "SKILL.md").write_text(
+            "---\nname: deep-dive\ndescription: Long-form research passes\n---\n"
+            "# deep-dive\nbody", "utf-8")
+        link = launch / "skills" / "research" / "linked-skill"
+        if not link.exists():
+            link.symlink_to(skill, target_is_directory=True)
+        prof = launch / "profiles" / "watcher"
+        prof.mkdir(parents=True, exist_ok=True)
+        (prof / "memories").mkdir(exist_ok=True)
+        return launch, skill, prof
+
+    def test_seed_copies_identity_and_skills(self):
+        launch, skill, prof = self._seed_world()
+        res = self.tg._methods["moch.profiles.seed"](1, {
+            "profile": "watcher", "copy_user_memory": True,
+            "skills": ["deep-dive"]})
+        self.assertNotIn("error", res, res)
+        r = res["result"]
+        self.assertEqual(r["userMemory"], "copied")
+        self.assertIsNone(r["memory"])  # not requested
+        self.assertEqual(r["skills"], [{"name": "deep-dive", "result": "copied"}])
+        self.assertEqual((prof / "memories" / "USER.md").read_text("utf-8"),
+                         "# user\nlikes tea")
+        self.assertTrue((prof / "skills" / "research" / "deep-dive" / "SKILL.md").is_file())
+
+    def test_seed_guardrails_and_edges(self):
+        launch, skill, prof = self._seed_world()
+        # default / unnamed / nothing-to-seed refused
+        for bad in ({"profile": "default", "copy_user_memory": True},
+                    {"profile": "", "copy_user_memory": True},
+                    {"profile": "watcher"}):
+            self.assertIn("error", self.tg._methods["moch.profiles.seed"](1, bad))
+        # unknown profile refused
+        self.assertIn("error", self.tg._methods["moch.profiles.seed"](
+            1, {"profile": "ghost", "copy_user_memory": True}))
+        # unknown skill → missing; symlinked skill → skipped-symlink
+        res = self.tg._methods["moch.profiles.seed"](1, {
+            "profile": "watcher", "skills": ["nope", "linked-skill"]})
+        results = {x["name"]: x["result"] for x in res["result"]["skills"]}
+        self.assertEqual(results["nope"], "missing")
+        self.assertEqual(results["linked-skill"], "skipped-symlink")
+        # dst-exists → skipped (never merge over an existing identity file):
+        # first copy lands, the repeat is refused.
+        res2 = self.tg._methods["moch.profiles.seed"](
+            1, {"profile": "watcher", "copy_user_memory": True,
+                "copy_memory": True})
+        self.assertEqual(res2["result"]["userMemory"], "copied")
+        self.assertEqual(res2["result"]["memory"], "copied")
+        res3 = self.tg._methods["moch.profiles.seed"](
+            1, {"profile": "watcher", "copy_user_memory": True})
+        self.assertEqual(res3["result"]["userMemory"], "skipped-exists")
+
+    def test_skills_list_shape(self):
+        launch, skill, prof = self._seed_world()
+        res = self.tg._methods["moch.skills.list"](1, {})
+        self.assertNotIn("error", res, res)
+        names = {s["name"]: s for s in res["result"]["skills"]}
+        self.assertIn("deep-dive", names)
+        self.assertEqual(names["deep-dive"]["description"],
+                         "Long-form research passes")
 
 
 if __name__ == "__main__":

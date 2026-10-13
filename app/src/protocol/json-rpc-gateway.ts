@@ -20,6 +20,7 @@ import {
 } from './json-rpc-channel'
 
 export {
+  GatewayTimeoutError,
   JsonRpcGatewayError,
   JSON_RPC_INTERNAL_ERROR,
   JSON_RPC_METHOD_NOT_FOUND,

@@ -80,6 +80,61 @@ def _relay_down_error() -> Optional[str]:
     return None
 
 
+def ensure_webview_supervisor(task_id: Optional[str] = None) -> None:
+    """ONE supervisor attach attempt for the task — never raises.
+
+    BUG-127 (BH-000045-adjacent): every non-navigate verb used to answer
+    ``_NO_SESSION`` as soon as the registry held no supervisor, and only
+    ``webview_navigate`` re-attached — so an attach lost to a reconnect
+    backoff / deregister (5 failed reconnects) dead-ended every tool until
+    someone navigated. This is the same attach dance ``webview_navigate``
+    runs (``_ensure_cdp_supervisor`` is idempotent and blocks until attach
+    completes); attach trouble is reported by the caller's no-session error.
+    """
+    try:
+        from tools.browser_tool_cdp import _ensure_cdp_supervisor
+
+        _ensure_cdp_supervisor(task_id or "default")
+    except Exception as exc:  # noqa: BLE001 — the no-session error says the rest
+        logger.debug("webview supervisor self-heal attach failed: %s", exc)
+
+
+def _supervisor_or_selfheal(task_id: Optional[str] = None):
+    """The task's supervisor, attempting ONE self-heal attach when absent.
+
+    Mirror of ``webview_navigate``'s dance (which keeps its own inline copy so
+    its error wording stays unchanged): supervisors keyed by the RAW task id.
+    """
+    sup = _supervisor(task_id)
+    if sup is not None:
+        return sup
+    ensure_webview_supervisor(task_id)
+    return _supervisor(task_id)
+
+
+def _no_session_error(task_id: Optional[str] = None) -> str:
+    """The honest no-session error for a non-navigate verb (BUG-127).
+
+    Three truths, in order: the relay is down (the user must open the Browser
+    screen — ``_relay_down_error``); a live page target EXISTS but the agent's
+    session is not attached to it (name the relay's CURRENT /json/list target
+    id so the model knows a ``browser_navigate`` re-attach is the fix, and it
+    can tell the user which tab is about to be driven); nothing at all is
+    live (the generic ``_NO_SESSION``).
+    """
+    relay_down = _relay_down_error()
+    if relay_down:
+        return relay_down
+    target_id = _active_tab_id()
+    if target_id:
+        return (
+            f"No browser page attached. A live page target exists ({target_id}) but this "
+            "session is not attached to it — call browser_navigate once to re-attach to the "
+            "active tab, then retry."
+        )
+    return _NO_SESSION
+
+
 def _call(sup, method: str, params: Optional[Dict[str, Any]] = None, timeout: float = 15.0) -> Dict[str, Any]:
     """One CDP command via the supervisor bridge; raises RuntimeError on failure.
 
@@ -129,9 +184,9 @@ _JS_INTERACTIVE = """
 
 def webview_snapshot(task_id: Optional[str] = None, full: bool = False) -> str:
     """Interactive-element snapshot of the visible tab (DOM-first, refs attached)."""
-    sup = _supervisor(task_id)
+    sup = _supervisor_or_selfheal(task_id)
     if sup is None:
-        return json.dumps({"success": False, "error": _NO_SESSION})
+        return json.dumps({"success": False, "error": _no_session_error(task_id)})
     try:
         result = _call(sup, "Runtime.evaluate", {
             "expression": _JS_INTERACTIVE, "returnByValue": True, "awaitPromise": False,
@@ -238,9 +293,9 @@ def _action(sup, expression: str, what: str) -> str:
 
 def webview_click(ref: str, task_id: Optional[str] = None) -> str:
     """Click by ref: real .click() (trusted enough for most flows; CDP touch for later)."""
-    sup = _supervisor(task_id)
+    sup = _supervisor_or_selfheal(task_id)
     if sup is None:
-        return json.dumps({"success": False, "error": _NO_SESSION})
+        return json.dumps({"success": False, "error": _no_session_error(task_id)})
     js = _ref_js(ref, """
       el.scrollIntoView({block: 'center'});
       el.click();
@@ -251,9 +306,9 @@ def webview_click(ref: str, task_id: Optional[str] = None) -> str:
 
 def webview_type(ref: str, text: str, task_id: Optional[str] = None) -> str:
     """Fill an input by ref: focus + native setter (React-safe) + input event."""
-    sup = _supervisor(task_id)
+    sup = _supervisor_or_selfheal(task_id)
     if sup is None:
-        return json.dumps({"success": False, "error": _NO_SESSION})
+        return json.dumps({"success": False, "error": _no_session_error(task_id)})
     value = json.dumps(text)
     js = _ref_js(ref, f"""
       el.focus();
@@ -268,18 +323,18 @@ def webview_type(ref: str, text: str, task_id: Optional[str] = None) -> str:
 
 
 def webview_scroll(direction: str, task_id: Optional[str] = None) -> str:
-    sup = _supervisor(task_id)
+    sup = _supervisor_or_selfheal(task_id)
     if sup is None:
-        return json.dumps({"success": False, "error": _NO_SESSION})
+        return json.dumps({"success": False, "error": _no_session_error(task_id)})
     dx, dy = (0, -600) if direction == "up" else (0, 600)
     js = f"window.scrollBy({dx}, {dy}); JSON.stringify({{ok: true}})"
     return _action(sup, js, "scroll")
 
 
 def webview_back(task_id: Optional[str] = None) -> str:
-    sup = _supervisor(task_id)
+    sup = _supervisor_or_selfheal(task_id)
     if sup is None:
-        return json.dumps({"success": False, "error": _NO_SESSION})
+        return json.dumps({"success": False, "error": _no_session_error(task_id)})
     js = "history.back(); JSON.stringify({ok: true})"
     result = _action(sup, js, "back")
     if '"success": false' in result and "navigated or closed" in result:
@@ -290,9 +345,9 @@ def webview_back(task_id: Optional[str] = None) -> str:
 
 
 def webview_press(key: str, task_id: Optional[str] = None) -> str:
-    sup = _supervisor(task_id)
+    sup = _supervisor_or_selfheal(task_id)
     if sup is None:
-        return json.dumps({"success": False, "error": _NO_SESSION})
+        return json.dumps({"success": False, "error": _no_session_error(task_id)})
     js = (
         "document.activeElement && document.activeElement.dispatchEvent(new KeyboardEvent('keydown', "
         f"{{key: {json.dumps(key)}, bubbles: true}})); JSON.stringify({{ok: true}})"
@@ -829,18 +884,23 @@ def webview_tab_switch(tab_id: Optional[str] = None, index: Any = None, task_id:
 
 
 def webview_console(clear: bool = False, task_id: Optional[str] = None) -> str:
-    sup = _supervisor(task_id)
+    sup = _supervisor_or_selfheal(task_id)
     if sup is None:
-        return json.dumps({"success": False, "error": _NO_SESSION})
-    js = "JSON.stringify({ok: true, note: 'console capture requires Runtime.consoleAPI calls; use browser_eval for page state'})"
+        return json.dumps({"success": False, "error": _no_session_error(task_id)})
+    # BUG-126: the note used to point at a nonexistent ``browser_eval`` tool —
+    # the console-with-expression path is ``browser_console(expression=…)``.
+    js = (
+        "JSON.stringify({ok: true, note: 'console capture requires Runtime.consoleAPI calls; "
+        "use browser_console(expression=...) for page state'})"
+    )
     return _action(sup, js, "console")
 
 
 def webview_screenshot(task_id: Optional[str] = None) -> str:
     """Page.captureScreenshot → file in the agent-visible workspace."""
-    sup = _supervisor(task_id)
+    sup = _supervisor_or_selfheal(task_id)
     if sup is None:
-        return json.dumps({"success": False, "error": _NO_SESSION})
+        return json.dumps({"success": False, "error": _no_session_error(task_id)})
     try:
         result = _call(sup, "Page.captureScreenshot", {"format": "png"}, timeout=20.0)
         data = result.get("data")
@@ -858,9 +918,9 @@ def webview_screenshot(task_id: Optional[str] = None) -> str:
 
 def webview_eval(expression: str, task_id: Optional[str] = None) -> str:
     """JS eval through the supervisor's own bridge (fast path already exists)."""
-    sup = _supervisor(task_id)
+    sup = _supervisor_or_selfheal(task_id)
     if sup is None:
-        return json.dumps({"success": False, "error": _NO_SESSION})
+        return json.dumps({"success": False, "error": _no_session_error(task_id)})
     result = sup.evaluate_runtime(expression)
     if not result.get("ok"):
         return json.dumps({"success": False, "error": result.get("error", "eval failed")})
@@ -868,9 +928,9 @@ def webview_eval(expression: str, task_id: Optional[str] = None) -> str:
 
 def webview_get_images(task_id: Optional[str] = None) -> str:
     """Visible images of the current tab (src + alt + dimensions)."""
-    sup = _supervisor(task_id)
+    sup = _supervisor_or_selfheal(task_id)
     if sup is None:
-        return json.dumps({"success": False, "error": _NO_SESSION})
+        return json.dumps({"success": False, "error": _no_session_error(task_id)})
     js = (
         "JSON.stringify(Array.from(document.querySelectorAll('img'))"
         ".filter(i => i.getBoundingClientRect().width > 20)"

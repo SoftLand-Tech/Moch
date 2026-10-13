@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { Stack, router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { KeyboardProvider } from 'react-native-keyboard-controller'
@@ -9,7 +9,7 @@ import * as SplashScreen from 'expo-splash-screen'
 import { initPush, registerPushIfGranted, dismissMochNotifications, lastNotificationResponse, onNotificationResponse, clearLastNotificationResponse, type NotificationTarget } from '../src/lib/push'
 import { log } from '../src/lib/log'
 import { AnimatedSplash } from '../src/components/AnimatedSplash'
-import { AlertDialogHost } from '../src/components/AlertDialog'
+import { AlertDialogHost, showAlert } from '../src/components/AlertDialog'
 import { SessionToasts } from '../src/components/SessionToasts'
 import { MochiStage } from '../src/components/Mascot'
 import {
@@ -19,17 +19,19 @@ import {
   forgetActiveServer, mostRecentServer, onDialConfig, type SavedServer,
   everConnected,
 } from '../src/lib/gateway'
-import { loadSessions } from '../src/lib/sessionList'
+import { loadSessions, refreshRunningSessions } from '../src/lib/sessionList'
 import { refreshRunningAutomations } from '../src/lib/automationsState'
 import { hookChatEvents, loadOutbox, switchToSession } from '../src/lib/chat'
 import { loadAttention, pendingOpenStoredId, requestOpenSession } from '../src/lib/attention'
 import { flushDrafts, loadDrafts } from '../src/lib/drafts'
 import { flushSendQueue, loadSendQueue } from '../src/lib/sendQueue'
 import { initShareIn, deliverSharedNow, shareInInbox } from '../src/lib/shareIn'
-import { loadLocale } from '../src/lib/strings'
+import { loadLocale, tr } from '../src/lib/strings'
+import { linkToast } from '../src/lib/linkToast'
 import { AgentBrowserHost } from '../src/components/AgentBrowserHost'
 import { syncBackendIdentity } from '../src/lib/backendIdentity'
 import { parseConnectUrl } from '../src/lib/pairing'
+import { needsPlaintextConfirm } from '../src/lib/transportGate'
 import { pruneRelayMedia } from '../src/lib/mediaCache'
 import { C, loadTheme, useStyles } from '../src/lib/theme'
 import { loadActiveBot } from '../src/lib/fleet'
@@ -37,6 +39,22 @@ import { loadActiveBot } from '../src/lib/fleet'
 // Keep the native splash up until the animated overlay is committed on top
 // of the app — global scope, un-awaited, per the SDK 57 docs.
 SplashScreen.preventAutoHideAsync().catch(() => {})
+
+/** GH #109: the pairing/deep-link toast — tap-dismissable (it used to be a
+ * passive View nothing could remove), one component for both root branches. */
+function LinkToast({ msg, onDismiss }: { msg: string; onDismiss: () => void }) {
+  const s = useStyles(makeS)
+  return (
+    <Pressable
+      style={({ pressed }) => [s.toast, pressed && s.pressed]}
+      onPress={onDismiss}
+      accessibilityRole="button"
+      accessibilityLabel="Dismiss message"
+    >
+      <Text style={s.toastText}>{msg}</Text>
+    </Pressable>
+  )
+}
 
 export default function RootLayout() {
   const s = useStyles(makeS)
@@ -140,6 +158,10 @@ export default function RootLayout() {
     })()
 
     const handleUrl = async (url: string | null) => {
+      // GH #109: a NEW link retires whatever toast the previous one left —
+      // linkMsg used to be write-only, so an old failure stuck on screen
+      // through every later successful pair.
+      setLinkMsg((m) => linkToast(m, { type: 'reset' }))
       if (!url || !url.startsWith('hermes://')) return
       // In-app routes (knock taps land here — see CronKnockNotifier).
       if (url.startsWith('hermes://automations')) {
@@ -152,10 +174,36 @@ export default function RootLayout() {
       }
       try {
         const p = parseConnectUrl(url)
-        await connect({ host: p.host, token: p.token, tls: p.tls, name: p.name })
+        // C-05 (#95): a deep link NEVER auto-dials plaintext to a public
+        // host — the QR/link used to hand the token to the gateway in the
+        // clear with zero interaction. Non-private plaintext links stop at
+        // this confirmation dialog; only "Connect anyway" dials. (Public
+        // hosts without an explicit tls= now parse as TLS by default, so
+        // this only fires for links that explicitly asked for plaintext.)
+        const plain = needsPlaintextConfirm(p.host, p.tls)
+        if (plain) {
+          const btn = await showAlert({
+            title: tr('pair.plain.title'),
+            message: tr('pair.plain.body', { host: p.host }),
+            buttons: [
+              { text: tr('pair.plain.cancel'), style: 'cancel' },
+              { text: tr('pair.plain.confirm'), style: 'destructive' },
+            ],
+          })
+          if (btn.style !== 'destructive') return // declined — nothing dials
+        }
+        await connect({
+          host: p.host, token: p.token, tls: p.tls,
+          ...(p.name ? { name: p.name } : {}),
+          ...(plain ? { plaintextConfirmed: true } : {}),
+        })
+        // GH #109: success clears any error toast this dial's earlier
+        // attempts (or the previous link) put up.
+        setLinkMsg((m) => linkToast(m, { type: 'reset' }))
         router.replace('/(tabs)/chat')
       } catch (e) {
-        setLinkMsg(e instanceof Error ? e.message : 'Bad pairing link')
+        setLinkMsg((m) =>
+          linkToast(m, { type: 'error', message: e instanceof Error ? e.message : '' }))
       }
     }
     void Linking.getInitialURL().then((u) => { if (!cancelled && u) void handleUrl(u) })
@@ -186,6 +234,10 @@ export default function RootLayout() {
     const pollId = setInterval(() => {
       if (isConnectedAtom.get()) {
         void loadSessions()
+        // BUG-131 (client half): the gateway-running overlay rides the same
+        // 60s poll — session.active_list is what surfaces turns running in
+        // sessions this app instance never opened.
+        void refreshRunningSessions()
         void refreshRunningAutomations()
       }
     }, 60_000)
@@ -239,7 +291,11 @@ export default function RootLayout() {
     if (Date.now() - pendingOpen.at > 60_000) {
       // BUG-029: a stale tap used to be dropped SILENTLY — the user tapped a
       // notification and nothing happened, with no hint why.
-      setLinkMsg("That chat couldn't be opened — the connection took too long. Try the notification again.")
+      setLinkMsg((m) =>
+        linkToast(m, {
+          type: 'error',
+          message: "That chat couldn't be opened — the connection took too long. Try the notification again.",
+        }))
       return
     }
     try { router.navigate('/(tabs)/chat') } catch {}
@@ -253,6 +309,20 @@ export default function RootLayout() {
     if (!sharedIn) return
     try { router.navigate('/(tabs)/chat') } catch {}
   }, [sharedIn, router])
+
+  // GH #109: the link/auto-dismiss lifecycle. linkMsg used to be write-only —
+  // a pairing failure (or the BUG-029 stale-tap notice) rendered FOREVER,
+  // not even tap-dismissable. Auto-dismiss after ~7s; every path (tap, new
+  // link, successful connect) funnels through the pure linkToast table.
+  useEffect(() => {
+    if (!linkMsg) return
+    const t = setTimeout(() => setLinkMsg((m) => linkToast(m, { type: 'timeout' })), 7_000)
+    return () => clearTimeout(t)
+  }, [linkMsg])
+  const dismissLinkMsg = useCallback(
+    () => setLinkMsg((m) => linkToast(m, { type: 'dismiss' })),
+    [],
+  )
 
   if (!cfg) {
     return (
@@ -269,9 +339,7 @@ export default function RootLayout() {
       <View style={{ flex: 1, backgroundColor: C.bg }}>
         <StatusBar style="light" />
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: C.bg } }} />
-        {linkMsg ? (
-          <View style={s.toast}><Text style={s.toastText}>{linkMsg}</Text></View>
-        ) : null}
+        {linkMsg ? <LinkToast msg={linkMsg} onDismiss={dismissLinkMsg} /> : null}
       </View>
       <AlertDialogHost />
       {splash}
@@ -354,9 +422,7 @@ export default function RootLayout() {
           ) : null}
         </View>
       ) : null}
-      {linkMsg ? (
-        <View style={s.toast}><Text style={s.toastText}>{linkMsg}</Text></View>
-      ) : null}
+      {linkMsg ? <LinkToast msg={linkMsg} onDismiss={dismissLinkMsg} /> : null}
 
       <Modal visible={showServers} transparent animationType="fade" onRequestClose={() => setShowServers(false)}>
         <View style={s.pickerScrim}>

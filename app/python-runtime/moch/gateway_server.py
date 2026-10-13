@@ -28,11 +28,31 @@ import socket
 import threading
 import time
 import traceback
-from typing import Any
+from typing import Any, Optional
 
-_STATE: dict[str, Any] = {"started": False, "starting": False, "port": None, "token": None, "error": None}
+_STATE: dict[str, Any] = {
+    "started": False,
+    "starting": False,
+    "port": None,
+    "token": None,
+    "error": None,
+    # BH-000047: terminal marker — the supervised boot exhausted its retry
+    # schedule. start()'s wait loop and info()'s self-heal key off it so a
+    # transient per-attempt error (about to be retried) is not reported as
+    # final, and a late successful attempt is never hidden behind a stale one.
+    "boot_gave_up": False,
+}
 _LOCK = threading.Lock()
 _READY_TIMEOUT_S = 90.0  # first boot extracts/compiles; phone storage is slow
+
+# BH-000047 / GitHub #101 — the boot chain used to be single-shot: a failure
+# anywhere in ``_run_server`` landed in ``_STATE['error']`` and the gateway
+# stayed dead for the life of the process (the Kotlin side's bootAttempted
+# AtomicBoolean never retries either, so cron knocks + the RN client just saw
+# a dead gateway). Bounded supervised retries with growing backoff: one
+# initial try plus one retry per scheduled delay. Pure data so tests can pin
+# the schedule; give-up leaves the error state exactly as before.
+_BOOT_RETRY_DELAYS_S: tuple[float, ...] = (5.0, 15.0, 60.0)
 
 
 def _free_port() -> int:
@@ -74,6 +94,140 @@ def _load_or_mint_token() -> str:
     except OSError:
         pass
     return token
+
+
+# hermes' headless serve shim (web_server_dashboard.mount_spa under
+# HERMES_SERVE_HEADLESS=1) registers its root handshake on this catch-all path.
+_ROOT_SHIM_PATH = "/{full_path:path}"
+# Marker attr set on the replacement endpoint so re-runs recognise their own work.
+_ROOT_SHIM_MARKER = "_moch_root_shim_neutralized"
+
+
+# ── BUG-121: capability notes riding prompt.submit ──────────────────────────
+#
+# The warming half shipped first (BUG-132): while the relay is armed but the
+# tool registry has not matured, a bracketed system note tells the model the
+# browser will continue automatically. BUG-121's gate-off half: with the relay
+# NOT armed (MOCH_BROWSER_RELAY unset / browser_navigate missing from the
+# catalog), nothing told the model the Moch Browser exists at all — it burned
+# terminal calls on /system/bin/am, then improvised with curl instead of
+# saying "open the Browser screen". Same channel, second note.
+
+_MOCH_WARMING_NOTE = (
+    "[SYSTEM: The in-app browser is still starting up (a minute or two after "
+    "the app launches). If the user is asking you to open or browse a web "
+    "page, tell them you will CONTINUE AUTOMATICALLY the moment the browser "
+    "is ready — they do NOT need to resend or do anything; you will pick the "
+    "task back up yourself shortly. Keep the reply to one short sentence. Do "
+    "NOT use terminal curl as a replacement for browsing.]"
+)
+
+_MOCH_GATE_OFF_NOTE = (
+    "[SYSTEM: The in-app Moch Browser exists on this phone but its tools are "
+    "not available right now — the browser relay is not running. Tell the "
+    "user to open the Browser screen in Moch once (drawer → Browser); the "
+    "browser tools activate the moment it opens and the browsing task can be "
+    "retried then. Do NOT use terminal curl as a replacement for browsing, "
+    "and do NOT conclude the capability does not exist. Keep the reply to "
+    "one short sentence.]"
+)
+
+
+def _moch_platform() -> bool:
+    """True when this process is the embedded Moch gateway (not desktop hermes)."""
+    return (
+        os.environ.get("MOCH_EMBEDDED", "").strip() == "1"
+        or os.environ.get("MOCH_FLEET", "").strip() == "1"
+    )
+
+
+def _moch_prompt_note(*, relay_armed: bool, moch_platform: bool, tools_ready: bool) -> Optional[str]:
+    """Which capability note (if any) rides a prompt.submit; ``None`` = none.
+
+    Warming: relay armed but the catalog has not matured → the auto-continue
+    note. Gate off (BUG-121): Moch platform and the browser tools are absent
+    from the catalog → the open-the-Browser-screen note. Tools present →
+    never a note (both windows are closed).
+    """
+    if not tools_ready and relay_armed:
+        return _MOCH_WARMING_NOTE
+    if not tools_ready and moch_platform:
+        return _MOCH_GATE_OFF_NOTE
+    return None
+
+
+def _neutralize_root_token_handshake(application: Any) -> bool:
+    """BUG-120 / GitHub #67 — stop the loopback root from serving the session token.
+
+    Under ``HERMES_SERVE_HEADLESS=1`` (set below, before the web_server import)
+    hermes' SPA mount answers unauthenticated ``GET /`` with an HTML page
+    embedding ``window.__HERMES_SESSION_TOKEN__=<the live gateway token>`` — a
+    desktop-Electron handshake (upstream #94227/#95575). No Moch consumer needs
+    it: the RN client gets the token over the JNI bridge
+    (``HermesBridge.getGateway``) and authenticates REST/WS via
+    ``X-Hermes-Session-Token`` / ``?token=``, never via HTTP-GET /. But this
+    gateway binds plain loopback TCP (127.0.0.1:9119), which every app on the
+    phone can reach — so that page handed the full hermes API to any
+    co-installed app (same threat model the browser relay is token-gated
+    against, FEATURE-BROWSER.md §Safety).
+
+    Fix = surgical route-table swap from the Moch side (hermes-src stays
+    pristine — the boot-time-patch convention of ``_tg_server._SlashWorker``
+    and the dispatch wrapper below): remove the shim's catch-all GET route and
+    re-register the same path with an endpoint that ALWAYS returns the shim's
+    own no-token 404 JSON, so ``/`` answers exactly what every other unmatched
+    path answers. /api/* routes, public paths and the WS ``?token=`` handshake
+    are untouched — we do NOT set ``app.state.auth_required`` (gated mode
+    rejects the legacy ``?token=`` the RN client still uses).
+
+    Idempotent: on an already-neutralized app it only strips stray duplicate
+    shims and never registers a second replacement. Returns True when no
+    token-serving catch-all remains, False when the upstream shape changed
+    (warned, never raised — boot must not die here).
+    """
+    try:
+        routes = application.router.routes
+        matching = [
+            r for r in routes
+            if getattr(r, "path", None) == _ROOT_SHIM_PATH
+            and "GET" in (getattr(r, "methods", None) or ())
+        ]
+
+        def _ours(route: Any) -> bool:
+            return bool(getattr(getattr(route, "endpoint", None), _ROOT_SHIM_MARKER, False))
+
+        if any(_ours(r) for r in matching):
+            # Second run (or a double mount_spa): keep OUR replacement, drop
+            # any duplicate upstream shims, register nothing new.
+            routes[:] = [r for r in routes if r not in matching or _ours(r)]
+            return True
+        if not matching:
+            print(
+                f"[moch] WARNING BUG-120: headless root shim route {_ROOT_SHIM_PATH} not found "
+                "— GET / NOT neutralized (upstream web_server_dashboard changed shape?)",
+                flush=True,
+            )
+            return False
+        routes[:] = [r for r in routes if r not in matching]
+
+        from fastapi.responses import JSONResponse
+
+        try:  # keep the 404 body identical to the shim's non-root reply
+            from hermes_cli.web_server_dashboard import _HEADLESS_MSG
+        except Exception:
+            _HEADLESS_MSG = "Headless backend (hermes serve): web UI disabled."
+
+        async def _moch_no_frontend(full_path: str):  # same signature as the shim
+            return JSONResponse({"error": _HEADLESS_MSG}, status_code=404)
+
+        setattr(_moch_no_frontend, _ROOT_SHIM_MARKER, True)
+        application.get(_ROOT_SHIM_PATH)(_moch_no_frontend)
+        print("[moch] BUG-120: root token handshake neutralized — GET / no longer serves the session token", flush=True)
+        return True
+    except Exception:
+        print("[moch] WARNING BUG-120: root token handshake neutralization failed:", flush=True)
+        traceback.print_exc()
+        return False
 
 
 def _run_server(port: int) -> None:
@@ -129,6 +283,18 @@ def _run_server(port: int) -> None:
                 _fleet_worker = _fw.FleetWorker()
                 _fw.install_reclaim_patch(_kbd)
                 _fw.install_dispatch_spawn_patch(_kbd, _fleet_worker)
+                # BUG-138: nothing in this process dispatches (upstream's
+                # dispatcher watcher is a messaging-gateway mixin) — arm the
+                # poke+heal ticker so app-created tasks run and stale claims
+                # reclaim. Idempotent, flag-gated, daemon.
+                from moch import kanban_dispatch as _kd
+                _kd.start_heal_ticker()
+                # BUG-137 (M9.1a stage 3): register the spawn_bot tool onto
+                # the delegation toolset — bots can finally create their own
+                # helpers. Boot-time (pre-start_server) so every session's
+                # tool snapshot includes it; flag-gated, idempotent.
+                from moch import spawn_tool as _st
+                _st.install()
         except Exception:
             traceback.print_exc()
 
@@ -187,7 +353,11 @@ def _run_server(port: int) -> None:
                 return False
 
         def _browser_warming() -> bool:
-            """Armed but not yet usable — the window the user must be told about."""
+            """Armed but not yet usable — the window the user must be told about.
+
+            (The prompt-riding decision now lives in the module-level
+            ``_moch_prompt_note`` so it is unit-testable; this predicate stays
+            for readers of the warm-up loop below.)"""
             return os.environ.get("MOCH_BROWSER_RELAY", "") == "1" and not _browser_tools_ready()
 
         def _prewarm_browser() -> None:
@@ -245,42 +415,44 @@ def _run_server(port: int) -> None:
 
         # While warming, MOCHI tells the user — no silent curl fallback, no
         # "Moch looks down". A bracketed system note rides the prompt (the
-        # established out-of-band pattern) only while the window is live.
+        # established out-of-band pattern) while the warming window is live,
+        # and (BUG-121, gate-off half) also when the platform is Moch but the
+        # browser tools are absent from the catalog outright.
         def _moch_note_dispatch(req, transport=None):
             try:
-                if isinstance(req, dict) and req.get("method") == "prompt.submit" and _browser_warming():
+                if isinstance(req, dict) and req.get("method") == "prompt.submit":
                     params = req.get("params") or {}
                     text = str(params.get("text") or "")
-                    if text and not text.startswith("["):
-                        _sid = str(params.get("session_id") or "")
-                        if _sid:
-                            _warm_waiters.add(_sid)
-                        params["text"] = (
-                            "[SYSTEM: The in-app browser is still starting up (a minute or two after "
-                            "the app launches). If the user is asking you to open or browse a web "
-                            "page, tell them you will CONTINUE AUTOMATICALLY the moment the browser "
-                            "is ready — they do NOT need to resend or do anything; you will pick the "
-                            "task back up yourself shortly. Keep the reply to one short sentence. Do "
-                            "NOT use terminal curl as a replacement for browsing.]\n\n"
-                        ) + text
-                        # Surface the wait: the app already renders attention
-                        # notices for sessions (toasts + the hermes-alerts
-                        # knock), so the gap between this turn and the
-                        # auto-continue is not a silent dead end.
-                        try:
-                            _notice_sid = str(params.get("session_id") or "")
-                            if _notice_sid:
-                                _tg_server._emit(
-                                    "status.update",
-                                    _notice_sid,
-                                    {
-                                        "busy": True,
-                                        "waiting_for": "browser",
-                                        "note": "Warming up the browser — Moch will continue automatically",
-                                    },
-                                )
-                        except Exception:
-                            pass
+                    # The catalog probe can force a fresh (memoized) build —
+                    # run it at most once per call, and only when a note is
+                    # even possible (desktop hermes never pays for this).
+                    relay_armed = os.environ.get("MOCH_BROWSER_RELAY", "") == "1"
+                    if text and not text.startswith("[") and (relay_armed or _moch_platform()):
+                        tools_ready = None
+
+                        def _tools_ready() -> bool:
+                            nonlocal tools_ready
+                            if tools_ready is None:
+                                tools_ready = _browser_tools_ready()
+                            return tools_ready
+
+                        note = _moch_prompt_note(
+                            relay_armed=relay_armed,
+                            moch_platform=_moch_platform(),
+                            tools_ready=_tools_ready(),
+                        )
+                        if note is not None:
+                            warming = note is _MOCH_WARMING_NOTE
+                            _sid = str(params.get("session_id") or "")
+                            if warming and _sid:
+                                _warm_waiters.add(_sid)
+                            params["text"] = note + "\n\n" + text
+                            # NOTE (PR #139): the status.update emit here was
+                            # removed — the event payload is pydantic-validated
+                            # and the extra waiting_for/note fields raised
+                            # extra_forbidden on device (errors.log). Build the
+                            # RN wait indicator against a SCHEMA-VALID event
+                            # (or a dedicated one) — see the tracker.
             except Exception:
                 pass
             return _note_upstream(req, transport)
@@ -293,20 +465,91 @@ def _run_server(port: int) -> None:
             _tg_server.dispatch = _moch_note_dispatch
             _tg_server._moch_note_installed = True
 
-        from hermes_cli.web_server import start_server
+        from hermes_cli.web_server import app as _web_app, start_server
+
+        # BUG-120/#67: strip the headless root shim's token page BEFORE the
+        # first request can arrive (never raises; see the neutralizer).
+        _neutralize_root_token_handshake(_web_app)
 
         start_server(host="127.0.0.1", port=port, open_browser=False, headless=True)
     except BaseException:  # noqa: BLE001 — thread boundary; recorded in state
         _STATE["error"] = traceback.format_exc(limit=12)
 
 
+def _boot_retry_delay_s(failed_attempt: int) -> float | None:
+    """Delay to sleep before the retry that follows ``failed_attempt`` (1-based),
+    or None when the retry schedule is exhausted — the supervisor gives up.
+    Pure: tests pin the schedule without a server."""
+    if failed_attempt < 1:
+        return None
+    idx = failed_attempt - 1
+    if idx >= len(_BOOT_RETRY_DELAYS_S):
+        return None
+    return _BOOT_RETRY_DELAYS_S[idx]
+
+
+def _supervised_server_boot(port: int) -> None:
+    """Run ``_run_server`` with bounded supervised retries (BH-000047 / GH #101).
+
+    ``_run_server`` blocks while the server serves and records a failure into
+    ``_STATE['error']`` when it dies — so returning from it means "this attempt
+    is over". Each failure is logged with its attempt number, per-attempt state
+    is reset (error cleared — the gateway is honestly "booting" again, not
+    dead), and the next attempt runs after the scheduled backoff. After the
+    last scheduled retry the final error stays set, exactly the pre-fix
+    give-up state. A clean error-free return (e.g. process shutdown asked the
+    server to stop) is not retried.
+    """
+    total = 1 + len(_BOOT_RETRY_DELAYS_S)
+    attempt = 1
+    while True:
+        _run_server(port)
+        error = _STATE.get("error")
+        if error is None:
+            return
+        delay = _boot_retry_delay_s(attempt)
+        if delay is None:
+            with _LOCK:
+                _STATE["boot_gave_up"] = True
+            print(
+                f"[moch] gateway boot gave up after attempt {attempt}/{total} — "
+                "error recorded in gateway state",
+                flush=True,
+            )
+            return
+        tail = error.strip().splitlines()[-1] if error.strip() else "unknown error"
+        print(
+            f"[moch] gateway boot attempt {attempt}/{total} failed: {tail} — "
+            f"retrying in {delay:.0f}s",
+            flush=True,
+        )
+        with _LOCK:
+            # Reset between attempts: info() reports an honest "booting"
+            # (running=true, no stale error) across the backoff window.
+            _STATE["error"] = None
+        time.sleep(delay)
+        attempt += 1
+
+
 def start(port: int = 0) -> dict:
     """Boot hermes (idempotent) and the gateway; returns connection info."""
+    # BH-000048 / GitHub #102: arm the boot state BEFORE any boot work — the
+    # RN client polls getGateway from the moment the process starts, and
+    # ``starting`` was never set True, so info_json reported running=false
+    # through the whole (slow) cold boot. A re-start also clears any stale
+    # terminal error/gave-up marker so the fresh attempt is judged on its own.
+    with _LOCK:
+        _STATE["starting"] = True
+        _STATE["error"] = None
+        _STATE["boot_gave_up"] = False
+
     from moch import hermes_boot
 
     boot = hermes_boot.boot()
     if not boot.get("ok"):
         _STATE["error"] = "hermes boot failed: " + "; ".join(boot.get("errors") or ["unknown"])
+        with _LOCK:
+            _STATE["starting"] = False
         return info()
 
     if not port:
@@ -321,7 +564,7 @@ def start(port: int = 0) -> dict:
     _STATE["token"] = token
 
     threading.Thread(
-        target=_run_server,
+        target=_supervised_server_boot,
         args=(port,),
         name="moch-hermes-gateway",
         daemon=True,
@@ -329,7 +572,10 @@ def start(port: int = 0) -> dict:
 
     waited = 0.0
     while waited < _READY_TIMEOUT_S:
-        if _STATE["error"]:
+        # Only a TERMINAL error ends the wait early: a per-attempt failure is
+        # about to be retried by the supervisor (BH-000047), and returning it
+        # as final would re-introduce the single-shot behavior.
+        if _STATE["error"] and _STATE.get("boot_gave_up"):
             with _LOCK:
                 _STATE["starting"] = False
             return info()
@@ -348,18 +594,43 @@ def start(port: int = 0) -> dict:
     return info()
 
 
+def _running_payload(state: dict) -> dict:
+    """Pure view of a gateway boot-state dict → the derived getGateway fields
+    (BH-000048 / GitHub #102, extracted for tests).
+
+    ``running`` is honest: true while starting OR started, but never once an
+    error is recorded (a failed/booting-out gateway must not look alive).
+    ``ready`` here is the port-independent half; info() adds the live accept
+    probe and the workspace env read.
+    """
+    started = bool(state.get("started"))
+    starting = bool(state.get("starting"))
+    error = state.get("error")
+    return {
+        "running": (started or starting) and error is None,
+        "ready": started and state.get("port") is not None,
+        "port": state.get("port"),
+        "token": state.get("token"),
+        "error": error,
+    }
+
+
 def info() -> dict:
     """Current gateway state for the bridge. Never raises."""
-    started = bool(_STATE["started"])
     port = _STATE["port"]
-    return {
-        "running": started or bool(_STATE["starting"]),
-        "ready": started and port is not None and _port_accepts(port),
-        "port": port,
-        "token": _STATE["token"],
-        "workspace": os.environ.get("MOCH_WORKSPACE"),
-        "error": _STATE["error"],
-    }
+    port_up = port is not None and _port_accepts(port)
+    if port_up and not _STATE["started"] and not _STATE.get("boot_gave_up"):
+        # A supervised attempt came up AFTER start() stopped waiting (the
+        # retry schedule can outlast the ready timeout): a listening port is
+        # the ground truth, so heal the stale timeout error instead of
+        # reporting a dead gateway that is actually serving (BH-000047).
+        with _LOCK:
+            _STATE["started"] = True
+            _STATE["error"] = None
+    payload = _running_payload(_STATE)
+    payload["ready"] = bool(_STATE["started"]) and port_up
+    payload["workspace"] = os.environ.get("MOCH_WORKSPACE")
+    return payload
 
 
 def info_json() -> str:

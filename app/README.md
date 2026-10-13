@@ -101,6 +101,8 @@ The app is written to run in **Expo Go** — `npm run test:imports` evaluates th
 - **Remote push everywhere** — needs an EAS-linked development or production build on a physical device (see below).
 - **The `hermes://connect` deep link** — custom URL schemes only work in development/production builds; Expo Go opens `exp://` links only. In Expo Go, pair with the in-app scanner or the paste field.
 
+**Release builds (local Gradle) require `android/keystore.properties`** — `storeFile`, `storePassword`, `keyAlias`, `keyPassword`, pointing at a keystore kept *outside* the repo (the file is gitignored). Without it, `:app:assembleRelease` / `:app:bundleRelease` fail at configuration time with instructions instead of silently shipping a debug-signed APK (C-04 / #94; see `plugins/with-android-release.js`). Debug builds need no setup: AGP auto-generates the standard Android debug keystore (`~/.android/debug.keystore`) — the stock-template `android/app/debug.keystore` this repo used to commit is untracked and no longer referenced. EAS builds are unaffected; EAS injects its own signing credentials into the build.
+
 ## Connecting to a gateway
 
 Pairing needs three things: the **host** (`<gateway-host>:<gateway-port>`), the **dashboard session token**, and whether to use **TLS** (`wss`). The flow is QR-first; manual entry is the fallback.

@@ -23,6 +23,7 @@ The guest lives at ``<home>/linux/rootfs``; the workspace is bind-mounted at
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -50,12 +51,29 @@ LOADER_LIB_NAME = "libproot-loader.so"
 
 ROOTFS_URLS = {
     "ubuntu-24.04": "https://cdimage.ubuntu.com/ubuntu-base/releases/noble/release/ubuntu-base-24.04.4-base-arm64.tar.gz",
-    # Debian 12 (bookworm) official arm64 base — debuerreumatism artifacts
-    # NOTE (M8): this URL is DEAD (HTTP 404, pre-existing M7.5 defect — the
-    # org is misspelled; real one: debuerreotype/docker-debian-artifacts,
-    # dist-arm64v8, rootfs.tar.xz). bootstrap("debian-12") fails at download
-    # by design; fix is a tracked follow-up (EXEC-DESIGN.md §4.3/§10.8).
-    "debian-12": "https://github.com/debuerreumaker/docker-debian-artifacts/raw/dist-arm64/bookworm/rootfs.tar.gz",
+    # Debian 12 (bookworm) official arm64 base — debuerreotype artifacts
+    # (GH #103 / BH-000050: the old URL misspelled the org as
+    # 'debuerreumaker' and 404'd. The dist-arm64v8 branch no longer carries
+    # bookworm/rootfs.tar.xz at its top level — the rootfs tarball lives in
+    # the branch's OCI layout; verified 2026-10-12 that this URL resolves and
+    # its sha256 equals the OCI layer digest the branch itself declares in
+    # bookworm/oci/index.json).
+    "debian-12": "https://github.com/debuerreotype/docker-debian-artifacts/raw/dist-arm64v8/bookworm/oci/blobs/rootfs.tar.gz",
+}
+
+# C-07 / GitHub #97 — pinned SHA256 for every downloaded bootstrap artifact.
+# FAIL CLOSED: ``_download`` refuses any URL not present here (no pin → no
+# download), verifies the streamed bytes after download, deletes the file on
+# mismatch and fails the step — a compromised/moved upstream artifact can
+# never execute inside the guest. Pins are content pins: when an upstream
+# artifact legitimately changes (e.g. debuerreotype rebuilds bookworm), the
+# mismatch refusal is the deliberate tripwire — update the pin consciously.
+_SHA256_PINS: dict[str, str] = {
+    PROOT_URL: "8199dca06dccb693ec09fb1759e3e1ad08b4863f0c11c612f89c20bd9ecdc1a0",
+    LIBTALLOC_URL: "556591f43bb773ad8777e1a29522640866a55f95dab71914418b94a8c58ad5a7",
+    SHMEM_URL: "0da3a24d558b93c92bcf8d611e0826a99ff96e396b148e6cdf33b47c47c57ff6",
+    ROOTFS_URLS["ubuntu-24.04"]: "04207713ece899c3740823d33690441ad3a7f0ded1101aca744e2b0f37ac7ff2",
+    ROOTFS_URLS["debian-12"]: "2a02c40189e361a19e7cb07374fe9925f5c4f7db254ae2b9196348c27c286b03",
 }
 
 # Provisioning version stamp (§4.3): written after a successful bootstrap,
@@ -76,7 +94,13 @@ STAMP_MECHANISM = 2
 # v5: proot-distro parity flags (link2symlink/sysvipc/-L/fake utsname) +
 # resolv.conf seeding — apt/dpkg upgrades died on link(2) EPERM and DNS
 # was unresolvable (on-device 2026-10-06, third field round).
-SHIM_FORMAT = 5
+# v6 (BUG-134): export HOME=/root + a guest-sane PATH inside the shim —
+# the trampoline env carries the Chaquopy process HOME, a HOST path that
+# does not exist inside the guest (only workspace/scratch/dev/proc are
+# bind-mounted), so every $HOME-resolved credential (gh auth hosts.yml,
+# ~/.gitconfig, ~/.ssh, ~/.netrc, ~/.aws, ~/.npmrc, ~/.config/*) read
+# ENOENT in agent-exec'd commands while the user's Terminal saw them.
+SHIM_FORMAT = 6
 _SHIM_MARKER = f"# moch-shim-format: {SHIM_FORMAT}"
 
 # proot-distro parity on Android (proot_distro/commands/login/proot_cmd.py
@@ -92,6 +116,19 @@ FAKE_UTSNAME = (
     "\\aarch64\\localdomain\\-1\\"
 )
 PROOT_PARITY_FLAGS = ["--link2symlink", "--sysvipc", "-L", f"--kernel-release={FAKE_UTSNAME}"]
+
+# BUG-134: ONE HOME for every guest path. The guest is Ubuntu with a real
+# /root, but the Moch process runs with the Chaquopy default HOME
+# (/data/user/0/<pkg>/files) — a HOST path that does not exist inside the
+# guest (only workspace/scratch/dev/proc are bind-mounted). Inherited
+# verbatim, it made every $HOME-resolved credential (gh auth hosts.yml,
+# ~/.gitconfig, ~/.ssh, ~/.netrc, ~/.aws, ~/.npmrc, ~/.config/*, ~/.cache)
+# read ENOENT inside agent-exec'd commands while the user's Terminal —
+# which pinned HOME=/root itself — saw them fine. build_guest_launch and
+# the PATH shims export these so terminal, agent exec, the bridge's
+# exec_in_guest and background procs all land on the same /root.
+GUEST_HOME = "/root"
+GUEST_PATH_PREFIX = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # Cached rootfs size in MB for status(): computing it means stat()ing every
 # file of a full Ubuntu rootfs — seconds of GIL-hot Python inside the shared
@@ -170,7 +207,11 @@ def build_guest_launch(guest_argv: list[str]) -> tuple[list[str], dict]:
     - ``PROOT_LOADER`` points at the native-lib loader, so every execve the
       ptraced tracee performs (bash → node → children, shebangs, every exec
       variant, raw syscalls) lands on an apk_data_file;
-    - ``LD_PRELOAD`` popped (proot-distro parity; Moch never sets it).
+    - ``LD_PRELOAD`` popped (proot-distro parity; Moch never sets it);
+    - ``HOME``/``PATH`` pinned to the guest's own /root + system dirs
+      (BUG-134): the inherited host HOME does not exist inside the guest,
+      which made gh/git/ssh credentials written at guest /root invisible
+      to every command that entered through this builder.
 
     Used by exec_in_guest and the persistent session; the PATH shims carry
     the same shape inline.
@@ -194,6 +235,14 @@ def build_guest_launch(guest_argv: list[str]) -> tuple[list[str], dict]:
     env["PROOT_LOADER"] = str(loader_path())
     env["PROOT_TMP_DIR"] = str(tmp_dir)
     env.pop("LD_PRELOAD", None)
+    # BUG-134: HOME must be the GUEST's /root — the inherited Chaquopy
+    # process HOME is a host path that does not exist inside the guest, so
+    # ~/.config/gh, ~/.gitconfig, ~/.ssh … all read ENOENT under it. The
+    # guest's system dirs go first on PATH; the inherited tail (shim dir,
+    # self-bound host paths) survives after them. This builder is the ONE
+    # env source for the terminal PTY and the bridge's exec_in_guest.
+    env["HOME"] = GUEST_HOME
+    env["PATH"] = GUEST_PATH_PREFIX + ":" + env.get("PATH", "")
     argv = [
         LINKER64,
         str(proot),
@@ -235,6 +284,14 @@ mkdir -p "$LD/tmp"
 [ -s "$LD/rootfs/etc/resolv.conf" ] || printf 'nameserver 8.8.8.8\\nnameserver 1.1.1.1\\n' > "$LD/rootfs/etc/resolv.conf"
 WS="${{MOCH_WORKSPACE:-$LD/../workspace}}"
 SC="${{TMPDIR:-$LD/../cache/scratch}}"
+# BUG-134: one HOME for every guest path. The trampoline (/system/bin/sh)
+# inherits the Chaquopy process HOME — a host path that does not exist
+# inside the guest — so credentials written at guest /root in the Terminal
+# (~/.config/gh, ~/.gitconfig, ~/.ssh, …) were invisible to hermes'
+# commands and background procs, which all exec through this shim. The
+# export wins over the inherited env for everything below the exec.
+export HOME={GUEST_HOME}
+export PATH="{GUEST_PATH_PREFIX}:$PATH"
 exec /system/bin/linker64 "$LD/bin/proot" -r "$LD/rootfs" \\
   -b "$WS:/workspace" -b "$WS:$WS" -b "$SC:$SC" -b /dev -b /proc -0 \\
   --link2symlink --sysvipc -L --kernel-release='{FAKE_UTSNAME}' \\
@@ -376,8 +433,35 @@ def _deb_extract_file(deb: Path, td: Path, path_suffix: str) -> Path:
     return hits[0]
 
 
+def _sha256_file(path: Path, chunk_mb: int = 8) -> str:
+    """Hex sha256 of a file, streamed (C-07 — used by the download pins)."""
+    digest = hashlib.new("sha256")
+    with path.open("rb") as f:
+        while True:
+            chunk = f.read(chunk_mb * 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _download(url: str, dest: Path, chunk_mb: int = 8) -> int:
-    """Stream a file to dest; returns bytes written. Logs progress."""
+    """Stream a file to dest, verifying its pinned sha256 (C-07 / GH #97).
+
+    FAIL CLOSED: an unpinned URL is refused BEFORE any byte hits disk, and a
+    downloaded artifact whose hash does not match its pin is deleted and
+    refused — the step fails with a clear error instead of ever laying an
+    unverified executable/librootfs into the guest tree. Returns bytes
+    written. Logs progress.
+    """
+    pin = _SHA256_PINS.get(url)
+    if pin is None:
+        # A TODO-pin or a plain omission must never become a silent
+        # unpinned download — refuse, loudly.
+        raise ValueError(
+            f"refusing to download {url}: no pinned sha256 in linux_env._SHA256_PINS "
+            "(fail closed — add a pin for this artifact)"
+        )
     _log(f"downloading {url.split('/')[-1]} …")
     req = urllib.request.Request(url, headers={"User-Agent": "Moch/1.0"})
     total = 0
@@ -389,7 +473,28 @@ def _download(url: str, dest: Path, chunk_mb: int = 8) -> int:
             f.write(chunk)
             total += len(chunk)
             _log(f"  {total / 1e6:.1f} MB")
+    digest = _sha256_file(dest)
+    if digest != pin:
+        dest.unlink(missing_ok=True)
+        raise ValueError(
+            f"sha256 mismatch for {url.split('/')[-1]}: got {digest}, pinned {pin} "
+            "— artifact deleted (upstream changed? update the pin deliberately)"
+        )
+    _log(f"  sha256 ok ({pin[:12]}…)")
     return total
+
+
+def _extract_rootfs(tarball: Path, dest: Path) -> None:
+    """Extract a distribution rootfs tarball into dest (GH #103 / BH-000050).
+
+    ``r:*`` — transparent over gzip/xz/bz2: the ubuntu base ships .tar.gz and
+    the Debian debuerreotype artifacts ship .tar.xz (and the OCI-layer
+    .tar.gz); the old ``r:gz`` hard-failed on anything but gzip. Extraction
+    goes through the same §4.3 traversal predicate as everything else.
+    """
+    _log("extracting rootfs (this takes a few minutes)…")
+    with tarfile.open(tarball, "r:*") as tf:
+        _safe_extract(tf, dest)
 
 
 def _stamp_path(linux_dir: Path) -> Path:
@@ -527,12 +632,13 @@ def bootstrap(distro: str = "ubuntu-24.04") -> dict:
         def _rootfs():
             with tempfile.TemporaryDirectory(dir=linux_dir) as td:
                 td = Path(td)
-                tarball = td / "rootfs.tar.gz"
+                # name by URL basename — the suffix travels with the artifact
+                # (.tar.gz ubuntu, .tar.xz/.tar.gz debian) and the extractor
+                # sniffs the compression anyway (r:*)
+                tarball = td / rootfs_url.rsplit("/", 1)[-1]
                 _download(rootfs_url, tarball)
                 rootfs.mkdir(parents=True, exist_ok=True)
-                _log("extracting rootfs (this takes a few minutes)…")
-                with tarfile.open(tarball, "r:gz") as tf:
-                    _safe_extract(tf, rootfs)
+                _extract_rootfs(tarball, rootfs)
         step("rootfs", _rootfs)
 
     step("dns", ensure_guest_dns)

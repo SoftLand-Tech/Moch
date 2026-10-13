@@ -8,10 +8,12 @@ process flips the same env gates the boot path would have set, then clears the
 registry's check_fn TTL cache so the browser tools appear on the next schema
 build — no restart needed, in either open order.
 
-Deactivation is deliberate absence: when the Browser screen closes we leave
-the gate on (cookies/session keep the relay cheap to resume) — tools failing
-while no tab is live return structured "no page targets" errors, which is the
-documented v1 behavior.
+Deactivation (BUG-99 / BH-000045) is the mirror: `BrowserRelayModule.stop()`
+calls `deactivate(port, token)` after `CdpRelay.stop()` so an in-process stop
+leaves no armed gate pointing at a dead relay. Merely CLOSING the Browser
+screen still deactivates nothing — the relay belongs to the process, not the
+screen; tools failing while no tab is live return structured "no page
+targets" errors, which is the documented v1 behavior.
 """
 
 from __future__ import annotations
@@ -28,27 +30,24 @@ _STATE: dict[str, Any] = {"active": False, "url": None, "port": 0, "activated_at
 _LOCK = threading.Lock()
 
 
-def activate(port: int, token: str) -> dict:
-    """Point the running process's browser tools at the live relay (idempotent)."""
-    url = f"http://127.0.0.1:{int(port)}/{str(token).strip()}"
-    with _LOCK:
-        os.environ["BROWSER_CDP_URL"] = url
-        os.environ["MOCH_BROWSER_RELAY"] = "1"
-        changed = _STATE.get("url") != url
-        _STATE.update(active=True, url=url, port=int(port), activated_at=bool(changed))
-    # The registry TTL-caches check_fn results process-wide; a stale False from
-    # before the relay existed would keep the tools hidden for up to 30s. Clear
-    # so the next schema build (next message / new chat) sees the gate immediately.
-    #
-    # BUG-107: clearing ONLY the check_fn verdicts is not enough. ``model_tools``
-    # memoizes the fully ASSEMBLED tool list per (enabled, disabled,
-    # skip_tool_search) key in ``_tool_defs_cache``, and the browser verdict is
-    # baked into that list — so a session whose list was assembled before the
-    # relay started kept replaying the browser-less catalog for the rest of the
-    # process (device: gate active 18:02:17, a chat created 18:03:18 still
-    # resolved 8 tools with no browser_*). ``tools/mcp_tool_agent.py``'s
-    # ``reprobe_tool_availability()`` pairs exactly these two clears for the same
-    # reason when MCP servers appear mid-session.
+def _broadcast_catalog_change() -> None:
+    """Make a gate flip (either direction) visible to every catalog consumer.
+
+    The registry TTL-caches check_fn results process-wide; a stale verdict
+    from before the flip would keep the old tool set hidden/shown for up to
+    30s. Clear so the next schema build (next message / new chat) sees the
+    gate immediately.
+
+    BUG-107: clearing ONLY the check_fn verdicts is not enough. ``model_tools``
+    memoizes the fully ASSEMBLED tool list per (enabled, disabled,
+    skip_tool_search) key in ``_tool_defs_cache``, and the browser verdict is
+    baked into that list — so a session whose list was assembled before the
+    relay started kept replaying the browser-less catalog for the rest of the
+    process (device: gate active 18:02:17, a chat created 18:03:18 still
+    resolved 8 tools with no browser_*). ``tools/mcp_tool_agent.py``'s
+    ``reprobe_tool_availability()`` pairs exactly these two clears for the same
+    reason when MCP servers appear mid-session.
+    """
     try:
         from tools.registry import invalidate_check_fn_cache
 
@@ -61,9 +60,9 @@ def activate(port: int, token: str) -> dict:
         _clear_tool_defs_cache()
     except Exception:  # noqa: BLE001 — cache shape drift must never break the gate
         logger.debug("tool-defs cache clear failed", exc_info=True)
-    # BUG-132 (cause 4): arming must also reach LIVE sessions. agent.tools is
+    # BUG-132 (cause 4): a flip must also reach LIVE sessions. agent.tools is
     # snapshotted once at build (agent_init._load_tools) and nothing refreshes
-    # it on a gate flip — the between-turns refresh is MCP-gated and a default
+    # it on a gate change — the between-turns refresh is MCP-gated and a default
     # phone install has zero MCP servers, so a session built pre-arm improvised
     # with curl for its whole life. Append-only refresh (preserve_prefix=True,
     # no enabled_override — the gate changed no toolsets), mirroring
@@ -92,7 +91,43 @@ def activate(port: int, token: str) -> dict:
             logger.info("gate live-refresh: %d session(s)", len(live))
     except Exception:
         logger.debug("gate live-session refresh skipped (gateway not up)", exc_info=True)
+
+
+def activate(port: int, token: str) -> dict:
+    """Point the running process's browser tools at the live relay (idempotent)."""
+    url = f"http://127.0.0.1:{int(port)}/{str(token).strip()}"
+    with _LOCK:
+        os.environ["BROWSER_CDP_URL"] = url
+        os.environ["MOCH_BROWSER_RELAY"] = "1"
+        changed = _STATE.get("url") != url
+        _STATE.update(active=True, url=url, port=int(port), activated_at=bool(changed))
+    _broadcast_catalog_change()
     logger.info("Moch browser gate active: %s", url)
+    return status()
+
+
+def deactivate(port: int = 0, token: str = "") -> dict:
+    """Disarm the gate after an in-process relay stop (BUG-99 / BH-000045).
+
+    The exact mirror of :func:`activate` (the Kotlin caller passes the same
+    ``(port, token)`` pair for symmetry; they are informational only): clear
+    the env gates + both caches + live-session refresh, so the stopped relay
+    leaves tools de-advertised instead of every call dying as "No browser
+    page…". Idempotent — deactivating an inactive gate is a no-op.
+
+    A manually-set ``BROWSER_CDP_URL`` that does NOT point at the activated
+    relay (PC workflow) survives; ``MOCH_BROWSER_RELAY`` never does — only the
+    relay's own arming paths ever set it.
+    """
+    with _LOCK:
+        was = _STATE.get("url")
+        os.environ.pop("MOCH_BROWSER_RELAY", None)
+        env_url = os.environ.get("BROWSER_CDP_URL")
+        if env_url is not None and (was is None or env_url == was):
+            os.environ.pop("BROWSER_CDP_URL", None)
+        _STATE.update(active=False, url=None, port=0, activated_at=None)
+    _broadcast_catalog_change()
+    logger.info("Moch browser gate deactivated (was %s)", was)
     return status()
 
 

@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
+  AppState,
 } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -29,6 +30,7 @@ import {
   refreshTabTargetIds,
 } from '../../src/lib/browserRelay'
 import { shareInInbox, normalizeSharedPayload } from '../../src/lib/shareIn'
+import { tr } from '../../src/lib/strings'
 
 /**
  * Moch Browser (BUILD-PLAN.md B1) — the visible, multi-tab WebView pool the
@@ -85,6 +87,30 @@ export default function Browser() {
       cancelled = true
     }
   }, [])
+
+  // BUG-118 (BH-000093): the mount effect above is one-shot, so a relay that
+  // failed at mount left the error branch below as a dead end — no path back
+  // short of leaving the screen. Retry re-runs the exact boot dance.
+  const retryBoot = useCallback(() => {
+    setBooting(true)
+    void ensureBrowserRelay().finally(() => {
+      setBooting(false)
+      if (browserTabs.get().length === 0) addTab(HOME_URL)
+    })
+  }, [])
+
+  // BUG-118: returning to the foreground re-evaluates a known-bad relay —
+  // a relay that died while backgrounded (or was stopped in a prior app
+  // state) gets one fresh ensure instead of a stale error screen.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s !== 'active') return
+      const st = relayStatus.get()
+      if (booting || !st || st.running) return
+      retryBoot()
+    })
+    return () => sub.remove()
+  }, [booting, retryBoot])
 
   const active = tabs.find((t) => t.id === activeId) ?? null
   const activeLiveUrl = active ? liveUrls.current[active.id] ?? active.url : ''
@@ -171,6 +197,16 @@ export default function Browser() {
             <Ionicons name="warning-outline" size={34} color={C.red} />
             <Text style={s.bootText}>Browser relay unavailable</Text>
             <Text style={s.errText}>{status?.lastError ?? 'unknown error'}</Text>
+            {/* BUG-118: tap-to-retry, the ScreenShell reconnect-control pattern. */}
+            <Pressable
+              style={({ pressed }) => [s.retryBtn, pressed && s.retryBtnPressed]}
+              onPress={retryBoot}
+              accessibilityRole="button"
+              accessibilityLabel={tr('browser.retry')}
+            >
+              <Ionicons name="refresh" size={17} color={C.onAccent} />
+              <Text style={s.retryText}>{tr('browser.retry')}</Text>
+            </Pressable>
           </View>
         ) : (
           <View style={s.root}>
@@ -307,6 +343,18 @@ const makeS = () =>
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 32 },
     bootText: { color: C.textDim, fontSize: 15, textAlign: 'center' },
     errText: { color: C.red, fontSize: 13, textAlign: 'center' },
+    retryBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 7,
+      marginTop: 8,
+      paddingHorizontal: 18,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: C.accent,
+    },
+    retryBtnPressed: { opacity: 0.75 },
+    retryText: { color: C.onAccent, fontSize: 14, fontWeight: '600' },
     root: { flex: 1 },
     tabBar: {
       flexDirection: 'row',

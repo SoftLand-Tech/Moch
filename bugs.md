@@ -117,9 +117,33 @@ Check off `- [ ]` as you fix. All findings were adversarially verified against s
   Every open path clears attention synchronously at tap; `markAttention` only fires on NEW server events; there is NO re-mark path from `pendingBySession`. So: question arrives → amber dot → tap the chat (cleared) → leave without answering → dot gone while the question still blocks. The stated intent "leaving without answering should show yellow" (`:1992-1994`) is only implemented at arrival. After a relaunch (memory-only pending map, replay only on resume of that session) the indication is zero until you happen to reopen the chat. `pendingStoredIds` (`:247-256`) — built for exactly this — is dead code (see BUG-023).
   *Fix:* derive the row dot at render time by wiring `pendingStoredIds` into `rowStatus`, or re-mark `'input'` when leaving a chat whose `pendingBySession` entry is non-empty.
 
-- [ ] **BUG-086 [HIGH] Sessions started elsewhere (automation/CLI/another device) show NO running/done/error dot in any state — and their approval questions are unanswerable** — `src/lib/chat.ts:2065-2066,239-244,282-289,2002-2003,1884,224-228` + `src/lib/sessionList.ts:22-31`
+- [x] **BUG-086 [HIGH] Sessions started elsewhere (automation/CLI/another device) show NO running/done/error dot in any state — and their approval questions are unanswerable** *(fixed in PR #132 — untracked approvals surface as an aggregate answerable card, request.cancel clears foreign entries (badge no longer lies forever), attention toast fires; per-row dot for foreign sessions follows the indicator-contract work, bugs.md:290)* — `src/lib/chat.ts:2065-2066,239-244,282-289,2002-2003,1884,224-228` + `src/lib/sessionList.ts:22-31`
   Events for sessions not in `sessionsById` are dropped wholesale; `session.list` carries no running field; busy dots derive only from `sessionsById`. Foreign approval requests DO land in `pendingBySession` (`:1884`) so the footer count shows "waiting on you", but no row dot exists (`flagAttention` early-returns, `:2002-2003`) and `pendingRequest` (`:224-228`) requires that foreign session to be active — silently permanently blocked.
   *Fix:* server: add running/state to `session.list` (or status events). Client: resolve untracked pending entries to stored ids (`storedIdMap`/`sessionRows`) instead of early-returning, and make them openable/answerable.
+
+- [x] **BH-000018 [HIGH] inflightCreate shared across provisional windows — send in a second new-chat window landed in the first window's session** — chat.ts:1261,1184,1247,1276 — *(fixed in PR #132 — inflightCreates Map keyed by provisional id; sweep drops dead windows' creates; pseudo-id outbox pinning fixed; on-device check pending)*
+  One module-global `inflightCreate` was shared by every optimistic new-chat window: New → send (create in flight) → New again → send made window 2's `ensureSession`/`activeLiveId` await window 1's create, so the message landed in window 1's session while the screen stayed on the (now empty) window 2. The failure leg was worse: if window 1's create rejected, window 2's send was enqueued pinned to window 2's PSEUDO stored id (`new:…`), which `flushOutbox` can neither match to a live entry nor resume — silently dropped forever.
+  *Fix:* `inflightCreates` Map keyed by the provisional temp id (same shape as `inflightResumes`); `newChat`'s sweep deletes a swept window's entry (an abandoned window's create is never adopted); `enqueueOffline` never pins to a pseudo id (falls back to the unpinned contract, and `loadOutbox` normalizes legacy pseudo pins).
+
+- [x] **BH-000019 [HIGH] flush-time mis-target for unpinned provisional sends — text composed in window B delivered to chat A, and B keeps a stale failed row** — chat.ts:1845-1866,847-910 — *(fixed in this PR — the pin half landed in PR #132 (outboxPinFor strips `new:` pins); this lands the origin routing + failed-row cleanup: outbox items record the composed chat's live/temp id (`originId`), flushOutbox routes through a still-live provisional window's OWN keyed create (`outboxTargetFor` + `createForWindow`, node-safe truth table in test-queue.ts), swept windows fall back to today's pinned/unpinned contract, and `dropMatchingFailedRow` also cleans up by the delivered-through live id so the stale failed row in B clears on delivery; flush re-add is snapshot-based so an origin send that re-enqueues under its real stored id is never double-added)*
+  Unpinned outbox items (a pseudo stored id is unpinnable, BH-000018) flushed via `sendPrompt(item.text)` → `ensureSession()` against the flush-time ACTIVE chat: text composed in new-chat window B (offline send → failed row patched into B, outbox entry unpinned) landed in whichever chat A was active when connectivity returned, while the failed row in B never cleared (`dropMatchingFailedRow('')` matches nothing) — the user saw BOTH a failed row in B and a delivered row in A for the same text.
+  *Fix:* `OutboxItem.originId` recorded at enqueue (the send-time `pinned ?? activeSession` id, both `sendPrompt` catch sites); pure `outboxTargetFor(item, sessionsByIdKeys)` decides origin/pinned/active; `createForWindow(tempId)` is the get-or-start keyed create both `ensureSession` and the flush resolve through.
+
+- [x] **BH-000023 [HIGH] isKnownSlashCommand returned true on an EMPTY catalog — offline, every "/…" text dead-ended in 'Command failed' and bypassed the outbox** — slash.ts:260-268, chat.tsx:625-640 — *(fixed in this PR — the empty-catalog legacy guess is GONE: `isKnownSlashCommand` answers false on an empty registry; the send path holds leading-slash text for ONE `loadCatalog()` (fails fast offline, never throws) via `resolveSlashRoute()`, then re-decides — known → dispatch (unchanged), unknown or still-unloaded → the text flows through sendPrompt so the offline machinery owns it (failed row + outbox retry) instead of a dead-end alert; node-safe `slashRouteFor`/`resolveSlashRoute` pinned in test-slash.ts, which now runs its unit battery before the live-gateway checks)*
+  With the catalog empty (offline, pre-boot, or a failed load), `isKnownSlashCommand` returned true as a "legacy guess", so chat.tsx's send path dispatched ANY "/…" text through `runSlash` → the RPC failed → `Command failed` alert ate the typed text, and it never reached `sendPrompt` — no failed row, no outbox entry, no retry: the text was simply gone.
+  *Fix:* hold + one load + re-decide (above); known-command behavior with a loaded catalog is byte-identical.
+
+- [x] **BH-000024 [MEDIUM] migrateV1Transcript interim branch returned BEFORE the legacy sweep — interim-era installs stranded every live-keyed v1 blob forever** — chat.ts:644-674 — *(fixed in this PR — the whole sweep is extracted node-safe into `src/lib/transcriptMigrate.ts` (`legacyV1KeysFor` + `migrateV1TranscriptWith` over a storage seam); the interim branch now removes the interim key, falls through to the legacy keys' removal half, and STILL returns the interim payload (freshest format); pinned in test-queue.ts with a fake-storage harness: 2 live-keyed v1 blobs + an interim v1 seeded → all removed, v2 written, interim returned; the legacy-only branch (freshest vintage wins, all mapped keys removed) is pinned too)*
+  The interim-key branch `return`ed at the top of the try, contradicting the docstring's "remove EVERY v1 key mapped to this stored id": an install that ever wrote an interim (stored-keyed) v1 blob migrated it but left every older live-keyed v1 blob in storage — dead bytes that survive every future launch (the v2 hit short-circuits the migration) and, worse, a future map rotation could still resolve one.
+  *Fix:* interim branch writes v2 + removes its own key, then sweeps `legacyV1KeysFor(storedId, storedIdMap)` before returning.
+
+- [x] **BH-000025 [HIGH] batch clarify Send was unconditional — unanswered questions shipped as deliberate skips, unrecoverably** — chat.tsx:861-898, chat.ts:2184-2190, clarify_tool.py:139-156 — *(fixed in this PR, client-only — Send is disabled until EVERY `q.questions` entry has a non-empty answer (multi_select needs ≥1 selection; empty string counts as unanswered) via the node-safe `batchReady`/`countUnanswered` helpers in `src/lib/clarifyGate.ts` (truth table in test-queue.ts); a subtle hint line shows the unanswered count in EN/AR (`chat.clarify.pending.one/many` via tr()); the reset-on-question-set-change behavior is untouched; the SERVER semantics are unchanged by design — an explicit empty/blank answer remains a legitimate skip)*
+  The batch card's Send Pressable had no gate; `respondClarifyBatch` forwarded the partial map verbatim; the server maps missing qids to `""` with no `timed_out` flag (read as a DELIBERATE skip) and `retire()` withdraws the question — one tap with N questions unanswered silently told the agent the user chose to skip them, and the turn proceeded on wrong assumptions with no way back.
+  *Fix:* gate + hint line (above); multi-select rendering itself stays single-pick (pre-existing; the helper accepts selection lists for when it lands).
+
+- [x] **BH-000088 [HIGH] reasoning-effort write passed the RAW provisional sid — a session-scoped pick from an unsent chat silently rewrote the PROFILE-WIDE default and the UI confirmed success** — agent.tsx:30,100,119, methods_config_set.py:479,313 — *(fixed in this PR — the write lives in agent.tsx: every write path computes the same live id via `liveWriteSid` (extracted to modelState.ts, also used by the reads and by `connectKey`/`doDisconnect`); a session-scoped pick with no live id AWAITS `ensureSession()` (the BUG-013 comment's "explicit picks still create on demand" is now real code) or blocks with a hint if the create fails, and `applyReasoning` itself refuses a session-scoped frame with no session id; a global pick ships with NO session_id; the toggle (`config.set reasoning show|hide`) omits the id for a provisional window; vendored server hardening: `config.set` returns the standard 4001 "session not found" (the `_sess_nowait` shape) when scope=='session' AND a session_id names a session `_sessions` does not hold — directly-run unittest with a fake sessions registry in python-runtime/tests/test_config_set_scope.py; wire invariant pinned in test-interactive.ts: no `pending:new:`/`new:` session_id ever hits the wire)*
+  `sid = useStore(activeSession)` is the window's `pending:new:…` temp key while a new chat is unsent; `applyReasoning({sessionId: sid})` and the display toggle put it on the wire. Server-side `_sessions.get()` misses, the setter treats the call as sessionless, and `_set_reasoning` escalates `scope='session'` with `session None` to `_write_config_key("agent.reasoning_effort")` — the GLOBAL default — while answering ok, so the app's "This chat" pick changed thinking everywhere and reported success. Reads were already guarded (agent.tsx:60); writes were not.
+  *Fix:* client create-or-block (above) + vendored 4001 guard; scopeless/global calls keep today's contract (a global write is legitimately sessionless).
 
 - [ ] **BUG-103 [HIGH] Long chats open at the top and require repeated scrolling to reach the bottom** *(fixed in PR #50 — on-device check pending user's next dev build)* — `app/app/(tabs)/chat.tsx` (FlatList + `parkAtBottomRef`/`listRevealed`/`scrollListToEnd`)
   A non-inverted `FlatList` starts at `offset = 0` (the oldest message) and only mounts the first `initialNumToRender` (10) items; `VirtualizedList` (`@react-native/virtualized-lists/Lists/VirtualizedList.js:1010-1039`) clamps the tail spacer to `_highestMeasuredFrameIndex` when `getItemLayout` is absent. Three failures compound on open: (1) on cold/hydrating open, `msgs` is initially `[]` so `onContentSizeChange` fires with `h <= viewH` and immediately flips `parkAtBottomRef.current = false` before messages arrive; (2) on warm open, `scrollListToEnd` scrolls to `contentH - viewH` of only the first 10 items, `readScroll` sees `distance < 120` for that partial height and ends parking, and subsequent batches expanding `contentH` flip `stick = false`; (3) even tapping "Jump to latest" only reaches the end of the currently-measured batches.
@@ -209,7 +233,7 @@ Check off `- [ ]` as you fix. All findings were adversarially verified against s
 - [x] **BUG-033 [MEDIUM] `resetSessionCaches` leaves residue** — `src/lib/chat.ts:1424-1445`. Skips `chatBanner` (:326 — stale retry against a dead stored id), `streamBufs` (:404 — never `.delete`d anywhere), `queuedAttachments` (:806 — also skipped by `forgetSession`), `mochiMoment` (:304).
 - [x] **BUG-034 [MEDIUM] "Forget this computer" never closes the socket** — `src/lib/gateway.ts:377-385` + `app/(tabs)/settings.tsx:283-295`. `clearConfig` has no `client.close()`/state write; Settings forgets without `disconnect()` (unlike `_layout.tsx:53-55`) → revoked machine stays connected, hero shows green "Connected".
 - [x] **BUG-035 [MEDIUM] Debounced queue/draft writes lost on a quick kill** — `src/lib/sendQueue.ts:28,52-63` + `src/lib/drafts.ts:18,41-54` + `src/lib/chat.ts:534,547-559`. 400-500ms debounces; `flushSendQueue`/`flushDrafts` have ZERO production callers; no AppState 'background' flush (`_layout.tsx:150-160` handles only 'active'). Queue loss = message lost.
-- [ ] **BUG-036 [MEDIUM] 120s request timeout → 2-minute hangs + double-submitted prompts** — `src/protocol/json-rpc-channel.ts:135,241-249` + `src/lib/chat.ts:1655`. Timeout only rejects; `prompt.submit` has no idempotency key so timed-out-but-delivered + retry double-submits. *(Client-side half; server dedupe is the real fix.)*
+- [x] **BUG-036 [MEDIUM] 120s request timeout → 2-minute hangs + double-submitted prompts** *(partially — client half fixed in PR #132: typed timeouts, no auto-resubmit after submit-phase timeout, unconfirmed row status; SERVER dedupe deferred: needs client_request_id in vendored contracts (extra=forbid) — protocol decision)* — `src/protocol/json-rpc-channel.ts:135,241-249` + `src/lib/chat.ts:1655`. Timeout only rejects; `prompt.submit` has no idempotency key so timed-out-but-delivered + retry double-submits. *(Client-side half; server dedupe is the real fix.)*
 
 - [x] **BUG-089 [MEDIUM] Server requests can be misfiled onto the wrong chat or a dead key (unmarked + unanswerable)** *(fixed in PR #31: live ids rebind through storedIdFor before filing)*  — `src/lib/chat.ts:1867,2002-2003,1012`
   A request missing `session_id` is filed under WHATEVER chat is active (`:1867`) — the wrong row gets the amber dot + composer block while the origin shows nothing; a request emitted under the old live id during resume rotation lands under a dead key — `flagAttention` early-returns and `pendingRequest` can never match. Timing-narrow but silently permanent when hit.
@@ -267,7 +291,7 @@ Check off `- [ ]` as you fix. All findings were adversarially verified against s
 - [x] **BUG-071 [LOW] Per-server token silently falls back to plaintext AsyncStorage (no warn, unlike saveConfig)** — `src/lib/gateway.ts:201-208` vs :371.
 - [x] **BUG-072 [LOW] `client.capabilities` re-advertised on every gateway.ready frame** — `src/protocol/json-rpc-channel.ts:414-415,427-429` ("once per generation" comment unenforced).
 - [x] **BUG-073 [LOW] Queue flush into a session deleted mid-flush drops the head (and its attachments) silently** — `src/lib/chat.ts:1541-1543,1778-1780`.
-- [ ] **BUG-074 [LOW] Raw server strings in UI** — `item.source` verbatim ("mobile · 2 msgs", sessions.tsx:213); "cannot delete an active session"/"session not found" alerts; optimistic row stuck at "0 msgs" (`sessionList.ts:120`).
+- [x] **BUG-074 [LOW] Raw server strings in UI** — `item.source` verbatim ("mobile · 2 msgs", sessions.tsx:213); "cannot delete an active session"/"session not found" alerts; optimistic row stuck at "0 msgs" (`sessionList.ts:120`). *(fixed in PR #138 — the two real legs: known `source` tokens tr()'d EN/AR (mobile/cli/desktop/tui/webui/cron/kanban/subagent + the gateway's own token set, raw fallback for anything else) and the "cannot delete an active session" refusal mapped to friendly bilingual copy with the raw error kept in the diag log; the optimistic row now leaves `message_count` undefined so "— msgs" renders (pairs with #111/BH-000085). The "session not found" alert leg no longer exists — the delete path already swallows it via `isSessionNotFound`.)*
 - [x] **BUG-075 [LOW] Silent no-feedback sends** — retry early-returns (`chat.ts:1699/1701/1704` — the real silent path is BUG-003's lock); send with no storedId no-ops (`chat.tsx:631`); clarify empty mini-send wipes the field (`chat.tsx:1194` + `chat.ts:1829-1830`); steer with a full queue drops the item's attachments (`chat.tsx:1294-1307` — re-enqueue re-attaches only when the queue isn't full).
 - [x] **BUG-076 [LOW] Enter inserts a newline despite `returnKeyType="send"`** *(documented platform limitation: RN multiline ignores the IME action; a real fix needs a native single-line+manual-newline composer — out of scope)*  — `app/(tabs)/chat.tsx:1381-1383` (multiline native; submit handler web-gated; no `blurOnSubmit`).
 - [x] **BUG-077 [LOW] Truncations with no markers** — expanded thinking at 4000 chars (`Chat.tsx:368,381`); history rows 8000 vs 32000 streamed (`chat.ts:1481-1487`); transcript export 50k silent truncate ("Transcript copied" regardless, settings.tsx:279-280); todos capped at 4, index keys, no "+N" (`chat.tsx:1019-1023`).
@@ -275,6 +299,12 @@ Check off `- [ ]` as you fix. All findings were adversarially verified against s
 - [x] **BUG-079 [LOW] A11y roles missing on icon-only controls; internal qid leaked into a label** *(qid fixed in PR #28; queue-action roles + hitSlops in PR #34)*  — model chip/banners/FAB/copy-listen (labels but no `accessibilityRole`); `accessibilityLabel={'Answer ' + q.qid}` (`chat.tsx:1159`); tab rows/search/banners lack roles (`sessions.tsx:145-203`, `SessionToasts.tsx:56-60`).
 - [x] **BUG-080 [LOW] Scattered hard-coded whites/inks bypassing tokens** — `chat.tsx:1410,1575`; `Sidebar.tsx:1044,1198`; `SessionToasts.tsx:62`; iOS-only `RefreshControl tintColor` on an Android-only app (`sessions.tsx:190`).
 - [x] **BUG-081 [LOW] Docs drift** — SPEED_REPORT A2-28 says "not edited" but concurrent persist is implemented (`gateway.ts:518-532`); TODO.md's cold-launch-lands-on-pairing issue STILL TRUE (`app/index.tsx:24-29` — no auto-restore/"continue as <name>"); `setup.tsx:60` typo "rocksolid".
+
+---
+
+## Security (audit C-items)
+
+- [x] **C-05 / BH-000038 [HIGH, security] Plaintext-by-default pairing + cleartext app-wide — crafted QR/deep-link silently dials ws:// with the token in the URL** — pairing.ts:37, gateway.ts:559, http.ts:5, AndroidManifest:23 — *(fixed in PR #130 — tls defaults ON for public hosts, explicit confirm before any plaintext public dial (QR + deep-link + manual), dial/http refusal without confirmation; networkSecurityConfig loopback-only deferred (breaks documented LAN plaintext pairing — product call); on-device check pending user's next dev build)*.
 
 ---
 
@@ -338,7 +368,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   `errors.log`: `SQLite FTS5 unavailable for …/state.db; full-text session search disabled … (no such module: fts5)`. Measured: drawer/Chats search matches **titles** (`AGENT-ISOLATION`) but not a phrase that exists only in a message body (`reachable from my side` → `No matches`, phrase verified in the transcript); `GET /api/sessions/search?q=…` returns `{"results":[]}` even for a title term. No UI hint that search is title-only.
   *Fix:* ship an FTS5-capable SQLite/Python in the embedded runtime, or add a LIKE-based fallback for message search and label the degraded mode.
 
-- [ ] **BUG-115 [MEDIUM] Terminal: Kill → Retry replays the dead session's scrollback into the fresh shell** — `app/python-runtime/moch/terminal.py:202-203` + `app/src/lib/terminal.ts:226-250`
+- [x] **BUG-115 [MEDIUM] Terminal: Kill → Retry replays the dead session's scrollback into the fresh shell** — `app/python-runtime/moch/terminal.py:202-203` + `app/src/lib/terminal.ts:226-250` *(fixed in PR #137 — start() and kill() now clear `_state.replay`/`replay_bytes` alongside the chunks (bank kept for live WebView reload repaints); 2 regression tests added to tests/test_terminal.py; on-device check pending)*
   `start()` clears `_state.chunks` but not `_state.replay` (the WebView-refill bank), and the JS immediately re-banks `native.replay()` into the new xterm. Repro: echo a marker → Kill → Retry → the previous session's output (`uname -a`, `TICK-1..4`, marker) is on screen again from a bash that never ran it. Also makes the kill affordance look broken.
   *Fix:* clear `_state.replay`/`replay_bytes` in `start()` (or scope the replay bank to WebView reloads only).
 
@@ -346,7 +376,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   Grep over the app finds only the definitions; Settings has no language row (whole screen scrolled). The atom is therefore always `'en'`, so the Arabic catalog and the RTL flag are dead code; forcing the app locale (`cmd locale set-app-locales … ar`) + relaunch leaves the UI English and LTR. M9.2's "RTL pass on the new screens" is untestable as shipped.
   *Fix:* call `loadLocale()` once at boot and add the language row (EN/العربية) that calls `setLocale()` + reloads the RN layout direction.
 
-- [ ] **BUG-117 [MEDIUM] Model picker opened from Settings shows an internal error banner** — `app/(tabs)/settings.tsx` → model sheet
+- [x] **BUG-117 [MEDIUM] Model picker opened from Settings shows an internal error banner** — `app/(tabs)/settings.tsx` → model sheet *(fixed in PR #137 — the sheet's open-path refresh no longer gates on activeLiveId(): a dead provisional window resolves to null and model.options is fetched sessionless (sessionId is optional per modelState); the internal-error banner stays for genuine inventory failures; on-device check pending)*
   `Couldn't refresh the model inventory (New chat is not ready). Showing the last known list.` The cached list still renders, but an internal precondition leaks into a Settings screen and the inventory can stay stale for anyone who never opens the picker from a chat.
   *Fix:* refresh the inventory without a live chat (gateway `models.*`), or phrase/scope the fallback so it never surfaces raw state.
 
@@ -354,19 +384,19 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   Connectors → Browse: `Catalog is empty`; `GET /api/mcp/catalog` → `{"entries":[],"diagnostics":[]}`; RPC `mcp.catalog` → `{"servers":[]}`; `…/AssetFinder/app/optional-mcps` does not exist. The screen invites browsing a catalog that never ships.
   *Fix:* bundle `optional-mcps/` in the Python sources, or replace the empty state with an honest "catalog not bundled in this build" + the manual add-server path.
 
-- [ ] **BUG-119 [LOW] About shows `Moch v1.0`, not the installed build** — `app/(tabs)/settings.tsx`
+- [x] **BUG-119 [LOW] About shows `Moch v1.0`, not the installed build** — `app/(tabs)/settings.tsx` *(fixed in PR #137 — About row and copyDiagnostics now render `Moch v${nativeAppVersion ?? expoConfig.version} (${nativeBuildVersion})`; on-device check pending)*
   Installed APK is `1.0.15-browser` (versionCode 18) and the runtime reports `Mochi 0.21.3`; the About row says `Moch v1.0`, so neither the user nor support can read the build from the UI.
   *Fix:* render `Constants.expoConfig?.version` + the Android versionName/versionCode.
 
-- [ ] **BUG-120 [MEDIUM, security] The loopback gateway hands out its own session token without auth** — `moch/gateway_server.py` (hermes `web_server` root shim)
+- [x] **BUG-120 [MEDIUM, security] The loopback gateway hands out its own session token without auth** *(fixed in PR #129 — embedded runtime no longer serves the token at /: idempotent route-surgery in gateway_server._run_server, hermes-src pristine; regression test tests/test_gateway_root_shim.py; on-device check pending user's next dev build)* — `moch/gateway_server.py` (hermes `web_server` root shim)
   `GET http://127.0.0.1:9119/` returns the dashboard HTML containing `window.__HERMES_SESSION_TOKEN__="…"` with no authentication, while every `/api/*` route requires exactly that token (`X-Hermes-Session-Token`). Loopback TCP is reachable by any app on the device, so any installed app can read the token and then drive the full hermes API — sessions, transcripts, file read/write/delete, cron, fleet. The browser relay was deliberately token-gated against this same threat model (`FEATURE-BROWSER.md` §Safety: "loopback TCP is reachable by other apps, unlike the unix socket"); the gateway is not.
   *Fix:* serve the token only to the app's own WebView (or drop the token from the shim response entirely and inject it through the RN bridge), and/or bind the gateway to a UID-restricted channel.
 
-- [ ] **BUG-121 [MEDIUM] Browser gate failure mode: the agent improvises instead of saying the tools are unavailable** — `hermes-src/tools/tool_search.py` hint + `browser_webview._RELAY_DOWN_ERROR` path
+- [x] **BUG-121 [MEDIUM] Browser gate failure mode: the agent improvises instead of saying the tools are unavailable** — `hermes-src/tools/tool_search.py` hint + `browser_webview._RELAY_DOWN_ERROR` path *(fixed in PR #142 — gate-off half: `gateway_server._moch_note_dispatch` now ALSO injects a capability note when the platform is Moch and the browser tools are absent from the catalog ("the in-app Moch Browser exists… open the Browser screen; do NOT use terminal curl"), via the unit-testable `_moch_prompt_note` selector (new tests/test_gateway_note_dispatch.py); warming half was already fixed; plus the Moch-scoped tool_search no-match hint sentence when the query lexically reaches for "browser" with the gate off)*
   With the gate correctly off (BUG-105 verified fixed), TEST-1.0.15 step 1.3 expects the agent to say it has no browser tools. Instead it burned 5 `terminal` calls trying `/system/bin/am` inside the proot guest, then the run ended `Operation interrupted.` — no answer to the user. `tool_search`'s hint actively discourages concluding the capability is missing ("Retry tool_search … before concluding the capability is unavailable"), and nothing tells the model the Moch Browser exists but is not armed.
   *Fix:* when the platform supports the relay but it is down, inject a one-line capability note ("the Moch Browser exists; ask the user to open the Browser screen") into the system prompt/tool notes.
 
-- [ ] **BUG-122 [LOW] SQLite WAL-reset vulnerability warning on every boot, with non-actionable advice** — `errors.log` (`hermes_state`)
+- [x] **BUG-122 [LOW] SQLite WAL-reset vulnerability warning on every boot, with non-actionable advice** — `errors.log` (`hermes_state`)
   Once per process per DB: "linked SQLite 3.50.4 … vulnerable to the WAL-reset corruption bug … using journal_mode=DELETE instead of enabling WAL. … run `hermes update`". The mitigation is automatic, but every database now runs in the slower journal mode and the message tells a phone user to run a CLI they do not have.
   *Fix:* ship SQLite ≥ 3.51.3 in the embedded runtime and drop the developer-facing advice from the phone log.
 
@@ -409,6 +439,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   fields all render; only the failure is silent.
   *Fix:* surface the parse/connect error inline next to the field ("could not
   reach 127.0.0.1:1 — check the host and that the agent is running").
+  *(not real at HEAD — paste path inline-errors since PR #36/#54 era; deep-link residue is #109's toast lifecycle)*
 
 - [x] **BUG-125 [HIGH] [FIXED + VERIFIED on device] Refs from a FRESH snapshot are rejected as "stale ref" unless the `@` prefix is stripped — the agent's primary click/type path silently dead-ends** — `hermes-src/tools/browser_webview.py:200-207` (`_ref_js`), snapshot ref rendering
   On device, same page, same minute (session `20261011_162731_898f7c`):
@@ -429,7 +460,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   in `_ref_js` and the click/type handlers, and reword the miss to
   `unknown ref <r> — snapshot refs are bare ids like e1`.
 
-- [ ] **BUG-126 [MEDIUM] `browser_console` can answer "JavaScript evaluation is not supported by this browser backend. agent-browser CLI not found (cached)" in WebView mode** — `hermes-src/tools/browser_tool.py` (console backend check)
+- [x] **BUG-126 [MEDIUM] `browser_console` can answer "JavaScript evaluation is not supported by this browser backend. agent-browser CLI not found (cached)" in WebView mode** — `hermes-src/tools/browser_tool.py` (console backend check) *(fixed in PR #142 — `_browser_eval` gained the missing webview branch: in webview mode the expression runs the browser_navigate attach dance then `webview_eval` on the supervisor; the CLI subprocess probe is unreachable in webview mode, and webview_console's stub note now names `browser_console(expression=…)` instead of the nonexistent browser_eval; tests/test_browser_tab_tools.py extended — routing + error-contract classes)*
   Same app run, ~18 minutes apart: at 16:12 `browser_console` evaluated JS on
   google.com successfully several times (it read the result links); at 16:30 the
   identical tool on the on-device backend returned that CLI-flavoured error and
@@ -439,7 +470,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   *Fix:* make the console path honour `MOCH_BROWSER_RELAY` unconditionally (no CLI
   probe/negative cache in WebView mode) and drop the CLI wording from this branch.
 
-- [ ] **BUG-127 [MEDIUM] "No browser page" can appear while the relay is up and the tab is loaded — the attachment is lost across a CDP navigation and only a fresh navigate recovers it** — `hermes-src/tools/browser_supervisor.py` (per-page attach), `CdpRelay` /json/list filter
+- [x] **BUG-127 [MEDIUM] "No browser page" can appear while the relay is up and the tab is loaded — the attachment is lost across a CDP navigation and only a fresh navigate recovers it** — `hermes-src/tools/browser_supervisor.py` (per-page attach), `CdpRelay` /json/list filter *(fixed in PR #142 — every non-navigate webview verb now attempts ONE `_ensure_cdp_supervisor` self-heal (the webview_navigate dance) before reporting no-session, `_no_session_error` names the relay's CURRENT /json/list target id so the model knows a browser_navigate re-attach is the fix, and `get_or_start`'s health check no longer treats a reconnect-backoff-parked supervisor as healthy; tests/test_browser_attach.py extended — self-heal + backoff-health + error-naming classes. NOT taken: pinning the supervisor's target by id for the task's life — the self-heal + named-target error cover the reachable failure without new per-task state)*
   Sequence on device: `browser_navigate` → DuckDuckGo Lite → success; type+click
   into the search form → success; minutes later `browser_snapshot` →
   `{"success": false, "error": "No browser page. Call browser_navigate first (and
@@ -466,7 +497,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   *Fix:* a scheme-specific message: "only http(s) URLs can be driven; data:,
   javascript:, file: and blobs are refused".
 
-- [ ] **BUG-129 [MEDIUM] Settings → "Stop runtime" does nothing — the app keeps running and the gateway keeps serving, with the failure swallowed** — `app/app/(tabs)/settings.tsx:125-131` → `src/lib/mochiRuntime.ts:55-58` → `android/.../hermes/HermesBridgeModule.kt:58-65` (`HermesService.stop`)
+- [x] **BUG-129 [MEDIUM] Settings → "Stop runtime" does nothing — the app keeps running and the gateway keeps serving, with the failure swallowed** — `app/app/(tabs)/settings.tsx:125-131` → `src/lib/mochiRuntime.ts:55-58` → `android/.../hermes/HermesBridgeModule.kt:58-65` (`HermesService.stop`)
   On device, with the runtime healthy: tapping the row (label: *"Ends the background service
   and exits the app"*) produced no dialog, no toast, no exit — same pid, app still
   foreground, `/` on `127.0.0.1:9119` still answering 200, ten seconds later.
@@ -478,6 +509,13 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   *Fix:* make `HermesService.stop` actually tear the runtime down (and exit like
   Restart does), or relabel the row to what it really does; surface the rejection
   instead of `.catch(() => {})`.
+  *(fixed in PR #134 — `HermesService.stop` now delivers the
+  service's ACTION_STOP command (the exact machinery the notification's Stop
+  action uses): stopForeground(STOP_FOREGROUND_REMOVE) + stopService + process
+  exit(0), so the gateway dies and the app exits like Restart; falls back to the
+  direct `shutdownProcess` teardown if startService is refused. The settings row
+  already said "Ends the background service and exits the app" — now honest.
+  Source-level only — on-device check pending next dev build.)*
 
 - [x] **BUG-130 [MEDIUM, CORRECTED] The composer's accessibility subtree freezes while a turn runs — the Steer chip and the Stop button are rendered but invisible to a11y, and the EditText keeps reporting the last submitted text** — `app/(tabs)/chat.tsx:1414-1427` (Steer chip, `busy`-gated), `:1469-1478` (Stop button, `busy`-gated), composer `TextInput` a11y text
   **Correction first:** this entry was originally filed as "a running turn shows no busy state, the Stop control is unreachable". That was wrong, and the mistake is instructive: the instrument was `uiautomator`, not the screen. Re-checked with a screenshot of the composer band while a run was provably in flight (a `terminal` call to `sleep 600`; transcript timestamps 17:08:28 → 17:18:xx): the band reads **"Steer"**, and `chat.tsx:1414` renders that chip only when `busy` is true — so `busy` is tracked locally and the code path that swaps the voice slot for the **Stop** button (`chat.tsx:1469`) is live too. The UI is fine; the accessibility tree is not.
@@ -490,9 +528,10 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   Impact: screen-reader users cannot reach the two busy-only controls (Stop, Steer), and any accessibility-driven automation — including the on-device harness used for this campaign — reads an "idle" composer with the wrong contents. My first BUG-130 report is exactly the false positive that produces.
   *Fix:* re-announce the composer subtree when `busy` flips (`accessibilityLiveRegion`, explicit `importantForAccessibility` on the chip, a keyed re-render or `accessibilityValue` for the input) so the new controls and the live text reach the tree.
 
-- [ ] **BUG-131 [MEDIUM] Session list rows carry no running marker** — `hermes_cli/web_routers/sessions.py` (list rows), `app/src/lib/sessionList.ts`
+- [x] **BUG-131 [MEDIUM] Session list rows carry no running marker** — `hermes_cli/web_routers/sessions.py` (list rows), `app/src/lib/sessionList.ts`
   `/api/sessions` rows return `running: null` (also `active`/`busy`: null) for a session that is demonstrably mid-turn — its own detail endpoint says `last_activity_description: "receiving stream response"` at the same moment. The client can therefore never learn "this chat is working" from a list refresh (`chat.ts:1095` has a `res.running` branch no list payload can satisfy), which is the recovery path a reconnect, a chat switch or a second device needs.
   *Fix:* include the live running flag on `session.list` rows (the gateway already knows it).
+  *(fixed in PR #138 — client-only via the previously-unused session.active_list RPC join; per-row dot for gateway-live-unopened sessions; vendored SessionListRow.running field deliberately not needed)*
 
   **[FIXED 2026-10-11, verified on device]** `CdpRelay.start` now binds
   `InetAddress.getByName("127.0.0.1")` (IPv4 loopback literal, both the preferred
@@ -1196,6 +1235,138 @@ Deferred (documented, not shipped): Tier B anydoc wheel (+3.4MB, unlocks doc ext
 read_file's schema CLAIMS anydoc is bundled but it never was: drift), Tier C ddgs/lxml/primp
 (+4-5MB, lights web_search/web_extract — or configure a search API key instead).
 
+## BUG-134 [HIGH] Terminal ≠ agent environment — gh auth done in the terminal is invisible to the agent
+User report (2026-10-12): "the terminal is not the same as the terminal that the agent do commands on, for
+example i installed gh cli and i authed with my account in the terminal, and i told the agent to check if
+i am authed or not, it said no not authed!"
+Intake: the user's Terminal screen (persistent `bash -i` via `moch/terminal.py`) and the agent's one-shot
+`exec_in_guest` are supposed to share ONE Moch Linux guest — same rootfs, same HOME, same PATH-relevant
+env. Something diverges (HOME, PATH, env sanitization, GH_* override, separate proot launch env) so state
+written from the terminal (gh auth → `~/.config/gh/hosts.yml`) is not what the agent's exec sees.
+Verification wave pending (read-only, scope: `app/python-runtime/moch/{terminal.py,linux_env.py,
+linux_session.py}`, `HermesRuntime.kt`/`HermesBridgeModule.kt` exec paths, hermes-src exec tool).
+
+**Verified (read-only adversarial agent, 2026-10-12): CONFIRM, worse than reported — the intake's
+"same HOME" assumption is FALSE.** Same proot rootfs, DIFFERENT $HOME: the Terminal's bash gets
+HOME=/root (terminal.py:159-161 sets it explicitly); the agent's guest shells inherit the Chaquopy
+process HOME=/data/user/0/<pkg>/files — a path that does NOT exist inside the guest rootfs (only
+workspace/scratch/dev/proc are bound). Terminal gh auth writes guest /root/.config/gh/hosts.yml; the
+agent's `gh auth status` reads /data/…/files/.config/gh/hosts.yml → ENOENT → "not logged in"
+(truthful). Chain: agent tool → environments/local.py:907-928 `_run_bash` → PATH-shim bash
+(hermes_boot.py:105-107) → HERMES_EXEC_TRAMPOLINE /system/bin/sh → _shim_body (linux_env.py:220-242,
+exports ONLY LD_LIBRARY_PATH/PROOT_LOADER/PROOT_TMP_DIR — never HOME/PATH) → `apply_subprocess_home_env`
+no-ops on Android host (hermes_constants.py:936-971). EVERY $HOME-relative class diverges: ~/.gitconfig,
+~/.ssh, ~/.netrc, ~/.aws, ~/.npmrc, ~/.config/*, ~/.cache…; agent-side $HOME writes inside the guest
+create a phantom /data tree (proot -0 fake-root allows it) — silent state forking in BOTH directions.
+Bridge `exec_in_guest` (linux_env.py:554-569) = a THIRD env (raw os.environ). linux_session.py has the
+correct env but ZERO production callers (dead code). GH_TOKEN override and not-in-guest hypotheses
+DISPROVEN. Open sub-question: the terminal's guest PATH works only by accident (lazy
+hermes_cli.gateway import appends /bin dirs to os.environ at runtime — unpinned by any test).
+Fix shape (choke point = the shim): `build_guest_launch` (linux_env.py:192-196) sets HOME=/root +
+prepends guest PATH; `_shim_body` exports the same; bump SHIM_FORMAT 5→6 so the existing repair gate
+(hermes_boot.py:91-104) rewrites installed shims; with HOME=/root the agent's login bash natively
+sources /root/.profile + /root/.bashrc ⇒ dotfile parity for free; pin with test_linux_exec.py
+assertions. Deferred (documented): user-terminal env leak (raw os.environ incl. session token into the
+PTY — the terminal is the leaky surface, agent scrubs), cwd divergence (/root vs workspace), rc-file
+semantics triple (terminal misses login exports), dead linux_session.py, bot profile homes unbound in
+guest, PAGER/TERM asymmetries.
+
+*(fixed in PR #123 — `build_guest_launch` + `_shim_body` now export `HOME=/root` and the guest PATH
+prefix (SHIM_FORMAT 6 repairs installed shims at next boot); terminal.py deduped; contract pinned in
+test_linux_exec.py. Full python battery 161 passed / 5 pre-existing skips, re-run by the Lead.
+python-runtime ships inside the APK — on-device check pending the user's next dev build: terminal
+`gh auth login` → agent `gh auth status` must report the same account; same for git config.)*
+
+## BUG-135 [MEDIUM] Links in agent responses and terminal output are dead text — must be tappable and open in the built-in browser in a new tab
+
+User report (2026-10-12): "the terminal/agent responses give me a link to open or something they should be
+clickable and open in the built-in browser in a new tab!"
+Intake: two surfaces render URLs as plain text today — chat message bubbles (`Chat.tsx`) and the xterm.js
+terminal WebView (`app/android/app/src/main/assets/term/index.html`). Both need URL detection + tap →
+open the URL as a NEW TAB in Moch's built-in Browser screen (not the OS browser). Verification wave
+pending (read-only scope: Chat.tsx message rendering + any existing link handling, term/index.html +
+`src/lib/terminal.ts` plumbing, Browser screen tab-open API).
+
+**Verified (read-only adversarial agent, 2026-10-12): CONFIRM, understated.** (a) Bare URLs are dead
+text everywhere: assistant text renders `@ronradtke/react-native-markdown-display` with NO
+`markdownit`/`onLinkPress` props (Chat.tsx:223, CommandOutput.tsx:195) and the lib ships linkify
+DISABLED (createMarkdownIt.ts:18-19) — zero autolink/Linking.openURL anywhere in src. (b) Markdown
+`[text](url)` links in completed text ARE tappable — but open the OS BROWSER (lib default
+openUrl.ts:14) — wrong target even where "working". (c) Terminal: bundled xterm has OSC-8 parsing +
+auto-registered OscLinkProvider but no `linkHandler` (default confirm()+window.open — both unhandled
+in the RN WebView) and NO web-links addon for bare URLs; worse, the WebView sits in a
+`pointerEvents:"box-only"` wrapper (terminal.tsx:385, BUG-100) so taps NEVER reach xterm — every tap
+re-focuses the hidden input. (d) NO path exists to open the Browser screen WITH a URL: no route
+params (browser.tsx has no useLocalSearchParams), `addTab` (browserRelay.ts:147, module-level
+nanostore — callable from anywhere, mounts the tab when the screen opens) is only called in-screen.
+Fix shape: `openInAppBrowserTab(url)` helper beside addTab + `router.navigate('/(tabs)/browser')`;
+Chat/CommandOutput get `markdownit = MarkdownIt({typographer,linkify})` (re-exported by the lib, zero
+new deps) + `onLinkPress` → helper, return false (kills OS-browser default); terminal: OSC-8
+`linkHandler` + inlined web-links UMD both `say({type:'link',url})` over the EXISTING postMessage
+channel, RN-side hit-test via the box-only wrapper's onTouchEnd → `window.__linkAt(x,y)` (px→cell via
+renderService dimensions, fit-addon precedent), `{type:'link'}` branch in handleWebMsg → helper;
+link-tap gesture must suppress the IME refocus. Adjacent dead-text surfaces noted: streaming tail
+(BUG-040 trade — leave), thinking text, ToolRow preview, CommandCard error/usage/notice, clarify
+question. Agent-side new-tab is BUG-136's root (relay 405).
+
+*(fixed in PR #125 (stacked on #124, merge that first) — one shared linkified MarkdownIt instance +
+onLinkPress→`openInAppBrowserTab` (addTab + navigate to the Browser screen, never the OS browser) on
+Chat + CommandOutput; the constructor is require-bound because the lib's CJS-with-JSX dist loses
+NAMED ESM bindings under tsx (the imports-gate stub now mirrors the real exports); terminal:
+`window.__linkAt(x,y)` hit-test over the existing postMessage channel + OSC-8 linkHandler seam +
+140 ms-deferred IME refocus arbitration (link taps open the Browser, other taps unchanged); pure
+matcher extracted+tested in lib/terminal.ts (18 new cases). Typecheck clean, 15/15 suites green
+(test:terminal 54/54, imports gate PASS, browser-relay 34/34). Chat links are JS/OTA-able; the
+terminal asset ships inside the APK — on-device check pending the next dev build.)*
+
+## BUG-136 [HIGH] Browser tab control tools fail with 405 — only the tab list works
+
+User report (2026-10-12): "the browser tab control tools don't work, they return 405 error, only the tab
+list that works!"
+Intake: PR #120 shipped tab management tools; the CDP relay (`CdpRelay.kt`) deliberately 405s
+`/json/new|close|activate` as "native-owned" and `browser_webview.py` is supposed to fall back to
+native/CDP paths — on device the agent still surfaces the 405 for every lifecycle op while `/json/list`
+works. Verify which link in the fallback chain is missing (relay endpoints unimplemented vs bridge tab
+ops unwired vs `Target.*` fallback impossible on WebView) and what the minimal working route is (tab ops
+must end at the RN/Kotlin tab owner). Scope: `app/hermes-src/tools/browser_webview.py`, tab-tool
+registration, `app/src/lib/browserRelay.ts`, `CdpRelay.kt`/`BrowserRelayModule.kt`, RN browser screen,
+`app/python-runtime/tests/test_browser_tab_tools.py`.
+
+**Verified (read-only adversarial agent, 2026-10-12): CONFIRMED, worse than reported.** The literal 405
+surfaces for `browser_tab_create`/`browser_tab_switch`; `browser_tab_close` fails EARLIER with a
+misleading "refusing to close the last remaining tab" (the relay's `/json/list` is filtered to exactly
+ONE tab, so the close-guard always fires) — and "only the list works" is itself generous: the list can
+only ever show the ACTIVE tab (1-tab fiction). Net: 3/4 tools fail, the 4th is degraded. Knowingly
+shipped: PR #120's message lists the Kotlin/RN endpoints as follow-ups; its 165 green tests ran against
+a SIMULATED relay/headless Chromium, never the real one (test_browser_tab_tools.py stubs
+`_webview_tab_targets`→3 tabs, `_relay_lifecycle`→200, `Target.*` fallbacks — all impossible on device).
+Mechanism: `CdpRelay.kt:210-212` 405s `/json/new|close|activate` by design; `browser_webview.py`'s
+`Target.*` fallbacks run over the "browser" ws which the relay tunnels to the ACTIVE PAGE's socket
+(`CdpRelay.kt:213-226`) — WebView has no browser-level target, so every fallback is impossible. MISSING
+WIRE: tabs are owned by RN nanostores (`browserRelay.ts:147-174` addTab/closeTab/switchTab +
+`(tabs)/browser.tsx:262-290` WebView pool) but NOTHING connects Python/Kotlin to them — no bridge
+methods, no DeviceEventEmitter listener (only ShareInModule emits). FEATURE-BROWSER.md:125-127 designed
+"tab switch via bridge call, not CDP" — never built. Fix shape: relay implements the three lifecycle
+endpoints via a `mochTabOp` DeviceEventEmitter round-trip (op+requestId, latch ~5s) acked by
+`browserRelay.ts` after driving the nanostores; needs a tabs⇔targets registry (targetId per BrowserTab;
+relay diffs upstream `/json/list` to answer `/json/new` with the new page's JSON); zero Python changes
+required (it already PUTs and parses 200s). Adjacent defects found: silent wrong-tab driving after any
+manual tab switch (supervisor stays pinned to the old page; resync only runs after a successful
+activate/close); AgentBrowserHost/browser.tsx active-URL last-writer-wins race; `chosenPageJson`
+first-page fallback on ambiguous/stale URL match; tab ids go stale after onRenderProcessGone remount;
+fixed port 9334 squattable (confusion/DoS only).
+
+*(fixed in PR #124 — the relay's three lifecycle endpoints now round-trip to the RN tab owner: one
+`mochTabOp` event {requestId, op, url/targetId} → 5 s latch ack via the new `tabOpAck` bridge method,
+open resolves the new DevTools target by diffing the unfiltered upstream list (≤3 s) and answers 200
+with the page JSON; honest 400/409/502/503/504 statuses; `GET /json/moch-tabs` (token-gated) exposes
+the FULL page list; browserRelay.ts applies ops to the nanostores (RN-side last-tab guard as defense
+in depth) and keeps a tabs⇔targets registry (self-healing after onRenderProcessGone); python
+tab_list prefers moch-tabs and skips the impossible Target.* fallbacks on the relay. 56/56 tab-tool
+tests, 34/34 relay tsx checks, typecheck clean, full sweep 15/15; Kotlin is source-level verification
+only (no Kotlin test infra) — on-device check pending the next dev build (new APK: Kotlin changed).
+PR #125 stacks on this branch.)*
+
 ## BUG-133 [HIGH] Keyboard opens over inputs app-wide — the input and everything at the bottom must rise ABOVE the keyboard
 
 User report (2026-10-12): "find all inputs/anything that will open the keyboard, and make sure when the
@@ -1217,3 +1388,106 @@ pending user's next dev build; JS-only, Metro reload is enough.)*
 
 Deferred: SessionToasts render under open sheet Modals (RNKC OverKeyboardView is the fix surface);
 chat pathological tall-stack overflow in clarify cards (flexShrink on s.sheet/s.runFooter).
+
+## M9 crew-loop slice (2026-10-12) — close the headline demo chain
+
+- [x] **BUG-137 [HIGH] M9 headline false: bots cannot spawn sub-bots — SpawnBotService has no tool door (M9.1a stage 3 never landed)** — `app/python-runtime/moch/spawn_bot.py:81` (service + tests only; zero registration in `hermes-src` tools/plugins, no wiring in `gateway_server.py` boot) — "bots create their own sub-bots" is a service without a caller — wire the stage-3 toolset wrapper (Moch-side, flag-gated, no vendored edit) + surface the first-spawn-of-day `approval-required` refusal through the existing approval card machinery. *(fixed in PR #122 — `moch/spawn_tool.py` registers onto the `delegation` toolset at boot (verified live: resolve_toolset includes it), approval card via `request_tool_approval`, parent-depth ancestry; 5 tests green — on-device check pending user's next dev build.)*
+- [x] **BUG-138 [HIGH] Crew board is read-only from the app — the "user puts work on the board" loop cannot close** — `app/app/(tabs)/crew.tsx:15` (write ops deferred), `app/python-runtime/moch/rpc_fleet.py:157` (`moch.kanban.tasks` is read-only) — bots have board tools but the user has no write surface — add `moch.kanban.create/assign/complete` RPCs + Crew screen buttons. *(fixed in PR #122 — create/assign/complete/block RPCs through kb mutators (assignee validated, frozen refused), db_path pinned at RPC entry (wrong-board race), dispatch poke + 60s heal ticker (`moch/kanban_dispatch.py` — nothing dispatched before), Crew create box + Complete/Reassign; 5 tests green — on-device check pending. Deferred: kanban knocks, block UI, breaker parity for synthetic pids.)*
+- [x] **BUG-139 [MEDIUM] Bot creation has no checklist — context/skills/model knobs exist at the RPC layer but are unreachable from the UI** — `app/src/lib/fleet.ts:101` (`createProfile` sends only name/description/soul), `hermes-src/tui_gateway/methods_profiles.py:366` (`clone_from`/`no_skills`/`model`/`provider` accepted but unused by the app) — new bots always start strangers with default skills — checklist UI ("ideas about me" = USER.md copy as a file, selective skills, model pin) + small selective-copy additions in `moch/rpc_fleet.py` (not vendored edits). *(fixed in PR #122 — `moch.profiles.seed` + `moch.skills.list`, checklist rows in the create box (USER.md default ON, MEMORY.md OFF, skill picker; persisted defaults; dst-exists/symlink guards), EN/AR; 3 tests green — on-device check pending. Deferred: model pin (needs a pick-only sheet; ModelPickerSheet applies config — wrong shape).)*
+## Security audit (C-items) — 2026-10-12 wave
+
+- [x] **C-06 / BH-000039 [LOW, security] WebView debugging enabled process-wide in release builds — resident agent WebView holds the browsing session** — `MainApplication.kt:71`, `AgentBrowserHost.tsx:53`, `BrowserRelayModule.kt:145` — *(resolved in PR #128 — verified NOT code-fixable: CdpRelay's upstream IS the DevTools abstract socket (`CdpRelay.kt:544-558`), a `BuildConfig.DEBUG` gate kills every browser tool in release (the PR #61 always-available-browser feature). Verified attack surface is narrow: abstract unix socket (no network path), `SO_PEERCRED` rejects other apps, relay TCP token-gated — the only real path is an adb-AUTHORIZED host (USB debugging + prior RSA trust). Posture documented in SECURITY.md (root) + in-code comment at the enable call; changing it needs a separate non-debuggable WebView profile for authenticated browsing — deferred as a product decision)*
+
+## Security audit fixes (2026-10-12) — C-04 / GitHub #94
+
+- [x] **C-04 / BH-000037 [HIGH→MEDIUM, security] Release builds silently fell back to the publicly tracked debug.keystore; keystore.properties was never gitignored** — build.gradle:140, plugins/with-android-release.js — *(fixed in PR #133 — release now fails fast without keystore.properties (plugin mirrored), debug signingConfig + tracked debug.keystore removed (AGP default auto-creates), keystore.properties gitignored; PUBLIC RELEASE IMPACT REFUTED: v1.0.0 APK verified signed by a different key (0598c942…); residual = local dev sideloads + future local-gradle releases, now blocked)*
+
+## BH bug-hunt wave (2026-10-12) — always-on runtime survival, GH #100
+
+- [x] **BH-000046 [HIGH] Always-on dataSync FGS has no onTimeout — 6h/24h Android 15+ cap crashes the runtime (and sticky-restart + swallowed ForegroundServiceStartNotAllowedException = silent death)** — AndroidManifest:39, HermesService.kt:124 — *(fixed in PR #134 — migrated to specialUse FGS (no 6h cap, honest type for an embedded runtime gateway) + onTimeout(int[,fgsType]) defense-in-depth (marker file, sleep notification, immediate stop) + BUG-129: Stop runtime now fully tears down; source-level only — on-device check pending next dev build)*
+  Implementation notes: `FOREGROUND_SERVICE_SPECIAL_USE` permission added (dataSync
+  permission kept for the API 29-33 `startForeground` branch); subtype property
+  `android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE=embedded_agent_runtime_gateway`.
+  Timeout defense: `onTimeout(startId)` (API 34+) + `onTimeout(startId, fgsType)`
+  — the latter is the **compileSdk 36 signature**: API 35's
+  `onTimeout(int, Service.StartArgToken)` was replaced by `onTimeout(int, int)`
+  in API 36 and `Service.StartArgToken` no longer resolves against the API 36
+  SDK (verified against `$ANDROID_HOME/platforms/android-36/android.jar` and
+  AOSP main `Service.java`; the briefed StartArgToken override would not
+  compile). Handler order, all in one callback: write
+  `files/Moch/logs/fgs-timeout.txt` (timestamp + startId + type, shared
+  `MochLogs` writer with the crash handler), build the "Mochi went to sleep —
+  Android's 6-hour background limit was reached; reopen the app to wake her"
+  notification (reuses buildNotification + Stop action, non-ongoing),
+  `stopForeground(STOP_FOREGROUND_REMOVE)` + `stopSelf()` immediately (the
+  system throws ForegroundServiceDidNotStopInTimeException if we linger), then
+  re-post the sleep notice via NotificationManager after the REMOVE (posting
+  before it would cancel the same id). Known residual: if the timeout fires
+  while the process stays alive, "reopen the app to wake her" needs a process
+  restart — MainApplication auto-start only runs on process creation; a
+  MainActivity.onResume restart hook is deliberately out of scope here.
+
+## BH bug-hunt wave (2026-10-12) — screens error surfaces, GH #64/#65/#66/#106/#107/#108/#112/#115
+
+- [x] **BH-000080 [MEDIUM] Fleet freeze/unfreeze swallows every failure — the row silently snaps back** — `app/app/(tabs)/fleet.tsx:120-128` (`toggleFreeze` try/finally with NO catch) — *(fixed in PR #137 — freeze-half fixed here (create-half was already fixed in #122/BUG-139): catch → localized `fleet.freeze.failed` alert with name+why, busy cleared in finally; on-device check pending)*
+- [x] **BH-000081 [MEDIUM] Bot detail Save/Delete failures vanish (unhandled rejections, stale UI state)** — `app/app/bot.tsx:64-74,103-114` (both handlers try/finally with NO catch) — *(fixed in PR #137 — catch → localized `bot.save.failed`/`bot.delete.failed` alerts with why; save failure clears the stale "saved" indicator, delete failure re-arms the wizard (confirmDelete=0); on-device check pending)*
+- [x] **BH-000082 [HIGH] Automations edit destroys long prompts — schedule-only edits rewrite the stored prompt to the truncated preview** — `app/app/(tabs)/automations.tsx:171-189` (prefill from `prompt_preview`, edit ALWAYS sends `--prompt`) + `hermes-src/tools/cronjob_job_args.py:377` (preview capped at 100 chars + literal "...") + `hermes-src/tools/cronjob_tools.py` (`update` overwrites the stored prompt whenever `--prompt` is present) — *(fixed in PR #137 — new vendored `cron.manage` action `get` (contract updated) returns the `_format_job` row + the FULL prompt; edit prefills from it, falls back to the preview + `automations.promptLoadFailed` banner when get fails; save omits `--prompt` unless the field was actually modified (dirty-check against the loaded prompt); tests/test_cron_get.py green; on-device check pending)*
+- [x] **BH-000086 [MEDIUM] Crew pull-to-refresh is wired to `loading`, and an offline mount spins forever with no banner** — `app/app/(tabs)/crew.tsx` (RefreshControl used `refreshing={loading}`; the offline early-return left `loading=true`) — *(fixed in PR #137 — dedicated `refreshing` state (automations pattern) set in onRefresh/cleared in the loader's tail; the offline early-return clears `loading` so from-mount offline renders the `crew.offline` banner over the last board instead of a stuck spinner; on-device check pending)*
+- [x] **BH-000089 [MEDIUM] Settings Linux install/reset rows are fire-and-forget — failures change nothing and say nothing** — `app/app/(tabs)/settings.tsx:62-78` (`linuxBootstrap().finally(...)` / bare `void linuxReset()`) — *(fixed in PR #137 — BUG-016 pattern ported from setup.tsx: async handlers honor the `{ok,steps}|null` result (`!r || r.ok === false` → error) and catch throws → localized `linux.install.failed`/`linux.reset.failed` alerts with why; busy cleared in finally; on-device check pending)*
+
+- [x] **C-04 / BH-000037 [HIGH→MEDIUM, security] Release builds silently fell back to the publicly tracked debug.keystore; keystore.properties was never gitignored** — build.gradle:140, plugins/with-android-release.js — *(fixed in PR #133 — release now fails fast without keystore.properties (plugin mirrored), debug signingConfig + tracked debug.keystore removed (AGP default auto-creates), keystore.properties gitignored; PUBLIC RELEASE IMPACT REFUTED: v1.0.0 APK verified signed by a different key (0598c942…); residual = local dev sideloads + future local-gradle releases, now blocked)*
+
+## Security audit (C-items) — relay wave, GH #91/#92/#93
+
+- [x] **C-01 / BH-000034 [MEDIUM, security] Relay treated knowledge of tokenHash as machine identity — no proof-of-possession at /control (state.json leak = machine-takeover + victim crash-loop lockout)** — relay/moch-relay-server.js:183-204 — *(fixed in PR #135 — registration that creates a credential or takes over a hash must discharge a verify challenge: relay sends {"t":"verify","nonce"} and the machine opens /tunnel/<nonce> with the raw token (sha256 proof) within the window; failure → close 4003, offline twin KEEPS its slot (no more eviction-based lockout). Returning (id, tokenHash) pairs reconnect hash-only — existing tunnels unaffected. state.json now 0600 in a 0700 dir (any-local-VPS-user read closed). DEFERRED: full sha256→HMAC(relaySecret,token) verifier migration — needs every machine to re-run install.sh + legacy grandfathering (protocol decision))* 
+- [x] **C-02 / BH-000035 [MEDIUM, security] Raw pairing token (and Expo push token) traveled in relay URL query strings on both legs — lands in reverse-proxy access logs; 'relay never sees the token' comments were false** — relay:308-312,377-381; gateway.ts:148-158; install.sh:222-223 — *(fixed in PR #135 — phone dial sends token+push as X-Hermes-Session-Token/X-Hermes-Push-Token upgrade HEADERS (never a URL); relay routes by header and re-injects ?token=&push= into the FORWARDED request line only (in-memory, on the tunnel leg) so old homes and moch-link's push capture keep working; phone falls back to legacy query once on refusal (old relays). Tunnel leg sends its key as X-Moch-Tunnel-Key header with ?key= 403-fallback for old relays. All lying comments/READMEs/docs corrected; nginx log-scrub snippet added to relay/README)*
+- [x] **C-03 / BH-000036 [MEDIUM, security] Relay registration open by default; unauthenticated /control sockets had no lifecycle cap; XFF first-entry trust voided the per-IP cap** — relay:61,268-287,433-435,273-279 — *(fixed in PR #135 — 10s register deadline (close 4001) + parked-socket caps (5/IP after last-entry XFF trust, 100 global; close 4002); /health keeps {"ok":true} public but machine/connection counts only behind the relay key (?key= or X-Moch-Relay-Key); --bind flag (default unchanged — direct-exposure self-hosters keep working, loopback-behind-nginx documented); OPEN REGISTRATION now logs a loud DEPRECATION banner with migration instructions (--open-registration opts out). DEFERRED: flipping require-key default to closed — hard-breaks every tunnel lacking --relay-key (crash-loop); one-release deprecation window instead, MOCH_LINK_RELAY_KEY plumbing already added to install.sh)*
+## BH wave (2026-10-12) — session-list honesty + pairing toast, GH #63/#75/#109/#111
+
+- [x] **BH-000083 [MEDIUM] Sticky pairing/deep-link toast — set on failure, never cleared, not even tap-dismissable** — `app/app/_layout.tsx:158/:242` (`setLinkMsg` on a bad link / the BUG-029 stale-tap notice), `:272-274/:357-359` (rendered on both root branches)
+  `linkMsg` was write-only state: nothing ever set it back to null. A bad pairing link (or a stale
+  notification tap) put a toast up that outlived every later successful pair, survived navigation,
+  and covered bottom-of-screen content indefinitely — with no tap target, since it rendered as a
+  passive `View`. PR #130's plaintext-confirm rewrite of the same handler left the catch path
+  untouched, so the residue persisted at HEAD.
+  *(fixed in PR #138 — every linkMsg change funnels through a pure `linkToast`
+  transition table (reset on a new deep link AND on successful connect, error with an empty-message
+  fallback), the toast auto-dismisses after ~7s (timeout cleaned up on change/unmount), and it is a
+  Pressable with a dismiss a11y role; the #130 plaintext-confirm gate in the same handler is
+  untouched — the new hunks wrap it)*
+- [x] **BH-000085 [LOW] Content-search rows all read "0 msgs" — the hit mapping drops `message_count` the server actually sends** — `app/app/(tabs)/sessions.tsx:131-139` (hit-row construction), `:316` (`item.message_count ?? 0` render) vs `hermes_cli/web_routers/sessions.py:348` (`message_count` IS in the rich-hit payload)
+  Every content-search hit rendered a lying "0 msgs" while the same conversation showed its real
+  count on the plain list row — the constructor copied `title`/`snippet`/`started_at`/`profile` but
+  silently dropped `message_count` (and `source`), and the render site coerced undefined to 0.
+  *(fixed in PR #138 — pure `searchHitToRow` keeps `message_count`/`source` when
+  present; absent counts render "— msgs" via `messageCountText` (never a fabricated 0), the same
+  decision the optimistic-row leg of BUG-074 now uses)*
+
+## Runtime survival + supply-chain wave (2026-10-12) — GH #69/#97/#98/#101/#102/#103/#104/#105
+
+- [x] **C-07 / BH-000040 [LOW, security] Executable bootstrap artifacts downloaded with no checksum pinning** — linux_env.py, moch-link/install.sh — *(fixed in PR #141 — pinned-SHA256 table for every runtime download (proot/libtalloc/libandroid-shmem .debs + both rootfs tarballs), streaming verify BEFORE write/extract, FAIL CLOSED on unpinned/mismatched URLs (no pin → no download; mismatch = deliberate tripwire, update pins consciously); debian-12 pin = the OCI layer digest the branch itself declares; install.sh side: qrcodegen.py vendored/pinned + `ws` npm pinned via lockfile + npm ci — see its entry)*
+- [x] **C-08 / BH-000041 [LOW, security] docs/install.sh (the publicly served copy) diverged from canonical moch-link/install.sh (~619 lines; lacked #135 relay hardening + the push proxy — fresh website installs spoke the old wire protocol and could not join a keyed relay)** — docs/install.sh — *(fixed in PR #141 — byte-identical regenerate + CANONICAL SOURCE sync note in both files + tests/test_docs_sync.py enforcing identity mechanically (PROJECT.md's "always cmp" made into a gate))*
+- [x] **BH-000047 [MEDIUM] HermesRuntime boot chain single-shot/single-try — any gateway failure silently disabled cron knocks for the process life** — HermesRuntime.kt:28, gateway_server.py:_run_server — *(fixed in PR #141 — supervised boot retry (bounded backoff) + start() re-invocable after error + cron knocks armed in their own try/catch BEFORE the gateway call; on-device check pending next dev build)*
+- [x] **BH-000048 [LOW] gateway_server never set _STATE['starting']=True — getGateway reported running=false during the entire cold boot (and a >90s-late port accept stuck false forever)** — gateway_server.py:33/334/356 — *(fixed in PR #141 — starting=True at boot entry + running self-heals via live port-accept probe; regression tests test_gateway_boot_state.py)*
+- [x] **BH-000050 [MEDIUM] Setup wizard offered Debian 12 against a dead rootfs URL (misspelled org; the in-file 'correct' URL is ALSO dead — dist branches ship only OCI layouts)** — linux_env.py:51-59 — *(fixed in PR #141 — debian-12 points at the OCI layer blob (gzip, verified 200 + sha256 = the branch's declared digest); extractor generalized from r:gz to r:*; stale comment replaced with the resolution chain + rotation note)*
+- [x] **BH-000051 [LOW] linux_session.run timeout desynchronized the persistent guest shell (stale sentinel/rc poisoned every later command — wrong stdout + misattributed exit codes, one-command-lag cascade)** — linux_session.py:81-148 — *(fixed in PR #141 — timeout kills + respawns the shell (mirrors the generic failure path) instead of returning into a poisoned stream; sentinel protocol extracted pure + regression tests test_linux_session.py with a plain-sh fake guest)*
+- [x] **BH-000055 [LOW] moch-link install.sh checked node/npm but never systemctl — died mid-install on hosts without a systemd user session (after writing a minted token + half the units)** — install.sh:334 — *(fixed in PR #141 — early systemctl + user-bus probe BEFORE any writes, remediation text (loginctl enable-linger), MOCH_LINK_NO_SYSTEMD=1 escape hatch that skips unit install and prints by-hand run commands; every systemctl failure routed through die() with context)*
+
+## Browser/relay resilience wave (2026-10-12) — GH #68/#71/#72/#99/#110/#116/#118
+
+- [x] **BH-000093 [HIGH] relay-failure dead-end on the Browser screen — the one-shot mount effect left an error branch with no retry** — app/(tabs)/browser.tsx:77-87,159,169-174 — *(fixed in PR #142 — Retry Pressable in the error branch re-runs the exact boot dance (setBooting(true) + ensureBrowserRelay(), the ScreenShell tap-to-retry pattern), AppState 'active' re-ensures when relayBad, EN/AR `browser.retry` string via tr(); on-device check pending next dev build)*
+- [x] **BH-000084 [MEDIUM] host WebView has no renderer-crash recovery — a killed renderer took the agent's DevTools page target away for the rest of the process** — AgentBrowserHost.tsx:50-65 — *(fixed in PR #142 — `onRenderProcessGone` bumps a renderKey that remounts the host WebView (the browser.tsx renderKeys pattern) + logs it; restores the DevTools target after an OOM kill/crash)*
+- [x] **BH-000091 [HIGH] host gives up permanently — booted ref latched pre-await, failure swallowed, ready never re-evaluated** — AgentBrowserHost.tsx:34-46 — *(fixed in PR #142 — bounded retry (5 attempts, 1s→16s exponential backoff, the JS mirror of the Kotlin gate-arm loop) + re-arm on AppState 'active' + SUBSCRIBES to relayStatus so a later relay boot (e.g. via the Browser screen) flips the host ready; the ref is now only a concurrency guard and failures are logged, not swallowed)*
+- [x] **BH-000045 [MEDIUM] in-process relay stop leaves the gate armed — tools stayed advertised against a relay that never answers ("No browser page…"), and relay.json still described a live relay** — CdpRelay.kt:154-159, browser_gate.py — *(fixed in PR #142 — bridge-reachable today (stopBrowserRelay → BrowserRelayModule.stop), fixed before any in-process stop ships: CdpRelay.stop() rewrites relay.json with pid:0 (stale by the pid gate; token kept per-install) AND closes live WS tunnels (closing the server socket never closed accepted ones); BrowserRelayModule.stop() calls moch.browser_gate.deactivate(port, token) when Python.isStarted() — the exact mirror of activate (BROWSER_CDP_URL/MOCH_BROWSER_RELAY cleared + both tool caches + live-session refresh, idempotent) — and a generation counter kills in-flight gate-arm retry loops; tests/test_browser_boot_gate.py extended with a deactivate class. Kotlin changes are symbol-level reviewed only (no compile infra in-repo) — on-device check pending next dev build)*
+
+## Test-infrastructure wave (2026-10-12) — GH #84/#85/#86/#87/#88/#89
+
+- [x] **BH-000026 / D-01 [MEDIUM] lint gate red at HEAD — rules-of-hooks on PairForm's use-prefixed plain handler (verify chain blocked since the eslint wiring landed)** — PairForm.tsx:165 — *(fixed in PR #143 — handler renamed pairThisPhone (2 sites, zero semantic change; the name predates the eslint wiring, not a hook violation — rename not disable); `npm run lint` 0 errors for the first time since Oct 8)*
+- [x] **BH-000027 / D-02 [HIGH] test:order mislabeled offline — dialed the LIVE gateway (passed only because a dev gateway ran) and tested a STALE mirror of sessionList (pinned the started_at sort BUG-012 deleted)** — scripts/test-session-order.ts — *(fixed in PR #143 — rewritten offline against the REAL module (lazy gateway/fleet imports), 33 checks incl. the no-resort contract, last-active cap/bump, corrupt-storage tolerance, concurrent-load dedup, generation guard; zero network)*
+- [x] **BH-000028 / D-03 [HIGH] 16 of 32 src/lib modules had zero test coverage** — *(partially fixed in PR #143 — gateway pure helpers extracted (dialTransport) + suite (14 checks); push.ts lazy-imported + suite (23 checks); sessionList now covered via the order rewrite; mediaSend/mediaCache deliberately deferred (L effort/low value — pure helpers already covered via media.ts))* 
+- [x] **BH-000029 / D-04 [HIGH] BUG-132 native fixes had no coverage** — *(partially fixed in PR #143 — browser_gate.activate() idempotency contract pinned in the boot-gate suite; the Kotlin 120x1s retry loop is honestly NOT offline-testable (no Kotlin test infra) — device/logcat verification stays the record)*
+- [x] **BH-000031 / D-06 [LOW] BUG-102/103 fixes had no regression tests** — *(fixed in PR #143 — stick-to-bottom/follow policy extracted pure (src/lib/chatScroll.ts) + suite (16 checks); chip PLACEMENT stays device-verified (markup, no component-test infra))* 
+- [x] **BH-000030 / D-05 [MEDIUM] test_rpc_fleet 7/7 skipped on missing dotenv** — test_rpc_fleet.py — *(fixed in PR #143 — fake tui_gateway.server module fallback (process-lifetime stub, real-server path kept under the venv): 7/7 RUN green on bare python3; fake mode pins method logic + result shapes, NOT server dispatch — documented in-file)*
+## Misc wave (2026-10-12) — GH #73
+
+- [x] **BUG-128 / BH-000014 [LOW] data: URLs refused with the wrong reason (_url_policy_error fell through to _is_safe_url's scheme floor, reporting "private or internal address" for what is an unsupported scheme)** — browser_tool.py:_url_policy_error — *(fixed in PR #144 — explicit non-navigable-scheme floor FIRST: "Blocked: <scheme>: URLs are not supported by the browser tools (only http/https are navigable)" — honest + actionable; the private-address floor is unchanged for real private hosts)*

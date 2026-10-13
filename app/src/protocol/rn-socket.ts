@@ -5,6 +5,14 @@
 
 type Listener = (ev: any) => void
 
+/** Extra dial options. RN's WebSocket accepts `{ headers }` as a third
+ *  constructor argument and puts them on the HTTP upgrade request (works on
+ *  Android/iOS); the DOM typings and plain-node/browsers don't know the
+ *  argument and simply ignore it, so passing it is always safe. */
+export interface RnSocketDialOptions {
+  headers?: Record<string, string>
+}
+
 export class RnWebSocketAdapter {
   get CONNECTING() { return 0 }
   get OPEN() { return 1 }
@@ -16,8 +24,12 @@ export class RnWebSocketAdapter {
   private ws: WebSocket
   private listeners = new Map<string, Set<{ fn: Listener; once: boolean }>>()
 
-  constructor(url: string, protocols?: string | string[]) {
-    this.ws = new WebSocket(url, protocols as any)
+  constructor(url: string, protocols?: string | string[], options?: RnSocketDialOptions) {
+    // Cast: the ambient WebSocket typings (DOM/undici) stop at (url, protocols).
+    const Ctor = WebSocket as unknown as
+      new (url: string, protocols?: string | string[], options?: RnSocketDialOptions) => WebSocket
+    const hasHeaders = !!options?.headers && Object.keys(options.headers).length > 0
+    this.ws = hasHeaders ? new Ctor(url, protocols, options) : new Ctor(url, protocols)
     this.ws.onopen = () => { this.readyState = 1; this.emit('open', {}) }
     this.ws.onmessage = (m: any) => this.emit('message', m)
     this.ws.onerror = (e: any) => this.emit('error', e)

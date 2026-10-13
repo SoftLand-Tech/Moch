@@ -369,6 +369,24 @@ export async function fetchReasoningPrefs(sessionId?: string | null): Promise<Re
 export type ReasoningScope = 'session' | 'global'
 
 /**
+ * The live id a scoped write may target — or null when `sid` is a
+ * provisional (unsent) new-chat window (BH-000088). The window's
+ * `pending:new:…` temp key and `new:…` pseudo stored id name sessions the
+ * gateway does not hold: config.set's setters treat a sessionless scoped
+ * write as SESSIONLESS and persist the PROFILE-wide default (and a hardened
+ * server answers 4001), so those ids must never reach the wire. Callers
+ * either pass null through (a global write needs no session) or create the
+ * chat on demand first (ensureSession's default). Pure on purpose: the wire
+ * frames this gates are pinned in scripts/test-interactive.ts.
+ */
+export function liveWriteSid(
+  sid: string | null | undefined,
+  entry?: { provisional?: boolean } | null,
+): string | null {
+  return sid && !entry?.provisional ? sid : null
+}
+
+/**
  * Apply a thinking level. `global` persists it as the profile default in
  * config.yaml (and updates the live session so it takes effect now); `session`
  * pins only this conversation. 'none' turns thinking off in either scope.
@@ -379,6 +397,14 @@ export async function applyReasoning(params: {
   sessionId?: string | null
 }): Promise<{ value: string }> {
   const { rpc } = await gw()
+  // BH-000088: a session-scoped write with no session id is a GLOBAL write
+  // server-side (_set_reasoning escalates session-None to the profile
+  // default) — refuse it here so no caller can silently rewrite the
+  // everywhere default while reporting a per-chat pick. Callers create the
+  // chat first (ensureSession) or pass scope 'global' explicitly.
+  if (params.scope === 'session' && !params.sessionId) {
+    throw new Error('Session-scoped reasoning pick needs a live chat — create the session first')
+  }
   const res = await rpc<{ key: string; value?: string | null }>('config.set', {
     key: 'reasoning',
     value: params.value,
