@@ -65,8 +65,12 @@ chat). Subsequent runs go straight in. Everything lives in
 | 1 | Mocheme design system (tokens from theme.ts), chat rebuilt to the phone's identity |
 | 2 | Markdown rendering (GFM + sanitize; code cards, accentSoft inline code) |
 | 3 | Real session rows (server order BUG-012, profile fan-out BUG-112, relative time, counts) |
-| 4 | Bots tab to phone parity (builder agent) + SIGTERM runtime cleanup |
-| next | Crew/Automations/Skills/Models polish, chat extras (interrupt, title) |
+| 4 | Bots tab to phone parity (builder agent; confirm:true delete, seed checklist) + SIGTERM runtime cleanup |
+| 5 | Crew (columns, correct complete {task_id,summary}, run ledger), Automations (run-now, edit + #108 guard), Skills (searchable catalog), Models (key forms, reasoning efforts), Run (latency ping) |
+| 5b | WS reconnect supervisor (backoff + silent-drop detection) |
+| 6 | Per-bot chat switcher (session.create {profile, follow_profile_config}) |
+| 7 | Markdown in task bodies/prompts; dead-CSS prune |
+| build | Release profile verified live: 4.4MB binary + moch-desktop.sh launcher |
 
 ## Known limits
 
