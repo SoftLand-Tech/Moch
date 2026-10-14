@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { View, Text, FlatList, StyleSheet, Pressable, TextInput, ActivityIndicator } from 'react-native'
+import { View, Text, FlatList, StyleSheet, Pressable, TextInput, ActivityIndicator, Image } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
@@ -28,6 +28,8 @@ import {
 } from '../../src/lib/fleet'
 import { isConnected } from '../../src/lib/gateway'
 import { tr, isRTL } from '../../src/lib/strings'
+import { avatarIndexFor } from '../../src/lib/botRoster'
+import { BOT_AVATARS } from '../../src/lib/botAvatars'
 import { showAlert } from '../../src/components/AlertDialog'
 
 /** §2.7 starter templates: tappable job seeds — zero typing path. */
@@ -203,11 +205,26 @@ export default function Fleet() {
                   onPress={() => router.push({ pathname: '/bot', params: { name: item.name } } as never)}
                 >
                   <View style={s.cardHead}>
-                    <Ionicons
-                      name={frozen ? 'snow-outline' : 'person-circle-outline'}
-                      size={26}
-                      color={frozen ? C.accent : C.textDim}
-                    />
+                    {/* UI-009: the mochi-children face replaces the generic
+                        person icon — same assignment as the drawer roster. */}
+                    {(() => {
+                      const isDefaultBot = ['default', 'moch'].includes(item.name.trim().toLowerCase())
+                      const face = isDefaultBot
+                        ? require('../../assets/mochi-run-1.png')
+                        : (() => { const ix = avatarIndexFor(item.name, BOT_AVATARS.length); return ix >= 0 ? BOT_AVATARS[ix] : null })()
+                      return face ? (
+                        <View>
+                          <Image source={face} style={s.cardAvatar} />
+                          {frozen ? <Ionicons name="snow-outline" size={13} color={C.accent} style={s.cardAvatarBadge} /> : null}
+                        </View>
+                      ) : (
+                        <Ionicons
+                          name={frozen ? 'snow-outline' : 'person-circle-outline'}
+                          size={26}
+                          color={frozen ? C.accent : C.textDim}
+                        />
+                      )
+                    })()}
                     <View style={s.cardTitles}>
                       <Text style={s.cardName}>{item.name}</Text>
                       {!!item.description && (
@@ -408,6 +425,8 @@ const makeS = () =>
       padding: 14,
     },
     cardHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    cardAvatar: { width: 30, height: 30, resizeMode: 'contain' },
+    cardAvatarBadge: { position: 'absolute', right: -3, bottom: -3 },
     cardTitles: { flex: 1 },
     cardName: { color: C.text, fontSize: 15, fontWeight: '600' },
     cardDesc: { color: C.textDim, fontSize: 12, marginTop: 2 },

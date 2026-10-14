@@ -3,21 +3,27 @@
  * helper faces. Static requires (Metro bundles exactly these); bots map to
  * one deterministically via botRoster's avatarIndex, so a bot keeps the same
  * face across launches, themes and surfaces.
+ *
+ * DELIBERATELY shaped like the proven mochi-run assets: 8-bit PNGs at the
+ * assets ROOT, requires at component-visible module scope. The first cut
+ * (16-bit PNGs in an assets/bots/ subdirectory, required from a lib file)
+ * shipped blank on-device — root-level 8-bit is the pattern the app already
+ * renders reliably (MOCHI_RUN, logo), so the set conforms to it.
  */
 export const BOT_AVATARS: import('react-native').ImageSourcePropType[] = [
-  require('../../assets/bots/01-moko.png'),
-  require('../../assets/bots/02-mocha.png'),
-  require('../../assets/bots/03-moshi.png'),
-  require('../../assets/bots/04-mochu.png'),
-  require('../../assets/bots/05-moro.png'),
-  require('../../assets/bots/06-mori.png'),
-  require('../../assets/bots/07-momo.png'),
-  require('../../assets/bots/08-chibi.png'),
-  require('../../assets/bots/09-mopo.png'),
-  require('../../assets/bots/10-morin.png'),
-  require('../../assets/bots/11-molu.png'),
-  require('../../assets/bots/12-chiko.png'),
-  require('../../assets/bots/13-molo.png'),
-  require('../../assets/bots/14-mogo.png'),
-  require('../../assets/bots/15-mobi.png'),
+  require('../../assets/bot-face-01.png'),
+  require('../../assets/bot-face-02.png'),
+  require('../../assets/bot-face-03.png'),
+  require('../../assets/bot-face-04.png'),
+  require('../../assets/bot-face-05.png'),
+  require('../../assets/bot-face-06.png'),
+  require('../../assets/bot-face-07.png'),
+  require('../../assets/bot-face-08.png'),
+  require('../../assets/bot-face-09.png'),
+  require('../../assets/bot-face-10.png'),
+  require('../../assets/bot-face-11.png'),
+  require('../../assets/bot-face-12.png'),
+  require('../../assets/bot-face-13.png'),
+  require('../../assets/bot-face-14.png'),
+  require('../../assets/bot-face-15.png'),
 ]

@@ -32,6 +32,11 @@ export function colorIndexFor(name: string): number {
   return stableHash(name) % 4
 }
 
+/** Stable face assignment for a bot given the avatar set size (UI-009). */
+export function avatarIndexFor(name: string, avatarCount: number): number {
+  return avatarCount > 0 ? stableHash(name) % avatarCount : -1
+}
+
 function stableHash(name: string): number {
   let h = 0
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
