@@ -198,14 +198,15 @@ fn content_type(path: &Path) -> &'static str {
     }
 }
 
-/// Serve web-ui/ + /moch-config.json + POST /dbg on a loopback port.
-fn start_static_server(cfg: serde_json::Value) -> u16 {
+/// Serve the EMBEDDED web-ui (compile-time assets) + /moch-config.json +
+/// POST /dbg on a loopback port — the bundles no longer depend on the
+/// repo's web-ui/ directory.
+fn start_static_server(cfg: serde_json::Value, assets: Box<dyn tauri::Assets<tauri::Wry>>) -> u16 {
     let server = tiny_http::Server::http("127.0.0.1:0").expect("static server bind");
     let port = match server.server_addr() {
         tiny_http::ListenAddr::IP(addr) => addr.port(),
         _ => 0,
     };
-    let webui = desktop_dir().join("web-ui");
 
     std::thread::spawn(move || {
         for mut request in server.incoming_requests() {
@@ -254,16 +255,13 @@ fn start_static_server(cfg: serde_json::Value) -> u16 {
             }
 
             if method == Method::Get {
-                let rel = path.trim_start_matches('/');
-                let file = if rel.is_empty() {
-                    webui.join("index.html")
-                } else {
-                    let f = webui.join(rel);
-                    // path traversal guard
-                    if f.starts_with(&webui) { f } else { webui.join("index.html") }
-                };
-                if let Ok(bytes) = std::fs::read(&file) {
-                    let ct = content_type(&file);
+                // Embedded assets (path traversal is moot: map lookup only).
+                let rel = path.trim_start_matches('/').to_string();
+                let key: &str = if rel.is_empty() { "index.html" } else { &rel };
+                let ik = key.into();
+                let bytes = assets.get(&ik).or_else(|| assets.get(&"index.html".into())).map(|b| b.into_owned());
+                if let Some(bytes) = bytes {
+                    let ct = content_type(std::path::Path::new(key));
                     let _ = request.respond(
                         Response::from_data(bytes).with_header(
                             tiny_http::Header::from_bytes(&b"Content-Type"[..], ct.as_bytes()).unwrap(),
@@ -311,8 +309,19 @@ pub fn run() {
         "wsUrl": ws_url, "token": token, "mode": mode,
         "home": home, "logTail": log_tail,
     });
-    let port = start_static_server(cfg);
-    eprintln!("moch: static server on {port}");
+    let mut ctx = tauri::generate_context!();
+    // The shell serves the UI itself (loopback origin for hermes' guard),
+    // so tauri's own asset serving is never used — swap in a null provider
+    // and move the embedded assets into our static server.
+    struct NullAssets;
+    impl tauri::Assets<tauri::Wry> for NullAssets {
+      fn get(&self, _k: &tauri::utils::assets::AssetKey) -> Option<std::borrow::Cow<'_, [u8]>> { None }
+      fn iter(&self) -> Box<tauri::utils::assets::AssetsIter<'_>> { Box::new(std::iter::empty()) }
+      fn csp_hashes(&self, _p: &tauri::utils::assets::AssetKey) -> Box<dyn std::iter::Iterator<Item = tauri::utils::assets::CspHash<'_>> + '_> { Box::new(std::iter::empty()) }
+    }
+    let assets = std::mem::replace(&mut ctx.assets, Box::new(NullAssets));
+    let port = start_static_server(cfg, assets);
+    eprintln!("moch: static server on {port} (embedded UI)");
 
     let selftest = std::env::var("MOCH_SELFTEST").ok().as_deref() == Some("1");
     let url = url::Url::parse(&format!(
@@ -345,7 +354,7 @@ pub fn run() {
             eprintln!("moch: window built");
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(ctx)
         .expect("error while building tauri application");
 
     app.run(|_app, event| {
