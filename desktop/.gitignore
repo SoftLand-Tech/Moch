@@ -16,3 +16,5 @@ ui/node_modules/
 .hermes-serve.log
 runtime-home/
 .setup.json
+.chrome-profile/
+.probe.cjs
