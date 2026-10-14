@@ -321,6 +321,18 @@ pub fn run() {
     ))
     .expect("window url");
 
+    // Kill the supervised runtime on SIGTERM/SIGINT too — RunEvent::Exit
+    // only fires on a clean loop exit, so signals used to orphan the
+    // python child (which kept port 9118 bound).
+    let _ = ctrlc::set_handler({
+        move || {
+            if let Some(mut child) = hermes_child().lock().unwrap().take() {
+                let _ = child.kill();
+            }
+            std::process::exit(0);
+        }
+    });
+
     let app = tauri::Builder::default()
         .setup(move |app| {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
