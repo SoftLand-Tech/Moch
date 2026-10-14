@@ -108,7 +108,7 @@ fn start_fork() -> Result<(String, String, &'static str), String> {
         .arg(&runner)
         .env("MOCH_FORK_SRC", &fork)
         .env("MOCH_RUNTIME_PKGS", root.join("app/python-runtime"))
-        .env("MOCH_GATEWAY_PORT", HERMES_PORT.to_string())
+        .env("MOCH_GATEWAY_PORT", std::env::var("MOCH_PORT").unwrap_or_else(|_| HERMES_PORT.to_string()))
         .env("HERMES_HOME", &home)
         .current_dir(&fork)
         .stdout(Stdio::piped())
