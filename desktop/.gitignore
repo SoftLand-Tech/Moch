@@ -1,0 +1,12 @@
+node_modules/
+web/
+src-tauri/target/
+src-tauri/gen/
+.npm-cache/
+.cargo-home/
+.xdg/
+.tauri-run.log
+.proof-shot*.png
+.win-crop.png
+.clients.json
+.win-geometry
