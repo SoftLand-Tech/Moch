@@ -25,6 +25,7 @@ export default function App() {
   const [cfg, setCfg] = useState<Cfg | null>(null)
   const [conn, setConn] = useState<'connecting' | 'open' | 'error'>('connecting')
   const [tab, setTab] = useState<Tab>('chat')
+  const [chatProfile, setChatProfile] = useState('')
   const [setupDone, setSetupDone] = useState<boolean | null>(null)
   const clientRef = useRef<JsonRpcGatewayClient | null>(null)
   const rpcRef = useRef<((m: string, p?: any) => Promise<any>) | null>(null)
@@ -165,8 +166,8 @@ export default function App() {
           <div className="empty"><div className="mochi">(●ᴗ●)</div><p>connecting to your local agent…</p></div>
         ) : (
           <>
-            {tab === 'chat' && <ChatTab rpc={rpcRef} client={client} />}
-            {tab === 'bots' && <BotsTab rpc={rpcRef} />}
+            {tab === 'chat' && <ChatTab rpc={rpcRef} client={client} profile={chatProfile} onProfile={setChatProfile} />}
+            {tab === 'bots' && <BotsTab rpc={rpcRef} onChat={(name) => { setChatProfile(name); setTab('chat') }} />}
             {tab === 'crew' && <CrewTab rpc={rpcRef} />}
             {tab === 'automations' && <AutomationsTab rpc={rpcRef} />}
             {tab === 'skills' && <SkillsTab rpc={rpcRef} />}

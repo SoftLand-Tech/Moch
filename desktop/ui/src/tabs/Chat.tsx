@@ -4,13 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import Markdown from '../Markdown'
 import { ev, relTime, type Block, type RpcRef, type SessionRow } from '../types'
 
-export default function ChatTab({ rpc, client }: { rpc: RpcRef; client: any }) {
+export default function ChatTab({ rpc, client, profile, onProfile }: { rpc: RpcRef; client: any; profile: string; onProfile: (p: string) => void }) {
   const [sessions, setSessions] = useState<SessionRow[]>([])
   const [activeSid, setActiveSid] = useState('')
   const [blocks, setBlocks] = useState<Record<string, Block[]>>({})
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [panel, setPanel] = useState(true)
+  const [roster, setRoster] = useState<string[]>([])
   const blockId = useRef(1)
   const blocksRef = useRef(blocks); blocksRef.current = blocks
   const activeRef = useRef(activeSid); activeRef.current = activeSid
@@ -56,25 +57,38 @@ export default function ChatTab({ rpc, client }: { rpc: RpcRef; client: any }) {
   /** session.list → panel rows (shape per sessionRowMeta.ts: id is the durable
    *  key session.resume takes). Round 3 called this but never defined it —
    *  defined here during the round 4 move so gateway.ready populates the panel. */
-  const loadSessions = useCallback(async () => {
+  const loadSessions = useCallback(async (prof: string) => {
     const r = rpc.current; if (!r) return
     try {
-      const res = await r('session.list', { limit: 200 })
+      const res = await r('session.list', prof && prof !== 'default' ? { limit: 200, profile: prof } : { limit: 200 })
       const rows: SessionRow[] = Array.isArray(res) ? res : res.sessions ?? res.items ?? []
       setSessions(rows.filter((s) => s.id ?? s.stored_session_id ?? s.session_id))
     } catch { /* panel keeps whatever it had */ }
   }, [])
+  const loadRoster = useCallback(async () => {
+    const r = rpc.current; if (!r) return
+    try {
+      const res = await r('profiles.list', {})
+      const rows = res.profiles ?? res.items ?? []
+      setRoster(rows.map((p: { name: string }) => p.name).filter((n: string) => n && n !== 'default'))
+    } catch { }
+  }, [])
 
+  const profRef = useRef(profile); profRef.current = profile
   useEffect(() => {
     if (!client) return
-    void loadSessions()
+    void loadSessions(profRef.current)
+    void loadRoster()
     const un = client.onAny((e: unknown) => {
       const { type } = ev(e)
-      if (type === 'gateway.ready') void loadSessions()
+      if (type === 'gateway.ready') { void loadSessions(profRef.current); void loadRoster() }
       applyEvent(e)
     })
     return un
-  }, [client, applyEvent, loadSessions])
+  }, [client, applyEvent, loadSessions, loadRoster])
+
+  // Switching profile swaps the board: clear the open chat + reload the list.
+  useEffect(() => { setActiveSid(''); void loadSessions(profile) }, [profile])
 
   const send = async () => {
     const text = draft.trim(); if (!text || busy) return
@@ -82,9 +96,10 @@ export default function ChatTab({ rpc, client }: { rpc: RpcRef; client: any }) {
     try {
       let sid = activeRef.current
       if (!sid) {
-        const cr = await r('session.create', { title: 'Desktop chat', cols: 120, source: 'mobile' })
+        const prof = profile && profile !== 'default' ? profile : undefined
+        const cr = await r('session.create', { title: prof ? `${prof} · chat` : 'Desktop chat', cols: 120, source: 'mobile', ...(prof ? { profile: prof, follow_profile_config: true } : {}) })
         sid = cr.session_id; setBlocks((p) => ({ ...p, [sid]: [] })); setActiveSid(sid)
-        setSessions((p) => [{ session_id: sid, title: 'Desktop chat', started_at: Date.now() / 1000 }, ...p])
+        setSessions((p) => [{ session_id: sid, title: prof ? `${prof} · chat` : 'Desktop chat', started_at: Date.now() / 1000, profile: prof }, ...p])
       }
       pushBlock(sid, { kind: 'user', text })
       await r('prompt.submit', { session_id: sid, text })
@@ -96,7 +111,13 @@ export default function ChatTab({ rpc, client }: { rpc: RpcRef; client: any }) {
     <div className="chatwrap">
       {panel && (
         <div className="sessions-panel">
-          <button className="new-chat" onClick={() => { setActiveSid(''); setDraft('') }}>+ New chat</button>
+          <button className="new-chat" onClick={() => { setActiveSid(''); setDraft('') }}>+ New chat{profile && profile !== 'default' ? ` · ${profile}` : ''}</button>
+          <div className="pchips">
+            <button className={`pchip ${!profile || profile === 'default' ? 'on' : ''}`} onClick={() => onProfile('')}>Moch</button>
+            {roster.map((n) => (
+              <button key={n} className={`pchip ${profile === n ? 'on' : ''}`} onClick={() => onProfile(n)}>{n}</button>
+            ))}
+          </div>
           <div className="sessions">
             {sessions.map((s) => {
               const key = s.id ?? s.stored_session_id ?? s.session_id ?? ''
@@ -124,7 +145,7 @@ export default function ChatTab({ rpc, client }: { rpc: RpcRef; client: any }) {
       )}
       <div className="chat">
         <div className="messages">
-          {list.length === 0 && <div className="empty"><div className="mochi">(●ᴗ●)</div><p>Your agent, on this machine.</p></div>}
+          {list.length === 0 && <div className="empty"><div className="mochi">(●ᴗ●)</div><p>{profile && profile !== 'default' ? `Talking to ${profile}.` : 'Your agent, on this machine.'}</p></div>}
           {list.map((b) =>
             b.kind === 'user' ? <div key={b.id} className="msg user">{b.text}</div>
             : b.kind === 'assistant' ? (

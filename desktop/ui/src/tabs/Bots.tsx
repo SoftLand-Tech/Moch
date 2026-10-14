@@ -63,7 +63,7 @@ function saveCreateDefaults(c: CreateChecklist): void {
   try { localStorage.setItem(CREATE_DEFAULTS_KEY, JSON.stringify(c)) } catch { /* best-effort */ }
 }
 
-export default function BotsTab({ rpc }: { rpc: RpcRef }) {
+export default function BotsTab({ rpc, onChat }: { rpc: RpcRef; onChat: (name: string) => void }) {
   const [profiles, setProfiles] = useState<FleetProfile[]>([])
   const [status, setStatus] = useState<FleetStatus | null>(null)
   const [err, setErr] = useState('')
@@ -286,6 +286,10 @@ export default function BotsTab({ rpc }: { rpc: RpcRef }) {
               {gateHeld && <span className="pill warn">gate held</span>}
               {p.model?.default && <span className="pill dim">{p.model.default}</span>}
               <span className="spacer" />
+              <button className="ghost" disabled={!!busy || frozen}
+                onClick={() => onChat(p.name)}>
+                chat
+              </button>
               <button className="ghost" disabled={isBusy || !!busy}
                 onClick={() => toggleFreeze(p, !frozen)}>
                 {isBusy ? '…' : frozen ? 'unfreeze' : 'freeze'}
