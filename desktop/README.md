@@ -72,6 +72,19 @@ chat). Subsequent runs go straight in. Everything lives in
 | 7 | Markdown in task bodies/prompts; dead-CSS prune |
 | build | Release profile verified live: 4.4MB binary + moch-desktop.sh launcher |
 
+## Bundles (built)
+
+```
+desktop/src-tauri/target/release/bundle/
+  deb/Moch_0.2.0_amd64.deb        1.93 MiB  ← the lightweight installable
+  appimage/Moch_0.2.0_amd64.AppImage  97 MiB
+```
+
+NOTE: the bundles contain the SHELL only. The runtime (python + the
+hermes fork via runtime.py) and web-ui/ resolve from the repo checkout
+at launch — run them from this worktree until standalone packaging
+(embedded assets + runtime) lands.
+
 ## Known limits
 
 - Voice/media not wired (protocol exists; UI later). Automations
