@@ -10,6 +10,7 @@ export default function ChatTab({ rpc, client, profile, onProfile }: { rpc: RpcR
   const [blocks, setBlocks] = useState<Record<string, Block[]>>({})
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
+  const [turnMochi, setTurnMochi] = useState<'' | 'listening' | 'celebration'>('')
   const [panel, setPanel] = useState(true)
   const [roster, setRoster] = useState<string[]>([])
   const blockId = useRef(1)
@@ -30,7 +31,7 @@ export default function ChatTab({ rpc, client, profile, onProfile }: { rpc: RpcR
     if (!sid) return
     const last = (pred: (b: Block) => boolean) => (blocksRef.current[sid] ?? []).findLast(pred)
     switch (type) {
-      case 'message.start': pushBlock(sid, { kind: 'assistant', text: '', live: true }); break
+      case 'message.start': pushBlock(sid, { kind: 'assistant', text: '', live: true }); setTurnMochi('listening'); break
       case 'message.delta': case 'message.interim': {
         const text = String(p?.text ?? p?.delta ?? ''); if (!text) break
         const t = last((b) => b.kind === 'assistant' && b.live)
@@ -40,7 +41,7 @@ export default function ChatTab({ rpc, client, profile, onProfile }: { rpc: RpcR
       }
       case 'message.complete':
         patchBlock(sid, (b) => b.kind === 'assistant' && b.live, (b: Block) => ({ live: false, text: p?.text != null ? String(p.text) : b.text }))
-        setBusy(false); break
+        setBusy(false); setTurnMochi('celebration'); setTimeout(() => setTurnMochi(''), 2600); break
       case 'thinking.delta': {
         const text = String(p?.text ?? p?.delta ?? ''); if (!text) break
         const t = last((b) => b.kind === 'thinking' && b.live)
@@ -161,6 +162,10 @@ export default function ChatTab({ rpc, client, profile, onProfile }: { rpc: RpcR
           )}
         </div>
         <div className="composer">
+          {turnMochi && (
+            <img className={`turnchip${turnMochi === 'celebration' ? ' celebrate' : ''}`}
+              src={turnMochi === 'celebration' ? '/brand/mochi-celebration.svg' : '/brand/mochi-listening.svg'} alt="" />
+          )}
           <textarea value={draft} placeholder="Message your agent…" onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
           <button className="send" onClick={send} disabled={!draft.trim() || busy}>{busy ? '…' : 'Send'}</button>
