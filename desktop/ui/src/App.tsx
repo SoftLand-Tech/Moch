@@ -11,6 +11,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { JsonRpcGatewayClient } from '../../../app/src/protocol/json-rpc-gateway'
+import Markdown from './Markdown'
 
 type Cfg = { wsUrl: string; token: string; mode: string; home?: string; logTail?: string }
 type Tab = 'chat' | 'bots' | 'crew' | 'automations' | 'skills' | 'models' | 'run'
@@ -343,7 +344,11 @@ function ChatTab({ rpc, client }: { rpc: RpcRef; client: any }) {
           {list.length === 0 && <div className="empty"><div className="mochi">(●ᴗ●)</div><p>Your agent, on this machine.</p></div>}
           {list.map((b) =>
             b.kind === 'user' ? <div key={b.id} className="msg user">{b.text}</div>
-            : b.kind === 'assistant' ? <div key={b.id} className={`msg assistant${b.live ? ' live' : ''}`}>{b.text || (b.live ? '▍' : '')}</div>
+            : b.kind === 'assistant' ? (
+              <div key={b.id} className={`msg assistant${b.live ? ' live' : ''}`}>
+                {b.live ? (b.text || '▍') : (b.text ? <Markdown text={b.text} /> : null)}
+              </div>
+            )
             : b.kind === 'thinking' ? (
               <details key={b.id} className="thinking"><summary>Thinking{b.live ? '…' : ''}</summary><pre>{b.text}</pre></details>
             ) : b.kind === 'tool' ? (

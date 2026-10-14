@@ -310,3 +310,45 @@ body {
   border-radius: 12px; padding: 12px; max-height: 170px; overflow: auto;
   white-space: pre-wrap; font-family: ui-monospace, monospace;
 }
+
+/* ── Markdown (assistant prose) — Mocheme conventions ── */
+.md { font-size: 14.5px; line-height: 1.62; }
+.md > *:first-child { margin-top: 0; }
+.md > *:last-child { margin-bottom: 0; }
+.md p { margin: 0 0 10px; white-space: pre-wrap; }
+.md h1, .md h2, .md h3, .md h4, .md h5 { margin: 16px 0 8px; line-height: 1.3; font-weight: 700; }
+.md h1 { font-size: 19px; } .md h2 { font-size: 17px; } .md h3 { font-size: 15.5px; } .md h4, .md h5 { font-size: 14.5px; }
+.md h1, .md h2 { border-bottom: 1px solid var(--border-soft); padding-bottom: 5px; }
+.md ul, .md ol { margin: 0 0 10px; padding-left: 22px; }
+.md li { margin: 3px 0; }
+.md li::marker { color: var(--text-faint); }
+.md strong { color: var(--text); font-weight: 700; }
+.md em { color: var(--text-dim); }
+.md del { color: var(--text-faint); }
+.md a { color: var(--blush); text-decoration: underline; text-decoration-color: rgba(250, 155, 106, 0.4); text-underline-offset: 2px; }
+.md a:hover { text-decoration-color: var(--blush); }
+.md blockquote {
+  border-left: 2px solid var(--think-border);
+  padding: 2px 0 2px 12px; margin: 0 0 10px; color: var(--text-dim);
+}
+.md hr { border: none; border-top: 1px solid var(--border-soft); margin: 14px 0; }
+/* inline code — accentSoft wash, blush ink (the theme's contract) */
+.md :not(pre) > code {
+  background: var(--accent-soft); color: var(--blush);
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 0.86em; padding: 1.5px 6px; border-radius: 6px;
+}
+/* code blocks — elevated cards */
+.md pre {
+  background: var(--bg-elev); border: 1px solid var(--border-soft);
+  border-radius: 12px; padding: 12px 14px; margin: 0 0 10px;
+  overflow-x: auto; max-width: 100%;
+}
+.md pre code {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 12.5px; line-height: 1.55; color: var(--text-dim);
+  white-space: pre;
+}
+.md table { border-collapse: collapse; margin: 0 0 10px; font-size: 13.5px; max-width: 100%; display: block; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--border-soft); padding: 6px 11px; text-align: left; }
+.md th { background: var(--bg-elev); font-weight: 600; color: var(--text-dim); }
