@@ -24,6 +24,7 @@ import { usePathname } from 'expo-router'
 import { useStore } from '@nanostores/react'
 import { archivedIds, groupChats, pinnedIds } from '../lib/chatListState'
 import type { BotCard } from '../lib/botRoster'
+import { BOT_AVATARS } from '../lib/botAvatars'
 import { tr } from '../lib/strings'
 import type { RowStatus } from '../lib/attention'
 import { C, S, TYPE, useStyles, useShape } from '../lib/theme'
@@ -771,6 +772,8 @@ export function Sidebar({
             >
               {b.isDefault ? (
                 <Image source={MOCHI_RUN[0]} style={s.botAvatarImg} />
+              ) : b.avatarIndex >= 0 ? (
+                <Image source={BOT_AVATARS[b.avatarIndex]} style={s.botAvatarImg} />
               ) : (
                 <View style={[s.botAvatarDisc, { backgroundColor: BOT_DISC_COLORS()[b.colorIndex] }]}>
                   <Text style={s.botAvatarInitial} numberOfLines={1}>

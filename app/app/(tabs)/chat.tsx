@@ -62,6 +62,7 @@ import {
 import { sessionRows, lastActiveByStoredId } from '../../src/lib/sessionList'
 import { pickLatestBotChat, botRoster } from '../../src/lib/botRoster'
 import { fleetProfiles, refreshFleet } from '../../src/lib/fleet'
+import { BOT_AVATARS } from '../../src/lib/botAvatars'
 import { enqueueSend, removeQueued } from '../../src/lib/sendQueue'
 import { setQueuedAttachments, takeQueuedAttachments } from '../../src/lib/chat'
 import { MAX_ATTACHMENTS, ATTACH_MAX_BYTES, formatBytes, mediaKindForPath } from '../../src/lib/media'
@@ -244,7 +245,7 @@ export default function Chat() {
 
   // Bots-first empty state: the roster leads, generic starters follow.
   const profiles = useStore(fleetProfiles)
-  const botCards = useMemo(() => botRoster(profiles), [profiles])
+  const botCards = useMemo(() => botRoster(profiles, BOT_AVATARS.length), [profiles])
 
   // The Skills screen hands over a command to pre-fill (`/model ` etc).
   // The Fleet screen hands over a bot identity. Bots-first (UI-007): that
@@ -1312,6 +1313,8 @@ export default function Chat() {
                             source={require('../../assets/mochi-run-1.png')}
                             style={s.botCardImg}
                           />
+                        ) : b.avatarIndex >= 0 ? (
+                          <Image source={BOT_AVATARS[b.avatarIndex]} style={s.botCardImg} />
                         ) : (
                           <View style={[s.botCardDisc, { backgroundColor: [C.accent, C.blush, C.green, C.amber][b.colorIndex] }]}>
                             <Text style={s.botCardInitial} numberOfLines={1}>

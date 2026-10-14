@@ -253,7 +253,11 @@ export class TerminalController {
   /** Raw base64 bank of recent PTY bytes — refills a freshly (re)loaded xterm (BUG-097). */
   rawBank = ''
   private native: TermNative
-  private timer: ReturnType<typeof setInterval> | null = null
+  // `number`, not ReturnType<typeof setInterval>: the ambient timer types
+  // differ between worlds (RN globals return a `Timeout` interface, DOM/
+  // @types/node mixes overloads), which made clearInterval flake under
+  // different tsc runs. Normalize to the DOM shape at the boundary.
+  private timer: number | null = null
   private listeners = new Set<TermListener>()
   private draining = false
   private drainMs: number
@@ -330,7 +334,7 @@ export class TerminalController {
     this.stopPoll()
     this.timer = setInterval(() => {
       void this.tick()
-    }, this.drainMs)
+    }, this.drainMs) as unknown as number
   }
 
   private stopPoll() {

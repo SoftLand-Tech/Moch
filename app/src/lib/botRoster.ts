@@ -16,6 +16,9 @@ export interface BotCard {
   isDefault: boolean
   /** Deterministic avatar-disc color bucket (0-3) — stable per name. */
   colorIndex: number
+  /** Deterministic mochi-children avatar (0..avatarCount-1); -1 when no
+   *  avatar set is supplied — renderers fall back to the color disc. */
+  avatarIndex: number
 }
 
 /** The default agent answers to these (BUG-112: absent or `default` = Moch). */
@@ -26,18 +29,27 @@ function isDefaultName(name: string): boolean {
 
 /** Stable 0-3 bucket from the name — deterministic across launches/themes. */
 export function colorIndexFor(name: string): number {
+  return stableHash(name) % 4
+}
+
+function stableHash(name: string): number {
   let h = 0
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
-  return h % 4
+  return h
 }
 
 /**
  * The bots-first roster: the default agent card FIRST (always present), then
  * the gateway's other profiles in server order, default-named entries deduped.
+ * `avatarCount` (the mochi-children set size) assigns each bot a stable face;
+ * 0 disables the assignment (renderers fall back to color discs).
  */
-export function botRoster(profiles: { name: string; description?: string }[]): BotCard[] {
+export function botRoster(
+  profiles: { name: string; description?: string }[],
+  avatarCount = 0,
+): BotCard[] {
   const cards: BotCard[] = [
-    { key: 'default', name: 'Moch', description: '', isDefault: true, colorIndex: 0 },
+    { key: 'default', name: 'Moch', description: '', isDefault: true, colorIndex: 0, avatarIndex: -1 },
   ]
   for (const p of profiles) {
     if (isDefaultName(p.name)) continue
@@ -47,6 +59,7 @@ export function botRoster(profiles: { name: string; description?: string }[]): B
       description: p.description ?? '',
       isDefault: false,
       colorIndex: colorIndexFor(p.name),
+      avatarIndex: avatarCount > 0 ? stableHash(p.name) % avatarCount : -1,
     })
   }
   return cards

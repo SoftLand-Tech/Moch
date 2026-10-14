@@ -410,6 +410,59 @@ function SettingsInner() {
           />
         </Section>
 
+        {/* UI-008 declutter: these moved OUT of the drawer — power surfaces,
+            not daily chrome. navigate, never push: /(tabs) is a single route
+            on the root stack (push would mount a fresh copy of every tab). */}
+        <Section title="SURFACES">
+          <Row
+            icon="people-outline"
+            label="Fleet"
+            sub="Your bots — state, creation, freeze"
+            chevron
+            onPress={() => router.navigate('/(tabs)/fleet' as never)}
+          />
+          <Divider />
+          <Row
+            icon="grid-outline"
+            label="Crew"
+            sub="Bots working together on a shared board"
+            chevron
+            onPress={() => router.navigate('/(tabs)/crew' as never)}
+          />
+          <Divider />
+          <Row
+            icon="timer-outline"
+            label="Automations"
+            sub="Scheduled jobs and recurring work"
+            chevron
+            onPress={() => router.navigate('/(tabs)/automations' as never)}
+          />
+          <Divider />
+          <Row
+            icon="globe-outline"
+            label="Browser"
+            sub="The browser the agent drives"
+            chevron
+            onPress={() => router.navigate('/(tabs)/browser' as never)}
+          />
+          <Divider />
+          <Row
+            icon="terminal-outline"
+            label="Terminal"
+            sub="Direct shell into the agent's Linux"
+            chevron
+            onPress={() => router.navigate('/(tabs)/terminal' as never)}
+          />
+          <Divider />
+          <Row
+            icon="extension-puzzle-outline"
+            label="Connectors"
+            sub="MCP tools and integrations"
+            chevron
+            onPress={() => router.navigate('/(tabs)/connectors' as never)}
+          />
+        </Section>
+
         <Section title="COMPUTERS">
           {savedServers.length === 0 ? (
             <Row icon="laptop-outline" label={cfg?.host ?? '—'} sub="Current session — pair to remember it" chevron />

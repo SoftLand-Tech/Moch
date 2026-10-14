@@ -28,7 +28,7 @@ import {
   type RecentChat,
 } from './Sidebar'
 import { C, S, useStyles, useShape } from '../lib/theme'
-import { runningAutomationCount, refreshRunningAutomations } from '../lib/automationsState'
+import { refreshRunningAutomations } from '../lib/automationsState'
 import { attentionById, rowStatus } from '../lib/attention'
 import { isConnected as isConnectedAtom, connectionState, retryNow, rpc } from '../lib/gateway'
 import {
@@ -50,6 +50,7 @@ import { loadLastActive, loadSessions, lastActiveByStoredId, lastActiveFor, patc
 import { forgetChatMarks, loadChatMarks, toggleArchive, togglePin } from '../lib/chatListState'
 import { fleetProfiles, refreshFleet, setActiveBot } from '../lib/fleet'
 import { botRoster, pickLatestBotChat } from '../lib/botRoster'
+import { BOT_AVATARS } from '../lib/botAvatars'
 import { tr } from '../lib/strings'
 
 /**
@@ -197,29 +198,24 @@ export function ScreenShell({
     void loadLastActive()
   }, [])
 
-  const runningAuto = useStore(runningAutomationCount)
   // Bots-first (UI-007): the roster leads the drawer. profiles.list always
   // answers (even without the fleet runtime armed); refresh rides the same
   // drawer-open refresh the chat list already gets.
   const profiles = useStore(fleetProfiles)
-  const bots = useMemo(() => botRoster(profiles), [profiles])
+  const bots = useMemo(() => botRoster(profiles, BOT_AVATARS.length), [profiles])
+  // UI-008 declutter: the drawer is bots + chats + Settings. Fleet, Crew,
+  // Automations, Browser, Terminal and Connectors moved to Settings →
+  // SURFACES (settings.tsx) — power tools, not daily chrome. The waiting-on-
+  // you count stays on the drawer footer; New bot keeps Fleet one tap away.
 
   // ── Drawer nav (ChatGPT-style): top block + Settings docked at the bottom ─
   // The Chats screen stays reachable via the chat header's search icon; the
   // drawer's own grouped chat list is the richer surface. Skills and Models
   // moved into Settings' AGENT section.
-  const topNav = useMemo<NavItem[]>(() => [
-    // The waiting-on-you count rides the Chat row as a badge (the drawer
-    // footer spells it out in words; the badge keeps it visible when the
-    // list is long). Same number, two surfaces, one atom.
-    { key: 'chat', label: 'Chat', icon: 'chatbubble-outline', badge: pendingN > 0 ? pendingN : undefined },
-    { key: 'fleet', label: 'Fleet', icon: 'people-outline' },
-    { key: 'crew', label: 'Crew', icon: 'grid-outline' },
-    { key: 'browser', label: 'Browser', icon: 'globe-outline' },
-    { key: 'terminal', label: 'Terminal', icon: 'terminal-outline' },
-    { key: 'automations', label: 'Automations', icon: 'timer-outline', mochis: runningAuto },
-    { key: 'connectors', label: 'Connectors', icon: 'extension-puzzle-outline' },
-  ], [runningAuto, pendingN])
+  // UI-008 declutter: top nav rows are GONE from the drawer — bots + chats +
+  // Settings is the whole drawer now. Fleet/Crew/Automations/Browser/Terminal/
+  // Connectors live in Settings → SURFACES; waiting-on-you stays on the footer.
+  const topNav = useMemo<NavItem[]>(() => [], [])
 
   const bottomNav = useMemo<NavItem[]>(() => [
     { key: 'settings', label: 'Settings', icon: 'settings-outline' },

@@ -36,6 +36,14 @@ async function main() {
   check('descriptions pass through', many[1].description === 'watches deals' && many[2].description === '')
   check('every card carries a 0-3 color bucket', many.every((b) => b.colorIndex >= 0 && b.colorIndex <= 3))
 
+  // ── avatar assignment (UI-009 mochi-children) ─────────────────────────────
+  const noAv = r.botRoster([{ name: 'Atlas', description: '' }])
+  check('avatarCount 0 → avatarIndex -1 (disc fallback)', noAv[1].avatarIndex === -1 && noAv[0].avatarIndex === -1)
+  const withAv = r.botRoster([{ name: 'Atlas' }, { name: 'B' }, { name: 'C' }], 15)
+  check('avatarIndex in range with a set of 15', withAv.every((b) => b.isDefault || (b.avatarIndex >= 0 && b.avatarIndex <= 14)))
+  check('avatarIndex deterministic per name', withAv[1].avatarIndex === r.botRoster([{ name: 'Atlas' }], 15)[1].avatarIndex)
+  check('distinct names can share a face (modulo is fine, no crash)', new Set([withAv[1].avatarIndex, withAv[2].avatarIndex]).size >= 1)
+
   // ── colorIndexFor ─────────────────────────────────────────────────────────
   check('color bucket is deterministic', r.colorIndexFor('Atlas') === r.colorIndexFor('Atlas'))
   check('color bucket of empty name stays in range', r.colorIndexFor('') <= 3)
