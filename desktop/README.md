@@ -1,66 +1,76 @@
 # Moch Desktop (Tauri 2) — local-only PC build
 
-**v0.2 — complete rebuild.** No React Native, no relay, no phone. A fresh,
-small web UI running in a Tauri window, talking to a **local hermes** on
-this PC through the Moch app's own TypeScript protocol stack, imported
-verbatim from `../app/src/protocol/` (fork changes included).
+**Your own hermes agent, on your PC — through Moch, not through hermes.**
+The desktop twin of the phone's embedded mode: the app runs its OWN agent
+runtime (the fork, in a Moch-owned home) and a fresh web UI talks to it
+over loopback with the app's TypeScript protocol stack, imported verbatim.
 
 ```
 ┌ Tauri shell (Rust) ────────────────────────────────────────────────┐
-│ 1. SUPERVISOR: spawns the hermes fork (app/hermes-src/cli.py serve │
-│    --host 127.0.0.1 --port 9118, token minted by us). Falls back   │
-│    to attaching the machine serve on 9119 (systemd, token from     │
-│    ~/.config/hermes-serve.env). Child is killed when the app ends. │
-│ 2. LOCAL SERVER: serves the built UI + /moch-config.json on        │
-│    127.0.0.1:<port> — a loopback origin hermes' WS guard accepts.  │
-│ 3. WINDOW on that origin.                                           │
-│    ┌ UI (Vite+React, desktop/ui) ────────────────────────────────┐ │
-│    │ JsonRpcGatewayClient (app's protocol stack, unchanged)      │ │
-│    │ ws://127.0.0.1:<port>/api/ws?token=…                        │ │
-│    │ sessions · streaming chat · thinking · tool rows · replay   │ │
-│    └─────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────┘
+│ RUNTIME: spawns the phone's own gateway module as a supervised     │
+│  child (desktop/runtime.py → app/python-runtime/moch/              │
+│  gateway_server.py): headless serve, MOCH_FLEET=1 (bots/crew       │
+│  surface — BUG-109), in-process slash worker, fleet admission      │
+│  gate, dm bridge, HERMES_DESKTOP=1 cron ticker.                    │
+│  Home: desktop/runtime-home (HERMES_HOME) — app-private, like the  │
+│  phone. Handshake: .moch-gateway.json (file-based). SIGTERM kills  │
+│  the child. Attach to an external serve only via MOCH_ATTACH=1.    │
+│ SERVER: serves the built UI + /moch-config.json + /setup.json on   │
+│  127.0.0.1:<port> — loopback origin the gateway's guard accepts.   │
+│ WINDOW: loads that origin. GDK_BACKEND=x11 default on Linux        │
+│  (WebKitGTK fractional-scale crop bug on Wayland).                 │
+│  ┌ UI (Vite+React, desktop/ui → web-ui) ─────────────────────────┐ │
+│  │ JsonRpcGatewayClient — the app's protocol stack, unchanged    │ │
+│  │ First-run wizard: welcome → boot → provider key → done        │ │
+│  │ Tabs: Chat · Bots · Crew · Automations · Skills · Models · Run│ │
+│  └───────────────────────────────────────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────────┘
 ```
+
+## Design
+
+Mocheme, tokens verbatim from the app's `src/lib/theme.ts`: navy-hue
+near-black surfaces, sprout orange reserved for primary actions (dark ink
+on it), the user bubble in Mochi's cream with visor-navy ink, assistant
+messages flat on the background, 12% soft washes, radii 16/24+8/32/999.
+Markdown renders with marked + DOMPurify; inline code on `accentSoft`
+(the theme's documented `code_inline` contract).
 
 ## Run
 
 ```sh
 cd desktop
-npm run install:ui   # once
-npm run dev          # or: npm run build  → AppImage/deb
-./src-tauri/target/debug/moch-desktop   # after a build
+(cd ui && npm install)        # once
+npm run build:ui              # vite build → web-ui/
+./src-tauri/target/debug/moch-desktop   # or: npm run dev / npm run build
 ```
 
-The window badge shows the active mode: **fork** (spawned from
-`app/hermes-src`, your changes) or **attached** (the machine-level serve
-on 9119). Sessions/providers come from the same `~/.hermes` as the CLI.
+First run shows the setup wizard (Set up Moch locally → provider key →
+chat). Subsequent runs go straight in. Everything lives in
+`runtime-home/` + `.setup.json`.
 
-Notes:
+- `MOCH_SELFTEST=1` — autonomous round trip on every tab's RPCs,
+  logged to `desktop/.dbg.log` (the verification channel).
+- `MOCH_HERMES_HOME=…` — move the runtime home (e.g. point at
+  `~/.hermes` to share the CLI's home — by default Moch keeps its own,
+  like the phone).
+- `MOCH_ATTACH=1` — escape hatch: attach an external serve on 9119.
+- `MOCH_HERMES_PYTHON=…` — python for the runtime (default: the
+  installed hermes' venv python).
 
-- Linux uses the X11 backend by default (`GDK_BACKEND=x11`) to dodge the
-  WebKitGTK fractional-scale crop bug on Wayland; override with
-  `GDK_BACKEND=wayland` to test.
-- `MOCH_SELFTEST=1 ./src-tauri/target/debug/moch-desktop` runs an
-  autonomous round trip (connect → ping → session → prompt → reply) and
-  logs every step to `desktop/.dbg.log`.
-- `MOCH_HERMES_PYTHON` overrides the python used for the fork
-  (default: the installed hermes' venv python).
-- `npm run export:web` / `web/` from v0.1 (Expo web export wrapper) are
-  gone — that approach is retired.
+## Rounds (feature per feature)
 
-## RPC surface used (same shapes as `app/scripts/test-live.ts`)
+| Round | Shipped |
+| --- | --- |
+| 1 | Mocheme design system (tokens from theme.ts), chat rebuilt to the phone's identity |
+| 2 | Markdown rendering (GFM + sanitize; code cards, accentSoft inline code) |
+| 3 | Real session rows (server order BUG-012, profile fan-out BUG-112, relative time, counts) |
+| 4 | Bots tab to phone parity (builder agent) + SIGTERM runtime cleanup |
+| next | Crew/Automations/Skills/Models polish, chat extras (interrupt, title) |
 
-`session.create {title,cols,source:'mobile'}` · `session.list {limit}` ·
-`session.resume {session_id,cols}` · `session.events.since
-{session_id,last_seen}` (history replay) · `prompt.submit
-{session_id,text}` · `gateway.ping` — events: `message.*`, `thinking.delta`,
-`tool.*`, `session.title`, `status.update`.
+## Known limits
 
-## Known limits (next steps)
-
-- Markdown rendering is plain text so far; code blocks not styled.
-- No automations/skills/models screens yet — chat + sessions + history
-  first, the rest incrementally.
-- Attachments/voice not wired (protocol pieces exist; UI work).
-- Fork serve under a *sandboxed* harness dies on read-only `~/.hermes`
-  (Errno 30) — run from a normal terminal; attach mode covers the rest.
+- Voice/media not wired (protocol exists; UI later). Automations
+  run-now/edit not yet in the tab (list/pause/resume/add are).
+- Wayland rendering under sandboxed launches shows the WebKitGTK scale
+  bug — launch from a normal terminal (x11 default) for clean rendering.
