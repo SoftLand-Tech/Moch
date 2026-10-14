@@ -145,7 +145,7 @@ export default function ChatTab({ rpc, client, profile, onProfile }: { rpc: RpcR
       )}
       <div className="chat">
         <div className="messages">
-          {list.length === 0 && <div className="empty"><div className="mochi">(●ᴗ●)</div><p>{profile && profile !== 'default' ? `Talking to ${profile}.` : 'Your agent, on this machine.'}</p></div>}
+          {list.length === 0 && <div className="empty"><img className="mochi-img" src="/brand/mochi-greeting.svg" alt="Mochi" /><p>{profile && profile !== 'default' ? `${profile} is listening.` : 'Your agent, on this machine.'}</p></div>}
           {list.map((b) =>
             b.kind === 'user' ? <div key={b.id} className="msg user">{b.text}</div>
             : b.kind === 'assistant' ? (

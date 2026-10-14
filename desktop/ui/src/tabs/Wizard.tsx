@@ -39,7 +39,7 @@ export default function Wizard({ conn, cfg, rpc, onDone }: { conn: string; cfg: 
   if (cfg?.mode === 'error' || conn === 'error') {
     return (
       <div className="wizard">
-        <div className="mochi big">(•́ ‸ •̀ )</div>
+        <img className="mochi-img" src="/brand/mochi-error.svg" alt="Mochi" />
         <h1>Moch couldn't start its runtime</h1>
         <p className="dim">The fork (app/hermes-src) failed to serve on 127.0.0.1:9118.</p>
         <pre className="logtail">{cfg?.logTail || 'no log'}</pre>
@@ -52,7 +52,7 @@ export default function Wizard({ conn, cfg, rpc, onDone }: { conn: string; cfg: 
     <div className="wizard">
       {step === 'welcome' && (
         <>
-          <div className="mochi big">(●ᴗ●)</div>
+          <img className="mochi-img" src="/brand/mochi-greeting.svg" alt="Mochi" />
           <h1>Your own agent, on this PC.</h1>
           <p className="dim">
             Moch runs the agent <strong>locally inside this app</strong> — a private runtime with its own
@@ -64,7 +64,7 @@ export default function Wizard({ conn, cfg, rpc, onDone }: { conn: string; cfg: 
       )}
       {step === 'boot' && (
         <>
-          <div className="mochi big spin-slow">(◐‿◑)</div>
+          <img className="mochi-img" src="/brand/mochi-deep-thinking.svg" alt="Mochi" />
           <h1>Starting your runtime…</h1>
           <p className="dim">Booting the agent from <code>app/hermes-src</code> in a Moch-owned home.</p>
           <p className="dim small">mode: {cfg?.mode ?? '…'} · gateway: {cfg?.wsUrl || '…'}</p>
@@ -72,7 +72,7 @@ export default function Wizard({ conn, cfg, rpc, onDone }: { conn: string; cfg: 
       )}
       {step === 'provider' && (
         <>
-          <div className="mochi big">(●ᴗ●)✦</div>
+          <img className="mochi-img" src="/brand/mochi-idea.svg" alt="Mochi" />
           <h1>Connect a model provider</h1>
           <p className="dim">The agent needs a provider key, stored locally in your Moch runtime.</p>
           {err && <div className="err">{err}</div>}

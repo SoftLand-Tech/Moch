@@ -467,3 +467,9 @@ body {
 }
 .pchip:hover { color: var(--text-dim); }
 .pchip.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+/* ── Branding: real logo + Mochi expressions ── */
+.logo-img { width: 26px; height: 26px; border-radius: 8px; object-fit: cover; }
+.mochi-img { width: 132px; height: 132px; object-fit: contain; }
+.wizard .mochi-img { width: 168px; height: 168px; }
+.mochi-img[src*="mochi-offline"], .fatal .mochi-img { width: 110px; height: 110px; }

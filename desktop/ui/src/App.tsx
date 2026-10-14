@@ -140,7 +140,7 @@ export default function App() {
   }, [])
 
   if (setupDone === null) {
-    return <div className="wizard"><div className="mochi big">(●ᴗ●)</div><p className="dim">Moch</p></div>
+    return <div className="wizard"><img className="mochi-img" src="/brand/mochi-connecting.svg" alt="Mochi" /><p className="dim">Moch</p></div>
   }
   if (!setupDone) {
     return <Wizard conn={conn} cfg={cfg} rpc={rpcRef} onDone={() => setSetupDone(true)} />
@@ -149,7 +149,7 @@ export default function App() {
   return (
     <div className="app">
       <aside className="sidebar">
-        <div className="brand"><span className="logo">◍</span> Moch
+        <div className="brand"><img className="logo-img" src="/brand/logo.png" alt="Moch" /> Moch
           <span className={`badge ${cfg?.mode ?? ''}`}>{cfg?.mode === 'fork' ? 'fork' : cfg?.mode ?? '…'}</span>
         </div>
         <nav className="tabs">
@@ -161,9 +161,9 @@ export default function App() {
       </aside>
       <main className="main">
         {conn === 'error' ? (
-          <div className="fatal"><p>No local hermes found.</p><p className="hint">Check <code>desktop/.hermes-serve.log</code> — the shell tried the fork (9118) and attach (9119).</p></div>
+          <div className="fatal"><img className="mochi-img" src="/brand/mochi-offline.svg" alt="Mochi" /><p>No local runtime found.</p><p className="hint">Check <code>desktop/.hermes-serve.log</code> — the shell tried the fork (9118) and attach (9119).</p></div>
         ) : conn !== 'open' ? (
-          <div className="empty"><div className="mochi">(●ᴗ●)</div><p>connecting to your local agent…</p></div>
+          <div className="empty"><img className="mochi-img" src="/brand/mochi-connecting.svg" alt="Mochi" /><p>connecting to your local agent…</p></div>
         ) : (
           <>
             {tab === 'chat' && <ChatTab rpc={rpcRef} client={client} profile={chatProfile} onProfile={setChatProfile} />}
