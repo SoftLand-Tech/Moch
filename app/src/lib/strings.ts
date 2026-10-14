@@ -171,6 +171,13 @@ const EN: Catalog = {
   'chat.start.brainstorm.hint': 'Bring a topic, leave with options',
   'chat.start.commands': 'Browse slash commands',
   'chat.start.commands.hint': 'Everything the agent knows how to run',
+
+  // Bots-first surfaces (UI-007): the roster leads, conversations follow.
+  'drawer.bots': 'Bots',
+  'drawer.bots.new': 'New bot',
+  'drawer.bots.defaultDesc': 'Your agent',
+  'chat.empty.bots': 'Your bots',
+  'chat.empty.or': 'Or start with',
 }
 
 const AR: Catalog = {
@@ -296,6 +303,13 @@ const AR: Catalog = {
   'chat.start.brainstorm.hint': 'أحضر موضوعًا واخترج بخيارات',
   'chat.start.commands': 'تصفّح أوامر الشرطة المائلة',
   'chat.start.commands.hint': 'كل ما يعرف الوكيل كيف يشغّله',
+
+  // Bots-first surfaces (UI-007).
+  'drawer.bots': 'البوتات',
+  'drawer.bots.new': 'بوت جديد',
+  'drawer.bots.defaultDesc': 'وكيلك',
+  'chat.empty.bots': 'بوتاتك',
+  'chat.empty.or': 'أو ابدأ بـ',
 }
 
 const CATALOGS: Record<Locale, Catalog> = { en: EN, ar: AR }

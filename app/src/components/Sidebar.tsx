@@ -23,6 +23,8 @@ import RAnimated, { useAnimatedStyle } from 'react-native-reanimated'
 import { usePathname } from 'expo-router'
 import { useStore } from '@nanostores/react'
 import { archivedIds, groupChats, pinnedIds } from '../lib/chatListState'
+import type { BotCard } from '../lib/botRoster'
+import { tr } from '../lib/strings'
 import type { RowStatus } from '../lib/attention'
 import { C, S, TYPE, useStyles, useShape } from '../lib/theme'
 import { timeAgo } from '../lib/timeAgo'
@@ -60,6 +62,13 @@ export interface RecentChat {
 /** Actions return an error message to show in the dialog, or null on success. */
 type ChatAction = (id: string) => Promise<string | null>
 
+/**
+ * Avatar-disc palette buckets for bot cards (UI-007). A function, not a
+ * constant: C is theme-mutated in place, so the tokens must be read at
+ * render time or a theme switch leaves stale colors behind.
+ */
+const BOT_DISC_COLORS = () => [C.accent, C.blush, C.green, C.amber]
+
 interface Props {
   open: boolean
   onClose: () => void
@@ -89,6 +98,12 @@ interface Props {
    * above the New-chat pill at the panel's bottom edge.
    */
   bottomNav?: NavItem[]
+  /** Bots-first roster (UI-007) — rendered as the drawer's first section. */
+  bots: BotCard[]
+  /** Tap a bot → resume its latest chat, or start one scoped to it. */
+  onTalkToBot: (name: string) => void
+  /** The roster's "New bot" row → Fleet creation. */
+  onNewBot: () => void
   recent: RecentChat[]
   onNav: (key: string) => void
   onNewChat: () => void
@@ -238,6 +253,10 @@ export function Sidebar({
   onRequestOpen,
   nav,
   bottomNav,
+  /** Bots-first roster (UI-007): default agent first, then fleet profiles. */
+  bots,
+  onTalkToBot,
+  onNewBot,
   recent,
   onNav,
   onNewChat,
@@ -733,6 +752,60 @@ export function Sidebar({
           </Pressable>
         </View>
 
+        {/* Bots-first (UI-007): the roster is the drawer's first section —
+            tap a bot and you're in its conversation, Grok Bot style. The
+            default agent card is synthesized by botRoster, so this renders
+            even offline with zero fleet profiles. */}
+        <View style={s.botsSection}>
+          <Text style={s.sectionLabel}>{tr('drawer.bots')}</Text>
+          {bots.map((b) => (
+            <Pressable
+              key={b.key}
+              style={({ pressed }) => [s.botRow, pressed && s.rowPressed]}
+              onPress={() => {
+                onTalkToBot(b.key)
+                onClose()
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={b.isDefault ? tr('drawer.bots.defaultDesc') : b.name}
+            >
+              {b.isDefault ? (
+                <Image source={MOCHI_RUN[0]} style={s.botAvatarImg} />
+              ) : (
+                <View style={[s.botAvatarDisc, { backgroundColor: BOT_DISC_COLORS()[b.colorIndex] }]}>
+                  <Text style={s.botAvatarInitial} numberOfLines={1}>
+                    {b.name.slice(0, 1).toUpperCase()}
+                  </Text>
+                </View>
+              )}
+              <View style={s.botCopy}>
+                <Text style={s.botName} numberOfLines={1}>
+                  {b.name}
+                  {b.isDefault ? <Text style={s.botDefaultTag}>  ·  {tr('drawer.bots.defaultDesc')}</Text> : null}
+                </Text>
+                {!!b.description ? (
+                  <Text style={s.botDesc} numberOfLines={1}>{b.description}</Text>
+                ) : null}
+              </View>
+              <Icon name="chevron-forward" size={14} color={C.textFaint} />
+            </Pressable>
+          ))}
+          <Pressable
+            style={({ pressed }) => [s.botRow, pressed && s.rowPressed]}
+            onPress={() => {
+              onNewBot()
+              onClose()
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={tr('drawer.bots.new')}
+          >
+            <View style={s.botAvatarDiscMuted}>
+              <Icon name="add" size={16} color={C.textDim} />
+            </View>
+            <Text style={s.botNewLabel}>{tr('drawer.bots.new')}</Text>
+          </Pressable>
+        </View>
+
         <View>{renderNavRows(nav)}</View>
 
         {recent.length > 0 ? (
@@ -1079,6 +1152,39 @@ const makeS = () => StyleSheet.create({
     marginHorizontal: S.drawerRoundedCap ? 10 : 0,
     borderRadius: S.drawerRoundedCap ? 16 : 0,
   },
+  // Bots-first roster (UI-007): the drawer's first section.
+  botsSection: { marginTop: 2, marginBottom: 4 },
+  botRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    minHeight: 46,
+  },
+  botAvatarImg: { width: 30, height: 30, resizeMode: 'contain' },
+  botAvatarDisc: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  botAvatarDiscMuted: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  botAvatarInitial: { color: C.onAccent, fontSize: TYPE.body, fontWeight: '800' },
+  botCopy: { flex: 1 },
+  botName: { color: C.text, fontSize: TYPE.body, fontWeight: '600' },
+  botDefaultTag: { color: C.textFaint, fontSize: TYPE.caption, fontWeight: '400' },
+  botDesc: { color: C.textFaint, fontSize: TYPE.caption, marginTop: 1 },
+  botNewLabel: { color: C.textDim, fontSize: TYPE.body, fontWeight: '500', flex: 1 },
   // Mocheme's active nav row: a soft wash of the accent instead of nothing.
   navRowOn: { backgroundColor: C.accentSoft },
   rowPressed: { backgroundColor: C.bgHover },

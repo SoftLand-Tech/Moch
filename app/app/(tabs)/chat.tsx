@@ -9,6 +9,7 @@ import {
   Platform,
   ActivityIndicator,
   ScrollView,
+  Image,
   type NativeSyntheticEvent,
   type NativeScrollEvent,
 } from 'react-native'
@@ -53,10 +54,14 @@ import {
   flushOutbox,
   newChat,
   pushLocalMessage,
+  switchToSession,
   type ToolItem,
   type ChatMessage,
   type PendingRequest,
 } from '../../src/lib/chat'
+import { sessionRows, lastActiveByStoredId } from '../../src/lib/sessionList'
+import { pickLatestBotChat, botRoster } from '../../src/lib/botRoster'
+import { fleetProfiles, refreshFleet } from '../../src/lib/fleet'
 import { enqueueSend, removeQueued } from '../../src/lib/sendQueue'
 import { setQueuedAttachments, takeQueuedAttachments } from '../../src/lib/chat'
 import { MAX_ATTACHMENTS, ATTACH_MAX_BYTES, formatBytes, mediaKindForPath } from '../../src/lib/media'
@@ -230,19 +235,35 @@ export default function Chat() {
       // "watched" means focused, not just mounted.
       chatTabFocused.set(true)
       void clearBadge()
+      // Bots-first (UI-007): the roster on the empty state stays fresh with
+      // the same cheap refresh the drawer gets on open.
+      void refreshFleet()
       return () => { chatTabFocused.set(false) }
     }, []),
   )
 
+  // Bots-first empty state: the roster leads, generic starters follow.
+  const profiles = useStore(fleetProfiles)
+  const botCards = useMemo(() => botRoster(profiles), [profiles])
+
   // The Skills screen hands over a command to pre-fill (`/model ` etc).
-  // The Fleet screen hands over a bot identity: set active + fresh bot chat.
+  // The Fleet screen hands over a bot identity. Bots-first (UI-007): that
+  // hand-off RESUMES the bot's latest conversation when one exists — a fresh
+  // scoped chat only when the bot has none — so tapping a bot lands you in
+  // its thread, the way Grok Bot does, instead of minting a new chat per tap.
   const { draft, botProfile } = useLocalSearchParams<{ draft?: string; botProfile?: string }>()
   const lastBotProfile = useRef<string | undefined>(undefined)
   useEffect(() => {
     if (!botProfile) return
     void (async () => {
       await setActiveBot(botProfile)
-      void newChat().catch((e) => showAlert('New chat failed', e instanceof Error ? e.message : String(e)))
+      const latest = pickLatestBotChat(sessionRows.get(), botProfile, lastActiveByStoredId.get())
+      const current = activeStoredId.get()
+      if (latest && current !== latest) {
+        await switchToSession(latest).catch(() => {})
+      } else if (!latest) {
+        await newChat().catch((e) => showAlert('New chat failed', e instanceof Error ? e.message : String(e)))
+      }
     })()
   }, [botProfile])
   const lastDraft = useRef<string | undefined>(undefined)
@@ -1260,6 +1281,63 @@ export default function Chat() {
                 </View>
               ) : (
                 <View style={s.empty}>
+                  <Text style={s.emptySection}>{tr('chat.empty.bots')}</Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={s.botScroll}
+                  >
+                    {botCards.map((b) => (
+                      <Pressable
+                        key={b.key}
+                        style={({ pressed }) => [s.botCard, pressed && s.botCardPressed]}
+                        onPress={() => {
+                          if (b.isDefault) {
+                            // The default agent: clear any bot scope, fresh chat.
+                            void (async () => {
+                              await setActiveBot(null)
+                              await newChat()
+                            })()
+                          } else {
+                            // Same hand-off the Fleet screen uses — the
+                            // botProfile effect resumes-or-starts (UI-007).
+                            router.setParams({ botProfile: b.name })
+                          }
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel={b.isDefault ? `${b.name} — ${tr('drawer.bots.defaultDesc')}` : b.name}
+                      >
+                        {b.isDefault ? (
+                          <Image
+                            source={require('../../assets/mochi-run-1.png')}
+                            style={s.botCardImg}
+                          />
+                        ) : (
+                          <View style={[s.botCardDisc, { backgroundColor: [C.accent, C.blush, C.green, C.amber][b.colorIndex] }]}>
+                            <Text style={s.botCardInitial} numberOfLines={1}>
+                              {b.name.slice(0, 1).toUpperCase()}
+                            </Text>
+                          </View>
+                        )}
+                        <Text style={s.botCardName} numberOfLines={1}>{b.name}</Text>
+                        <Text style={s.botCardDesc} numberOfLines={2}>
+                          {b.isDefault && !b.description ? tr('drawer.bots.defaultDesc') : b.description}
+                        </Text>
+                      </Pressable>
+                    ))}
+                    <Pressable
+                      style={({ pressed }) => [s.botCard, s.botCardNew, pressed && s.botCardPressed]}
+                      onPress={() => { router.navigate('/(tabs)/fleet') }}
+                      accessibilityRole="button"
+                      accessibilityLabel={tr('drawer.bots.new')}
+                    >
+                      <View style={s.botCardDiscMuted}>
+                        <Icon name="add" size={18} color={C.textDim} />
+                      </View>
+                      <Text style={s.botCardName}>{tr('drawer.bots.new')}</Text>
+                    </Pressable>
+                  </ScrollView>
+                  <Text style={s.emptySection}>{tr('chat.empty.or')}</Text>
                   {STARTERS.map((st) => {
                     const label = tr(st.labelKey)
                     return (
@@ -1713,6 +1791,48 @@ const makeS = () => StyleSheet.create({
   banner: { backgroundColor: C.amberSoft, paddingVertical: 9, paddingHorizontal: 14 },
   bannerText: { color: C.amber, fontSize: 12.5, fontWeight: '600', textAlign: 'center' },
   empty: { paddingHorizontal: 16, paddingTop: 24, gap: 4 },
+  emptySection: {
+    color: C.textFaint,
+    fontSize: TYPE.micro,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginTop: 14,
+    marginBottom: 6,
+  },
+  botScroll: { paddingRight: 16, gap: 8 },
+  botCard: {
+    width: 148,
+    backgroundColor: C.bgCard,
+    borderWidth: 1,
+    borderColor: C.borderSoft,
+    borderRadius: 14,
+    padding: 12,
+    gap: 6,
+  },
+  botCardPressed: { backgroundColor: C.bgHover },
+  botCardNew: { borderStyle: 'dashed', backgroundColor: 'transparent' },
+  botCardImg: { width: 36, height: 36, resizeMode: 'contain' },
+  botCardDisc: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  botCardDiscMuted: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  botCardInitial: { color: C.onAccent, fontSize: TYPE.bodyLg, fontWeight: '800' },
+  botCardName: { color: C.text, fontSize: TYPE.body, fontWeight: '600' },
+  botCardDesc: { color: C.textFaint, fontSize: TYPE.caption, lineHeight: 16, minHeight: 32 },
   booting: { flex: 1, flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 80 },
   bootingText: { color: C.textFaint, fontSize: 13.5 },
   starter: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 52, justifyContent: 'flex-start' },

@@ -48,6 +48,9 @@ import {
 import { loadCatalog } from '../lib/slash'
 import { loadLastActive, loadSessions, lastActiveByStoredId, lastActiveFor, patchRowTitle, refreshRunningSessions, sessionRows, toMs } from '../lib/sessionList'
 import { forgetChatMarks, loadChatMarks, toggleArchive, togglePin } from '../lib/chatListState'
+import { fleetProfiles, refreshFleet, setActiveBot } from '../lib/fleet'
+import { botRoster, pickLatestBotChat } from '../lib/botRoster'
+import { tr } from '../lib/strings'
 
 /**
  * ChatGPT-style shell: a compact top bar with a hamburger, the screen title,
@@ -195,6 +198,11 @@ export function ScreenShell({
   }, [])
 
   const runningAuto = useStore(runningAutomationCount)
+  // Bots-first (UI-007): the roster leads the drawer. profiles.list always
+  // answers (even without the fleet runtime armed); refresh rides the same
+  // drawer-open refresh the chat list already gets.
+  const profiles = useStore(fleetProfiles)
+  const bots = useMemo(() => botRoster(profiles), [profiles])
 
   // ── Drawer nav (ChatGPT-style): top block + Settings docked at the bottom ─
   // The Chats screen stays reachable via the chat header's search icon; the
@@ -324,6 +332,40 @@ export function ScreenShell({
     },
     [router],
   )
+
+  /**
+   * Bots-first (UI-007): tapping a bot IS the primary action — resume the
+   * bot's latest conversation, or start a fresh one scoped to it (newChat
+   * reads activeBotAtom). Scope is set in BOTH paths so a follow-up New chat
+   * stays with the bot until the user switches back (BUG-111 chip).
+   */
+  const talkToBot = useCallback(
+    (name: string) => {
+      if (name === 'default') {
+        // The default agent card: clear any bot scope and start fresh.
+        router.navigate('/(tabs)/chat')
+        void (async () => {
+          await setActiveBot(null)
+          await newChat()
+        })().catch(() => {})
+        return
+      }
+      const latest = pickLatestBotChat(sessionRows.get(), name, lastActiveMap)
+      void setActiveBot(name)
+      if (latest) {
+        openChat(latest)
+      } else {
+        router.navigate('/(tabs)/chat')
+        void newChat().catch(() => {})
+      }
+    },
+    [openChat, router, lastActiveMap],
+  )
+
+  const newBot = useCallback(() => {
+    // Creation lives on the Fleet screen (job description → SOUL → seed).
+    router.navigate('/(tabs)/fleet')
+  }, [router])
 
   // ── Per-chat actions (surfaced by the sidebar's long-press / ⋯ menu) ──────
   // Each returns an error message for the dialog, or null on success —
@@ -534,11 +576,16 @@ export function ScreenShell({
           // turn started on another device marks its row the moment the
           // drawer opens, not at the next 60s tick.
           void refreshRunningSessions()
+          // Bots-first roster: same cheap refresh-on-open contract.
+          void refreshFleet()
         }}
         onClose={() => setOpen(false)}
         onRequestOpen={() => setOpen(true)}
         nav={topNav}
         bottomNav={bottomNav}
+        bots={bots}
+        onTalkToBot={talkToBot}
+        onNewBot={newBot}
         recent={recent}
         onNav={go}
         onNewChat={startNew}
