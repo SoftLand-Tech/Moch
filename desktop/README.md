@@ -71,13 +71,14 @@ chat). Subsequent runs go straight in. Everything lives in
 | 6 | Per-bot chat switcher (session.create {profile, follow_profile_config}) |
 | 7 | Markdown in task bodies/prompts; dead-CSS prune |
 | build | Release profile verified live: 4.4MB binary + moch-desktop.sh launcher |
+| 8 | Real branding — Moch logo, favicon, Mochi expressions (greeting/deep-thinking/idea/error/offline/listening/celebration), turn-reactive mochi |
 
 ## Bundles (built)
 
 ```
 desktop/src-tauri/target/release/bundle/
-  deb/Moch_0.2.0_amd64.deb        2.03 MiB  ← the lightweight installable
-  appimage/Moch_0.2.0_amd64.AppImage  97.6 MiB
+  deb/Moch_0.2.0_amd64.deb        2.37 MiB  ← the lightweight installable
+  appimage/Moch_0.2.0_amd64.AppImage  97.9 MiB
 ```
 
 The UI is EMBEDDED in the binary (verified: app selftests green with
