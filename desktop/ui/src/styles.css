@@ -391,15 +391,7 @@ body {
 .session.active .s-meta { color: var(--accent-dark); opacity: 0.9; }
 
 /* ── Round 5 tab polish ── */
-.pagehead .search { background: var(--input-bg); color: var(--text); border: 1px solid var(--border-soft); border-radius: var(--r-chip); padding: 6px 14px; font: inherit; font-size: 13px; outline: none; width: 180px; }
-.pagehead .search:focus { border-color: var(--accent); }
 .sec { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-faint); margin: 10px 2px 0; }
-.cmdrow code { color: var(--blush); font-family: ui-monospace, monospace; font-size: 13px; }
-.pill.effort { cursor: pointer; background: var(--btn-tint); color: var(--text-faint); border: none; font: inherit; font-size: 11px; font-weight: 600; }
-.pill.effort:hover { color: var(--text-dim); }
-.pill.effort.on { background: var(--accent-soft); color: var(--accent); }
-.logtail-card summary { cursor: pointer; }
-.logtail-card pre { margin-top: 8px; font-size: 11.5px; color: var(--text-faint); white-space: pre-wrap; max-height: 180px; overflow-y: auto; font-family: ui-monospace, monospace; }
 
 /* ══ Round 5 — Crew board + run ledger (phone parity) ══ */
 .colhead { display: flex; align-items: center; gap: 8px; }

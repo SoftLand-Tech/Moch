@@ -12,6 +12,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { relTime, type FleetProfile, type FleetStatus, type RpcRef, type Run, type Task } from '../types'
+import Markdown from '../Markdown'
 
 /** Board columns (RN COLUMNS) — unknown statuses bucket into Ready. */
 const COLUMNS: { key: string; label: string }[] = [
@@ -204,7 +205,7 @@ export default function CrewTab({ rpc }: { rpc: RpcRef }) {
                         {t.id && <span className="taskid">{t.id.slice(0, 8)}</span>}
                       </span>
                     </button>
-                    {open && t.body && <p className="dim taskbody">{t.body}</p>}
+                    {open && t.body && <div className="dim taskbody"><Markdown text={t.body} /></div>}
                     {open && !done && (
                       <>
                         <div className="row mt8">

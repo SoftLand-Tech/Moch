@@ -13,6 +13,7 @@
  */
 import { useEffect, useState } from 'react'
 import type { CronJob, RpcRef } from '../types'
+import Markdown from '../Markdown'
 
 /** Shell-quote a value for /cron edit flags (RN automations.tsx shq). */
 const shq = (v: string): string => `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
@@ -260,7 +261,7 @@ export default function AutomationsTab({ rpc }: { rpc: RpcRef }) {
                 {open ? 'less' : 'details'}
               </button>
             </div>
-            {preview && <p className={`dim jprompt${open ? ' open' : ''}`}>{preview}</p>}
+            {preview && <div className={`dim jprompt${open ? ' open' : ''}`}><Markdown text={preview} /></div>}
             {open && (
               <div className="jdetails">
                 <div className="jrow">
