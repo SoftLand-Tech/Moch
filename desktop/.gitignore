@@ -14,3 +14,5 @@ src-tauri/gen/
 web-ui/
 ui/node_modules/
 .hermes-serve.log
+runtime-home/
+.setup.json

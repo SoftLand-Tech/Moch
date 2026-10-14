@@ -83,8 +83,18 @@ fn start_fork() -> Result<(String, String, &'static str), String> {
         PathBuf::from("python3")
     };
 
-    let token = mint_token();
-    let log = std::fs::OpenOptions::new()
+    // Moch-owned hermes home — same architecture as the phone's embedded
+    // mode (app-private home), separate from any CLI install. Override
+    // with MOCH_HERMES_HOME.
+    let home = std::env::var("MOCH_HERMES_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| desktop_dir().join("runtime-home"));
+    let _ = std::fs::create_dir_all(&home);
+
+    // Run the phone's embedded gateway (moch/gateway_server.py) as a child:
+    // headless serve, MOCH_FLEET=1 (bots/crew surface), supervised boots.
+    let runner = desktop_dir().join("runtime.py");
+    let mut log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(desktop_dir().join(".hermes-serve.log"))
@@ -93,33 +103,64 @@ fn start_fork() -> Result<(String, String, &'static str), String> {
         .try_clone()
         .map_err(|e| format!("clone serve log: {e}"))?;
 
-    let child = std::process::Command::new(&python)
-        .arg("cli.py")
-        .arg("serve")
-        .arg("--host")
-        .arg("127.0.0.1")
-        .arg("--port")
-        .arg(HERMES_PORT.to_string())
-        .arg("--skip-build")
-        .env("HERMES_DASHBOARD_SESSION_TOKEN", &token)
-        .env("PYTHONPATH", &fork)
+    use std::process::Stdio;
+    let mut child = std::process::Command::new(&python)
+        .arg(&runner)
+        .env("MOCH_FORK_SRC", &fork)
+        .env("MOCH_RUNTIME_PKGS", root.join("app/python-runtime"))
+        .env("MOCH_GATEWAY_PORT", HERMES_PORT.to_string())
+        .env("HERMES_HOME", &home)
         .current_dir(&fork)
-        .stdout(log)
+        .stdout(Stdio::piped())
         .stderr(log_err)
         .spawn()
         .map_err(|e| format!("spawn {}: {e}", python.display()))?;
+    eprintln!("moch: runtime spawned pid={:?}", child.id());
 
-    *hermes_child().lock().unwrap() = Some(child);
-
-    if wait_port(HERMES_PORT, 25_000) {
-        Ok((
-            format!("ws://127.0.0.1:{HERMES_PORT}/api/ws"),
-            token,
-            "fork",
-        ))
-    } else {
-        Err("fork serve did not open its port in 25s".to_string())
+    // Drain stdout into the log (observability only — the real handshake
+    // is file-based).
+    let stdout = child.stdout.take();
+    if let Some(out) = stdout {
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            let reader = std::io::BufReader::new(out);
+            for line in reader.lines().map_while(Result::ok) {
+                let _ = writeln!(log, "{line}");
+            }
+        });
     }
+
+    // File-based handshake: runtime.py writes .moch-gateway.json into its
+    // home once the gateway accepts connections. Poll up to 150s (cold
+    // boots on an existing home can be slow — MCP reconnects etc.).
+    let info_path = home.join(".moch-gateway.json");
+    let _ = std::fs::remove_file(&info_path);
+    let mut info = serde_json::Value::Null;
+    let deadline = std::time::Instant::now() + Duration::from_secs(150);
+    while std::time::Instant::now() < deadline {
+        if let Ok(s) = std::fs::read_to_string(&info_path) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
+                info = v;
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    *hermes_child().lock().unwrap() = Some(child);
+    if info.is_null() {
+        return Err("runtime did not write gateway info in 150s".to_string());
+    }
+    eprintln!("moch: handshake received");
+    let port = info["port"].as_u64().unwrap_or(HERMES_PORT as u64) as u16;
+    let token = info["token"].as_str().unwrap_or_default().to_string();
+    if token.is_empty() || !wait_port(port, 5_000) {
+        return Err("gateway info arrived but port not accepting".to_string());
+    }
+    Ok((
+        format!("ws://127.0.0.1:{port}/api/ws"),
+        token,
+        "fork",
+    ))
 }
 
 /// Attach to an already-running machine-level serve (token from its env file).
@@ -186,6 +227,24 @@ fn start_static_server(cfg: serde_json::Value) -> u16 {
                 continue;
             }
 
+            if method == Method::Get && path == "/setup.json" {
+                let done = std::fs::read_to_string(desktop_dir().join(".setup.json")).is_ok();
+                let _ = request.respond(
+                    Response::from_string(format!("{{\"done\":{}}}", done))
+                        .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], b"application/json").unwrap()),
+                );
+                continue;
+            }
+
+            if method == Method::Post && path == "/setup-done" {
+                let _ = std::fs::write(
+                    desktop_dir().join(".setup.json"),
+                    serde_json::json!({ "done": true, "t": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() }).to_string(),
+                );
+                let _ = request.respond(Response::from_string("ok"));
+                continue;
+            }
+
             if method == Method::Get && path == "/moch-config.json" {
                 let _ = request.respond(
                     Response::from_string(cfg.to_string())
@@ -222,20 +281,38 @@ fn start_static_server(cfg: serde_json::Value) -> u16 {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Supervisor + static server first, then the window onto it.
-    let (ws_url, token, mode) = start_fork()
-        .or_else(|e| {
-            eprintln!("moch: fork spawn failed ({e}); trying attach 9119");
-            attach_existing()
-        })
-        .unwrap_or_else(|e| {
-            eprintln!("moch: no local hermes ({e}) — UI will show the error");
+    // Supervisor first, then the window onto it. Moch runs ITS OWN runtime
+    // (the fork, in a Moch-owned home) — attach is an explicit emergency
+    // escape hatch (MOCH_ATTACH=1), never the default path.
+    let (ws_url, token, mode) = if std::env::var("MOCH_ATTACH").ok().as_deref() == Some("1") {
+        attach_existing().unwrap_or_else(|e| {
+            eprintln!("moch: attach failed ({e})");
             ("".to_string(), "".to_string(), "error")
-        });
+        })
+    } else {
+        start_fork().unwrap_or_else(|e| {
+            eprintln!("moch: fork spawn failed ({e})");
+            ("".to_string(), "".to_string(), "error")
+        })
+    };
     eprintln!("moch: hermes mode={mode} ws={ws_url}");
 
-    let cfg = serde_json::json!({ "wsUrl": ws_url, "token": token, "mode": mode });
+    let log_tail = std::fs::read_to_string(desktop_dir().join(".hermes-serve.log"))
+        .map(|s| {
+            let lines: Vec<&str> = s.lines().collect();
+            let n = lines.len();
+            lines[n.saturating_sub(12)..].join("\n")
+        })
+        .unwrap_or_default();
+    let home = std::env::var("MOCH_HERMES_HOME")
+        .unwrap_or_else(|_| desktop_dir().join("runtime-home").to_string_lossy().to_string());
+
+    let cfg = serde_json::json!({
+        "wsUrl": ws_url, "token": token, "mode": mode,
+        "home": home, "logTail": log_tail,
+    });
     let port = start_static_server(cfg);
+    eprintln!("moch: static server on {port}");
 
     let selftest = std::env::var("MOCH_SELFTEST").ok().as_deref() == Some("1");
     let url = url::Url::parse(&format!(
@@ -253,6 +330,7 @@ pub fn run() {
                 .resizable(true)
                 .center()
                 .build()?;
+            eprintln!("moch: window built");
             Ok(())
         })
         .build(tauri::generate_context!())
