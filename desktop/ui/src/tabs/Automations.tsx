@@ -1,79 +1,304 @@
-/** Automations — cron.manage list/pause/resume/remove/add + run-now via
- *  slash.exec '/cron run <job_id>' (the RN screen's exact mechanism:
- *  automations.tsx line 146). */
-import { useEffect, useRef, useState } from 'react'
-import type { Job, RpcRef } from '../types'
+/**
+ * Automations — cron jobs, phone parity with app/(tabs)/automations.tsx:
+ * cron.manage list (include_disabled — without it paused jobs vanish and
+ * could never be resumed), pause/resume/remove and add. RUN-NOW and EDIT
+ * go through slash.exec '/cron …', which needs a live session id — a
+ * throwaway 'automation' session is created per command (RN ensureSession).
+ * prompt_preview is capped at 100 chars server-side (#108): the editor
+ * fetches the FULL prompt via cron.manage action:'get', and a
+ * schedule-only edit never re-sends --prompt (the backend overwrites the
+ * stored prompt whenever --prompt is present — worst case with the
+ * truncated preview). Edit flags are shell-quoted; schedules contain
+ * spaces ("every 30m").
+ */
+import { useEffect, useState } from 'react'
+import type { CronJob, RpcRef } from '../types'
 
-function toMs(ts?: number): number {
-  if (typeof ts !== 'number' || !Number.isFinite(ts) || ts <= 0) return 0
-  return ts > 1e12 ? ts : ts * 1000
+/** Shell-quote a value for /cron edit flags (RN automations.tsx shq). */
+const shq = (v: string): string => `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+
+/** Future-relative chip for next_run (RN `when`): due / in 12m / in 3h /
+ *  in 2d. types.ts relTime is past-oriented ("2h" = ago), so the phone's
+ *  future variant lives here. */
+const when = (iso?: string | null): string => {
+  if (!iso) return ''
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return ''
+  const diff = t - Date.now()
+  if (diff < 0) return 'due'
+  if (diff < 3_600_000) return `in ${Math.max(1, Math.round(diff / 60_000))}m`
+  if (diff < 86_400_000) return `in ${Math.round(diff / 3_600_000)}h`
+  return `in ${Math.round(diff / 86_400_000)}d`
 }
-function relIn(ts?: number): string {
-  const ms = toMs(ts)
-  if (!ms) return ''
-  const s = Math.floor((ms - Date.now()) / 1000)
-  if (s <= 0) return 'due'
-  if (s < 3600) return `in ${Math.max(1, Math.floor(s / 60))}m`
-  if (s < 86400) return `in ${Math.floor(s / 3600)}h`
-  return `in ${Math.floor(s / 86400)}d`
+
+/** Full locale timestamp for the expanded detail rows (RN fmtFull). */
+const fmtFull = (iso?: string | null): string => {
+  if (!iso) return '—'
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return '—'
+  try {
+    return new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  } catch { return iso }
+}
+
+type FormState = {
+  /** null → add mode; set → edit mode (name locked: /cron edit has no --name). */
+  jobId: string | null
+  name: string
+  schedule: string
+  prompt: string
+  /** Prompt exactly as loaded from the gateway ('get'); the save
+   *  dirty-check compares against it so a schedule-only edit never
+   *  re-sends --prompt. null while the 'get' fetch is in flight. */
+  loadedPrompt: string | null
+  /** The 'get' fetch failed: the field holds the 100-char preview. */
+  promptDegraded: boolean
+  saving: boolean
+}
+
+const ADD_FORM: FormState = {
+  jobId: null, name: '', schedule: 'every 30m', prompt: '',
+  loadedPrompt: null, promptDegraded: false, saving: false,
 }
 
 export default function AutomationsTab({ rpc }: { rpc: RpcRef }) {
-  const [jobs, setJobs] = useState<Job[]>([])
+  const [jobs, setJobs] = useState<CronJob[]>([])
   const [err, setErr] = useState('')
-  const [busy, setBusy] = useState('')
-  const [name, setName] = useState(''); const [schedule, setSchedule] = useState('every 30m'); const [prompt, setPrompt] = useState('')
-  const cronSession = useRef('')
+  /** Transient status line ("Paused …", "Job ID copied") — fades after 4s. */
+  const [status, setStatus] = useState('')
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [busyJob, setBusyJob] = useState<string | null>(null)
+  /** job_id armed for a second-click delete confirm (Bots tab pattern). */
+  const [confirmDel, setConfirmDel] = useState<string | null>(null)
+  const [form, setForm] = useState<FormState>(ADD_FORM)
 
-  const load = async () => { try { setJobs((await rpc.current!('cron.manage', { action: 'list', include_disabled: true })).jobs ?? []) } catch (e) { setErr(String(e)) } }
-  useEffect(() => { if (rpc.current) load() }, [])
-
-  /** slash.exec needs a live session id — mint one lazily and reuse it. */
-  const cronSlash = async (command: string) => {
-    if (!cronSession.current) {
-      const s = await rpc.current!('session.create', { title: 'automations', cols: 120, source: 'mobile' })
-      cronSession.current = s.session_id
-    }
-    return rpc.current!('slash.exec', { session_id: cronSession.current, command })
-  }
-
-  const add = async () => {
-    if (!name.trim() || !prompt.trim()) return
+  const load = async () => {
+    const r = rpc.current; if (!r) return
     setErr('')
-    try { await rpc.current!('cron.manage', { action: 'add', name: name.trim(), schedule, prompt }); setName(''); setPrompt(''); load() } catch (e) { setErr(String(e)) }
+    try {
+      const res = await r('cron.manage', { action: 'list', include_disabled: true })
+      setJobs(res?.jobs ?? [])
+    } catch (e) { setErr(String(e)) }
   }
-  const act = async (key: string, fn: () => Promise<unknown>) => {
-    setBusy(key); setErr('')
-    try { await fn(); await load() } catch (e) { setErr(String(e)) } finally { setBusy('') }
+  useEffect(() => { if (rpc.current) void load() }, [])
+
+  useEffect(() => {
+    if (!status) return
+    const t = setTimeout(() => setStatus(''), 4000)
+    return () => clearTimeout(t)
+  }, [status])
+
+  const armDelete = (jobId: string) => {
+    setConfirmDel(jobId)
+    setTimeout(() => setConfirmDel((c) => (c === jobId ? null : c)), 4000)
   }
+
+  /** Run a /cron subcommand through slash.exec — it needs a live session id
+   *  (RN ensureSession; here a fresh 'automation' session per command). */
+  const cronSlash = async (command: string): Promise<string> => {
+    const r = rpc.current!
+    const s = await r('session.create', { title: 'automation', cols: 120, source: 'mobile' })
+    if (!s?.session_id) throw new Error('session.create returned no session_id')
+    const res = await r('slash.exec', { session_id: s.session_id, command })
+    return String(res?.output ?? '').trim()
+  }
+
+  const withBusy = async (jobId: string, fn: () => Promise<void>) => {
+    setBusyJob(jobId); setErr('')
+    try { await fn() } catch (e) { setErr(String(e)) } finally { setBusyJob(null) }
+  }
+
+  const togglePause = (j: CronJob) => void withBusy(j.job_id, async () => {
+    const action = j.enabled === false ? 'resume' : 'pause'
+    await rpc.current!('cron.manage', { action, name: j.job_id })
+    setStatus(action === 'pause' ? `Paused “${j.name ?? j.job_id}”` : `Resumed “${j.name ?? j.job_id}”`)
+    await load()
+  })
+
+  const runNow = (j: CronJob) => void withBusy(j.job_id, async () => {
+    const out = await cronSlash(`/cron run ${j.job_id}`)
+    setStatus(out.split('\n')[0] || `Queued “${j.name ?? j.job_id}” to run`)
+  })
+
+  const remove = (j: CronJob) => void withBusy(j.job_id, async () => {
+    await rpc.current!('cron.manage', { action: 'remove', name: j.job_id })
+    setStatus(`Deleted “${j.name ?? j.job_id}”`)
+    await load()
+  })
+
+  const copyId = async (j: CronJob) => {
+    try {
+      await navigator.clipboard.writeText(j.job_id)
+      setStatus('Job ID copied')
+    } catch { setStatus('Copy failed — job id is in the details row') }
+  }
+
+  /** #108: open the editor from the FULL prompt (cron.manage 'get'), with
+   *  the truncated preview only as a degraded fallback. */
+  const openEdit = async (j: CronJob) => {
+    setErr(''); setConfirmDel(null); setExpanded(j.job_id)
+    setForm({
+      jobId: j.job_id, name: j.name ?? '', schedule: j.schedule ?? '',
+      prompt: j.prompt_preview ?? j.prompt ?? '',
+      loadedPrompt: null, promptDegraded: false, saving: false,
+    })
+    try {
+      const r = await rpc.current!('cron.manage', { action: 'get', name: j.job_id })
+      const full = r?.job?.prompt
+      if (typeof full !== 'string') throw new Error('cron.manage get: no job in response')
+      setForm((f) => (f.jobId === j.job_id ? { ...f, prompt: full, loadedPrompt: full } : f))
+    } catch {
+      // Older gateway (no 'get') or the RPC failed: keep the preview,
+      // mark degraded — the dirty-check keeps it from being written back.
+      setForm((f) => (f.jobId === j.job_id
+        ? { ...f, loadedPrompt: j.prompt_preview ?? j.prompt ?? '', promptDegraded: true }
+        : f))
+    }
+  }
+
+  const saveForm = async () => {
+    if (form.saving) return
+    const schedule = form.schedule.trim()
+    const prompt = form.prompt.trim()
+    const name = form.name.trim()
+    // An unmodified prompt is omitted from the edit command entirely.
+    const unchanged = !!form.jobId && form.loadedPrompt !== null && prompt === form.loadedPrompt.trim()
+    if (!schedule || (!prompt && !unchanged) || (!form.jobId && !name)) {
+      setErr('Name, schedule and prompt are all needed.')
+      return
+    }
+    setForm({ ...form, saving: true }); setErr('')
+    try {
+      if (form.jobId) {
+        // /cron edit has no --name; schedule + prompt are the editable levers.
+        const promptFlag = unchanged ? '' : ` --prompt ${shq(prompt)}`
+        const out = await cronSlash(`/cron edit ${form.jobId} --schedule ${shq(schedule)}${promptFlag}`)
+        setStatus(out.split('\n')[0] || 'Updated')
+      } else {
+        await rpc.current!('cron.manage', { action: 'add', name, schedule, prompt })
+        setStatus(`Created “${name}”`)
+      }
+      setForm(ADD_FORM)
+      await load()
+    } catch (e) {
+      setErr(String(e))
+      setForm((f) => (f.saving ? { ...f, saving: false } : f))
+    }
+  }
+
+  const editing = !!form.jobId
+  const promptUnchanged = editing && form.loadedPrompt !== null && form.prompt.trim() === form.loadedPrompt.trim()
+  const canSave = form.schedule.trim() !== ''
+    && (form.prompt.trim() !== '' || promptUnchanged)
+    && (editing || form.name.trim() !== '')
 
   return (
     <div className="page">
-      <div className="pagehead"><h2>Automations</h2><span className="pill dim">{jobs.filter((j) => j.enabled !== false).length} running</span><span className="spacer" /><button className="ghost" onClick={load}>refresh</button></div>
+      <div className="pagehead"><h2>Automations</h2><button className="ghost" onClick={() => void load()}>refresh</button></div>
+      <p className="dim">Scheduled jobs run on your local runtime, so they work even when this window is closed.</p>
+      {status && <div className="okline">{status}</div>}
       {err && <div className="err">{err}</div>}
+
       <div className="card form">
-        <div className="row"><input placeholder="name" value={name} onChange={(e) => setName(e.target.value)} /><input placeholder="schedule (every 30m, every monday 9:00…)" value={schedule} onChange={(e) => setSchedule(e.target.value)} /></div>
-        <textarea placeholder="prompt — what should run" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-        <div className="row"><button className="primary" onClick={add}>Create automation</button></div>
-      </div>
-      {jobs.map((j) => (
-        <div key={j.job_id} className="card">
-          <div className="row">
-            <strong>{j.name ?? j.job_id}</strong>
-            {j.enabled === false ? <span className="pill warn">paused</span> : <span className="pill ok">running</span>}
-            {j.schedule && <span className="pill dim">{j.schedule}</span>}
-            {j.next_run ? <span className="pill dim">{relIn(typeof j.next_run === 'string' ? Date.parse(j.next_run) / 1000 : j.next_run)}</span> : null}
-            <span className="spacer" />
-            <button className="ghost" disabled={!!busy} onClick={() => act(`run:${j.job_id}`, () => cronSlash(`/cron run ${j.job_id}`))}>{busy === `run:${j.job_id}` ? 'running…' : 'run now'}</button>
-            <button className="ghost" disabled={!!busy} onClick={() => act(`t:${j.job_id}`, () => rpc.current!('cron.manage', { action: j.enabled === false ? 'resume' : 'pause', name: j.job_id }))}>
-              {j.enabled === false ? 'resume' : 'pause'}
-            </button>
-            <button className="ghost danger" disabled={!!busy} onClick={() => act(`rm:${j.job_id}`, () => rpc.current!('cron.manage', { action: 'remove', name: j.job_id }))}>remove</button>
-          </div>
-          {j.prompt && <p className="dim">{j.prompt}</p>}
+        <div className="row">
+          <strong>{editing ? 'Edit automation' : 'New automation'}</strong>
+          {editing && <span className="pill dim">{form.jobId}</span>}
         </div>
-      ))}
-      {jobs.length === 0 && <div className="empty"><p>No automations yet.</p></div>}
+        {editing ? (
+          <div className="jrow"><span className="jlabel">NAME</span><span className="jvalue">{form.name || form.jobId}</span></div>
+        ) : (
+          <input placeholder="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        )}
+        <input placeholder="schedule (every 30m, in 45m, every monday 9:00…)" value={form.schedule}
+          onChange={(e) => setForm({ ...form, schedule: e.target.value })} />
+        <span className="checkhint">Intervals: every 30m · every 2h — one-shot: in 45m — weekly: every monday 9:00</span>
+        {editing && form.promptDegraded && (
+          <div className="notice">
+            Couldn't load the full prompt — the field shows the truncated preview. Saving without prompt changes is safe; editing the prompt here would rewrite it truncated.
+          </div>
+        )}
+        <textarea placeholder="prompt — what should run (self-contained: jobs run in a fresh session with no chat context)"
+          value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })} />
+        <div className="row">
+          <button className="primary" onClick={() => void saveForm()} disabled={!canSave || form.saving}>
+            {form.saving ? 'Saving…' : editing ? 'Save changes' : 'Create automation'}
+          </button>
+          {editing && (
+            <button className="ghost" onClick={() => setForm(ADD_FORM)} disabled={form.saving}>cancel edit</button>
+          )}
+        </div>
+      </div>
+
+      {jobs.length === 0 && !err && (
+        <div className="empty">
+          <div className="mochi">(●ᴗ●)</div>
+          <p>No automations yet — create one above, or from chat with /cron add.</p>
+        </div>
+      )}
+
+      {jobs.map((j) => {
+        const paused = j.enabled === false || j.state === 'paused'
+        const open = expanded === j.job_id
+        const isBusy = busyJob === j.job_id
+        const next = j.next_run_at ?? j.next_run ?? null
+        const armed = confirmDel === j.job_id
+        const preview = j.prompt_preview ?? j.prompt ?? ''
+        const lastError = j.last_fire_error || j.last_delivery_error || j.last_error
+        return (
+          <div key={j.job_id} className="card">
+            <div className="row">
+              <strong>{j.name ?? j.job_id}</strong>
+              {paused ? (
+                <span className="pill warn">paused</span>
+              ) : next ? (
+                <span className="pill ok" title={fmtFull(next)}>{when(next)}</span>
+              ) : null}
+              {j.schedule && <span className="pill dim">{j.schedule}</span>}
+              {j.last_status && <span className="pill dim">last: {j.last_status}</span>}
+              <span className="spacer" />
+              <button className="ghost" onClick={() => { setExpanded(open ? null : j.job_id); setConfirmDel(null) }}>
+                {open ? 'less' : 'details'}
+              </button>
+            </div>
+            {preview && <p className={`dim jprompt${open ? ' open' : ''}`}>{preview}</p>}
+            {open && (
+              <div className="jdetails">
+                <div className="jrow">
+                  <span className="jlabel">Job ID</span>
+                  <button type="button" className="jvalue copy" onClick={() => void copyId(j)} title="click to copy">
+                    {j.job_id} ⧉
+                  </button>
+                </div>
+                <div className="jrow">
+                  <span className="jlabel">Next run</span>
+                  <span className="jvalue">{next ? fmtFull(next) : '—'}</span>
+                </div>
+                <div className="jrow">
+                  <span className="jlabel">Last run</span>
+                  <span className="jvalue">{fmtFull(j.last_run_at)}</span>
+                </div>
+                {j.repeat && <div className="jrow"><span className="jlabel">Repeat</span><span className="jvalue">{j.repeat}</span></div>}
+                {j.deliver && <div className="jrow"><span className="jlabel">Deliver</span><span className="jvalue">{j.deliver}</span></div>}
+                {j.paused_reason && <div className="jrow"><span className="jlabel">Paused because</span><span className="jvalue">{j.paused_reason}</span></div>}
+                {lastError && <div className="jrow"><span className="jlabel">Last error</span><span className="jvalue bad">{String(lastError).slice(0, 300)}</span></div>}
+              </div>
+            )}
+            <div className="row mt8">
+              <button className="ghost" disabled={!!busyJob} onClick={() => runNow(j)}>
+                {isBusy ? '…' : 'run now'}
+              </button>
+              <button className="ghost" disabled={!!busyJob} onClick={() => togglePause(j)}>
+                {paused ? 'resume' : 'pause'}
+              </button>
+              <button className="ghost" disabled={!!busyJob} onClick={() => void openEdit(j)}>edit</button>
+              <button className={`ghost danger${armed ? ' confirm' : ''}`} disabled={!!busyJob}
+                onClick={() => (armed ? remove(j) : armDelete(j.job_id))}>
+                {armed ? 'sure? delete' : 'delete'}
+              </button>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

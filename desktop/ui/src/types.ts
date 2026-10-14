@@ -83,3 +83,43 @@ export function dbg(what: string, extra: Record<string, unknown> = {}) {
   fetch('/dbg', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ t: Date.now(), what, ...extra }) }).catch(() => {})
 }
 export const ev = (e: unknown): { type: string; session_id?: string; payload: any } => e as any
+
+/* ══ Round 5 — Crew + Automations (phone parity) ══ */
+
+/** moch.runs.timeline row — the merged kanban/cron/delegation run ledger
+ *  (rpc_fleet.py moch_runs_timeline: newest-first VIEW, not a store).
+ *  ts is unix seconds (fractional); source ∈ kanban | cron | delegate. */
+export type Run = {
+  source: string
+  id: string
+  profile: string
+  title: string
+  status: string
+  ts?: number
+  error?: string
+  board?: string
+}
+
+/** cron.manage 'list' row. prompt_preview is capped at 100 chars
+ *  server-side (phone #108) — the FULL prompt only comes via
+ *  action:'get'. next_run_at/last_* are ISO strings; next_run is the
+ *  older desktop spelling, kept defensively. */
+export type CronJob = {
+  job_id: string
+  name?: string
+  schedule?: string
+  prompt_preview?: string
+  prompt?: string
+  repeat?: string | null
+  deliver?: string | null
+  next_run_at?: string | null
+  next_run?: string | null
+  last_run_at?: string | null
+  last_status?: string | null
+  last_error?: string | null
+  last_fire_error?: string | null
+  last_delivery_error?: string | null
+  enabled?: boolean
+  state?: string | null
+  paused_reason?: string | null
+}

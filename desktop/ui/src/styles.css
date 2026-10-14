@@ -400,3 +400,68 @@ body {
 .pill.effort.on { background: var(--accent-soft); color: var(--accent); }
 .logtail-card summary { cursor: pointer; }
 .logtail-card pre { margin-top: 8px; font-size: 11.5px; color: var(--text-faint); white-space: pre-wrap; max-height: 180px; overflow-y: auto; font-family: ui-monospace, monospace; }
+
+/* ══ Round 5 — Crew board + run ledger (phone parity) ══ */
+.colhead { display: flex; align-items: center; gap: 8px; }
+.colhead h3 { font-size: 13px; font-weight: 700; letter-spacing: 0.3px; color: var(--text); }
+.colhead .pill { margin-left: auto; }
+.colempty { color: var(--text-faint); font-size: 12.5px; padding: 3px 2px 0; }
+.task {
+  background: var(--bg-elev); border: 1px solid var(--border-soft);
+  border-radius: 12px; padding: 10px 12px; margin-top: 6px;
+  transition: border-color 0.12s;
+}
+.task:hover, .task.open { border-color: var(--border); }
+.taskhead {
+  width: 100%; text-align: left; background: none; border: none;
+  color: var(--text); font: inherit; cursor: pointer;
+  display: flex; flex-direction: column; gap: 6px; padding: 0;
+}
+.taskhead strong { font-size: 13.5px; line-height: 1.45; }
+.taskmeta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.taskid {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 11px; color: var(--text-faint);
+}
+.taskbody { margin-top: 8px; }
+.assignrow { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.assignlabel { font-size: 11px; font-weight: 600; letter-spacing: 1px; color: var(--text-faint); }
+/* Chips as disabled picker options (current assignee stays "on" but inert,
+   frozen bots fade — the server refuses them too, 4071). */
+.chip:disabled { cursor: default; }
+.chip:disabled:not(.on) { opacity: 0.45; }
+.chip:disabled:not(.on):hover { color: var(--text-dim); background: var(--btn-tint); }
+
+/* Run ledger rows (moch.runs.timeline footer) */
+.ledger { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+.lrow { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-dim); min-width: 0; }
+.lsrc {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase;
+  color: var(--text-faint); min-width: 64px; flex: none;
+}
+.ltitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lwhen { font-size: 11px; color: var(--text-faint); white-space: nowrap; }
+
+/* ══ Round 5 — Automations job cards (phone parity) ══ */
+.okline {
+  color: var(--green-soft); font-size: 12.5px;
+  background: var(--green-tint); border-radius: 12px; padding: 8px 12px;
+}
+.jprompt {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.jprompt.open { display: block; -webkit-line-clamp: unset; overflow: visible; }
+.jdetails {
+  display: flex; flex-direction: column; gap: 5px;
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-soft);
+}
+.jrow { display: flex; align-items: flex-start; gap: 10px; font-size: 12.5px; min-width: 0; }
+.jlabel { color: var(--text-faint); font-weight: 600; min-width: 88px; flex: none; padding-top: 1px; }
+.jvalue { color: var(--text-dim); flex: 1; min-width: 0; word-break: break-word; }
+.jvalue.bad { color: var(--red); }
+.jvalue.copy {
+  background: none; border: none; padding: 0; font: inherit;
+  text-align: left; cursor: pointer;
+}
+.jvalue.copy:hover { color: var(--text); }
