@@ -347,7 +347,7 @@ function ChatTab({ rpc, client }: { rpc: RpcRef; client: any }) {
             : b.kind === 'thinking' ? (
               <details key={b.id} className="thinking"><summary>Thinking{b.live ? '…' : ''}</summary><pre>{b.text}</pre></details>
             ) : b.kind === 'tool' ? (
-              <div key={b.id} className="tool"><span className="dot">{b.live ? '◌' : '●'}</span> {b.text}{b.meta ? <span className="meta"> {b.meta}</span> : null}</div>
+              <div key={b.id} className="tool"><span className={`dot${b.live ? '' : ' done'}`}>{b.live ? '◌' : '●'}</span> {b.text}{b.meta ? <span className="meta"> {b.meta}</span> : null}</div>
             ) : <div key={b.id} className="statusline">{b.text}</div>,
           )}
         </div>
