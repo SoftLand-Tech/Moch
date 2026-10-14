@@ -76,14 +76,13 @@ chat). Subsequent runs go straight in. Everything lives in
 
 ```
 desktop/src-tauri/target/release/bundle/
-  deb/Moch_0.2.0_amd64.deb        1.93 MiB  ← the lightweight installable
-  appimage/Moch_0.2.0_amd64.AppImage  97 MiB
+  deb/Moch_0.2.0_amd64.deb        2.03 MiB  ← the lightweight installable
+  appimage/Moch_0.2.0_amd64.AppImage  97.6 MiB
 ```
 
-NOTE: the bundles contain the SHELL only. The runtime (python + the
-hermes fork via runtime.py) and web-ui/ resolve from the repo checkout
-at launch — run them from this worktree until standalone packaging
-(embedded assets + runtime) lands.
+The UI is EMBEDDED in the binary (verified: app selftests green with
+web-ui/ deleted from disk). Remaining repo dependency: the python
+runtime (runtime.py + the hermes fork) — future packaging round.
 
 ## Known limits
 
