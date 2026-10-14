@@ -2,10 +2,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    // WebKitGTK's DMA-BUF renderer breaks webview resize tracking on
-    // Wayland compositors (content stays at the launch size when the
-    // window is tiled/maximized). Must be set before the webview is
-    // created. See FEATURE-DESKTOP-TAURI.md, "Known gaps".
-    std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    // WebKitGTK on fractional-scale Wayland compositors (Hyprland 1.25 etc.)
+    // renders at the wrong device scale (top-left quarter crop). The X11/
+    // XWayland backend sidesteps it. Override with GDK_BACKEND=wayland if
+    // you prefer to test Wayland.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("GDK_BACKEND").is_none() {
+        std::env::set_var("GDK_BACKEND", "x11");
+    }
     moch_desktop_lib::run()
 }

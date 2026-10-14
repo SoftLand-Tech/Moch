@@ -10,3 +10,7 @@ src-tauri/gen/
 .win-crop.png
 .clients.json
 .win-geometry
+.dbg.log
+web-ui/
+ui/node_modules/
+.hermes-serve.log

@@ -1,27 +1,14 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Moch",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "tech.softland.moch.desktop",
-  "build": {
-    "frontendDist": "../web"
-  },
+  "build": {},
   "app": {
     "withGlobalTauri": false,
-    "windows": [
-      {
-        "label": "main",
-        "title": "Moch",
-        "width": 420,
-        "height": 860,
-        "minWidth": 360,
-        "minHeight": 600,
-        "resizable": true,
-        "center": true
-      }
-    ],
+    "windows": [],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob: data:; connect-src 'self' ws: wss: http: https:; font-src 'self' data:"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss: http: https:; font-src 'self' data:"
     }
   },
   "bundle": {
