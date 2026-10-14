@@ -17,7 +17,33 @@ type Cfg = { wsUrl: string; token: string; mode: string; home?: string; logTail?
 type Tab = 'chat' | 'bots' | 'crew' | 'automations' | 'skills' | 'models' | 'run'
 
 type Block = { id: number; kind: 'user' | 'assistant' | 'thinking' | 'tool' | 'status'; text: string; live?: boolean; meta?: string }
-type SessionRow = { session_id?: string; stored_session_id?: string; title?: string; updated_at?: number }
+type SessionRow = {
+  /** Durable id — the one session.resume takes (sessionRowMeta.ts). */
+  id?: string
+  session_id?: string; stored_session_id?: string
+  title?: string; preview?: string
+  /** Unix SECONDS, fractional. */
+  started_at?: number
+  message_count?: number
+  profile?: string
+}
+
+/** started_at is unix seconds; normalize defensively (sessionList.ts toMs). */
+function toMs(ts?: number): number {
+  if (typeof ts !== 'number' || !Number.isFinite(ts) || ts <= 0) return 0
+  if (ts > 1e12) return ts
+  return ts * 1000
+}
+function relTime(ts?: number): string {
+  const ms = toMs(ts)
+  if (!ms) return ''
+  const s = Math.max(1, Math.floor((Date.now() - ms) / 1000))
+  if (s < 60) return 'now'
+  if (s < 3600) return `${Math.floor(s / 60)}m`
+  if (s < 86400) return `${Math.floor(s / 3600)}h`
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)}d`
+  return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
 type FleetProfile = { name: string; description?: string; soul?: string; frozen?: boolean; gateHeld?: boolean; model?: { provider: string; default: string } }
 type FleetStatus = { fleetEnabled: boolean; queue?: { slots: number; active: number }; profiles?: { name: string; frozen: boolean; gateHeld: boolean }[] }
 type LaunchSkill = { name: string; description: string; path: string }
@@ -286,11 +312,7 @@ function ChatTab({ rpc, client }: { rpc: RpcRef; client: any }) {
     if (!client) return
     const un = client.onAny((e: unknown) => {
       const { type } = ev(e)
-      if (type === 'gateway.ready') {
-        rpc.current!('session.list', { limit: 200 })
-          .then((r: any) => setSessions((r.sessions ?? []).slice().sort((a: any, b: any) => (b.updated_at ?? 0) - (a.updated_at ?? 0))))
-          .catch(() => {})
-      }
+      if (type === 'gateway.ready') loadSessions()
       applyEvent(e)
     })
     return un
@@ -304,7 +326,7 @@ function ChatTab({ rpc, client }: { rpc: RpcRef; client: any }) {
       if (!sid) {
         const cr = await r('session.create', { title: 'Desktop chat', cols: 120, source: 'mobile' })
         sid = cr.session_id; setBlocks((p) => ({ ...p, [sid]: [] })); setActiveSid(sid)
-        setSessions((p) => [{ session_id: sid, title: 'Desktop chat' }, ...p])
+        setSessions((p) => [{ session_id: sid, title: 'Desktop chat', started_at: Date.now() / 1000 }, ...p])
       }
       pushBlock(sid, { kind: 'user', text })
       await r('prompt.submit', { session_id: sid, text })
@@ -319,7 +341,9 @@ function ChatTab({ rpc, client }: { rpc: RpcRef; client: any }) {
           <button className="new-chat" onClick={() => { setActiveSid(''); setDraft('') }}>+ New chat</button>
           <div className="sessions">
             {sessions.map((s) => {
-              const key = s.stored_session_id ?? s.session_id ?? ''
+              const key = s.id ?? s.stored_session_id ?? s.session_id ?? ''
+              const label = s.title || (s.preview ? s.preview.slice(0, 40) : key.slice(0, 18))
+              const meta = [relTime(s.started_at), s.message_count ? `${s.message_count} msgs` : null, s.profile && s.profile !== 'default' ? s.profile : null].filter(Boolean).join(' · ')
               return (
                 <button key={key} className={`session ${activeSid === s.session_id ? 'active' : ''}`}
                   onClick={async () => {
@@ -332,7 +356,8 @@ function ChatTab({ rpc, client }: { rpc: RpcRef; client: any }) {
                       for (const e of rep.events ?? []) applyEvent(e)
                     } catch { }
                   }}>
-                  {s.title || key.slice(0, 18)}
+                  <span className="s-title">{label}</span>
+                  {meta && <span className="s-meta">{meta}</span>}
                 </button>
               )
             })}

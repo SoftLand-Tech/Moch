@@ -352,3 +352,9 @@ body {
 .md table { border-collapse: collapse; margin: 0 0 10px; font-size: 13.5px; max-width: 100%; display: block; overflow-x: auto; }
 .md th, .md td { border: 1px solid var(--border-soft); padding: 6px 11px; text-align: left; }
 .md th { background: var(--bg-elev); font-weight: 600; color: var(--text-dim); }
+
+/* ── Sessions rows: two-line, meta under title ── */
+.session { display: flex; flex-direction: column; gap: 1px; white-space: normal; }
+.session .s-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session .s-meta { font-size: 11px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session.active .s-meta { color: var(--accent-dark); opacity: 0.9; }
