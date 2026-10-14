@@ -28,31 +28,89 @@ export default function App() {
   const [setupDone, setSetupDone] = useState<boolean | null>(null)
   const clientRef = useRef<JsonRpcGatewayClient | null>(null)
   const rpcRef = useRef<((m: string, p?: any) => Promise<any>) | null>(null)
+  const urlRef = useRef('')
 
   const [client, setClient] = useState<any>(null)
+  const selftestRan = useRef(false)
 
+  // Boot + reconnect supervisor: initial connect, then backoff retries and
+  // silent-drop detection (the gateway restarting under us) — the conn
+  // badge must tell the truth (both round-5 builders flagged this gap).
   useEffect(() => {
+    let closed = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let watchdog: ReturnType<typeof setTimeout> | null = null
+    let poll: ReturnType<typeof setInterval> | null = null
+    let attempt = 0
+    let everOpened = false
+
+    const dial = () => {
+      if (closed) return
+      const url = urlRef.current
+      if (!url) return
+      setConn('connecting')
+      const c = new JsonRpcGatewayClient({
+        connectTimeoutMs: 15_000, requestTimeoutMs: 120_000,
+        socketFactory: (u: string) => new WebSocket(u) as unknown as WebSocket,
+      })
+      clientRef.current = c
+      rpcRef.current = (m: string, p: any = {}) => c.request(m, p)
+      c.onAny((e) => {
+        if (ev(e).type === 'gateway.ready') {
+          attempt = 0
+          setConn('open')
+          setClient(c)
+          dbg(everOpened ? 'ws-reconnected' : 'ws-open', {})
+          everOpened = true
+        }
+      })
+      c.connect(url).catch(() => { /* watchdog reschedules */ })
+      if (watchdog) clearTimeout(watchdog)
+      watchdog = setTimeout(() => {
+        if (!closed && c.connectionState !== 'open') {
+          try { c.close() } catch { }
+          schedule()
+        }
+      }, 20_000)
+    }
+    const schedule = () => {
+      if (closed) return
+      const delay = everOpened ? Math.min(30_000, 2_000 * 2 ** Math.min(attempt, 4)) : Math.min(15_000, 1_000 * 2 ** Math.min(attempt, 3))
+      attempt++
+      timer = setTimeout(dial, delay)
+    }
+
     ;(async () => {
       let cfg: Cfg
       try { cfg = await (await fetch('/moch-config.json')).json() } catch { setConn('error'); return }
       setCfg(cfg)
       dbg('cfg', { mode: cfg.mode })
       if (cfg.mode === 'error') { setConn('error'); return }
-      const client = new JsonRpcGatewayClient({
-        connectTimeoutMs: 15_000, requestTimeoutMs: 120_000,
-        socketFactory: (url: string) => new WebSocket(url) as unknown as WebSocket,
-      })
-      clientRef.current = client
-      rpcRef.current = (m: string, p: any = {}) => client.request(m, p)
-      client.onAny((e) => { if (ev(e).type === 'gateway.ready') { setConn('open'); setClient(client); dbg('ws-open', {}) } })
-      client.connect(`${cfg.wsUrl}?token=${encodeURIComponent(cfg.token)}`).catch((err) => { dbg('ws-error', { err: String(err) }); setConn('error') })
+      urlRef.current = `${cfg.wsUrl}?token=${encodeURIComponent(cfg.token)}`
+      dial()
+      poll = setInterval(() => {
+        const c = clientRef.current
+        if (c && everOpened && c.connectionState === 'closed') {
+          dbg('ws-drop', {})
+          schedule()
+        }
+      }, 3_000)
     })()
-    return () => { clientRef.current?.close() }
+
+    return () => {
+      closed = true
+      if (timer) clearTimeout(timer)
+      if (watchdog) clearTimeout(watchdog)
+      if (poll) clearInterval(poll)
+      clientRef.current?.close()
+    }
   }, [])
 
   /** Selftest (?selftest=1): exercise EVERY tab's data path, report to /dbg. */
   useEffect(() => {
     if (conn !== 'open' || !location.search.includes('selftest=1')) return
+    if (selftestRan.current) return
+    selftestRan.current = true
     ;(async () => {
       const r = rpcRef.current!
       const try_ = async (what: string, m: string, p: any) => {
