@@ -69,7 +69,7 @@ import { activeBotAtom, setActiveBot } from '../../src/lib/fleet'
 import { shareInInbox, ackShareIn, applySharedToDraft, type SharedFile } from '../../src/lib/shareIn'
 import { isConnected as isConnectedAtom, connectionState, gatewayError, retryNow } from '../../src/lib/gateway'
 import { completeSlash, loadCatalog, runCommand, parseSlashCommand, canonicalName, interactiveTarget, describeCommand, subsFor, argumentModeFor, slashLabel, localCompleteSync, resolveSlashRoute, type CompletionItem, type SlashOutcome } from '../../src/lib/slash'
-import { liveModel, liveReasoning, liveReasoningDisplay, fetchReasoningDisplay } from '../../src/lib/modelState'
+import { liveModel, liveReasoning, liveReasoningDisplay, liveReasoningWire, fetchReasoningDisplay } from '../../src/lib/modelState'
 import { ModelPickerSheet } from '../../src/components/ModelPickerSheet'
 import { CommandOptionsSheet } from '../../src/components/CommandOptionsSheet'
 import { CommandCatalogSheet } from '../../src/components/CommandCatalogSheet'
@@ -80,14 +80,19 @@ import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
 import { tr } from '../../src/lib/strings'
 import { countUnanswered } from '../../src/lib/clarifyGate'
-import { C, S, useStyles, useShape } from '../../src/lib/theme'
+import { C, S, useStyles, useShape, TYPE } from '../../src/lib/theme'
 
-/** Empty-state prompts, styled as plain icon rows the way ChatGPT does. */
+/** Empty-state starters (2026-10-14 revamp): tappable idea cards in the
+ * ChatGPT/Muse mold — a title plus a one-line hint of what you get. Copy is
+ * externalized (strings.ts, EN/AR); `command` starters open the slash palette
+ * instead of sending their label (BUG-043 keeps the palette visible). */
 const STARTERS = [
-  { icon: 'sparkles-outline' as const, label: 'What can you do?' },
-  { icon: 'document-text-outline' as const, label: 'Summarize my day' },
-  { icon: 'terminal-outline' as const, label: 'Explain this repo' },
-  { icon: 'help-circle-outline' as const, label: 'Browse slash commands' },
+  { icon: 'sparkles-outline' as const, labelKey: 'chat.start.capability', hintKey: 'chat.start.capability.hint' },
+  { icon: 'document-text-outline' as const, labelKey: 'chat.start.day', hintKey: 'chat.start.day.hint' },
+  { icon: 'terminal-outline' as const, labelKey: 'chat.start.repo', hintKey: 'chat.start.repo.hint' },
+  { icon: 'create-outline' as const, labelKey: 'chat.start.write', hintKey: 'chat.start.write.hint' },
+  { icon: 'bulb-outline' as const, labelKey: 'chat.start.brainstorm', hintKey: 'chat.start.brainstorm.hint' },
+  { icon: 'help-circle-outline' as const, labelKey: 'chat.start.commands', hintKey: 'chat.start.commands.hint', command: true },
 ]
 
 const MAX_SLASH_ITEMS = 120
@@ -139,6 +144,13 @@ export default function Chat() {
   const gerr = useStore(gatewayError)
   const curModel = useStore(liveModel)
   const curEffort = useStore(liveReasoning)
+  // The clamped value the wire actually carries (session.info
+  // reasoning_effort_wire) — when the model lowers the configured pick, the
+  // chip shows what's REALLY running rather than parroting the config.
+  const curEffortWire = useStore(liveReasoningWire)
+  const effortShown = (curEffortWire || curEffort) || ''
+  const effortClamped =
+    !!curEffort && !!curEffortWire && curEffortWire !== curEffort
   const showThinking = useStore(liveReasoningDisplay) !== 'hide'
   // Live id — only used to scope the reasoning-display config read; the
   // screen itself keys off storedId.
@@ -1093,10 +1105,15 @@ export default function Chat() {
                 style={({ pressed }) => [s.modelChip, pressed && s.btnPressed]}
                 onPress={() => setModelPickerOpen(true)}
                 hitSlop={6}
-                accessibilityLabel={`Current model ${curModel}. Tap to change`}
+                accessibilityLabel={`Current model ${curModel}${
+                  effortShown && effortShown !== 'none' ? `, thinking ${curEffort}${effortClamped ? ` (running ${curEffortWire})` : ''}` : ''
+                }. Tap to change`}
               >
                 <Icon name="cube-outline" size={12} color={C.accent} />
-                <Text style={s.modelChipText} numberOfLines={1}>{curModel}</Text>
+                <Text style={s.modelChipText} numberOfLines={1}>
+                  {curModel}
+                  {effortShown && effortShown !== 'none' ? ` · ${effortShown}` : ''}
+                </Text>
               </Pressable>
             ) : null}
             {/* BUG-111: an active bot silently scoped every NEW chat to its
@@ -1169,10 +1186,15 @@ export default function Chat() {
               onPress={() => setModelPickerOpen(true)}
               hitSlop={6}
               accessibilityRole="button"
-              accessibilityLabel={`Current model ${curModel}. Tap to change`}
+              accessibilityLabel={`Current model ${curModel}${
+                effortShown && effortShown !== 'none' ? `, thinking ${curEffort}${effortClamped ? ` (running ${curEffortWire})` : ''}` : ''
+              }. Tap to change`}
             >
               <Icon name="cube-outline" size={12} color={C.accent} />
-              <Text style={s.modelChipText} numberOfLines={1}>{curModel}</Text>
+              <Text style={s.modelChipText} numberOfLines={1}>
+                {curModel}
+                {effortShown && effortShown !== 'none' ? ` · ${effortShown}` : ''}
+              </Text>
             </Pressable>
           ) : null}
           <FlatList
@@ -1238,25 +1260,31 @@ export default function Chat() {
                 </View>
               ) : (
                 <View style={s.empty}>
-                  {STARTERS.map((st) => (
-                    <Pressable
-                      key={st.label}
-                      style={({ pressed }) => [s.starter, pressed && s.starterPressed]}
-                      onPress={() => {
-                        // BUG-043: the slash palette only renders while the
-                        // composer is focused — the starter must focus it or
-                        // the user stares at a lone "/" with no catalog.
-                        if (st.label === 'Browse slash commands') {
-                          updateInput('/')
-                          inputRef.current?.focus()
-                        } else updateInput(st.label)
-                      }}
-                      accessibilityLabel={st.label}
-                    >
-                      <Icon name={st.icon} size={19} color={C.textDim} />
-                      <Text style={s.starterText}>{st.label}</Text>
-                    </Pressable>
-                  ))}
+                  {STARTERS.map((st) => {
+                    const label = tr(st.labelKey)
+                    return (
+                      <Pressable
+                        key={st.labelKey}
+                        style={({ pressed }) => [s.starter, pressed && s.starterPressed]}
+                        onPress={() => {
+                          // BUG-043: the slash palette only renders while the
+                          // composer is focused — the starter must focus it or
+                          // the user stares at a lone "/" with no catalog.
+                          if (st.command) {
+                            updateInput('/')
+                            inputRef.current?.focus()
+                          } else updateInput(label)
+                        }}
+                        accessibilityLabel={label}
+                      >
+                        <Icon name={st.icon} size={19} color={C.textDim} />
+                        <View style={s.starterCopy}>
+                          <Text style={s.starterText} numberOfLines={1}>{label}</Text>
+                          <Text style={s.starterHint} numberOfLines={1}>{tr(st.hintKey)}</Text>
+                        </View>
+                      </Pressable>
+                    )
+                  })}
                 </View>
               )
             }
@@ -1684,12 +1712,14 @@ const makeS = () => StyleSheet.create({
   // clashed with Relay's teal band after a theme switch.
   banner: { backgroundColor: C.amberSoft, paddingVertical: 9, paddingHorizontal: 14 },
   bannerText: { color: C.amber, fontSize: 12.5, fontWeight: '600', textAlign: 'center' },
-  empty: { paddingHorizontal: 16, paddingTop: 24, gap: 2 },
+  empty: { paddingHorizontal: 16, paddingTop: 24, gap: 4 },
   booting: { flex: 1, flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 80 },
   bootingText: { color: C.textFaint, fontSize: 13.5 },
-  starter: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 44, justifyContent: 'flex-start' },
+  starter: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 52, justifyContent: 'flex-start' },
   starterPressed: { opacity: 0.6 },
-  starterText: { color: C.textDim, fontSize: 15.5, fontWeight: '500' },
+  starterCopy: { flex: 1, gap: 1 },
+  starterText: { color: C.textDim, fontSize: TYPE.bodyLg, fontWeight: '500' },
+  starterHint: { color: C.textFaint, fontSize: TYPE.caption },
   runFooter: { borderTopWidth: 1, borderTopColor: C.borderSoft, backgroundColor: C.bg, paddingVertical: 4, maxHeight: 190 },
   moreTools: { color: C.textFaint, fontSize: 11.5, paddingHorizontal: 16, marginTop: 2 },
   // Collapsed tool-log affordance: a bordered chip (same idiom as the steer

@@ -78,6 +78,14 @@ export interface SessionInfoLite {
   model?: string
   provider?: string
   reasoning_effort?: string
+  /**
+   * What the wire ACTUALLY carries for this session after the route clamps
+   * the configured effort to what the model supports (e.g. configured 'ultra'
+   * → wire 'high'). Distinct from `reasoning_effort` (the configured pick) —
+   * showing both lets the UI say "high" honestly instead of parroting a value
+   * the backend silently lowered.
+   */
+  reasoning_effort_wire?: string
 }
 
 /** Persistence scope for a switch — maps 1:1 to the gateway's /model flags. */
@@ -92,6 +100,13 @@ export const liveProvider = atom<string>('')
 /** The active session's live reasoning effort (e.g. "high") — the main lever
  *  on how long the thinking phase lasts, applied live by config.set. */
 export const liveReasoning = atom<string>('')
+/**
+ * The CLAMPED effort the wire actually carries this session (from
+ * session.info `reasoning_effort_wire`). Empty until the first session.info.
+ * When set and different from `liveReasoning`, the configured pick is being
+ * silently lowered for the current model — surfaces as "high → medium".
+ */
+export const liveReasoningWire = atom<string>('')
 /** Whether thinking blocks render in the chat — mirrors the gateway's
  *  `reasoning` display config. Server-side `hide` also stops streaming the
  *  deltas at all; this gate additionally hides blocks already sitting in
@@ -110,6 +125,12 @@ export function noteSessionInfo(info?: SessionInfoLite | null) {
   }
   if (typeof info.reasoning_effort === 'string' && info.reasoning_effort) {
     liveReasoning.set(info.reasoning_effort)
+  }
+  if (typeof info.reasoning_effort_wire === 'string' && info.reasoning_effort_wire) {
+    liveReasoningWire.set(info.reasoning_effort_wire)
+  } else {
+    // No clamp reported (or an empty value) — the wire matches the config.
+    liveReasoningWire.set('')
   }
 }
 
@@ -130,6 +151,7 @@ export function hookModelState() {
         model: typeof p.model === 'string' ? p.model : undefined,
         provider: typeof p.provider === 'string' ? p.provider : undefined,
         reasoning_effort: typeof p.reasoning_effort === 'string' ? p.reasoning_effort : undefined,
+        reasoning_effort_wire: typeof p.reasoning_effort_wire === 'string' ? p.reasoning_effort_wire : undefined,
       })
     })
   })().catch((err) => log('warn', 'model', `hookModelState failed: ${String(err)}`))

@@ -1512,3 +1512,23 @@ OPEN (fresh installs only): the cold-kit window stretched >15 min on the fresh-i
 ~2.5 min and heals a running turn in ~30 s. Fresh-install logs were wiped by the reinstall; needs a
 focused repro (logs before any reinstall) — suspect first-boot Chaquopy extraction + onboarding
 I/O contention, or a provider-dependent check. Self-healing in all observed cases.
+
+---
+
+## UI revamp campaign (2026-10-14) — research-driven, branch `ui/chat-revamp` (worktree `worktrees/ui-revamp`), NO PR by request — Mamoun tests first
+
+Source research: `research/bot-chat-ui-landscape-2026.md` (13 competitor products, web-sourced
+2026-10-14) + two read-only verification agents over this repo (chat surface/protocol inventory;
+nav/shell/theme inventory). Every item below was verified feasible **UI-only** (no protocol
+change, no product decision) before building. Verification: `npm run typecheck`, lint 0 errors,
+suites green incl. new `test:turn-meta` (19 checks, wired into `verify`).
+
+- [ ] **UI-001 Sidebar chat cards: title + preview + relative time** — `src/components/Sidebar.tsx`, `ScreenShell.tsx`, new `src/lib/timeAgo.ts` — the drawer's rows were title-only while `session.list` already delivered `preview`/`last_active` (dropped at the mapping). Rows are now two-line cards (dim preview under the title, "3m ago" tail); search also matches the preview. Pattern source: every chat app's list (§11.3). On-device check pending.
+- [ ] **UI-002 "Waiting on you" badge on the Chat drawer row** — `ScreenShell.tsx` topNav + Sidebar's previously DEAD `NavItem.badge` render path (rendered since A2, never fed) — the pendingCount atom now rides the Chat nav row (amber = attention, matching the footer note + StatusDot semantics). On-device check pending.
+- [ ] **UI-003 Thinking level: chip on the pill + effort section in ModelPickerSheet** — `ModelPickerSheet.tsx`, `modelState.ts`, `chat.tsx` — the model pill now reads "model · effort"; the picker's landing step gains a THINKING chip row (the gateway's own 8-value /reasoning vocabulary, session-scoped via the proven applyReasoning path). NEW `liveReasoningWire` atom un-drops `session.info.reasoning_effort_wire`, so when the model clamps the configured pick the UI shows the truth ("This model caps ultra — running high"). On-device check pending.
+- [ ] **UI-004 Per-reply provenance footer** — `src/lib/turnMeta.ts` (new, pure) + `chat.ts` message.complete + `Chat.tsx` — message.complete has ALWAYS carried `usage` (model, tokens, avg_tps); the handler dropped it. Finished assistant replies now show "model · 1.2k tok · 31 t/s" in the timestamp row. Thinking header stays elapsed-only (prior user call stands). 19 regression tests. On-device check pending.
+- [ ] **UI-005 Starter cards + first-run copy in EN/AR** — `chat.tsx` STARTERS + `strings.ts` — the empty state's 4 static English rows became 6 two-line starter cards (title + hint) localized through the tr() catalog (first chat-surface strings to go bilingual). BUG-043 focus behavior preserved. On-device check pending.
+- [ ] **UI-006 Type/spacing scale (additive)** — `theme.ts` TYPE + SPACE tokens — named the values the touched surfaces already used; adopted by edited styles only. Full sweep across untouched screens deliberately deferred. On-device check pending.
+
+**Deferred (verified, documented — each needs a protocol wire-shape or product decision first):**
+memory browser cards (server has `learning.frames/detail/edit/delete` over MEMORY.md/USER.md chunks with ZERO TS callers — but frames are Ink-TUI-shaped; needs a structured variant), reply reactions (`message.react` RPC + `message.reaction` event exist unused; needs applyHistory row_id preservation + product call), per-message tool provenance/sources (tool log is session-scoped; data-model change), pin-to-memory + "don't mention this" (no verbs on the wire), personalized/AI-generated starters (needs RPC), in-thread day headers (pure UI but perf-sensitive inverted-list surgery), drawer server content-search + the ghost Chats screen's fate (endpoint already wired on sessions.tsx), New-chat pill top placement, RTL drawer mirroring, light theme.

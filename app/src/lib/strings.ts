@@ -157,6 +157,20 @@ const EN: Catalog = {
   'sessions.source.sms': 'SMS',
   'sessions.delete.failed': 'Delete failed',
   'sessions.delete.busy': 'This chat is busy on the computer — stop it there before deleting.',
+
+  // Chat empty-state starters (2026-10-14 UI revamp) — the first-run surface.
+  'chat.start.capability': 'What can you do?',
+  'chat.start.capability.hint': 'A tour of the agent, in its own words',
+  'chat.start.day': 'Summarize my day',
+  'chat.start.day.hint': 'Recap what happened across your sessions',
+  'chat.start.repo': 'Explain this repo',
+  'chat.start.repo.hint': 'Point the agent at code and ask why',
+  'chat.start.write': 'Help me write something',
+  'chat.start.write.hint': 'A message, a post, an email — draft it together',
+  'chat.start.brainstorm': 'Brainstorm ideas with me',
+  'chat.start.brainstorm.hint': 'Bring a topic, leave with options',
+  'chat.start.commands': 'Browse slash commands',
+  'chat.start.commands.hint': 'Everything the agent knows how to run',
 }
 
 const AR: Catalog = {
@@ -268,6 +282,20 @@ const AR: Catalog = {
   'sessions.source.sms': 'رسائل نصية',
   'sessions.delete.failed': 'تعذّر الحذف',
   'sessions.delete.busy': 'هذه المحادثة تعمل الآن على الحاسوب — أوقفها هناك قبل الحذف.',
+
+  // Chat empty-state starters (2026-10-14 UI revamp).
+  'chat.start.capability': 'ماذا تستطيع أن تفعل؟',
+  'chat.start.capability.hint': 'جولة في قدرات الوكيل بكلماته هو',
+  'chat.start.day': 'لخّص لي يومي',
+  'chat.start.day.hint': 'استعادة ما جرى في جلساتك',
+  'chat.start.repo': 'اشرح لي هذا المستودع',
+  'chat.start.repo.hint': 'وجّه الوكيل إلى الكود واسأله عن السبب',
+  'chat.start.write': 'ساعدني في كتابة شيء',
+  'chat.start.write.hint': 'رسالة أو منشور أو بريد — نصنع المسودة معًا',
+  'chat.start.brainstorm': 'أعصف ذهنيًا معي',
+  'chat.start.brainstorm.hint': 'أحضر موضوعًا واخترج بخيارات',
+  'chat.start.commands': 'تصفّح أوامر الشرطة المائلة',
+  'chat.start.commands.hint': 'كل ما يعرف الوكيل كيف يشغّله',
 }
 
 const CATALOGS: Record<Locale, Catalog> = { en: EN, ar: AR }

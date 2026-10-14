@@ -12,6 +12,7 @@ import { Icon } from './Icon'
 import { speakText, stopTts } from '../lib/voice'
 import { C, S, useStyles, useShape } from '../lib/theme'
 import { formatThinkMeta, type ChatMessage, type ChatSegment, type ToolItem } from '../lib/chat'
+import { formatTurnMeta } from '../lib/turnMeta'
 import { MediaSegmentView } from './media/MediaSegmentView'
 import { useReduceMotion } from './useReduceMotion'
 import { CommandCard } from './CommandOutput'
@@ -222,6 +223,9 @@ export const MessageBubble = React.memo(function MessageBubble({
     const hasVisibleText = (showThinking ? segs : segs.filter((seg) => seg.kind !== 'thinking')).some(
       (seg) => seg.kind === 'text' && seg.text.trim(),
     )
+    // Turn provenance (model · tokens · t/s) — arrives with message.complete,
+    // so it only ever renders on a finished reply; never while streaming.
+    const turnMetaText = formatTurnMeta(m.meta)
     return (
       <View style={s.botWrap}>
         {S.assistantAvatar ? (
@@ -271,6 +275,7 @@ export const MessageBubble = React.memo(function MessageBubble({
         {m.text && !m.streaming ? (
           <View style={s.botActions}>
             <Text style={s.time}>{fmtTime(m.ts)}</Text>
+            {turnMetaText ? <Text style={s.meta} numberOfLines={1}>{turnMetaText}</Text> : null}
             <Pressable
               onPress={copy}
               hitSlop={10}
@@ -511,10 +516,10 @@ const makeS = () => StyleSheet.create({
   streamText: { color: C.text, fontSize: 16, lineHeight: 24 },
   dotsRow: { flexDirection: 'row', alignItems: 'center', gap: 3, height: 12, marginTop: 2 },
   dot: { width: 5, height: 5, borderRadius: 3, backgroundColor: C.blush },
-  botActions: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, marginLeft: -6 },
-  iconBtn: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center', borderRadius: 15 },
+  botActions: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, marginLeft: -6 },  iconBtn: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center', borderRadius: 15 },
   iconPressed: { opacity: 0.5 },
   time: { color: C.textFaint, fontSize: 11, marginRight: 6 },
+  meta: { color: C.textFaint, fontSize: 11, marginRight: 6, flexShrink: 1 },
   failedRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
   failedText: { color: C.red, fontSize: 12.5, flexShrink: 1 },
   retryBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: C.bgCard, borderRadius: 14, paddingHorizontal: 10, height: 30 },

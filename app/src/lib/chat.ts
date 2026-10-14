@@ -15,6 +15,8 @@ import { extractMedia, isDataUrlPath, joinedTextOf, appendRefText, stripMediaFro
 import { processAttachments, detachImages, type PendingAttachment } from './mediaSend'
 import { isGatewayTimeout, isUnconfirmedSubmit, outboxPinFor, outboxTargetFor, shouldAutoRetry, UnconfirmedSubmitError } from './rpcRetry'
 import { migrateV1TranscriptWith } from './transcriptMigrate'
+// Turn provenance helpers (pure — keep chat.ts importable by them, not vice versa).
+import { parseTurnUsage, type TurnMeta } from './turnMeta'
 // Type-only: erased at runtime, so chat.ts stays free of slash.ts's atom graph
 // (chat.ts already cannot load in plain node — react-native/AsyncStorage at
 // import time — and this keeps it that way).
@@ -58,6 +60,14 @@ export interface ChatMessage {
   segments?: ChatSegment[]
   streaming?: boolean
   ts: number
+  /**
+   * Turn provenance (2026-10-14 UI revamp): what model answered and how much
+   * it cost in tokens/speed — the message.complete payload has always carried
+   * this; it used to be dropped on the floor. Parsed by lib/turnMeta. Absent
+   * on user rows, command rows and anything finalized before this field
+   * existed (older transcripts).
+   */
+  meta?: TurnMeta
   /** 'unconfirmed' (BUG-036): a submit-phase timeout — the frame left the
    *  device but no ack ever came back, so the turn may be running remotely
    *  right now. Renders like a failed row (with retry) but says so
@@ -70,6 +80,8 @@ export interface ChatMessage {
    *  all keep rendering exactly as before. */
   cmd?: CommandMeta
 }
+
+/** Per-turn usage provenance — see lib/turnMeta.ts (pure, tested there). */
 
 export interface ToolItem {
   id: string
@@ -2636,11 +2648,13 @@ export function hookChatEvents() {
         for (let i = list.length - 1; i >= 0; i--) {
           if (list[i].role !== 'assistant' || !list[i].streaming) continue
           const failed = p.status === 'error' || !!p.error
+          const turnMeta = failed ? undefined : parseTurnUsage(p.usage)
           let done: ChatMessage = {
             ...list[i],
             streaming: false,
             status: failed ? 'failed' : 'ok',
             error: failed ? String(p.error ?? p.failure_reason ?? 'Turn failed') : undefined,
+            ...(turnMeta ? { meta: turnMeta } : {}),
           }
           if (text) {
             // Server-sent final text supersedes the streamed segments' text.
@@ -2667,11 +2681,13 @@ export function hookChatEvents() {
         // false. Append it as a completed message instead.
         if (!finalJoined && text) {
           const failed = p.status === 'error' || !!p.error
+          const turnMeta = failed ? undefined : parseTurnUsage(p.usage)
           list.push({
             id: nid(),
             role: 'assistant',
             text: stripMediaFromText(text).slice(0, 32000),
             ts: Date.now(),
+            ...(turnMeta ? { meta: turnMeta } : {}),
             ...(failed ? { status: 'failed' as const, error: String(p.error ?? p.failure_reason ?? 'Turn failed') } : {}),
           })
         }

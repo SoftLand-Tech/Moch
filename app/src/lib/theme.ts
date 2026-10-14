@@ -310,6 +310,29 @@ export const THEME_OPTIONS: { id: ThemeId; name: string; desc: string; swatches:
 
 export const FONT = { regular: '400', medium: '500', bold: '700' } as const
 
+/**
+ * Type + spacing scale — ADDITIVE (2026-10-14 UI revamp): the app's sizes were
+ * per-component literals (10.5–46 observed). These steps NAME the values the
+ * touched surfaces already used, so adopting them is consolidation, not a
+ * re-layout. A full sweep across untouched screens is deliberately deferred
+ * (tracker: UI-006) — new and edited styles must take tokens from here.
+ */
+export const TYPE = {
+  /** Badge/meta numerals and micro-labels (timestamps, chips). */
+  micro: 11,
+  /** Secondary lines: previews, hints, sublabels. */
+  caption: 12.5,
+  /** List/body default (sidebar titles, menu rows, starter text). */
+  body: 14.5,
+  /** Emphasized body: nav labels, dialog buttons, starters. */
+  bodyLg: 15.5,
+  /** Titles: sheet headers, dialog titles. */
+  title: 16.5,
+} as const
+
+/** 4-pt spacing rhythm — same rule: adopted by touched surfaces only. */
+export const SPACE = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24 } as const
+
 /** ChatGPT-style pill. `size` is the pill height; radius is always half of it. */
 export function pill(height: number) {
   return { borderRadius: height / 2, minHeight: height }

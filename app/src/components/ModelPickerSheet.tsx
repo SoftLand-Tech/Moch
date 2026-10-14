@@ -23,7 +23,8 @@ import { useStore } from '@nanostores/react'
 import {
   fetchModelOptions, rankProviders, rankModels, applyModel, saveProviderKey,
   liveModel, liveProvider, modelOptions, modelOptionsLoading,
-  type ProviderOption, type ModelScope,
+  applyReasoning, liveReasoning, liveReasoningWire, REASONING_EFFORTS,
+  type ProviderOption, type ModelScope, type ReasoningEffort,
 } from '../lib/modelState'
 import { ensureSession, activeLiveId, pushLocalMessage } from '../lib/chat'
 import { slashLabel } from '../lib/slash'
@@ -40,6 +41,8 @@ export function ModelPickerSheet({
   const loading = useStore(modelOptionsLoading)
   const curModel = useStore(liveModel)
   const curProvider = useStore(liveProvider)
+  const curEffort = useStore(liveReasoning)
+  const curEffortWire = useStore(liveReasoningWire)
 
   const [step, setStep] = useState<Step>('provider')
   const [provider, setProvider] = useState<ProviderOption | null>(null)
@@ -50,6 +53,9 @@ export function ModelPickerSheet({
   const [savingKey, setSavingKey] = useState(false)
   /** Set when the open-path refresh fails — surfaced in the sheet, not just the log. */
   const [loadError, setLoadError] = useState('')
+  /** Effort chip apply state (thinking level, session-scoped). */
+  const [effortBusy, setEffortBusy] = useState('')
+  const [effortError, setEffortError] = useState('')
   const seq = useRef(0)
 
   // Fresh inventory each time the sheet opens (cheap; also re-layers the
@@ -127,6 +133,30 @@ export function ModelPickerSheet({
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     setModel(m)
     setStep('scope')
+  }
+
+  /**
+   * Thinking level, session-scoped (the chat the user is looking at). The
+   * profile-wide default stays on the Models screen — one lever per surface,
+   * no scope ambiguity here. BH-000088 discipline: ensureSession first, so a
+   * provisional new-chat window becomes a real session before the write.
+   */
+  const pickEffort = async (v: ReasoningEffort) => {
+    if (effortBusy) return
+    if (v === (curEffortWire || curEffort)) return
+    setEffortBusy(v)
+    setEffortError('')
+    try {
+      const sid = await ensureSession()
+      await applyReasoning({ value: v, scope: 'session', sessionId: sid })
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      log('warn', 'model', `effort pick failed: ${msg}`)
+      setEffortError(msg)
+    } finally {
+      setEffortBusy('')
+    }
   }
 
   /** Connect a provider from the picker; null = connected, string = why not. */
@@ -219,7 +249,11 @@ export function ModelPickerSheet({
             <View style={{ flex: 1 }}>
               <Text style={s.headTitle} numberOfLines={1}>{headerTitle}</Text>
               <Text style={s.headSub} numberOfLines={1}>
-                {curModel ? `Now: ${curModel}${curProvider ? ` · ${curProvider}` : ''}` : 'Tap a provider, then a model'}
+                {curModel
+                  ? `Now: ${curModel}${curProvider ? ` · ${curProvider}` : ''}${
+                      curEffort && curEffort !== 'none' ? ` · thinking ${curEffortWire && curEffortWire !== curEffort ? `${curEffort} → ${curEffortWire}` : curEffort}` : ''
+                    }`
+                  : 'Pick a provider, then a model'}
               </Text>
             </View>
             <Pressable
@@ -236,6 +270,48 @@ export function ModelPickerSheet({
             <Text style={s.loadWarning}>
               Couldn't refresh the model inventory ({loadError}). Showing the last known list.
             </Text>
+          ) : null}
+
+          {/* Thinking level — the model's other big lever, on the landing step
+              so one sheet owns both (the Gemini chip + dial pattern). Chips
+              reuse the gateway's own /reasoning vocabulary; the highlighted
+              value is what the WIRE carries (clamped), not the raw config. */}
+          {step === 'provider' && !keyFor ? (
+            <View style={s.effortWrap}>
+              <Text style={s.effortLabel}>THINKING</Text>
+              <View style={s.effortChips}>
+                {REASONING_EFFORTS.map((v) => {
+                  const on = v === (curEffortWire || curEffort)
+                  return (
+                    <Pressable
+                      key={v}
+                      style={({ pressed }) => [
+                        s.effortChip,
+                        on && s.effortChipOn,
+                        pressed && s.rowPressed,
+                      ]}
+                      onPress={() => { void pickEffort(v) }}
+                      disabled={!!effortBusy}
+                      accessibilityLabel={`Thinking ${v}${on ? ', current' : ''}`}
+                    >
+                      {effortBusy === v ? (
+                        <ActivityIndicator size="small" color={on ? C.onAccent : C.textDim} />
+                      ) : (
+                        <Text style={[s.effortChipText, on && s.effortChipTextOn]}>{v}</Text>
+                      )}
+                    </Pressable>
+                  )
+                })}
+              </View>
+              {curEffort && curEffortWire && curEffortWire !== curEffort ? (
+                <Text style={s.effortHint} numberOfLines={2}>
+                  This model caps {curEffort} — running {curEffortWire}.
+                </Text>
+              ) : (
+                <Text style={s.effortHint} numberOfLines={1}>Applies to this chat · default lives in Settings → Models</Text>
+              )}
+              {effortError ? <Text style={s.effortErr} numberOfLines={2}>{effortError}</Text> : null}
+            </View>
           ) : null}
 
           {/* Search (provider + model steps) */}
@@ -459,6 +535,25 @@ const makeS = () => StyleSheet.create({
   sectionLabel: { color: C.textFaint, fontSize: 10.5, fontWeight: '800', letterSpacing: 1.5, paddingHorizontal: 12, paddingTop: 14, paddingBottom: 4 },
   providerWarning: { color: C.amber, fontSize: 11.5, lineHeight: 16, paddingHorizontal: 12, paddingBottom: 6 },
   loadWarning: { color: C.amber, fontSize: 11.5, lineHeight: 16, paddingHorizontal: 14, paddingBottom: 6 },
+  // Thinking-level block (landing step): label + chip row + one hint line.
+  effortWrap: { paddingHorizontal: 14, paddingTop: 4, paddingBottom: 10 },
+  effortLabel: { color: C.textFaint, fontSize: 10.5, fontWeight: '800', letterSpacing: 1.5, marginBottom: 8 },
+  effortChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  effortChip: {
+    minHeight: 30,
+    paddingHorizontal: 11,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.bgCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  effortChipOn: { backgroundColor: C.accent, borderColor: C.accent },
+  effortChipText: { color: C.textDim, fontSize: 12, fontWeight: '600' },
+  effortChipTextOn: { color: C.onAccent, fontWeight: '700' },
+  effortHint: { color: C.textFaint, fontSize: 11, marginTop: 8 },
+  effortErr: { color: C.amber, fontSize: 11, marginTop: 6 },
   empty: { color: C.textFaint, fontSize: 13, textAlign: 'center', padding: 24 },
   scopeWrap: { paddingHorizontal: 14, paddingBottom: 6, gap: 8 },
   scopeLead: { color: C.textDim, fontSize: 13, marginBottom: 2 },

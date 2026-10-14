@@ -24,7 +24,8 @@ import { usePathname } from 'expo-router'
 import { useStore } from '@nanostores/react'
 import { archivedIds, groupChats, pinnedIds } from '../lib/chatListState'
 import type { RowStatus } from '../lib/attention'
-import { C, S, useStyles, useShape } from '../lib/theme'
+import { C, S, TYPE, useStyles, useShape } from '../lib/theme'
+import { timeAgo } from '../lib/timeAgo'
 import { useReduceMotion } from './useReduceMotion'
 
 export interface NavItem {
@@ -41,6 +42,12 @@ export interface RecentChat {
   title: string
   /** Wall-clock ms of the chat's latest activity — drives the section grouping. */
   ts?: number
+  /**
+   * Last-message preview (server session.list already carries it) — one
+   * dim line under the title, the way every chat app's list reads. Empty
+   * for optimistic local rows that haven't synced yet.
+   */
+  preview?: string
   /**
    * Live status of the conversation: `input` (yellow — the agent asked
    * something), `done` (green — a reply landed while unwatched), `error`
@@ -440,9 +447,12 @@ export function Sidebar({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    // Search spans everything, including the archive.
+    // Search spans everything, including the archive — and the preview line
+    // now shown on each card, so a match reads in the results it produced.
     if (!q) return recent
-    return recent.filter((c) => c.title.toLowerCase().includes(q))
+    return recent.filter(
+      (c) => c.title.toLowerCase().includes(q) || (c.preview ?? '').toLowerCase().includes(q),
+    )
   }, [recent, query])
 
   const sections = useMemo<Section[]>(() => {
@@ -979,6 +989,7 @@ const RecentRow = React.memo(function RecentRow({
   onMenu: (c: RecentChat, e?: GestureResponderEvent) => void
 }) {
   const s = useStyles(makeS)
+  const when = timeAgo(c.ts)
   return (
     <Pressable
       onPress={() => {
@@ -988,12 +999,20 @@ const RecentRow = React.memo(function RecentRow({
       onLongPress={(e) => onMenu(c, e)}
       delayLongPress={350}
       style={({ pressed }) => [s.recentRow, pressed && s.recentRowPressed]}
-      accessibilityLabel={`Open ${c.title}`}
+      accessibilityLabel={`Open ${c.title}${c.preview ? `. Last: ${c.preview}` : ''}`}
     >
-      <Text style={[s.recentTitle, c.active && s.recentTitleActive]} numberOfLines={1}>
-        {c.title}
-      </Text>
-      {isPinned ? <Icon name="pin" size={11} color={C.textFaint} /> : null}
+      <View style={s.recentCopy}>
+        <View style={s.recentTitleRow}>
+          <Text style={[s.recentTitle, c.active && s.recentTitleActive]} numberOfLines={1}>
+            {c.title}
+          </Text>
+          {isPinned ? <Icon name="pin" size={11} color={C.textFaint} /> : null}
+        </View>
+        {c.preview ? (
+          <Text style={s.recentPreview} numberOfLines={1}>{c.preview}</Text>
+        ) : null}
+      </View>
+      {when ? <Text style={s.recentWhen}>{when}</Text> : null}
       <StatusDot status={c.status} />
       <Pressable
         style={s.rowMenu}
@@ -1064,12 +1083,14 @@ const makeS = () => StyleSheet.create({
   navRowOn: { backgroundColor: C.accentSoft },
   rowPressed: { backgroundColor: C.bgHover },
   navLabel: { color: C.text, fontSize: 15.5, fontWeight: '500', flex: 1 },
+  // Amber, not red: this badge is "waiting on you" (the same attention
+  // semantic as the drawer footer and the amber StatusDot), not an error.
   badge: {
     minWidth: 20,
     height: 20,
     borderRadius: 10,
     paddingHorizontal: 6,
-    backgroundColor: C.red,
+    backgroundColor: C.amber,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1117,12 +1138,18 @@ const makeS = () => StyleSheet.create({
     gap: 8,
     paddingLeft: 16,
     paddingRight: 8,
-    minHeight: 44,
+    minHeight: 52,
     borderRadius: 10,
   },
   recentRowPressed: { backgroundColor: C.bgHover },
-  recentTitle: { flex: 1, color: C.textDim, fontSize: 14.5, fontWeight: '400' },
+  // Two-line card: title line (+pin), preview line under. The copy column
+  // owns flex; time + status + menu dock right as a fixed tail.
+  recentCopy: { flex: 1, gap: 1, paddingVertical: 7 },
+  recentTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  recentTitle: { flexShrink: 1, color: C.textDim, fontSize: TYPE.body, fontWeight: '400' },
   recentTitleActive: { color: C.text, fontWeight: '600' },
+  recentPreview: { color: C.textFaint, fontSize: TYPE.caption },
+  recentWhen: { color: C.textFaint, fontSize: TYPE.micro },
   rowMenu: {
     width: 28,
     height: 28,

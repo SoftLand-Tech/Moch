@@ -201,14 +201,17 @@ export function ScreenShell({
   // drawer's own grouped chat list is the richer surface. Skills and Models
   // moved into Settings' AGENT section.
   const topNav = useMemo<NavItem[]>(() => [
-    { key: 'chat', label: 'Chat', icon: 'chatbubble-outline' },
+    // The waiting-on-you count rides the Chat row as a badge (the drawer
+    // footer spells it out in words; the badge keeps it visible when the
+    // list is long). Same number, two surfaces, one atom.
+    { key: 'chat', label: 'Chat', icon: 'chatbubble-outline', badge: pendingN > 0 ? pendingN : undefined },
     { key: 'fleet', label: 'Fleet', icon: 'people-outline' },
     { key: 'crew', label: 'Crew', icon: 'grid-outline' },
     { key: 'browser', label: 'Browser', icon: 'globe-outline' },
     { key: 'terminal', label: 'Terminal', icon: 'terminal-outline' },
     { key: 'automations', label: 'Automations', icon: 'timer-outline', mochis: runningAuto },
     { key: 'connectors', label: 'Connectors', icon: 'extension-puzzle-outline' },
-  ], [runningAuto])
+  ], [runningAuto, pendingN])
 
   const bottomNav = useMemo<NavItem[]>(() => [
     { key: 'settings', label: 'Settings', icon: 'settings-outline' },
@@ -236,6 +239,9 @@ export function ScreenShell({
       return {
       id: r.id,
       title,
+      // Last-message preview for the two-line row (server rows carry it;
+      // local-only optimistic rows have nothing to show yet).
+      preview: r.preview,
       // Revive-to-top: started_at is creation time only, so a revived old
       // chat never bubbled. The local bump (bumpSessionActivity, in
       // sessionList) overlays the real last activity — max() of the two,
