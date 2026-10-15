@@ -118,8 +118,10 @@ export default function ChatTab({
    *  no fabricated step counts, ever. */
   const taskSteps = useRef<Array<{ label: string; done?: boolean; active?: boolean }>>([])
   const taskTitle = useRef('')
-  /** stored session id -> live id, for drawer highlight (FX-3b #6). */
-  const liveByStored = useRef(new Map<string, string>())
+  /** LIVE runtime id -> stored/durable id (FX-3b #2/#6). session.create returns
+   *  both ids; session.list rows and session.resume are keyed by the STORED one
+   *  while activeSid holds the LIVE one. */
+  const liveToStored = useRef(new Map<string, string>())
 
   useEffect(() => () => { if (celebrationTimer.current) clearTimeout(celebrationTimer.current) }, [])
 
@@ -206,6 +208,25 @@ export default function ChatTab({
 
   const applyEvent = useCallback((e: unknown) => {
     const { type, session_id: sid, payload: p } = ev(e)
+    // session.reclaimed is a GLOBAL broadcast: the envelope session_id is ""
+    // (server.py:682 _broadcast_global_event → _event_frame(event, "", payload)),
+    // so it MUST be handled before the per-session early-return below — the
+    // payload names the reclaimed LIVE session (contracts/events.py:371-379).
+    if (type === 'session.reclaimed') {
+      const rsid = String(p?.session_id ?? sid ?? '')
+      if (!rsid) return
+      applyBusy(rsid, false)
+      pushBlock(rsid, { kind: 'status', text: 'Session was reclaimed by the server.' })
+      if (rsid === activeRef.current) {
+        setTurnMochi('')
+        onWorkingChangeRef.current?.(false)
+        // FX-3b #3: drop the pending task state — the id is dead, Stop would 4001.
+        taskSteps.current = []
+        taskTitle.current = ''
+        onTaskUpdateRef.current?.(null)
+      }
+      return
+    }
     if (!sid) return
     const active = sid === activeRef.current
     const last = (pred: (b: Block) => boolean) => (blocksRef.current[sid] ?? []).findLast(pred)
@@ -294,26 +315,29 @@ export default function ChatTab({
         break
       }
       case 'status.update':
-        // FX-3b #5: heartbeat/loop/goal/process chatter — the phone renders
-        // none of it (chat.ts:2764). The old busy-edge branch was dead code:
-        // no emitter ever sends kind:'busy' (contracts/events.py:193-200).
-        // Missed turn-ends are reconciled via gateway.ready → resume instead.
+        // FX-3b #5: heartbeat/loop/goal/process chatter never enters the
+        // transcript — the phone renders none of it (chat.ts:2764). The
+        // busy-false edge reconciliation is kept per spec even though no
+        // emitter sends kind:'busy' today (contracts/events.py:193-200 is a
+        // closed {kind, text}); missed turn-ends are reconciled via
+        // gateway.ready → resume as the safety net.
+        if (p?.kind === 'busy' && active && p?.busy === false) {
+          applyBusy(sid, false)
+          taskSteps.current = taskSteps.current.map((s) => ({ ...s, active: false, done: true }))
+          emitTask('Done')
+          setTurnMochi('')
+          onWorkingChangeRef.current?.(false)
+        }
         break
-      case 'session.reclaimed': {
-        // FX-3b #3: the backend evicted the session (events.py:371) — unlock
-        // the UI instead of spinning on a dead id (Stop would 4001).
-        applyBusy(sid, false)
-        if (active) { setTurnMochi(''); onWorkingChangeRef.current?.(false) }
-        pushBlock(sid, { kind: 'status', text: 'Session was reclaimed by the server.' })
-        break
-      }
       case 'error': {
         // Terminal path: freeze the live tail, surface the failure, clear busy.
         const msg = String(p?.message ?? p?.error ?? 'Gateway error')
         patchBlock(sid, (b) => (b.kind === 'assistant' || b.kind === 'thinking') && b.live, (b: Block) => (b.kind === 'assistant' && !b.text ? { live: false, text: msg } : { live: false }))
         pushBlock(sid, { kind: 'error', text: msg })
         applyBusy(sid, false)
-        if (active) { setTurnMochi(''); onWorkingChangeRef.current?.(false) }
+        // FX-3b #1c: a terminal error is a turn-end — close the real steps.
+        taskSteps.current = taskSteps.current.map((s) => ({ ...s, active: false, done: true }))
+        if (active) { emitTask('Turn failed'); setTurnMochi(''); onWorkingChangeRef.current?.(false) }
         break
       }
     }
@@ -339,9 +363,13 @@ export default function ChatTab({
 
   // Display-only badge: the configured default model, from model.options
   // (config.get is not a gateway RPC). Keyed on `client` so it (re)runs when
-  // the connection lands — at mount rpc can still be null (FX-3b #9).
+  // the connection lands — at mount rpc can still be null (FX-3b #9). The
+  // once-guard keeps reconnects re-running it (the model does not change
+  // per socket).
+  const modelBadgeFetched = useRef(false)
   useEffect(() => {
-    if (!client || !rpc.current) return
+    if (!client || modelBadgeFetched.current || !rpc.current) return
+    modelBadgeFetched.current = true
     rpc.current('model.options', {})
       .then((r: unknown) => {
         const o = (r && typeof r === 'object' ? r : {}) as { model?: unknown; providers?: unknown }
@@ -373,8 +401,21 @@ export default function ChatTab({
         // FX-3b #2: a turn that ENDED during the disconnect leaves
         // busyBySess stale (no message.complete ever arrived). The server's
         // transcript is the truth — reconcile the wedged active session.
+        // Resume by the STORED key: a live runtime id does not resolve once
+        // the first prompt persisted the row (methods_session._resume_locate
+        // looks up stored id / title / session_key, never the runtime sid).
         const sid = activeRef.current
-        if (sid && busyBySess.current[sid]) void resumeSession(sid)
+        if (sid && busyBySess.current[sid]) {
+          void resumeSession(liveToStored.current.get(sid) ?? sid).then((live) => {
+            if (!live) return
+            if (live !== sid) busyBySess.current[sid] = false // reclaimed + minted anew server-side
+            if (!busyBySess.current[live]) {
+              // The server says the turn ENDED while we were away — close the card.
+              taskSteps.current = taskSteps.current.map((s) => ({ ...s, active: false, done: true }))
+              emitTask('Done')
+            }
+          })
+        }
       }
       applyEvent(e)
     })
@@ -392,6 +433,9 @@ export default function ChatTab({
       // BUG-047 parity: only declare idle when the interrupt landed; turn-end
       // events reconcile the UI either way.
       applyBusy(sid, false)
+      // FX-3b #1c: a successful interrupt is a turn-end — close the real steps.
+      taskSteps.current = taskSteps.current.map((s) => ({ ...s, active: false, done: true }))
+      emitTask('Interrupted')
       if (sid === activeRef.current) { setTurnMochi(''); onWorkingChangeRef.current?.(false) }
     } catch (err) {
       console.error('interrupt failed:', err)
@@ -417,12 +461,15 @@ export default function ChatTab({
       if (!sid) {
         // C10: no create-time title — a manual title permanently blocks the
         // server's auto-titling. C15: source 'desktop'.
-        const cr = await r<{ session_id: string }>('session.create', {
+        const cr = await r<{ session_id: string; stored_session_id?: string }>('session.create', {
           cols: 120,
           source: 'desktop',
           ...(prof ? { profile: prof, follow_profile_config: true } : {}),
         })
         sid = cr.session_id
+        // FX-3b #6: remember the stored key — session.list rows are keyed by it,
+        // and the gateway.ready resync must resume through it, not the live id.
+        if (cr.stored_session_id) liveToStored.current.set(sid, cr.stored_session_id)
         // FX-3b #8: mark busy under the NEW sid BEFORE switching — the switch
         // effect re-reads busyBySess[sid]; without this there's a double-submit
         // window and a hidden Stop button.
@@ -447,6 +494,9 @@ export default function ChatTab({
       console.error('prompt.submit failed:', err)
       pushBlock(activeRef.current || sid || '', { kind: 'error', text: `Failed to send: ${err instanceof Error ? err.message : String(err)}` })
       applyBusy(activeRef.current || sid || '', false)
+      // FX-3b #1c: the busy flag fell — the card must not claim work in flight.
+      taskSteps.current = taskSteps.current.map((s) => ({ ...s, active: false, done: true }))
+      emitTask('Send failed')
       onWorkingChangeRef.current?.(false)
     }
   }
@@ -510,10 +560,11 @@ export default function ChatTab({
   /** C1/FX-3b #2: render the transcript session.resume RETURNS — the gateway's
    *  event ring is a capped FIFO (512) and misses long history. Live tail rides
    *  the socket as usual. Also the reconcile path for a wedged post-drop
-   *  session (gateway.ready → resume when busyBySess is stale). */
-  const resumeSession = useCallback(async (key: string) => {
+   *  session (gateway.ready → resume when busyBySess is stale). Returns the
+   *  live id (null on failure/absent) so the resync can reconcile. */
+  const resumeSession = useCallback(async (key: string): Promise<string | null> => {
     const r = rpc.current
-    if (!r) return
+    if (!r || !key) return null
     try {
       const rr = await r<{
         session_id?: string
@@ -524,10 +575,14 @@ export default function ChatTab({
         messages_omitted?: boolean
       }>('session.resume', { session_id: key, cols: 120 })
       const live = rr.session_id
-      if (!live) return
-      liveByStored.current.set(key, live)
-      setActiveSid(live)
+      if (!live) return null
+      // FX-3b #6: bridge live→stored so the drawer row highlights and the
+      // reconnect resync resolves. The ROW key wins over rr.stored_session_id:
+      // resume may follow a compression tip to a different durable id.
+      liveToStored.current.set(live, key)
+      // Busy truth BEFORE the switch — the [activeSid] effect re-reads it.
       busyBySess.current[live] = rr.running === true
+      setActiveSid(live)
       setBusy(rr.running === true)
       onWorkingChangeRef.current?.(rr.running === true)
       const restored = transcriptToBlocks(rr.messages)
@@ -535,7 +590,8 @@ export default function ChatTab({
         restored.unshift({ id: blockId.current++, kind: 'status', text: 'Earlier messages omitted — showing the most recent history.' })
       }
       setBlocks((p) => ({ ...p, [live]: restored }))
-    } catch { }
+      return live
+    } catch { return null }
   }, [rpc])
 
   return (
@@ -623,7 +679,7 @@ export default function ChatTab({
                 return (
                   <button
                     key={key}
-                    className={`drawer-session-row ${activeSid === s.session_id || activeSid === liveByStored.current.get(key) ? 'active' : ''}`}
+                    className={`drawer-session-row ${key === activeSid || key === liveToStored.current.get(activeSid) ? 'active' : ''}`}
                     onClick={async () => {
                       setShowSessionsDrawer(false)
                       await resumeSession(key)
