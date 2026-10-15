@@ -24,7 +24,7 @@ export default function Wizard({ conn, cfg, rpc, onDone }: { conn: string; cfg: 
     try {
       await rpc.current!('model.save_key', { slug: slug.trim(), api_key: key.trim() })
       setKey(''); setSlug('')
-      const r = await rpc.current!('model.options', { include_unconfigured: true })
+      const r = await rpc.current!<{ providers?: Provider[] }>('model.options', { include_unconfigured: true })
       setProviders(r.providers ?? [])
       dbg('setup:key-saved', { slug })
     } catch (e) { setErr(String(e)) }
