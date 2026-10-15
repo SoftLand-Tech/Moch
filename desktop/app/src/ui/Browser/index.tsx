@@ -411,7 +411,9 @@ export function Browser(): React.JSX.Element {
     const cleanups: Array<() => void> = []
     void (async () => {
       s = new CdpSession(
-        `ws://127.0.0.1:${wsPort}/cdp/ws?target=${encodeURIComponent(selectedId)}`,
+        `ws://127.0.0.1:${wsPort}/cdp/ws?target=${encodeURIComponent(selectedId)}&kind=${encodeURIComponent(
+          targets.find((t) => t.id === selectedId)?.type ?? 'page',
+        )}`,
       )
       try {
         await s.connect()

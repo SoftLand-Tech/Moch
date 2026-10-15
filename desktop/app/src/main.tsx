@@ -14,5 +14,6 @@ void bootDesktop().finally(() => {
   )
   setTimeout(() => {
     beacon('state ' + connectionState.get() + ' rows=' + sessionRows.get().length)
+    beacon('href=' + location.href + ' domlen=' + document.body.innerHTML.length + ' title=' + document.title)
   }, 4000)
 })
