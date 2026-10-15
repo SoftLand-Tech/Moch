@@ -799,37 +799,62 @@ export default function ChatTab({
               if (el) nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120
             }}
           >
-            {list.map((b) =>
-              b.kind === 'user' ? (
-                <div key={b.id} className="msg user">{b.text}{copyChip(b.text)}</div>
-              ) : b.kind === 'assistant' ? (
-                <div key={b.id} className={`msg assistant${b.live ? ' live' : ''}`}>
-                  {b.live ? (b.text || '▍') : (b.text ? <Markdown text={b.text} /> : null)}
-                  {!b.live && b.text ? copyChip(b.text) : null}
-                </div>
-              ) : b.kind === 'thinking' ? (
-                <details key={b.id} className="thinking" open={b.live}>
-                  <summary>Thinking{b.live ? '…' : ''}</summary>
-                  <pre>{b.text}</pre>
-                </details>
-              ) : b.kind === 'tool' ? (
-                <div key={b.id} className="tool">
-                  <span className={`dot${b.live ? '' : ' done'}`}>{b.live ? '◌' : '●'}</span>
-                  {b.text}
-                  {b.meta ? <span className="meta"> {b.meta}</span> : null}
-                </div>
-              ) : b.kind === 'error' ? (
-                <div
-                  key={b.id}
-                  className="statusline"
-                  style={{ color: '#e5484d', border: '1px solid rgba(229,72,77,.4)', background: 'rgba(229,72,77,.08)', whiteSpace: 'pre-wrap' }}
-                >
-                  {b.text}
-                </div>
-              ) : (
-                <div key={b.id} className="statusline">{b.text}</div>
-              )
-            )}
+            {list.map((b) => {
+              if (b.kind === 'user') {
+                // Gateway tool-layer notes arrive glued to the user's message
+                // as a leading "[SYSTEM: …]" prefix — never show them as if
+                // the user typed them (screenshot bug, 2026-10-15).
+                const m = /^\[SYSTEM:\s*([\s\S]*?)\]\s*/i.exec(b.text)
+                if (m) {
+                  const rest = b.text.slice(m[0].length)
+                  return (
+                    <div key={b.id} className="msg user">
+                      <div className="sysnote" title={m[1]}>system note · {m[1]}</div>
+                      {rest ? <div>{rest}</div> : null}
+                      {copyChip(rest || b.text)}
+                    </div>
+                  )
+                }
+                return <div key={b.id} className="msg user">{b.text}{copyChip(b.text)}</div>
+              }
+              if (b.kind === 'assistant') {
+                return (
+                  <div key={b.id} className={`msg assistant${b.live ? ' live' : ''}`}>
+                    {b.live ? (b.text || '▍') : (b.text ? <Markdown text={b.text} /> : null)}
+                    {!b.live && b.text ? copyChip(b.text) : null}
+                  </div>
+                )
+              }
+              if (b.kind === 'thinking') {
+                return (
+                  <details key={b.id} className="thinking" open={b.live}>
+                    <summary>Thinking{b.live ? '…' : ''}</summary>
+                    <pre>{b.text}</pre>
+                  </details>
+                )
+              }
+              if (b.kind === 'tool') {
+                return (
+                  <div key={b.id} className="tool">
+                    <span className={`dot${b.live ? '' : ' done'}`}>{b.live ? '◌' : '●'}</span>
+                    {b.text}
+                    {b.meta ? <span className="meta"> {b.meta}</span> : null}
+                  </div>
+                )
+              }
+              if (b.kind === 'error') {
+                return (
+                  <div
+                    key={b.id}
+                    className="statusline"
+                    style={{ color: '#e5484d', border: '1px solid rgba(229,72,77,.4)', background: 'rgba(229,72,77,.08)', whiteSpace: 'pre-wrap' }}
+                  >
+                    {b.text}
+                  </div>
+                )
+              }
+              return <div key={b.id} className="statusline">{b.text}</div>
+            })}
           </div>
         )}
       </div>
