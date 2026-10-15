@@ -17,8 +17,18 @@ then blocks forever (the gateway runs on a daemon thread).
 """
 import json
 import os
+import signal
 import sys
 import time
+
+
+def _on_sigterm(_signum, _frame):
+    # The Rust supervisor SIGTERMs us on exit — leave quietly instead of
+    # unwinding with a traceback.
+    sys.exit(0)
+
+
+signal.signal(signal.SIGTERM, _on_sigterm)
 
 FORK = os.environ.get("MOCH_FORK_SRC", "")
 RUNTIME_PKGS = os.environ.get("MOCH_RUNTIME_PKGS", "")

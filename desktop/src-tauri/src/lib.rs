@@ -3,8 +3,9 @@
 //! The Rust shell does three things:
 //!  1. SUPERVISE the local hermes agent: spawns the user's hermes fork
 //!     (`app/hermes-src`, with their changes) as `serve` on a loopback
-//!     port with a session token we mint ourselves. Falls back to
-//!     attaching an already-running machine-level serve on 9119.
+//!     port with a session token we mint ourselves. Attaching an
+//!     already-running machine-level serve on 9119 is NOT a fallback:
+//!     it only runs with the explicit MOCH_ATTACH=1 escape hatch.
 //!  2. SERVE the built UI from 127.0.0.1:<port> — so the webview origin
 //!     is a loopback origin hermes' WS host/origin guard accepts.
 //!  3. OPEN the window on that origin. The UI talks to hermes directly
@@ -40,14 +41,50 @@ fn desktop_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
-#[allow(dead_code)]
-fn mint_token() -> String {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let pid = std::process::id();
-    format!("{:x}{:x}{:x}", nanos, pid, nanos.rotate_left(32) ^ 0x5eed)
+/// Refuse to start twice: flock() the desktop lock file for the process
+/// lifetime. The kernel releases the flock on exit; the file itself is
+/// left in place (the next run just re-locks it).
+fn acquire_single_instance() {
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(desktop_dir().join(".moch-desktop.lock"))
+        .expect("open .moch-desktop.lock");
+    use std::os::unix::io::AsRawFd;
+    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        eprintln!("moch: already running");
+        std::process::exit(0);
+    }
+    // Keep the fd (and thus the lock) alive until the process exits.
+    std::mem::forget(lock);
+}
+
+/// Stop the supervised runtime politely: SIGTERM, wait up to 5s, then
+/// SIGKILL. Shared by both exit paths (signal handler + RunEvent::Exit).
+fn terminate_runtime() {
+    let mut child = match hermes_child().lock().unwrap().take() {
+        Some(c) => c,
+        None => return,
+    };
+    let pid = child.id() as i32;
+    unsafe {
+        libc::kill(pid, libc::SIGTERM);
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) | Err(_) => break,
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
 }
 
 fn wait_port(port: u16, timeout_ms: u64) -> bool {
@@ -104,6 +141,7 @@ fn start_fork() -> Result<(String, String, &'static str), String> {
         .try_clone()
         .map_err(|e| format!("clone serve log: {e}"))?;
 
+    use std::os::unix::process::CommandExt;
     use std::process::Stdio;
     let mut child = std::process::Command::new(&python)
         .arg(&runner)
@@ -112,20 +150,31 @@ fn start_fork() -> Result<(String, String, &'static str), String> {
         .env("MOCH_GATEWAY_PORT", std::env::var("MOCH_PORT").unwrap_or_else(|_| HERMES_PORT.to_string()))
         .env("HERMES_HOME", &home)
         .current_dir(&fork)
+        // Own process group: terminal signals reach us, not the child —
+        // we shut it down explicitly via terminate_runtime().
+        .process_group(0)
         .stdout(Stdio::piped())
         .stderr(log_err)
         .spawn()
         .map_err(|e| format!("spawn {}: {e}", python.display()))?;
     eprintln!("moch: runtime spawned pid={:?}", child.id());
 
-    // Drain stdout into the log (observability only — the real handshake
-    // is file-based).
     let stdout = child.stdout.take();
+    // Register the child right away (not after the handshake) so a signal
+    // arriving during boot still finds it and tears it down.
+    *hermes_child().lock().unwrap() = Some(child);
+
+    // Drain stdout into the log (observability only — the real handshake
+    // is file-based). Skip MOCH_GATEWAY_INFO lines: they carry the live
+    // session token and this file is world-readable.
     if let Some(out) = stdout {
         std::thread::spawn(move || {
             use std::io::BufRead;
             let reader = std::io::BufReader::new(out);
             for line in reader.lines().map_while(Result::ok) {
+                if line.starts_with("MOCH_GATEWAY_INFO") {
+                    continue;
+                }
                 let _ = writeln!(log, "{line}");
             }
         });
@@ -138,24 +187,46 @@ fn start_fork() -> Result<(String, String, &'static str), String> {
     let _ = std::fs::remove_file(&info_path);
     let mut info = serde_json::Value::Null;
     let deadline = std::time::Instant::now() + Duration::from_secs(150);
-    while std::time::Instant::now() < deadline {
+    loop {
+        // Fast-fail: don't sit out the whole timeout if the child already
+        // died — report its exit status immediately.
+        if let Some(status) = hermes_child()
+            .lock()
+            .unwrap()
+            .as_mut()
+            .and_then(|c| c.try_wait().ok())
+            .flatten()
+        {
+            return Err(format!("runtime exited early: {status}"));
+        }
         if let Ok(s) = std::fs::read_to_string(&info_path) {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
                 info = v;
                 break;
             }
         }
+        if std::time::Instant::now() >= deadline {
+            break;
+        }
         std::thread::sleep(Duration::from_millis(500));
     }
-    *hermes_child().lock().unwrap() = Some(child);
     if info.is_null() {
-        return Err("runtime did not write gateway info in 150s".to_string());
+        // The exit check at the top of the last iteration just saw the
+        // child alive, so say so instead of a bare timeout.
+        return Err(
+            "runtime did not write gateway info in 150s (child still running)".to_string(),
+        );
     }
     eprintln!("moch: handshake received");
     let port = info["port"].as_u64().unwrap_or(HERMES_PORT as u64) as u16;
     let token = info["token"].as_str().unwrap_or_default().to_string();
     if token.is_empty() || !wait_port(port, 5_000) {
-        return Err("gateway info arrived but port not accepting".to_string());
+        // The handshake JSON carries the runtime's own error, if any —
+        // surface it instead of the generic "port not accepting".
+        return Err(match info["error"].as_str().filter(|e| !e.is_empty()) {
+            Some(e) => format!("gateway startup failed: {e}"),
+            None => "gateway info arrived but port not accepting".to_string(),
+        });
     }
     Ok((
         format!("ws://127.0.0.1:{port}/api/ws"),
@@ -210,14 +281,31 @@ fn start_static_server(cfg: serde_json::Value, assets: Box<dyn tauri::Assets<tau
     };
 
     std::thread::spawn(move || {
+        // DNS-rebinding guard: every request (any method) must target this
+        // server's own loopback host:port.
+        let expected_host = format!("127.0.0.1:{port}");
         for mut request in server.incoming_requests() {
+            let host_ok = request.headers().iter().any(|h| {
+                h.field.as_str().as_str().eq_ignore_ascii_case("host")
+                    && h.value.as_str().eq_ignore_ascii_case(&expected_host)
+            });
+            if !host_ok {
+                let _ = request.respond(Response::from_string("forbidden").with_status_code(403));
+                continue;
+            }
+
             let method = request.method().clone();
             let url = request.url().to_string();
             let path = url.split('?').next().unwrap_or("/").to_string();
 
             if method == Method::Post && path == "/dbg" {
+                // Cap the body: a runaway client must not grow .dbg.log.
+                use std::io::Read;
                 let mut body = String::new();
-                let _ = request.as_reader().read_to_string(&mut body);
+                let _ = request
+                    .as_reader()
+                    .take(64 * 1024)
+                    .read_to_string(&mut body);
                 if let Ok(mut f) = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
@@ -256,7 +344,10 @@ fn start_static_server(cfg: serde_json::Value, assets: Box<dyn tauri::Assets<tau
             }
 
             if method == Method::Get {
-                // Embedded assets (path traversal is moot: map lookup only).
+                // Embedded assets: map lookup only, so the key can't
+                // traverse. The DISK fallback below is a real filesystem
+                // read and guards explicitly: reject ".."/absolute keys,
+                // then verify containment in web-ui/.
                 let rel = path.trim_start_matches('/').to_string();
                 let key: &str = if rel.is_empty() { "index.html" } else { &rel };
                 let ik = key.into();
@@ -265,11 +356,24 @@ fn start_static_server(cfg: serde_json::Value, assets: Box<dyn tauri::Assets<tau
                     .or_else(|| assets.get(&"index.html".into()))
                     .map(|b| b.into_owned())
                     .or_else(|| {
-                        let f = desktop_dir().join("web-ui").join(key);
+                        if key.contains("..") || key.starts_with('/') {
+                            return None;
+                        }
+                        let web_ui = desktop_dir().join("web-ui");
+                        let f = web_ui.join(key);
                         if f.is_file() {
+                            let inside = f
+                                .canonicalize()
+                                .ok()
+                                .zip(web_ui.canonicalize().ok())
+                                .map(|(c, root)| c.starts_with(root))
+                                .unwrap_or(false);
+                            if !inside {
+                                return None;
+                            }
                             std::fs::read(f).ok()
                         } else {
-                            std::fs::read(desktop_dir().join("web-ui/index.html")).ok()
+                            std::fs::read(web_ui.join("index.html")).ok()
                         }
                     });
                 if let Some(bytes) = bytes {
@@ -291,6 +395,8 @@ fn start_static_server(cfg: serde_json::Value, assets: Box<dyn tauri::Assets<tau
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Single instance first — before spawning anything.
+    acquire_single_instance();
     // Supervisor first, then the window onto it. Moch runs ITS OWN runtime
     // (the fork, in a Moch-owned home) — attach is an explicit emergency
     // escape hatch (MOCH_ATTACH=1), never the default path.
@@ -309,7 +415,17 @@ pub fn run() {
 
     let log_tail = std::fs::read_to_string(desktop_dir().join(".hermes-serve.log"))
         .map(|s| {
-            let lines: Vec<&str> = s.lines().collect();
+            // Redact anything that could carry the live token: handshake
+            // lines, or any line quoting the token string itself.
+            let lines: Vec<&str> = s
+                .lines()
+                .filter(|l| {
+                    if l.contains("MOCH_GATEWAY_INFO") {
+                        return false;
+                    }
+                    token.is_empty() || !l.contains(token.as_str())
+                })
+                .collect();
             let n = lines.len();
             lines[n.saturating_sub(12)..].join("\n")
         })
@@ -342,16 +458,13 @@ pub fn run() {
     ))
     .expect("window url");
 
-    // Kill the supervised runtime on SIGTERM/SIGINT too — RunEvent::Exit
+    // Tear the supervised runtime down on SIGTERM/SIGINT too — RunEvent::Exit
     // only fires on a clean loop exit, so signals used to orphan the
-    // python child (which kept port 9118 bound).
-    let _ = ctrlc::set_handler({
-        move || {
-            if let Some(mut child) = hermes_child().lock().unwrap().take() {
-                let _ = child.kill();
-            }
-            std::process::exit(0);
-        }
+    // python child (which kept port 9118 bound). Requires ctrlc's
+    // "termination" feature; without it only SIGINT is handled.
+    let _ = ctrlc::set_handler(move || {
+        terminate_runtime();
+        std::process::exit(0);
     });
 
     let app = tauri::Builder::default()
@@ -371,9 +484,7 @@ pub fn run() {
 
     app.run(|_app, event| {
         if let tauri::RunEvent::Exit = event {
-            if let Some(mut child) = hermes_child().lock().unwrap().take() {
-                let _ = child.kill();
-            }
+            terminate_runtime();
         }
     });
 }

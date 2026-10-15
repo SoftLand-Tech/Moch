@@ -1828,6 +1828,7 @@ name = "moch-desktop"
 version = "0.2.0"
 dependencies = [
  "ctrlc",
+ "libc",
  "serde",
  "serde_json",
  "tauri",
