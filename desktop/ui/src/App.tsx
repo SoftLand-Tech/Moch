@@ -1,7 +1,7 @@
 /**
  * Moch Desktop — 3-Column AI Agent Dashboard:
  * - Left Navigation Sidebar (Brand, Primary Tabs, Workspace Modes, Mascot Profile)
- * - Top Bar (Window dots, Search, Notifications, Right Panel Toggle, User Avatar)
+ * - Top Bar (Search, Runtime Notifications, Right Panel Toggle)
  * - Center Workspace Canvas (Chat/Agent with Hero Empty State, Example Tasks, Streaming Messages)
  * - Right Activity Panel (Live Task Progress & Steps Checklist, Activity Feed, Tools & Integrations)
  */
@@ -11,15 +11,15 @@ import {
   IconAgent,
   IconAgents,
   IconBell,
+  IconCalendar,
   IconChat,
   IconCoding,
-  IconFiles,
-  IconHome,
   IconLayout,
   IconProjects,
   IconResearch,
   IconSearch,
   IconSettings,
+  IconTerminal,
   IconTools,
 } from './Icons'
 import RightPanel, { type ActiveTaskState, type ActivityItem } from './RightPanel'
@@ -35,6 +35,9 @@ import Wizard from './tabs/Wizard'
 
 export type WorkspaceMode = 'agent' | 'chat' | 'coding' | 'research'
 
+/** One real runtime connection event, shown in the bell popover. */
+type RuntimeEvent = { id: number; text: string; at: string }
+
 export default function App() {
   const [cfg, setCfg] = useState<Cfg | null>(null)
   const [conn, setConn] = useState<'connecting' | 'open' | 'error'>('connecting')
@@ -42,17 +45,22 @@ export default function App() {
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('agent')
   const [chatProfile, setChatProfile] = useState('')
   const [setupDone, setSetupDone] = useState<boolean | null>(null)
-  const [rightPanelOpen, setRightPanelOpen] = useState(true)
+  const [rightPanelOpen, setRightPanelOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem('moch.rightPanel') !== '0' } catch { return true }
+  })
   const [agentWorking, setAgentWorking] = useState(false)
   const [activeTask, setActiveTask] = useState<ActiveTaskState | null>(null)
   const [activityEvents, setActivityEvents] = useState<ActivityItem[]>([])
   const [skills, setSkills] = useState<LaunchSkill[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const [runtimeEvents, setRuntimeEvents] = useState<RuntimeEvent[]>([])
 
   const clientRef = useRef<JsonRpcGatewayClient | null>(null)
   const rpcRef = useRef<(<T = unknown>(m: string, p?: Record<string, unknown>) => Promise<T>) | null>(null)
   const urlRef = useRef('')
+  const runtimeEventSeq = useRef(0)
+  const lastLoggedConn = useRef<'' | 'connecting' | 'open' | 'error'>('')
 
   const [client, setClient] = useState<JsonRpcGatewayClient | null>(null)
   const selftestRan = useRef(false)
@@ -161,6 +169,32 @@ export default function App() {
       .catch(() => setSetupDone(false))
   }, [])
 
+  // Real runtime event log for the bell popover (deduped via ref so
+  // StrictMode's double-mount and re-runs don't push the same transition twice).
+  useEffect(() => {
+    if (lastLoggedConn.current === conn) return
+    const prev = lastLoggedConn.current
+    lastLoggedConn.current = conn
+    // Skip the very first 'connecting' — nothing has transitioned yet.
+    if (conn === 'open') {
+      setRuntimeEvents((p) => [{ id: ++runtimeEventSeq.current, text: 'Connected to local runtime', at: new Date().toLocaleTimeString() }, ...p].slice(0, 25))
+    } else if (conn === 'error') {
+      setRuntimeEvents((p) => [{ id: ++runtimeEventSeq.current, text: 'Connection lost', at: new Date().toLocaleTimeString() }, ...p].slice(0, 25))
+    } else if (conn === 'connecting' && prev !== '') {
+      setRuntimeEvents((p) => [{ id: ++runtimeEventSeq.current, text: 'Reconnecting…', at: new Date().toLocaleTimeString() }, ...p].slice(0, 25))
+    }
+  }, [conn])
+
+  // Close the notifications popover on Escape.
+  useEffect(() => {
+    if (!notificationsOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setNotificationsOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [notificationsOpen])
+
   // Selftest
   useEffect(() => {
     if (conn !== 'open' || !location.search.includes('selftest=1')) return
@@ -215,21 +249,23 @@ export default function App() {
     setTab('chat')
   }
 
+  const toggleRightPanel = () => {
+    setRightPanelOpen((v) => {
+      const next = !v
+      try { localStorage.setItem('moch.rightPanel', next ? '1' : '0') } catch { /* private mode etc. */ }
+      return next
+    })
+  }
+
   return (
     <div className="app-shell">
       {/* ── Top Bar ── */}
       <header className="topbar">
-        <div className="window-dots">
-          <span className="dot red" />
-          <span className="dot yellow" />
-          <span className="dot green" />
-        </div>
-
         <div className="topbar-search">
           <IconSearch width={14} height={14} className="search-icon" />
           <input
             type="text"
-            placeholder="Search..."
+            placeholder="Search chats…"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -242,45 +278,56 @@ export default function App() {
             onClick={() => setNotificationsOpen((v) => !v)}
           >
             <IconBell width={16} height={16} />
-            <span className="badge-dot" />
+            {conn !== 'open' && <span className="badge-dot" />}
           </button>
 
           <button
             className={`topbar-icon-btn ${rightPanelOpen ? 'active' : ''}`}
             title="Toggle Right Panel"
-            onClick={() => setRightPanelOpen((v) => !v)}
+            onClick={toggleRightPanel}
           >
             <IconLayout width={16} height={16} />
           </button>
-
-          <div className="user-profile-avatar" title="Mamoun Hisham">
-            <span>MH</span>
-          </div>
         </div>
       </header>
 
-      {/* Notifications Popover */}
+      {/* Notifications Popover — outside-click backdrop (popover itself is z-index 100) */}
+      {notificationsOpen && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'transparent', zIndex: 99 }}
+          onClick={() => setNotificationsOpen(false)}
+        />
+      )}
       {notificationsOpen && (
         <div className="notifications-popover">
           <div className="notif-head">
-            <span>Runtime Activity & Knocks</span>
+            <span>Runtime Activity</span>
             <button className="notif-close" onClick={() => setNotificationsOpen(false)}>✕</button>
           </div>
           <div className="notif-body">
-            <div className="notif-item">
-              <span className="notif-dot ok" />
-              <div>
-                <strong>Gateway connected</strong>
-                <p>Loopback runtime accepting on 127.0.0.1:9118</p>
+            {runtimeEvents.length === 0 ? (
+              <div className="notif-item">
+                <div><p>No runtime events yet.</p></div>
               </div>
-            </div>
-            <div className="notif-item">
-              <span className="notif-dot ok" />
-              <div>
-                <strong>Cron ticker active</strong>
-                <p>HERMES_DESKTOP=1 ticker armed</p>
-              </div>
-            </div>
+            ) : (
+              runtimeEvents.map((e) => (
+                <div className="notif-item" key={e.id}>
+                  <span className="notif-dot ok" />
+                  <div>
+                    <strong>{e.text}</strong>
+                    <p>{e.at}</p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border, rgba(128,128,128,0.2))' }}>
+            <button
+              onClick={() => { setNotificationsOpen(false); setTab('run') }}
+              style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text-faint, inherit)', fontSize: 11 }}
+            >
+              Details in the Runtime tab →
+            </button>
           </div>
         </div>
       )}
@@ -304,43 +351,50 @@ export default function App() {
               className={`nav-item ${tab === 'chat' ? 'active' : ''}`}
               onClick={() => setTab('chat')}
             >
-              <IconHome width={17} height={17} />
-              <span>Home</span>
+              <IconChat width={17} height={17} />
+              <span>Chat</span>
             </button>
             <button
               className={`nav-item ${tab === 'bots' ? 'active' : ''}`}
               onClick={() => setTab('bots')}
             >
               <IconAgents width={17} height={17} />
-              <span>Agents</span>
+              <span>Bots</span>
             </button>
             <button
               className={`nav-item ${tab === 'crew' ? 'active' : ''}`}
               onClick={() => setTab('crew')}
             >
               <IconProjects width={17} height={17} />
-              <span>Projects</span>
+              <span>Crew</span>
             </button>
             <button
-              className={`nav-item ${tab === 'run' ? 'active' : ''}`}
-              onClick={() => setTab('run')}
+              className={`nav-item ${tab === 'automations' ? 'active' : ''}`}
+              onClick={() => setTab('automations')}
             >
-              <IconFiles width={17} height={17} />
-              <span>Files</span>
+              <IconCalendar width={17} height={17} />
+              <span>Automations</span>
             </button>
             <button
               className={`nav-item ${tab === 'skills' ? 'active' : ''}`}
               onClick={() => setTab('skills')}
             >
               <IconTools width={17} height={17} />
-              <span>Tools</span>
+              <span>Skills</span>
             </button>
             <button
               className={`nav-item ${tab === 'models' ? 'active' : ''}`}
               onClick={() => setTab('models')}
             >
               <IconSettings width={17} height={17} />
-              <span>Settings</span>
+              <span>Models</span>
+            </button>
+            <button
+              className={`nav-item ${tab === 'run' ? 'active' : ''}`}
+              onClick={() => setTab('run')}
+            >
+              <IconTerminal width={17} height={17} />
+              <span>Runtime</span>
             </button>
           </nav>
 
@@ -355,7 +409,7 @@ export default function App() {
                 <div className="mode-card-icon"><IconChat width={16} height={16} /></div>
                 <div className="mode-card-info">
                   <strong>Chat</strong>
-                  <p>Just talk, get things done</p>
+                  <p>Plain conversation with your agent.</p>
                 </div>
               </button>
 
@@ -366,7 +420,7 @@ export default function App() {
                 <div className="mode-card-icon purple"><IconAgent width={16} height={16} /></div>
                 <div className="mode-card-info">
                   <strong>Agent</strong>
-                  <p>Autonomous tasks & tools</p>
+                  <p>Task-first workspace with tools.</p>
                 </div>
               </button>
 
@@ -377,7 +431,7 @@ export default function App() {
                 <div className="mode-card-icon blue"><IconCoding width={16} height={16} /></div>
                 <div className="mode-card-info">
                   <strong>Coding</strong>
-                  <p>Code, terminal, dev tools</p>
+                  <p>Coding-flavored starter prompts.</p>
                 </div>
               </button>
 
@@ -388,7 +442,7 @@ export default function App() {
                 <div className="mode-card-icon cyan"><IconResearch width={16} height={16} /></div>
                 <div className="mode-card-info">
                   <strong>Research</strong>
-                  <p>Deep research & analysis</p>
+                  <p>Research-flavored starter prompts.</p>
                 </div>
               </button>
             </div>
@@ -402,7 +456,7 @@ export default function App() {
               <span className="profile-tagline">Always here, always working.</span>
               <span className="profile-status-pill">
                 <span className={`status-dot ${conn === 'open' ? 'online' : 'offline'}`} />
-                {conn === 'open' ? 'Online' : 'Connecting...'}
+                {conn === 'open' ? 'Online' : conn === 'error' ? 'Offline' : 'Connecting…'}
               </span>
             </div>
           </div>
@@ -414,7 +468,7 @@ export default function App() {
             <div className="fatal">
               <img className="mochi-img" src="/brand/mochi-offline.svg" alt="Mochi" />
               <p>No local runtime found.</p>
-              <p className="hint">Check <code>desktop/.hermes-serve.log</code> — the shell tried port 9118 and 9119.</p>
+              <p className="hint">The local runtime failed to start. Check <code>desktop/.hermes-serve.log</code> (fork mode; <code>MOCH_ATTACH=1</code> attaches an external serve on 9119).</p>
             </div>
           ) : (
             <>
@@ -425,6 +479,7 @@ export default function App() {
                   profile={chatProfile}
                   onProfile={setChatProfile}
                   mode={workspaceMode}
+                  searchQuery={searchQuery}
                   onActivity={handleActivity}
                   onTaskUpdate={setActiveTask}
                   onWorkingChange={setAgentWorking}

@@ -10,7 +10,7 @@ export type Tab = 'chat' | 'bots' | 'crew' | 'automations' | 'skills' | 'models'
 /** The RPC handle App passes into every tab (the gateway client's request fn). */
 export type RpcRef = { current: (<T = unknown>(m: string, p?: Record<string, unknown>) => Promise<T>) | null }
 
-export type Block = { id: number; kind: 'user' | 'assistant' | 'thinking' | 'tool' | 'status'; text: string; live?: boolean; meta?: string }
+export type Block = { id: number; kind: 'user' | 'assistant' | 'thinking' | 'tool' | 'status' | 'error' | 'approval'; text: string; live?: boolean; meta?: string }
 export type SessionRow = {
   /** Durable id — the one session.resume takes (sessionRowMeta.ts). */
   id?: string
@@ -57,7 +57,6 @@ export type CreateChecklist = {
 }
 export const DEFAULT_CHECKLIST: CreateChecklist = { copyUserMemory: true, copyMemory: false, skills: [] }
 
-export type Job = { job_id: string; name?: string; schedule?: string; prompt?: string; enabled?: boolean; next_run?: string }
 export type Task = { id?: string; title?: string; body?: string; assignee?: string; status?: string; state?: string }
 export type Provider = { slug?: string; name?: string; provider?: string; authenticated?: boolean; auth_type?: string; model?: string; default?: string }
 
