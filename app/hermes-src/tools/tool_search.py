@@ -435,12 +435,19 @@ def _moch_browser_gate_off() -> bool:
     """True on the embedded Moch gateway with the browser relay NOT armed
     (BUG-121): browser tools are genuinely absent from the catalog, not a
     lexical miss — the no-match hint must say the Browser screen exists
-    instead of pushing another retry."""
+    instead of pushing another retry.
+
+    Desktop exception: Moch Desktop drives a REAL Chromium via CDP
+    (BROWSER_CDP_URL exported by desktop/runtime.py before the gateway
+    boots — no relay involved). When CDP is armed the browser tools are
+    live, so the phone's open-the-Browser-screen note must not fire."""
     moch = (
         os.environ.get("MOCH_EMBEDDED", "").strip() == "1"
         or os.environ.get("MOCH_FLEET", "").strip() == "1"
     )
-    return moch and os.environ.get("MOCH_BROWSER_RELAY", "").strip() != "1"
+    relay = os.environ.get("MOCH_BROWSER_RELAY", "").strip() != "1"
+    cdp = bool(os.environ.get("BROWSER_CDP_URL", "").strip())
+    return moch and relay and not cdp
 
 
 def dispatch_tool_search(args: Dict[str, Any], *, current_tool_defs: List[Dict[str, Any]],
