@@ -1,10 +1,7 @@
 import { useState } from 'react'
 import {
   IconCheck,
-  IconDatabase,
   IconFileText,
-  IconFiles,
-  IconGitHub,
   IconSearch,
   IconTerminal,
   IconTools,
@@ -29,21 +26,10 @@ export type TaskStep = {
 export type ActiveTaskState = {
   title: string
   subtitle: string
-  step: number
-  total: number
+  step?: number
+  total?: number
   steps: TaskStep[]
 }
-
-const DEFAULT_STEPS: TaskStep[] = [
-  { label: 'Read project structure', time: '2m ago', done: true },
-  { label: 'Analyze requirements', time: '3m ago', done: true },
-  { label: 'Create migration', time: '4m ago', active: true },
-  { label: 'Update models' },
-  { label: 'Build Filament resource' },
-  { label: 'Add validation & policies' },
-  { label: 'Run tests' },
-  { label: 'Push to GitHub' },
-]
 
 export default function RightPanel({
   open,
@@ -60,31 +46,22 @@ export default function RightPanel({
   activityEvents: ActivityItem[]
   skills: LaunchSkill[]
   logTail?: string
-  onViewAllTools: () => void
+  // Still accepted (App.tsx passes it); the fake "Tools & Integrations" card it served was removed.
+  onViewAllTools?: () => void
 }) {
-  const [activeTab, setActiveTab] = useState<'activity' | 'tools' | 'terminal' | 'files'>('activity')
+  // 'files' tab was removed; keep it in the union so a stale value falls back to 'activity'.
+  const [activeTab, setActiveTab] = useState<'activity' | 'tools' | 'log' | 'files'>('activity')
   const [toolSearch, setToolSearch] = useState('')
 
   if (!open) return null
 
-  const task = activeTask || {
-    title: 'Build a Laravel feature',
-    subtitle: 'Adding user profile settings with Filament...',
-    step: 3,
-    total: 8,
-    steps: DEFAULT_STEPS,
-  }
+  const tab: 'activity' | 'tools' | 'log' = activeTab === 'files' ? 'activity' : activeTab
 
-  const percent = Math.round((task.step / Math.max(1, task.total)) * 100)
-
-  // Default mock activity items if none recorded yet
-  const displayEvents: ActivityItem[] = activityEvents.length > 0 ? activityEvents : [
-    { id: 1, kind: 'file', title: 'Read file', subtitle: 'app/Models/User.php', time: '4m ago' },
-    { id: 2, kind: 'command', title: 'Run command', subtitle: 'php artisan make:migration create_user...', time: '5m ago' },
-    { id: 3, kind: 'write', title: 'Write file', subtitle: 'database/migrations/2026_10_15_000...', time: '6m ago' },
-    { id: 4, kind: 'search', title: 'Search', subtitle: 'Filament user profile', time: '7m ago' },
-    { id: 5, kind: 'file', title: 'Read file', subtitle: 'app/Filament/Resources/UserResource.php', time: '8m ago' },
-  ]
+  const task = activeTask
+  const hasTask = !!task && (!!task.title || task.steps.length > 0)
+  const showStepBar = !!task && typeof task.step === 'number' && typeof task.total === 'number'
+  const stepsDone = task ? task.steps.filter((s) => s.done).length : 0
+  const stepsTotal = task ? task.steps.length : 0
 
   const filteredSkills = skills.filter((s) =>
     !toolSearch || s.name.toLowerCase().includes(toolSearch.toLowerCase()) || (s.description ?? '').toLowerCase().includes(toolSearch.toLowerCase())
@@ -97,57 +74,74 @@ export default function RightPanel({
         <div className="r-card-header">
           <div className="status-indicator">
             <span className={`status-dot ${agentWorking ? 'pulse' : 'idle'}`} />
-            <span className="status-label">{agentWorking ? 'Agent is working...' : 'Agent idle'}</span>
+            <span className="status-label">{agentWorking ? 'Agent is working…' : 'Agent idle'}</span>
           </div>
           {agentWorking && <span className="live-badge">Live</span>}
         </div>
 
-        <div className="active-task-box">
-          <div className="active-task-icon">
-            <IconTerminal width={15} height={15} />
-          </div>
-          <div className="active-task-meta">
-            <h4>{task.title}</h4>
-            <p>{task.subtitle}</p>
-          </div>
-        </div>
-
-        <div className="progress-section">
-          <div className="progress-meta">
-            <span>Step {task.step} of {task.total}</span>
-            <span>{percent}%</span>
-          </div>
-          <div className="progress-bar-track">
-            <div className="progress-bar-fill" style={{ transform: `scaleX(${percent / 100})` }} />
-          </div>
-        </div>
-
-        <div className="subtask-list">
-          {task.steps.map((st, i) => (
-            <div key={st.label + i} className={`subtask-item ${st.done ? 'done' : ''} ${st.active ? 'active' : ''}`}>
-              <div className="subtask-icon">
-                {st.done ? (
-                  <span className="check-circle"><IconCheck width={11} height={11} /></span>
-                ) : st.active ? (
-                  <span className="spinner-circle" />
-                ) : (
-                  <span className="empty-circle" />
-                )}
+        {hasTask && task ? (
+          <>
+            <div className="active-task-box">
+              <div className="active-task-icon">
+                <IconTerminal width={15} height={15} />
               </div>
-              <span className="subtask-label">{st.label}</span>
-              {st.time && <span className="subtask-time">{st.time}</span>}
+              <div className="active-task-meta">
+                <h4>{task.title}</h4>
+                <p>{task.subtitle}</p>
+              </div>
             </div>
-          ))}
-        </div>
+
+            {showStepBar && (
+              <div className="progress-section">
+                <div className="progress-meta">
+                  <span>Step {task.step} of {task.total}</span>
+                  <span>{Math.round((task.step! / Math.max(1, task.total!)) * 100)}%</span>
+                </div>
+                <div className="progress-bar-track">
+                  <div className="progress-bar-fill" style={{ transform: `scaleX(${task.step! / Math.max(1, task.total!)})` }} />
+                </div>
+              </div>
+            )}
+
+            {!showStepBar && stepsTotal > 0 && (
+              <div className="dim" style={{ fontSize: 12, padding: '4px 2px' }}>
+                {stepsDone} of {stepsTotal} steps done
+              </div>
+            )}
+
+            <div className="subtask-list">
+              {task.steps.map((st, i) => (
+                <div key={st.label + i} className={`subtask-item ${st.done ? 'done' : ''} ${st.active ? 'active' : ''}`}>
+                  <div className="subtask-icon">
+                    {st.done ? (
+                      <span className="check-circle"><IconCheck width={11} height={11} /></span>
+                    ) : st.active ? (
+                      <span className="spinner-circle" />
+                    ) : (
+                      <span className="empty-circle" />
+                    )}
+                  </div>
+                  <span className="subtask-label">{st.label}</span>
+                  {st.time && <span className="subtask-time">{st.time}</span>}
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="dim" style={{ padding: '8px 2px' }}>
+            <div>No active task.</div>
+            <div style={{ opacity: 0.75 }}>Tool activity from the agent's current turn appears here.</div>
+          </div>
+        )}
       </div>
 
       {/* ── Segmented Control & Tab Content ── */}
       <div className="r-card segmented-card">
         <div className="segmented-tabs">
-          {(['activity', 'tools', 'terminal', 'files'] as const).map((t) => (
+          {(['activity', 'tools', 'log'] as const).map((t) => (
             <button
               key={t}
-              className={`seg-tab ${activeTab === t ? 'active' : ''}`}
+              className={`seg-tab ${tab === t ? 'active' : ''}`}
               onClick={() => setActiveTab(t)}
             >
               {t.charAt(0).toUpperCase() + t.slice(1)}
@@ -156,27 +150,33 @@ export default function RightPanel({
         </div>
 
         <div className="segmented-content">
-          {activeTab === 'activity' && (
+          {tab === 'activity' && (
             <div className="activity-feed">
-              {displayEvents.map((ev) => (
-                <div key={ev.id} className="activity-row">
-                  <div className={`activity-icon-box ${ev.kind}`}>
-                    {ev.kind === 'file' ? <IconFileText width={13} height={13} />
-                      : ev.kind === 'command' ? <IconTerminal width={13} height={13} />
-                      : ev.kind === 'search' ? <IconSearch width={13} height={13} />
-                      : <IconTools width={13} height={13} />}
-                  </div>
-                  <div className="activity-meta">
-                    <span className="activity-title">{ev.title}</span>
-                    <span className="activity-subtitle">{ev.subtitle}</span>
-                  </div>
-                  <span className="activity-time">{ev.time}</span>
+              {activityEvents.length === 0 ? (
+                <div className="dim" style={{ padding: '10px 2px' }}>
+                  Nothing yet — tool calls show up here live.
                 </div>
-              ))}
+              ) : (
+                activityEvents.map((ev) => (
+                  <div key={ev.id} className="activity-row">
+                    <div className={`activity-icon-box ${ev.kind}`}>
+                      {ev.kind === 'file' ? <IconFileText width={13} height={13} />
+                        : ev.kind === 'command' ? <IconTerminal width={13} height={13} />
+                        : ev.kind === 'search' ? <IconSearch width={13} height={13} />
+                        : <IconTools width={13} height={13} />}
+                    </div>
+                    <div className="activity-meta">
+                      <span className="activity-title">{ev.title}</span>
+                      <span className="activity-subtitle">{ev.subtitle}</span>
+                    </div>
+                    <span className="activity-time">{ev.time}</span>
+                  </div>
+                ))
+              )}
             </div>
           )}
 
-          {activeTab === 'tools' && (
+          {tab === 'tools' && (
             <div className="tools-mini-list">
               <input
                 type="text"
@@ -196,46 +196,22 @@ export default function RightPanel({
             </div>
           )}
 
-          {activeTab === 'terminal' && (
+          {tab === 'log' && (
             <div className="terminal-mini">
-              <pre><code>{logTail || 'No active terminal output...'}</code></pre>
+              {logTail ? (
+                <>
+                  <div className="dim" style={{ fontSize: 11, padding: '2px 2px 6px' }}>
+                    boot-time snapshot — not live
+                  </div>
+                  <pre><code>{logTail}</code></pre>
+                </>
+              ) : (
+                <div className="dim" style={{ padding: '10px 2px' }}>
+                  No log snapshot — full log at desktop/.hermes-serve.log
+                </div>
+              )}
             </div>
           )}
-
-          {activeTab === 'files' && (
-            <div className="files-mini-list">
-              <div className="mini-file-row"><IconFileText width={12} height={12} /><span>SOUL.md</span></div>
-              <div className="mini-file-row"><IconFileText width={12} height={12} /><span>MEMORY.md</span></div>
-              <div className="mini-file-row"><IconFileText width={12} height={12} /><span>USER.md</span></div>
-              <div className="mini-file-row"><IconFileText width={12} height={12} /><span>.moch-gateway.json</span></div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Bottom Card: Tools & Integrations ── */}
-      <div className="r-card integrations-card">
-        <div className="integrations-head">
-          <span className="integrations-title">Tools & Integrations</span>
-          <button className="view-all-link" onClick={onViewAllTools}>View all</button>
-        </div>
-        <div className="integrations-grid">
-          <div className="integration-tile">
-            <IconGitHub width={16} height={16} />
-            <span>GitHub</span>
-          </div>
-          <div className="integration-tile">
-            <IconDatabase width={16} height={16} />
-            <span>Database</span>
-          </div>
-          <div className="integration-tile">
-            <IconTerminal width={16} height={16} />
-            <span>Terminal</span>
-          </div>
-          <div className="integration-tile">
-            <IconFiles width={16} height={16} />
-            <span>Filesystem</span>
-          </div>
         </div>
       </div>
     </aside>
