@@ -12,6 +12,25 @@ declare const beacon: (msg: string) => void
 
 const POLL_MS = 3000
 
+// Chromium renamed the screencast ack: current builds take
+// Page.screencastFrameAck, older ones Page.screencastFrameAcknowledge.
+// Until an ack lands Chromium caps in-flight frames (~2), so the screen
+// freezes at the first frames when the wrong name is used. Remember
+// which name this browser accepts.
+let ackFrameMethod: 'Page.screencastFrameAck' | 'Page.screencastFrameAcknowledge' =
+  'Page.screencastFrameAck'
+
+function ackScreencastFrame(session: CdpSession, frameSessionId: number): void {
+  const method = ackFrameMethod
+  session.send(method, { sessionId: frameSessionId }).catch((e: unknown) => {
+    if (!(e instanceof Error) || !e.message.includes("wasn't found")) return
+    if (method === 'Page.screencastFrameAck') {
+      ackFrameMethod = 'Page.screencastFrameAcknowledge'
+      void session.send(ackFrameMethod, { sessionId: frameSessionId }).catch(() => {})
+    }
+  })
+}
+
 /** windowsVirtualKeyCode for keys pages branch on; printable text rides
  * key/code and Input.insertText instead. */
 const VK_BY_KEY: Record<string, number> = {
@@ -143,8 +162,7 @@ function CdpStage(props: { session: CdpSession; target: CdpTarget }): React.JSX.
         }
       }
       img.src = `data:image/${format};base64,${data}`
-      // Chromium stops sending frames (~2 in flight) until acknowledged.
-      void session.send('Page.screencastFrameAcknowledge', { sessionId: p.sessionId }).catch(() => {})
+      ackScreencastFrame(session, p.sessionId)
       if (firstFrame) {
         firstFrame = false
         setDrawing(true)
