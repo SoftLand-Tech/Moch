@@ -1,0 +1,806 @@
+/*
+ * Chat surface styles. Colors ride the shell's CSS-variable tokens; the
+ * fallbacks are the shared Mocheme palette (app/src/lib/theme.ts) so the
+ * surface renders correctly before the shell's theme module mounts.
+ */
+
+.moch-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--moch-bg, #0a0813);
+  color: var(--moch-text, #ffffff);
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+
+.moch-chat :focus-visible {
+  outline: 2px solid var(--moch-accent, #f79236);
+  outline-offset: 2px;
+}
+
+.moch-chat button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.moch-col {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+/* ── Banner ─────────────────────────────────────────────────────────── */
+
+.moch-banner {
+  display: block;
+  width: 100%;
+  padding: 8px 16px;
+  background: var(--moch-amber-soft, rgba(245, 165, 36, 0.12));
+  color: var(--moch-amber, #f5a524);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* ── Transcript ─────────────────────────────────────────────────────── */
+
+.moch-chat__scrollwrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.moch-chat__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.moch-chat__col {
+  padding-bottom: 16px;
+}
+
+.moch-booting,
+.moch-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  color: var(--moch-faint, #86829b);
+  font-size: 13.5px;
+}
+
+.moch-jump {
+  position: absolute;
+  right: 20px;
+  bottom: 14px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 16px;
+  background: var(--moch-card, #151220);
+  border: 1px solid var(--moch-border, rgba(248, 239, 229, 0.11));
+  color: var(--moch-dim, #b4b1c4);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* ── Message rows ───────────────────────────────────────────────────── */
+
+.moch-row-user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: 6px 0;
+}
+
+.moch-bubble-user {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  border-bottom-right-radius: 6px;
+  background: var(--moch-user-bubble, #f6ece1);
+  color: var(--moch-user-text, #2b283b);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.moch-row-bot {
+  padding: 10px 0;
+}
+
+.moch-seg {
+  margin-bottom: 10px;
+}
+
+.moch-seg:last-child {
+  margin-bottom: 0;
+}
+
+.moch-stream {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.moch-cursor {
+  animation: moch-blink 1s steps(1) infinite;
+}
+
+@keyframes moch-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.moch-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.moch-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--moch-blush, #fa9b6a);
+  animation: moch-dot 1.2s ease-in-out infinite;
+}
+
+.moch-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.moch-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes moch-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.moch-failed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--moch-red, #ff5a5a);
+  font-size: 12.5px;
+}
+
+.moch-failed--warn {
+  color: var(--moch-amber, #f5a524);
+}
+
+.moch-failed__retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 14px;
+  background: var(--moch-card, #151220);
+  border: 1px solid var(--moch-border, rgba(248, 239, 229, 0.11));
+  color: var(--moch-text, #ffffff);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Thinking block */
+
+.moch-think {
+  align-self: flex-start;
+}
+
+.moch-think__head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1.5px dashed var(--moch-think-border, rgba(248, 239, 229, 0.25));
+  color: var(--moch-faint, #86829b);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.moch-think__body {
+  margin-top: 6px;
+  color: var(--moch-dim, #b4b1c4);
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Command card (slash-command output rows) */
+
+.moch-cmdcard {
+  border: 1px solid var(--moch-border, rgba(248, 239, 229, 0.11));
+  border-radius: 12px;
+  background: var(--moch-card, #151220);
+  padding: 10px 14px;
+  margin-bottom: 10px;
+}
+
+.moch-cmdcard__title {
+  color: var(--moch-accent, #f79236);
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.moch-cmdcard__body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13.5px;
+}
+
+/* Media segment chip (desktop media unit owns real rendering later) */
+
+.moch-media {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 15px;
+  background: var(--moch-card, #151220);
+  border: 1px solid var(--moch-border, rgba(248, 239, 229, 0.11));
+  color: var(--moch-dim, #b4b1c4);
+  font-size: 12.5px;
+  text-decoration: none;
+}
+
+.moch-media:hover {
+  color: var(--moch-text, #ffffff);
+}
+
+/* Markdown */
+
+.moch-md {
+  overflow-wrap: anywhere;
+}
+
+.moch-md > *:first-child {
+  margin-top: 0;
+}
+
+.moch-md > *:last-child {
+  margin-bottom: 0;
+}
+
+.moch-md p {
+  margin: 0 0 12px;
+}
+
+.moch-md h1,
+.moch-md h2,
+.moch-md h3,
+.moch-md h4,
+.moch-md h5,
+.moch-md h6 {
+  margin: 18px 0 8px;
+  line-height: 1.3;
+}
+
+.moch-md h1 {
+  font-size: 1.35em;
+}
+
+.moch-md h2 {
+  font-size: 1.22em;
+}
+
+.moch-md h3 {
+  font-size: 1.1em;
+}
+
+.moch-md ul,
+.moch-md ol {
+  margin: 0 0 12px;
+  padding-left: 22px;
+}
+
+.moch-md li {
+  margin: 3px 0;
+}
+
+.moch-md blockquote {
+  margin: 0 0 12px;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--moch-border, rgba(248, 239, 229, 0.11));
+  color: var(--moch-dim, #b4b1c4);
+}
+
+.moch-md code {
+  font-family: ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
+  font-size: 0.92em;
+  color: var(--moch-accent, #f79236);
+  background: var(--moch-accent-soft, rgba(247, 146, 54, 0.12));
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.moch-md pre {
+  margin: 0 0 12px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--moch-card, #151220);
+  overflow-x: auto;
+}
+
+.moch-md pre code {
+  display: block;
+  padding: 0;
+  background: none;
+  color: var(--moch-text, #ffffff);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.moch-md a {
+  color: var(--moch-accent, #f79236);
+}
+
+.moch-md hr {
+  border: 0;
+  border-top: 1px solid var(--moch-border, rgba(248, 239, 229, 0.11));
+  margin: 16px 0;
+}
+
+.moch-md table {
+  border-collapse: collapse;
+  margin: 0 0 12px;
+}
+
+.moch-md th,
+.moch-md td {
+  border: 1px solid var(--moch-border, rgba(248, 239, 229, 0.11));
+  padding: 5px 10px;
+  text-align: left;
+}
+
+/* ── Tool rows + todos (docked run strip) ──────────────────────────── */
+
+.moch-run {
+  border-top: 1px solid var(--moch-border-soft, rgba(248, 239, 229, 0.06));
+  padding: 6px 0 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.moch-run__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 92%;
+  height: 26px;
+  padding: 0 10px;
+  margin: 3px 0;
+  border-radius: 13px;
+  background: var(--moch-card, #151220);
+  border: 1px solid var(--moch-border, rgba(248, 239, 229, 0.11));
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--moch-dim, #b4b1c4);
+}
+
+.moch-run__summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moch-run__chev {
+  color: var(--moch-faint, #86829b);
+}
+
+.moch-run__more {
+  color: var(--moch-faint, #86829b);
+  font-size: 11.5px;
+  padding: 2px 0;
+}
+
+.moch-tool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12.5px;
+  min-width: 0;
+}
+
+.moch-tool__status {
+  width: 14px;
+  text-align: center;
+  flex: none;
+}
+
+.moch-tool__status--running {
+  color: var(--moch-accent, #f79236);
+  animation: moch-dot 1.2s ease-in-out infinite;
+}
+
+.moch-tool__status--done {
+  color: var(--moch-green-soft, #4ade80);
+}
+
+.moch-tool__status--failed {
+  color: var(--moch-red, #ff5a5a);
+}
+
+.moch-tool__name {
+  color: var(--moch-dim, #b4b1c4);
+  font-weight: 600;
+  flex: none;
+}
+
+.moch-tool__preview {
+  color: var(--moch-faint, #86829b);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.moch-tool__dur {
+  color: var(--moch-faint, #86829b);
+  font-size: 11px;
+  flex: none;
+}
+
+.moch-todos {
+  padding: 4px 0;
+}
+
+.moch-todos__item {
+  color: var(--moch-dim, #b4b1c4);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.moch-todos__mark {
+  display: inline-block;
+  width: 16px;
+  color: var(--moch-faint, #86829b);
+}
+
+.moch-todos__item--done .moch-todos__mark {
+  color: var(--moch-green-soft, #4ade80);
+}
+
+.moch-todos__item--done {
+  text-decoration: line-through;
+  text-decoration-color: var(--moch-border, rgba(248, 239, 229, 0.11));
+}
+
+/* ── Question cards ─────────────────────────────────────────────────── */
+
+.moch-card {
+  margin: 8px 0;
+  padding: 14px;
+  border: 1px solid var(--moch-border, rgba(248, 239, 229, 0.11));
+  border-radius: 12px;
+  background: var(--moch-elev, #1a1727);
+}
+
+.moch-card__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.moch-card__head--amber {
+  color: var(--moch-amber, #f5a524);
+}
+
+.moch-card__head--accent {
+  color: var(--moch-accent, #f79236);
+}
+
+.moch-card__head--red {
+  color: var(--moch-red, #ff5a5a);
+}
+
+.moch-card__kicker {
+  color: var(--moch-faint, #86829b);
+  font-size: 11.5px;
+  margin-bottom: 4px;
+}
+
+.moch-card__body {
+  margin-bottom: 12px;
+  font-size: 14px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.moch-card__desc {
+  color: var(--moch-dim, #b4b1c4);
+  font-size: 12.5px;
+  margin-bottom: 10px;
+}
+
+.moch-card__scroll {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.moch-card__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.moch-btn {
+  flex: 1 1 auto;
+  min-height: 38px;
+  padding: 8px 14px;
+  border-radius: 19px;
+  background: var(--moch-accent, #f79236);
+  color: var(--moch-on-accent, #2e1a08);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.moch-btn--ghost {
+  flex: 1 1 100%;
+  background: var(--moch-card, #151220);
+  border: 1px solid var(--moch-border, rgba(248, 239, 229, 0.11));
+  color: var(--moch-text, #ffffff);
+  text-align: left;
+}
+
+.moch-btn--ghost:hover {
+  background: var(--moch-hover, #272535);
+}
+
+.moch-btn--on {
+  background: var(--moch-accent, #f79236);
+  border-color: var(--moch-accent, #f79236);
+  color: var(--moch-on-accent, #2e1a08);
+  text-align: center;
+}
+
+.moch-btn--deny {
+  background: transparent;
+  border: 1.5px solid var(--moch-red, #ff5a5a);
+  color: var(--moch-red, #ff5a5a);
+}
+
+.moch-btn--off {
+  background: var(--moch-input, #1a1727);
+  border: 1px solid var(--moch-border, rgba(248, 239, 229, 0.11));
+  color: var(--moch-dim, #b4b1c4);
+  cursor: default;
+}
+
+.moch-card__hint {
+  color: var(--moch-faint, #86829b);
+  font-size: 11.5px;
+  margin: 8px 0 2px;
+  text-align: center;
+}
+
+.moch-card__input {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 14px;
+  border-radius: 18px;
+  border: 1px solid var(--moch-border, rgba(248, 239, 229, 0.11));
+  background: var(--moch-card, #151220);
+  color: var(--moch-text, #ffffff);
+  font: inherit;
+  font-size: 14px;
+}
+
+.moch-card__input::placeholder {
+  color: var(--moch-faint, #86829b);
+}
+
+.moch-card__clarifyrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.moch-card__clarifyrow .moch-card__input {
+  flex: 1;
+  margin-top: 10px;
+}
+
+.moch-btn--mini {
+  flex: none;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  margin-top: 10px;
+  border-radius: 20px;
+}
+
+.moch-card__q {
+  margin-bottom: 10px;
+}
+
+.moch-card__qtext {
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+
+.moch-card__options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Foreign (untracked) aggregate card */
+
+.moch-card__foreignhead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--moch-amber, #f5a524);
+}
+
+.moch-card__foreignchev {
+  margin-left: auto;
+  color: var(--moch-faint, #86829b);
+}
+
+.moch-card__foreignhint {
+  color: var(--moch-dim, #b4b1c4);
+  font-size: 12.5px;
+  margin-top: 4px;
+}
+
+/* ── Queue strip ────────────────────────────────────────────────────── */
+
+.moch-queue {
+  margin: 6px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--moch-border, rgba(248, 239, 229, 0.11));
+  border-radius: 12px;
+  background: var(--moch-elev, #1a1727);
+}
+
+.moch-queue__head {
+  color: var(--moch-dim, #b4b1c4);
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.moch-queue__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+}
+
+.moch-queue__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-size: 13px;
+  color: var(--moch-text, #ffffff);
+}
+
+.moch-queue__act {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 14px;
+  color: var(--moch-dim, #b4b1c4);
+}
+
+.moch-queue__act:hover {
+  background: var(--moch-hover, #272535);
+}
+
+.moch-queue__more {
+  color: var(--moch-faint, #86829b);
+  font-size: 11px;
+}
+
+/* ── Composer (docked, in flow) ─────────────────────────────────────── */
+
+.moch-dock {
+  flex: none;
+  padding: 6px 0 12px;
+  background: var(--moch-bg, #0a0813);
+}
+
+.moch-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 6px 6px 6px 14px;
+  border: 1px solid var(--moch-border, rgba(248, 239, 229, 0.11));
+  border-radius: 14px;
+  background: var(--moch-elev, #1a1727);
+}
+
+.moch-composer:focus-within {
+  border-color: var(--moch-accent, #f79236);
+}
+
+.moch-composer__input {
+  flex: 1;
+  min-height: 34px;
+  max-height: 180px;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--moch-text, #ffffff);
+  font: inherit;
+  resize: none;
+  overflow-y: auto;
+}
+
+.moch-composer__input::placeholder {
+  color: var(--moch-faint, #86829b);
+}
+
+.moch-composer__input:focus,
+.moch-composer__input:focus-visible {
+  outline: none;
+}
+
+.moch-composer:focus-within .moch-composer__input:focus-visible {
+  outline: none;
+}
+
+.moch-btn--round {
+  flex: none;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: 18px;
+  font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.moch-btn--round:disabled {
+  background: var(--moch-card, #151220);
+  color: var(--moch-faint, #86829b);
+  cursor: default;
+}
+
+.moch-btn--stop {
+  background: var(--moch-red-soft, rgba(255, 90, 90, 0.12));
+  color: var(--moch-red, #ff5a5a);
+}

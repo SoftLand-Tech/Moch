@@ -12,7 +12,7 @@
 //!     over ws://127.0.0.1 using the app's own TS protocol stack.
 
 use parking_lot::Mutex;
-use std::io::Write;
+use std::io::{Read as _, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, OnceLock};
@@ -33,6 +33,9 @@ static SHUTDOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 /// CDP debug port of the agent browser spawned by runtime.py (from the
 /// handshake JSON's browser_port). None = no browser this boot.
 static BROWSER_PORT: OnceLock<u16> = OnceLock::new();
+/// Loopback port of the raw CDP WebSocket proxy (set at boot, published
+/// to the UI via GET /cdp/ws-port).
+static CDP_WS_PORT: OnceLock<u16> = OnceLock::new();
 
 fn hermes_child() -> &'static Mutex<Option<std::process::Child>> {
     &HERMES_CHILD
@@ -452,6 +455,378 @@ fn cdp_get_json(port: u16, path: &str) -> Result<String, String> {
     Ok(body.to_string())
 }
 
+// ---------------------------------------------------------------------------
+// CDP WebSocket proxy
+//
+// The UI (origin http://127.0.0.1:<ui-port>) cannot open a WebSocket
+// straight to the agent browser's CDP port: Chromium rejects upgrades
+// carrying a foreign Origin header. The shell therefore terminates the
+// webview's WebSocket itself on a second loopback listener and splices the
+// raw bytes through to ws://127.0.0.1:<browser_port>/devtools/<target> —
+// the same raw-splice pattern the phone relay uses. tiny_http cannot
+// upgrade (its upgrade() yields an opaque, non-cloneable stream, and the
+// splice needs two duplex handles per direction), so this listener is
+// hand-rolled on std. Framing needs no code on our side: the webview sends
+// masked client frames and Chromium answers with unmasked server frames,
+// and a verbatim byte relay preserves both. Loopback-only by bind; the
+// browser port comes from BROWSER_PORT, never from the request.
+// ---------------------------------------------------------------------------
+
+const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+/// SHA-1, only for the RFC 6455 Sec-WebSocket-Accept handshake. No crate
+/// for one hash over ~60 bytes.
+fn sha1(data: &[u8]) -> [u8; 20] {
+    let mut h: [u32; 5] = [0x6745_2301, 0xEFCD_AB89, 0x98BA_DCFE, 0x1032_5476, 0xC3D2_E1F0];
+    let bit_len = (data.len() as u64).wrapping_mul(8);
+    let mut msg = data.to_vec();
+    msg.push(0x80);
+    while msg.len() % 64 != 56 {
+        msg.push(0);
+    }
+    msg.extend_from_slice(&bit_len.to_be_bytes());
+    for block in msg.chunks_exact(64) {
+        let mut w = [0u32; 80];
+        for (i, word) in block.chunks_exact(4).enumerate() {
+            w[i] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
+        }
+        for i in 16..80 {
+            w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
+        }
+        let (mut a, mut b, mut c, mut d, mut e) = (h[0], h[1], h[2], h[3], h[4]);
+        for (i, &wi) in w.iter().enumerate() {
+            let (f, k) = match i {
+                0..=19 => ((b & c) | (!b & d), 0x5A82_7999u32),
+                20..=39 => (b ^ c ^ d, 0x6ED9_EBA1),
+                40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1B_BCDC),
+                _ => (b ^ c ^ d, 0xCA62_C1D6),
+            };
+            let tmp = a
+                .rotate_left(5)
+                .wrapping_add(f)
+                .wrapping_add(e)
+                .wrapping_add(k)
+                .wrapping_add(wi);
+            e = d;
+            d = c;
+            c = b.rotate_left(30);
+            b = a;
+            a = tmp;
+        }
+        h[0] = h[0].wrapping_add(a);
+        h[1] = h[1].wrapping_add(b);
+        h[2] = h[2].wrapping_add(c);
+        h[3] = h[3].wrapping_add(d);
+        h[4] = h[4].wrapping_add(e);
+    }
+    let mut out = [0u8; 20];
+    for (i, word) in h.iter().enumerate() {
+        out[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
+    }
+    out
+}
+
+fn base64_encode(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { T[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
+fn sec_websocket_accept(client_key: &str) -> String {
+    base64_encode(&sha1(format!("{client_key}{WS_GUID}").as_bytes()))
+}
+
+/// The Sec-WebSocket-Key we send upstream. Chromium echoes whatever we
+/// send; random bytes keep the handshake honest.
+fn random_ws_key() -> String {
+    use std::io::Read as _;
+    let mut bytes = [0u8; 16];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        let _ = f.read_exact(&mut bytes);
+    }
+    base64_encode(&bytes)
+}
+
+/// Read one HTTP message head a byte at a time so nothing beyond the
+/// terminator is consumed — both peers may begin WebSocket framing on the
+/// segment right after it.
+fn read_http_head(stream: &mut TcpStream, cap: usize) -> std::io::Result<String> {
+    let mut head = Vec::with_capacity(512);
+    let mut byte = [0u8; 1];
+    loop {
+        let n = stream.read(&mut byte)?;
+        if n == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "eof inside handshake",
+            ));
+        }
+        head.push(byte[0]);
+        if head.ends_with(b"\r\n\r\n") {
+            return Ok(String::from_utf8_lossy(&head).into_owned());
+        }
+        if head.len() > cap {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "handshake head too large",
+            ));
+        }
+    }
+}
+
+fn header<'a>(head: &'a str, name: &str) -> Option<&'a str> {
+    head.lines().skip(1).find_map(|l| {
+        let (k, v) = l.split_once(':')?;
+        if k.trim().eq_ignore_ascii_case(name) {
+            Some(v.trim())
+        } else {
+            None
+        }
+    })
+}
+
+fn query_param(url: &str, name: &str) -> Option<String> {
+    let query = url.split_once('?')?.1;
+    for pair in query.split('&') {
+        let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+        if k == name {
+            return Some(percent_decode(v));
+        }
+    }
+    None
+}
+
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Ok(v) = u8::from_str_radix(std::str::from_utf8(&b[i + 1..i + 3]).unwrap_or(""), 16)
+            {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// CDP target ids are hex-with-dashes tokens; this gets spliced into the
+/// upstream request path, so anything else is refused outright.
+fn valid_target_id(t: &str) -> bool {
+    (8..=64).contains(&t.len()) && t.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
+}
+
+fn respond_simple(stream: &mut TcpStream, status: u16, reason: &str, body: &str) {
+    let resp = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = stream.write_all(resp.as_bytes());
+}
+
+/// One direction of the splice. Pure byte relay — no framing awareness.
+fn splice_bytes(mut from: TcpStream, mut to: TcpStream) {
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        match from.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                if to.write_all(&buf[..n]).is_err() {
+                    break;
+                }
+            }
+        }
+    }
+    let _ = from.shutdown(std::net::Shutdown::Read);
+    let _ = to.shutdown(std::net::Shutdown::Write);
+}
+
+fn handle_cdp_ws_session(
+    mut client: TcpStream,
+    resolve_browser_port: &dyn Fn() -> Option<u16>,
+    ui_port: u16,
+) {
+    let ws_port = client.local_addr().map(|a| a.port()).unwrap_or(0);
+    let _ = client.set_read_timeout(Some(Duration::from_secs(3)));
+    let head = match read_http_head(&mut client, 8 * 1024) {
+        Ok(h) => h,
+        Err(_) => return,
+    };
+    let request_line = head.lines().next().unwrap_or("");
+    let mut parts = request_line.split_whitespace();
+    let url = parts.nth(1).unwrap_or("");
+    let path = url.split(['?', '#']).next().unwrap_or("");
+    if parts.next() != Some("HTTP/1.1") || url.is_empty() {
+        respond_simple(&mut client, 400, "Bad Request", "{\"error\":\"bad request\"}");
+        return;
+    }
+    if path != "/cdp/ws" {
+        respond_simple(&mut client, 404, "Not Found", "{\"error\":\"not found\"}");
+        return;
+    }
+    // Same host-pinning guard as the static server: blocks DNS rebinding
+    // against this port.
+    if header(&head, "Host").map(|h| h != format!("127.0.0.1:{ws_port}")).unwrap_or(true) {
+        respond_simple(&mut client, 403, "Forbidden", "{\"error\":\"bad host\"}");
+        return;
+    }
+    // A page on our own origin (or a local tool sending no Origin) only.
+    if let Some(origin) = header(&head, "Origin") {
+        if origin != format!("http://127.0.0.1:{ui_port}") {
+            respond_simple(&mut client, 403, "Forbidden", "{\"error\":\"bad origin\"}");
+            return;
+        }
+    }
+    let upgrade_ok = header(&head, "Upgrade")
+        .map(|v| v.to_ascii_lowercase().contains("websocket"))
+        .unwrap_or(false);
+    let conn_ok = header(&head, "Connection")
+        .map(|v| v.to_ascii_lowercase().contains("upgrade"))
+        .unwrap_or(false);
+    let client_key = header(&head, "Sec-WebSocket-Key").unwrap_or("");
+    let version_ok = header(&head, "Sec-WebSocket-Version") == Some("13");
+    if !upgrade_ok || !conn_ok || client_key.is_empty() || !version_ok {
+        respond_simple(&mut client, 400, "Bad Request", "{\"error\":\"not a websocket handshake\"}");
+        return;
+    }
+    let Some(target) = query_param(url, "target").filter(|t| valid_target_id(t)) else {
+        respond_simple(&mut client, 400, "Bad Request", "{\"error\":\"bad target\"}");
+        return;
+    };
+    let Some(browser_port) = resolve_browser_port() else {
+        respond_simple(
+            &mut client,
+            503,
+            "Service Unavailable",
+            "{\"error\":\"agent browser not running\"}",
+        );
+        return;
+    };
+
+    // Upstream: act as a plain WebSocket client of the agent browser. No
+    // Origin header — a foreign origin is exactly what it rejects.
+    let mut upstream = match TcpStream::connect(("127.0.0.1", browser_port)) {
+        Ok(s) => s,
+        Err(e) => {
+            respond_simple(&mut client, 502, "Bad Gateway", &format!("{{\"error\":\"cdp connect: {e}\"}}"));
+            return;
+        }
+    };
+    let _ = upstream.set_read_timeout(Some(Duration::from_secs(3)));
+    let our_key = random_ws_key();
+    let req = format!(
+        "GET /devtools/{target} HTTP/1.1\r\n\
+         Host: 127.0.0.1:{browser_port}\r\n\
+         Upgrade: websocket\r\n\
+         Connection: Upgrade\r\n\
+         Sec-WebSocket-Key: {our_key}\r\n\
+         Sec-WebSocket-Version: 13\r\n\r\n"
+    );
+    if let Err(e) = upstream.write_all(req.as_bytes()) {
+        respond_simple(&mut client, 502, "Bad Gateway", &format!("{{\"error\":\"cdp write: {e}\"}}"));
+        return;
+    }
+    let upstream_head = match read_http_head(&mut upstream, 16 * 1024) {
+        Ok(h) => h,
+        Err(e) => {
+            respond_simple(&mut client, 502, "Bad Gateway", &format!("{{\"error\":\"cdp handshake: {e}\"}}"));
+            return;
+        }
+    };
+    if !upstream_head.starts_with("HTTP/1.1 101") && !upstream_head.starts_with("HTTP/1.0 101") {
+        respond_simple(&mut client, 502, "Bad Gateway", "{\"error\":\"cdp refused upgrade\"}");
+        return;
+    }
+
+    let resp = format!(
+        "HTTP/1.1 101 Switching Protocols\r\n\
+         Upgrade: websocket\r\n\
+         Connection: Upgrade\r\n\
+         Sec-WebSocket-Accept: {}\r\n\r\n",
+        sec_websocket_accept(client_key)
+    );
+    if client.write_all(resp.as_bytes()).is_err() {
+        return;
+    }
+
+    // Splice. After the upgrade neither side speaks HTTP; drop the
+    // handshake timeouts and relay until either direction closes, then
+    // shut both sockets down so the surviving thread unblocks. Each
+    // direction gets its own clones; the originals stay here for the
+    // shutdown below.
+    let _ = client.set_read_timeout(None);
+    let _ = upstream.set_read_timeout(None);
+    let (Ok(client_in), Ok(upstream_in), Ok(client_out), Ok(upstream_out)) = (
+        client.try_clone(),
+        upstream.try_clone(),
+        client.try_clone(),
+        upstream.try_clone(),
+    ) else {
+        return;
+    };
+    let to_cdp = std::thread::Builder::new()
+        .name("cdp-ws-in".into())
+        .spawn(move || splice_bytes(client_in, upstream_in));
+    let to_client = std::thread::Builder::new()
+        .name("cdp-ws-out".into())
+        .spawn(move || splice_bytes(upstream_out, client_out));
+    if let Ok(handle) = to_cdp {
+        let _ = handle.join();
+    }
+    let _ = client.shutdown(std::net::Shutdown::Both);
+    let _ = upstream.shutdown(std::net::Shutdown::Both);
+    if let Ok(handle) = to_client {
+        let _ = handle.join();
+    }
+}
+
+/// Bind the raw CDP WebSocket proxy on an ephemeral loopback port,
+/// publish it in CDP_WS_PORT, and serve forever. The browser port is read
+/// through `resolve_browser_port` per connection so sessions pick up a
+/// browser spawned after this listener (and tests can inject a fake).
+fn spawn_cdp_ws_proxy(
+    resolve_browser_port: impl Fn() -> Option<u16> + Send + Sync + 'static,
+    ui_port: u16,
+) -> u16 {
+    let listener = match std::net::TcpListener::bind("127.0.0.1:0") {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("moch: cdp ws proxy bind failed ({e}) — browser screen stays offline");
+            return 0;
+        }
+    };
+    let port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
+    let _ = CDP_WS_PORT.set(port);
+    let resolver = std::sync::Arc::new(resolve_browser_port);
+    if let Err(e) = std::thread::Builder::new().name("cdp-ws-accept".into()).spawn(move || {
+        for conn in listener.incoming() {
+            let Ok(stream) = conn else { continue };
+            let resolver = std::sync::Arc::clone(&resolver);
+            let _ = std::thread::Builder::new().name("cdp-ws-session".into()).spawn(move || {
+                handle_cdp_ws_session(stream, resolver.as_ref(), ui_port);
+            });
+        }
+    }) {
+        eprintln!("moch: cdp ws proxy thread spawn failed ({e})");
+    }
+    port
+}
+
 fn content_type(path: &Path) -> &'static str {
     match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
         "html" => "text/html; charset=utf-8",
@@ -578,6 +953,21 @@ fn start_static_server(cfg: serde_json::Value, assets: Box<dyn tauri::Assets<tau
                 let _ = request.respond(
                     Response::from_string(body)
                         .with_status_code(code)
+                        .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], b"application/json").unwrap()),
+                );
+                continue;
+            }
+
+            // Publish the raw CDP WebSocket proxy's port for the Browser
+            // screen. Not in /moch-config.json because that snapshot is
+            // built before the proxy binds its ephemeral port.
+            if method == Method::Get && path == "/cdp/ws-port" {
+                let body = match CDP_WS_PORT.get() {
+                    Some(p) => format!("{{\"port\":{p}}}"),
+                    None => "{\"port\":null}".to_string(),
+                };
+                let _ = request.respond(
+                    Response::from_string(body)
                         .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], b"application/json").unwrap()),
                 );
                 continue;
@@ -785,6 +1175,8 @@ pub fn run() {
     let assets = std::mem::replace(&mut ctx.assets, Box::new(NullAssets));
     let port = start_static_server(cfg, assets);
     eprintln!("moch: static server on {port} (embedded UI)");
+    let ws_port = spawn_cdp_ws_proxy(|| BROWSER_PORT.get().copied(), port);
+    eprintln!("moch: cdp ws proxy on {ws_port}");
 
     let selftest = std::env::var("MOCH_SELFTEST").ok().as_deref() == Some("1");
     let url = url::Url::parse(&format!(
@@ -813,4 +1205,142 @@ pub fn run() {
             terminate_runtime();
         }
     });
+}
+
+#[cfg(test)]
+mod cdp_ws_tests {
+    use super::*;
+    use std::io::Write as _;
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    #[test]
+    fn sha1_matches_published_vectors() {
+        assert_eq!(hex(&sha1(b"abc")), "a9993e364706816aba3e25717850c26c9cd0d89d");
+        assert_eq!(
+            hex(&sha1(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")),
+            "84983e441c3bd26ebaae4aa1f95129e5e54670f1"
+        );
+    }
+
+    #[test]
+    fn websocket_accept_matches_rfc6455_example() {
+        assert_eq!(
+            sec_websocket_accept("dGhlIHNhbXBsZSBub25jZQ=="),
+            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+        );
+    }
+
+    #[test]
+    fn base64_handles_all_padding_cases() {
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+    }
+
+    #[test]
+    fn target_ids_beyond_alnum_dashes_are_refused() {
+        assert!(valid_target_id("0123456789ABCDEF"));
+        assert!(!valid_target_id("../etc/passwd"));
+        assert!(!valid_target_id("short"));
+        assert!(!valid_target_id(""));
+    }
+
+    /// Hand-craft a masked client frame (what a browser sends) and an
+    /// unmasked server frame (what Chromium sends); the proxy must relay
+    /// both VERBATIM.
+    #[test]
+    fn proxy_splices_frames_both_ways_verbatim() {
+        let upstream = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let upstream_port = upstream.local_addr().unwrap().port();
+        let upstream_handle = std::thread::spawn(move || {
+            let (mut sock, _) = upstream.accept().unwrap();
+            let head = read_http_head(&mut sock, 8 * 1024).unwrap();
+            assert!(head.contains("GET /devtools/0123456789ABCDEF "), "upstream path: {head}");
+            let key = header(&head, "Sec-WebSocket-Key").unwrap().to_string();
+            let resp = format!(
+                "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n",
+                sec_websocket_accept(&key)
+            );
+            sock.write_all(resp.as_bytes()).unwrap();
+            // Read the client frame the proxy relayed upstream, byte for byte.
+            let mut relayed = [0u8; 13];
+            std::io::Read::read_exact(&mut sock, &mut relayed).unwrap();
+            let payload = b"ping!";
+            let mask = [0x01u8, 0x02, 0x03, 0x04];
+            let mut masked = vec![0x81, 0x80 | 5, mask[0], mask[1], mask[2], mask[3]];
+            masked.extend(payload.iter().enumerate().map(|(i, &b)| b ^ mask[i % 4]));
+            assert_eq!(relayed.to_vec(), masked, "upstream must see the masked frame verbatim");
+            // And answer with an unmasked server frame.
+            sock.write_all(b"\x81\x05hello").unwrap();
+        });
+
+        let proxy_port = spawn_cdp_ws_proxy(move || Some(upstream_port), 1);
+        let mut client = TcpStream::connect(("127.0.0.1", proxy_port)).unwrap();
+        let handshake = format!(
+            "GET /cdp/ws?target=0123456789ABCDEF HTTP/1.1\r\n\
+             Host: 127.0.0.1:{proxy_port}\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+             Sec-WebSocket-Version: 13\r\n\r\n"
+        );
+        client.write_all(handshake.as_bytes()).unwrap();
+        let head = read_http_head(&mut client, 8 * 1024).unwrap();
+        assert!(head.starts_with("HTTP/1.1 101"), "upgrade refused: {head}");
+        assert!(header(&head, "Sec-WebSocket-Accept").is_some());
+
+        let payload = b"ping!";
+        let mask = [0x01u8, 0x02, 0x03, 0x04];
+        let mut frame = vec![0x81, 0x80 | 5, mask[0], mask[1], mask[2], mask[3]];
+        frame.extend(payload.iter().enumerate().map(|(i, &b)| b ^ mask[i % 4]));
+        client.write_all(&frame).unwrap();
+
+        let mut relayed_back = [0u8; 7];
+        std::io::Read::read_exact(&mut client, &mut relayed_back).unwrap();
+        assert_eq!(&relayed_back, b"\x81\x05hello", "client must see the server frame verbatim");
+        upstream_handle.join().unwrap();
+    }
+
+    #[test]
+    fn tmp_probe_parses_handshake() {
+        let head = format!(
+            "GET /cdp/ws?target=0123456789ABCDEF HTTP/1.1\r\n\
+             Host: 127.0.0.1:5555\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+             Sec-WebSocket-Version: 13\r\n\r\n"
+        );
+        println!("HEAD = {head:?}");
+        println!("upgrade={:?} conn={:?} key={:?} ver={:?}",
+            header(&head, "Upgrade"), header(&head, "Connection"),
+            header(&head, "Sec-WebSocket-Key"), header(&head, "Sec-WebSocket-Version"));
+        let mut parts = head.lines().next().unwrap_or("").split_whitespace();
+        let url = parts.nth(1).unwrap_or("");
+        println!("url={url:?} next={:?}", parts.next());
+        println!("qp={:?}", query_param(url, "target"));
+    }
+
+    #[test]
+    fn proxy_rejects_without_browser_and_with_bad_target() {
+        let proxy_port = spawn_cdp_ws_proxy(|| None, 1);
+        let dial = |url: &str| -> String {
+            let mut client = TcpStream::connect(("127.0.0.1", proxy_port)).unwrap();
+            let handshake = format!(
+                "GET {url} HTTP/1.1\r\n\
+                 Host: 127.0.0.1:{proxy_port}\r\n\
+                 Upgrade: websocket\r\n\
+                 Connection: Upgrade\r\n\
+                 Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+                 Sec-WebSocket-Version: 13\r\n\r\n"
+            );
+            client.write_all(handshake.as_bytes()).unwrap();
+            read_http_head(&mut client, 8 * 1024).unwrap()
+        };
+        assert!(dial("/cdp/ws?target=0123456789ABCDEF").starts_with("HTTP/1.1 503"));
+        assert!(dial("/cdp/ws?target=%2E%2E%2Fetc").starts_with("HTTP/1.1 400"));
+    }
 }
