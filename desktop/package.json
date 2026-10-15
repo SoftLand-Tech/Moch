@@ -2,15 +2,16 @@
   "name": "moch-desktop",
   "version": "0.2.0",
   "private": true,
-  "description": "Moch Desktop — local-only hermes agent app for PCs (Tauri 2, fresh UI, app's protocol stack).",
+  "description": "Moch Desktop — the shared Moch app on your PC, running your own local hermes agent (Tauri 2).",
   "scripts": {
+    "build:app-web": "cd ../app && npx expo export --platform web --output-dir ../desktop/app-web",
     "install:ui": "cd ui && npm install",
     "build:ui": "cd ui && npm run build",
     "icon": "tauri icon ../app/assets/icon.png",
     "tauri": "tauri",
-    "dev": "npm run build:ui && tauri dev",
-    "build": "npm run build:ui && tauri build",
-    "selftest": "npm run build:ui && MOCH_SELFTEST=1 tauri dev"
+    "dev": "npm run build:app-web && tauri dev",
+    "build": "npm run build:app-web && tauri build",
+    "selftest": "npm run build:app-web && MOCH_SELFTEST=1 tauri dev"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.9.0"

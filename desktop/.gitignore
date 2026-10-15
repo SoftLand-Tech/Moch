@@ -13,6 +13,7 @@ src-tauri/gen/
 .moch-desktop.lock
 .dbg.log
 web-ui/
+app-web/
 ui/node_modules/
 .hermes-serve.log
 runtime-home/

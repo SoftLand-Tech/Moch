@@ -35,6 +35,7 @@ import { needsPlaintextConfirm } from '../src/lib/transportGate'
 import { pruneRelayMedia } from '../src/lib/mediaCache'
 import { C, loadTheme, useStyles } from '../src/lib/theme'
 import { loadActiveBot } from '../src/lib/fleet'
+import { seedDesktopLocalConnection } from '../src/lib/desktopLocal'
 
 // Keep the native splash up until the animated overlay is committed on top
 // of the app — global scope, un-awaited, per the SDK 57 docs.
@@ -135,7 +136,14 @@ export default function RootLayout() {
     let cancelled = false
     ;(async () => {
       await pushReady // token restored before the first dial's wsUrl() runs
-      const saved = await loadSavedConfig()
+      const stored = await loadSavedConfig()
+      // Moch Desktop runs its OWN local gateway and publishes it at
+      // /moch-config.json on the loopback origin it serves this UI from. On
+      // the phone (and the plain web build) that endpoint does not exist and
+      // this is a no-op — there is no QR to scan for a gateway the shell
+      // already supervises. A remote computer paired from this desktop is
+      // never hijacked (desktopLocal.ts).
+      const saved = (await seedDesktopLocalConnection(stored)) ?? stored
       // Scope the device caches to this backend BEFORE they hydrate: a
       // missing/different fingerprint purges once, then the loaders below
       // read a clean slate.
