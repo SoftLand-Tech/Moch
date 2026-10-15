@@ -427,32 +427,52 @@ fn attach_existing() -> Result<(String, String, &'static str), String> {
 
 /// Minimal HTTP/1.1 GET against the agent browser's CDP HTTP endpoint
 /// (GET /json — the target list). Hand-rolled: loopback, no TLS, one
-/// short-lived connection per call.
+/// short-lived connection per call. Chromium answers with Content-Length
+/// and leaves the socket open even under `Connection: close`, so the body
+/// is read by length — read_to_end would only ever hit the read timeout.
 fn cdp_get_json(port: u16, path: &str) -> Result<String, String> {
     let mut stream = TcpStream::connect(("127.0.0.1", port))
         .map_err(|e| format!("cdp connect: {e}"))?;
     stream
         .set_read_timeout(Some(Duration::from_secs(3)))
         .map_err(|e| format!("cdp timeout: {e}"))?;
-    use std::io::{Read as _, Write as _};
     let req = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
     stream
         .write_all(req.as_bytes())
         .map_err(|e| format!("cdp write: {e}"))?;
-    let mut raw = Vec::new();
-    stream
-        .read_to_end(&mut raw)
-        .map_err(|e| format!("cdp read: {e}"))?;
-    let text = String::from_utf8_lossy(&raw);
-    let body = text
-        .split_once("\r\n\r\n")
-        .map(|(_, b)| b)
-        .ok_or("cdp: malformed response")?;
-    let status_ok = text.starts_with("HTTP/1.1 200") || text.starts_with("HTTP/1.0 200");
+    let mut buf = Vec::with_capacity(4096);
+    let mut chunk = [0u8; 4096];
+    let head_end = loop {
+        let n = stream.read(&mut chunk).map_err(|e| format!("cdp read: {e}"))?;
+        if n == 0 {
+            return Err("cdp: connection closed before a response head".into());
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            break i;
+        }
+        if buf.len() > 64 * 1024 {
+            return Err("cdp: response head too large".into());
+        }
+    };
+    let head = String::from_utf8_lossy(&buf[..head_end]);
+    let status_ok = head.starts_with("HTTP/1.1 200") || head.starts_with("HTTP/1.0 200");
     if !status_ok {
         return Err(format!("cdp: non-200 from {path}"));
     }
-    Ok(body.to_string())
+    let content_length: usize = header(&head, "Content-Length")
+        .and_then(|v| v.parse().ok())
+        .ok_or_else(|| format!("cdp: no Content-Length from {path}"))?;
+    let mut body = buf.split_off(head_end + 4);
+    while body.len() < content_length {
+        let n = stream.read(&mut chunk).map_err(|e| format!("cdp read: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        body.extend_from_slice(&chunk[..n]);
+    }
+    body.truncate(content_length);
+    String::from_utf8(body).map_err(|_| format!("cdp: non-utf8 body from {path}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -640,6 +660,10 @@ fn respond_simple(stream: &mut TcpStream, status: u16, reason: &str, body: &str)
 }
 
 /// One direction of the splice. Pure byte relay — no framing awareness.
+/// When this direction ends (either side closed), BOTH clones are shut
+/// down: fd-level shutdown is per-socket, so this tears the whole
+/// connection down and unblocks the opposite direction's blocking read —
+/// a session can never strand one direction.
 fn splice_bytes(mut from: TcpStream, mut to: TcpStream) {
     let mut buf = [0u8; 64 * 1024];
     loop {
@@ -652,8 +676,8 @@ fn splice_bytes(mut from: TcpStream, mut to: TcpStream) {
             }
         }
     }
-    let _ = from.shutdown(std::net::Shutdown::Read);
-    let _ = to.shutdown(std::net::Shutdown::Write);
+    let _ = from.shutdown(std::net::Shutdown::Both);
+    let _ = to.shutdown(std::net::Shutdown::Both);
 }
 
 fn handle_cdp_ws_session(
@@ -708,6 +732,11 @@ fn handle_cdp_ws_session(
         respond_simple(&mut client, 400, "Bad Request", "{\"error\":\"bad target\"}");
         return;
     };
+    // Chromium's devtools endpoint is /devtools/<kind>/<id> — page for
+    // normal tabs. The kind is validated, never taken raw.
+    let kind = query_param(url, "kind")
+        .filter(|k| !k.is_empty() && k.len() <= 20 && k.bytes().all(|c| c.is_ascii_lowercase() || c == b'_'))
+        .unwrap_or_else(|| "page".to_string());
     let Some(browser_port) = resolve_browser_port() else {
         respond_simple(
             &mut client,
@@ -730,7 +759,7 @@ fn handle_cdp_ws_session(
     let _ = upstream.set_read_timeout(Some(Duration::from_secs(3)));
     let our_key = random_ws_key();
     let req = format!(
-        "GET /devtools/{target} HTTP/1.1\r\n\
+        "GET /devtools/{kind}/{target} HTTP/1.1\r\n\
          Host: 127.0.0.1:{browser_port}\r\n\
          Upgrade: websocket\r\n\
          Connection: Upgrade\r\n\
@@ -1258,7 +1287,7 @@ mod cdp_ws_tests {
         let upstream_handle = std::thread::spawn(move || {
             let (mut sock, _) = upstream.accept().unwrap();
             let head = read_http_head(&mut sock, 8 * 1024).unwrap();
-            assert!(head.contains("GET /devtools/0123456789ABCDEF "), "upstream path: {head}");
+            assert!(head.contains("GET /devtools/page/0123456789ABCDEF "), "upstream path: {head}");
             let key = header(&head, "Sec-WebSocket-Key").unwrap().to_string();
             let resp = format!(
                 "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n",
@@ -1266,7 +1295,8 @@ mod cdp_ws_tests {
             );
             sock.write_all(resp.as_bytes()).unwrap();
             // Read the client frame the proxy relayed upstream, byte for byte.
-            let mut relayed = [0u8; 13];
+            // 2 header + 4 mask + 5 payload.
+            let mut relayed = [0u8; 11];
             std::io::Read::read_exact(&mut sock, &mut relayed).unwrap();
             let payload = b"ping!";
             let mask = [0x01u8, 0x02, 0x03, 0x04];
@@ -1302,26 +1332,6 @@ mod cdp_ws_tests {
         std::io::Read::read_exact(&mut client, &mut relayed_back).unwrap();
         assert_eq!(&relayed_back, b"\x81\x05hello", "client must see the server frame verbatim");
         upstream_handle.join().unwrap();
-    }
-
-    #[test]
-    fn tmp_probe_parses_handshake() {
-        let head = format!(
-            "GET /cdp/ws?target=0123456789ABCDEF HTTP/1.1\r\n\
-             Host: 127.0.0.1:5555\r\n\
-             Upgrade: websocket\r\n\
-             Connection: Upgrade\r\n\
-             Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
-             Sec-WebSocket-Version: 13\r\n\r\n"
-        );
-        println!("HEAD = {head:?}");
-        println!("upgrade={:?} conn={:?} key={:?} ver={:?}",
-            header(&head, "Upgrade"), header(&head, "Connection"),
-            header(&head, "Sec-WebSocket-Key"), header(&head, "Sec-WebSocket-Version"));
-        let mut parts = head.lines().next().unwrap_or("").split_whitespace();
-        let url = parts.nth(1).unwrap_or("");
-        println!("url={url:?} next={:?}", parts.next());
-        println!("qp={:?}", query_param(url, "target"));
     }
 
     #[test]

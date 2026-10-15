@@ -16,3 +16,6 @@ file '/home/mamoun/ai/learning/Moch/worktrees/desktop-tauri/desktop/docs-shots/f
 file '/home/mamoun/ai/learning/Moch/worktrees/desktop-tauri/desktop/docs-shots/frames/frame-16.png'
 file '/home/mamoun/ai/learning/Moch/worktrees/desktop-tauri/desktop/docs-shots/frames/frame-17.png'
 file '/home/mamoun/ai/learning/Moch/worktrees/desktop-tauri/desktop/docs-shots/frames/frame-18.png'
+file '/home/mamoun/ai/learning/Moch/worktrees/desktop-tauri/desktop/docs-shots/frames/frame-25.png'
+file '/home/mamoun/ai/learning/Moch/worktrees/desktop-tauri/desktop/docs-shots/frames/frame-26.png'
+file '/home/mamoun/ai/learning/Moch/worktrees/desktop-tauri/desktop/docs-shots/frames/frame-27.png'
