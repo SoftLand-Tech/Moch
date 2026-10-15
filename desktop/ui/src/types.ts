@@ -5,7 +5,7 @@
  */
 
 export type Cfg = { wsUrl: string; token: string; mode: string; home?: string; logTail?: string }
-export type Tab = 'chat' | 'bots' | 'crew' | 'automations' | 'skills' | 'models' | 'run'
+export type Tab = 'chat' | 'bots' | 'crew' | 'automations' | 'skills' | 'models' | 'run' | 'browser'
 
 /** The RPC handle App passes into every tab (the gateway client's request fn). */
 export type RpcRef = { current: (<T = unknown>(m: string, p?: Record<string, unknown>) => Promise<T>) | null }
@@ -22,7 +22,9 @@ export type SessionRow = {
   profile?: string
 }
 
-export type FleetProfile = { name: string; description?: string; soul?: string; frozen?: boolean; gateHeld?: boolean; model?: { provider: string; default: string } }
+/** profiles.list rows carry `model` as a plain STRING (methods_profiles.py:257);
+ *  the {provider,default} object belongs to a different method — accept both. */
+export type FleetProfile = { name: string; description?: string; soul?: string; frozen?: boolean; gateHeld?: boolean; model?: string | { provider: string; default: string } }
 export type FleetQueueEntry = { home: string; priority: string; seq: number; queued_s: number }
 export type FleetStatus = {
   fleetEnabled: boolean
@@ -84,6 +86,8 @@ export function dbg(what: string, extra: Record<string, unknown> = {}) {
 export type GatewayEvent = {
   type: string
   session_id?: string
+  /** Per-session monotonic event seq — drives lossless reconnect replay. */
+  seq?: number
   payload?: Record<string, unknown>
 }
 export function ev(e: unknown): GatewayEvent {
@@ -92,6 +96,7 @@ export function ev(e: unknown): GatewayEvent {
     return {
       type: typeof o.type === 'string' ? o.type : '',
       session_id: typeof o.session_id === 'string' ? o.session_id : undefined,
+      seq: typeof o.seq === 'number' ? o.seq : undefined,
       payload: (o.payload && typeof o.payload === 'object' ? o.payload : o) as Record<string, unknown>,
     }
   }

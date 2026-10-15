@@ -25,6 +25,7 @@ import {
 import RightPanel, { type ActiveTaskState, type ActivityItem } from './RightPanel'
 import { dbg, ev, type Cfg, type LaunchSkill, type Tab } from './types'
 import AutomationsTab from './tabs/Automations'
+import BrowserTab from './tabs/Browser'
 import BotsTab from './tabs/Bots'
 import ChatTab from './tabs/Chat'
 import CrewTab from './tabs/Crew'
@@ -32,6 +33,7 @@ import ModelsTab from './tabs/Models'
 import RunTab from './tabs/Run'
 import SkillsTab from './tabs/Skills'
 import Wizard from './tabs/Wizard'
+import AsksOverlay, { addAsk, removeAsk } from './Asks'
 
 export type WorkspaceMode = 'agent' | 'chat' | 'coding' | 'research'
 
@@ -65,51 +67,108 @@ export default function App() {
   const [client, setClient] = useState<JsonRpcGatewayClient | null>(null)
   const selftestRan = useRef(false)
 
-  // Boot + reconnect supervisor
+  // Boot + reconnect supervisor. ONE persistent gateway client for the
+  // app's lifetime: reconnect = connect() AGAIN on the same instance, so
+  // per-session seq watermarks survive drops and the client's own replay
+  // machinery re-delivers missed events + open requests after reopening.
   useEffect(() => {
     let closed = false
+    let dialing = false // a dial is scheduled or connecting — blocks re-entry
     let timer: number | undefined
     let watchdog: number | undefined
     let poll: number | undefined
     let attempt = 0
     let everOpened = false
 
-    const dial = () => {
+    const client = new JsonRpcGatewayClient({
+      connectTimeoutMs: 15_000,
+      requestTimeoutMs: 120_000,
+      socketFactory: (u: string) => new WebSocket(u) as unknown as WebSocket,
+    })
+    clientRef.current = client
+    rpcRef.current = <T = unknown>(m: string, p?: Record<string, unknown>) => client.request(m, p) as Promise<T>
+
+    client.onAny((e) => {
+      const gev = ev(e)
+      // The backend withdrew an open server→client request (timeout /
+      // interrupt / shutdown / resolved) — drop the matching card so a
+      // settled id can never be answered late (payload {id, method, reason},
+      // server_requests.py:126).
+      if (gev.type === 'request.cancel') {
+        const pl = gev.payload ?? {}
+        const rid = typeof pl.id === 'string' ? pl.id : ''
+        if (rid) removeAsk(rid)
+        return
+      }
+      if (gev.type !== 'gateway.ready') return
       if (closed) return
+      attempt = 0
+      dialing = false
+      clearTimeout(watchdog) // ready ⇒ the dial settled; drop the 20s net
+      setConn('open')
+      setClient(client)
+      dbg(everOpened ? 'ws-reconnected' : 'ws-open', {})
+      everOpened = true
+    })
+
+    // Server→client requests (approval / clarify / sudo / secret) are answered
+    // HERE, at App level — the subscription must outlive ChatTab's conditional
+    // mount, or a question arriving while the user browses another tab is
+    // auto-declined -32601 by the channel. Cards live in the Asks store and
+    // render as a fixed overlay visible on every tab (ui/src/Asks.tsx).
+    const offRequests = client.onRequest((req) => {
+      const method = String(req?.method ?? '')
+      if (method !== 'approval' && method !== 'clarify' && method !== 'sudo' && method !== 'secret') {
+        // Preserve the channel's default answer for anything not rendered here.
+        req.fail(-32601, `no handler for server request: ${method}`)
+        return true
+      }
+      if (!req.sessionId) return false // unaddressable: channel answers -32601 (phone BUG-067)
+      const kind =
+        method === 'approval' ? 'approval'
+          : method === 'sudo' ? 'sudo'
+          : method === 'secret' ? 'secret'
+          : Array.isArray(req.params?.questions) ? 'batch_clarify'
+          : 'clarify'
+      addAsk({
+        id: req.id,
+        kind,
+        session_id: req.sessionId,
+        params: req.params ?? {},
+        respond: req.respond,
+        fail: req.fail,
+      })
+      return true
+    })
+
+    const dial = () => {
+      if (closed || dialing) return
       const url = urlRef.current
       if (!url) return
+      dialing = true
       setConn('connecting')
-      const c = new JsonRpcGatewayClient({
-        connectTimeoutMs: 15_000,
-        requestTimeoutMs: 120_000,
-        socketFactory: (u: string) => new WebSocket(u) as unknown as WebSocket,
+      client.connect(url).catch(() => {
+        // Handshake failed (refused / auth gate / 15s timeout) — back off
+        // now instead of sitting out the watchdog with a dead dial.
+        clearTimeout(watchdog)
+        if (closed || !dialing) return
+        dialing = false
+        schedule()
       })
-      clientRef.current = c
-      rpcRef.current = <T = unknown>(m: string, p?: Record<string, unknown>) => c.request(m, p) as Promise<T>
-
-      c.onAny((e) => {
-        const { type } = ev(e)
-        if (type === 'gateway.ready') {
-          attempt = 0
-          setConn('open')
-          setClient(c)
-          dbg(everOpened ? 'ws-reconnected' : 'ws-open', {})
-          everOpened = true
-        }
-      })
-
-      c.connect(url).catch(() => {})
       clearTimeout(watchdog)
       watchdog = window.setTimeout(() => {
-        if (!closed && c.connectionState !== 'open') {
-          try { c.close() } catch { }
-          schedule()
-        }
+        if (closed || !dialing) return
+        if (client.connectionState === 'open') return
+        try { client.close() } catch { } // never abandon a socket without close()
+        dialing = false
+        schedule()
       }, 20_000)
     }
 
+    // Idempotent: a pending redial is cleared before a new one is set.
     const schedule = () => {
       if (closed) return
+      clearTimeout(timer)
       const delay = everOpened
         ? Math.min(30_000, 2_000 * 2 ** Math.min(attempt, 4))
         : Math.min(15_000, 1_000 * 2 ** Math.min(attempt, 3))
@@ -125,6 +184,7 @@ export default function App() {
         setConn('error')
         return
       }
+      if (closed) return // unmounted mid-fetch — don't touch refs/state
       setCfg(c)
       dbg('cfg', { mode: c.mode })
       if (c.mode === 'error') {
@@ -134,10 +194,12 @@ export default function App() {
       urlRef.current = `${c.wsUrl}?token=${encodeURIComponent(c.token)}`
       dial()
       poll = window.setInterval(() => {
-        const cl = clientRef.current
-        if (cl && everOpened && cl.connectionState === 'closed') {
+        if (closed || dialing || timer !== undefined) return
+        if (everOpened && client.connectionState === 'closed') {
           dbg('ws-drop', {})
-          schedule()
+          setConn('connecting')
+          setRuntimeEvents((p) => [{ id: ++runtimeEventSeq.current, text: 'Connection lost', at: new Date().toLocaleTimeString() }, ...p].slice(0, 25))
+          schedule() // redial the SAME client → replay of missed seq'd events
         }
       }, 3_000)
     })()
@@ -147,7 +209,8 @@ export default function App() {
       clearTimeout(timer)
       clearTimeout(watchdog)
       clearInterval(poll)
-      clientRef.current?.close()
+      offRequests()
+      client.close()
     }
   }, [])
 
@@ -332,6 +395,10 @@ export default function App() {
         </div>
       )}
 
+      {/* Global ask-card overlay — server→client requests (approval / clarify
+          / sudo / secret), visible on EVERY tab. Renders null when empty. */}
+      <AsksOverlay />
+
       {/* ── Main App Body (3 Columns) ── */}
       <div className="app-body">
         {/* ── Left Sidebar (230px) ── */}
@@ -388,6 +455,13 @@ export default function App() {
             >
               <IconSettings width={17} height={17} />
               <span>Models</span>
+            </button>
+            <button
+              className={`nav-item ${tab === 'browser' ? 'active' : ''}`}
+              onClick={() => setTab('browser')}
+            >
+              <IconSearch width={17} height={17} />
+              <span>Browser</span>
             </button>
             <button
               className={`nav-item ${tab === 'run' ? 'active' : ''}`}
@@ -490,6 +564,7 @@ export default function App() {
               {tab === 'automations' && <AutomationsTab rpc={rpcRef} />}
               {tab === 'skills' && <SkillsTab rpc={rpcRef} />}
               {tab === 'models' && <ModelsTab rpc={rpcRef} />}
+              {tab === 'browser' && <BrowserTab />}
               {tab === 'run' && <RunTab cfg={cfg} rpc={rpcRef} />}
             </>
           )}
