@@ -12,6 +12,27 @@ function isEditable(target: EventTarget | null): boolean {
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true
 }
 
+export function installTauriMenuBridge(handlers: {
+  newChat: () => void
+  stopRun: () => void
+  focusScreen: (id: ScreenId) => void
+}): () => void {
+  const w = window as unknown as {
+    __mochMenu?: (id: string) => void
+  }
+  w.__mochMenu = (id: string) => {
+    if (id === 'new-chat') return handlers.newChat()
+    if (id === 'shortcuts') return openPalette()
+    if (id.startsWith('go-')) return handlers.focusScreen(id.slice(3) as ScreenId)
+    if (id === 'toggle-list') return setShellLayout({ listCollapsed: !shellLayout.get().listCollapsed })
+    if (id === 'toggle-inspector') return setShellLayout({ inspectorCollapsed: !shellLayout.get().inspectorCollapsed })
+    if (id === 'toggle-rail') return setShellLayout({ railExpanded: !shellLayout.get().railExpanded })
+  }
+  return () => {
+    delete w.__mochMenu
+  }
+}
+
 export function installAccelerators(handlers: {
   newChat: () => void
   stopRun: () => void

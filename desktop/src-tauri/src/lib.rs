@@ -18,8 +18,40 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::Duration;
 
-use tauri::{WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tiny_http::{Method, Response};
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct WinGeometry {
+    x: i32,
+    y: i32,
+    w: u32,
+    h: u32,
+    maximized: bool,
+}
+
+fn geometry_path() -> PathBuf {
+    desktop_dir().join(".win-geometry")
+}
+
+fn save_window_geometry(win: &tauri::WebviewWindow) {
+    let pos = win.outer_position().ok();
+    let size = win.inner_size().ok();
+    if let (Some(p), Some(s)) = (pos, size) {
+        let g = WinGeometry {
+            x: p.x,
+            y: p.y,
+            w: s.width,
+            h: s.height,
+            maximized: win.is_maximized().unwrap_or(false),
+        };
+        if let Ok(mut f) = std::fs::File::create(geometry_path()) {
+            use std::io::Write as _;
+            let _ = writeln!(f, "{}", serde_json::to_string(&g).unwrap_or_default());
+        }
+    }
+}
 
 const HERMES_PORT: u16 = 9118;
 /// A machine-level serve that may already be running (systemd service).
@@ -1219,11 +1251,140 @@ pub fn run() {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title("Moch")
                 .inner_size(1280.0, 840.0)
-                .min_inner_size(960.0, 600.0)
+                .min_inner_size(1024.0, 680.0)
                 .resizable(true)
                 .center()
                 .build()?;
             eprintln!("moch: window built");
+            let win = app.get_webview_window("main").expect("main window");
+
+            // Restore persisted geometry (physical px, same-monitor
+            // assumption) and keep saving it — throttled during drags,
+            // always on close.
+            if let Ok(txt) = std::fs::read_to_string(geometry_path()) {
+                if let Ok(g) = serde_json::from_str::<WinGeometry>(&txt) {
+                    let _ = win.set_position(tauri::PhysicalPosition::new(g.x, g.y));
+                    let _ = win.set_size(tauri::PhysicalSize::new(g.w, g.h));
+                    if g.maximized {
+                        let _ = win.maximize();
+                    }
+                }
+            }
+            let last_save = std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
+            let saver_win = win.clone();
+            win.on_window_event(move |event| match event {
+                tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
+                    let mut last = last_save.lock().unwrap();
+                    if last.elapsed() >= std::time::Duration::from_millis(750) {
+                        *last = std::time::Instant::now();
+                        save_window_geometry(&saver_win);
+                    }
+                }
+                tauri::WindowEvent::CloseRequested { .. } => save_window_geometry(&saver_win),
+                _ => {}
+            });
+
+            // Native menu. Duplicated actions deliberately carry NO
+            // accelerator here — the web layer owns the real keybindings,
+            // and a native accelerator would double-fire them.
+            let new_chat = MenuItem::with_id(app, "new-chat", "New Chat", false, None::<&str>)?;
+            let close = PredefinedMenuItem::close_window(app, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit Moch", false, None::<&str>)?;
+            let file = Submenu::with_items(
+                app,
+                "File",
+                true,
+                &[&new_chat, &close, &PredefinedMenuItem::separator(app)?, &quit],
+            )?;
+
+            let undo = PredefinedMenuItem::undo(app, None::<&str>)?;
+            let redo = PredefinedMenuItem::redo(app, None::<&str>)?;
+            let cut = PredefinedMenuItem::cut(app, None::<&str>)?;
+            let copy = PredefinedMenuItem::copy(app, None::<&str>)?;
+            let paste = PredefinedMenuItem::paste(app, None::<&str>)?;
+            let select_all = PredefinedMenuItem::select_all(app, None::<&str>)?;
+            let edit = Submenu::with_items(
+                app,
+                "Edit",
+                true,
+                &[&undo, &redo, &PredefinedMenuItem::separator(app)?, &cut, &copy, &paste, &select_all],
+            )?;
+
+            let toggle_list =
+                MenuItem::with_id(app, "toggle-list", "Toggle Chats Pane (Ctrl+B)", false, None::<&str>)?;
+            let toggle_inspector =
+                MenuItem::with_id(app, "toggle-inspector", "Toggle Inspector (Ctrl+J)", false, None::<&str>)?;
+            let toggle_rail =
+                MenuItem::with_id(app, "toggle-rail", "Toggle Rail Labels (Ctrl+\\)", false, None::<&str>)?;
+            let view = Submenu::with_items(
+                app,
+                "View",
+                true,
+                &[&toggle_list, &toggle_inspector, &toggle_rail],
+            )?;
+
+            let mut go_items: Vec<Box<dyn tauri::menu::IsMenuItem<_>>> = Vec::new();
+            for (id, label) in [
+                ("chat", "Chat"),
+                ("sessions", "Chats"),
+                ("crew", "Crew"),
+                ("fleet", "Fleet"),
+                ("automations", "Automations"),
+                ("agent", "Models"),
+                ("terminal", "Terminal"),
+                ("browser", "Browser"),
+                ("connectors", "Connectors"),
+                ("settings", "Settings"),
+                ("skills", "Skills"),
+            ] {
+                go_items.push(Box::new(MenuItem::with_id(
+                    app,
+                    &format!("go-{id}"),
+                    label,
+                    false,
+                    None::<&str>,
+                )?));
+            }
+            let refs: Vec<&dyn tauri::menu::IsMenuItem<_>> = go_items.iter().map(|b| b.as_ref()).collect();
+            let go = Submenu::with_items(app, "Go", true, refs.as_slice())?;
+
+            let restart = MenuItem::with_id(app, "restart-runtime", "Restart Runtime", false, None::<&str>)?;
+            let shortcuts = MenuItem::with_id(app, "shortcuts", "Keyboard Shortcuts", false, None::<&str>)?;
+            let help = Submenu::with_items(app, "Help", true, &[&restart, &shortcuts])?;
+
+            let menu = Menu::with_items(app, &[&file, &edit, &view, &go, &help])?;
+            app.set_menu(menu)?;
+
+            app.on_menu_event(move |app, event| {
+                let id = event.id().0.clone();
+                match id.as_str() {
+                    "restart-runtime" => {
+                        terminate_runtime();
+                        std::thread::spawn(|| {
+                            let _ = start_fork();
+                        });
+                    }
+                    "quit" => app.exit(0),
+                    "close" => {
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.close();
+                        }
+                    }
+                    _ => {
+                        // Everything else drives the web layer through the
+                        // page's own handler (window.__mochMenu, installed
+                        // by the accelerators module).
+                        if let Some(w) = app.get_webview_window("main") {
+                            let js = format!(
+                                "window.__mochMenu && window.__mochMenu({})",
+                                serde_json::to_string(&id).unwrap_or_else(|_| "\"\"".into())
+                            );
+                            let _ = w.eval(&js);
+                        }
+                    }
+                }
+            });
+
             Ok(())
         })
         .build(ctx)

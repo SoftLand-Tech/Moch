@@ -11,7 +11,7 @@ import {
 } from './core/boot'
 import { installTheme } from './ui/shell/themeVars'
 import { Shell } from './ui/shell/Shell'
-import { installAccelerators } from './ui/shell/accelerators'
+import { installAccelerators, installTauriMenuBridge } from './ui/shell/accelerators'
 import { setShellLayout, shellLayout, type ScreenId } from './ui/shell/state'
 import { SCREENS, SCREEN_ICONS } from './ui/shell/registry'
 import { sessionRows, loadSessions } from '../../../app/src/lib/sessionList'
@@ -110,6 +110,9 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     return installAccelerators({ newChat: doNewChat, stopRun: doStop, focusScreen })
+  }, [doNewChat, doStop, focusScreen])
+  useEffect(() => {
+    return installTauriMenuBridge({ newChat: doNewChat, stopRun: doStop, focusScreen })
   }, [doNewChat, doStop, focusScreen])
 
   const views: Partial<Record<ScreenId, React.ReactNode>> = {
