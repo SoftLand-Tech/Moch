@@ -30,15 +30,48 @@ fn hermes_child() -> &'static Mutex<Option<std::process::Child>> {
     HERMES_CHILD.get_or_init(|| Mutex::new(None))
 }
 
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../..")
-        .canonicalize()
-        .expect("repo root")
+/// Resolve the desktop/ dir at RUNTIME, not compile time:
+///  1. `MOCH_DESKTOP_DIR` env (explicit override — the installed-bundle path)
+///  2. exe-relative scan: walk ancestors from the exe dir while a
+///     `runtime.py` marker is missing (covers src-tauri/target/{debug,release})
+///  3. the compile-time manifest path (cargo dev builds — always correct
+///     there, and the binary was built from that tree)
+/// Tier 1/2 exist so an installed deb/AppImage can at least be POINTED at
+/// a checkout with env instead of silently using a baked build-machine
+/// path. Packaging the runtime itself remains a future round.
+fn desktop_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("MOCH_DESKTOP_DIR") {
+        let p = PathBuf::from(dir);
+        if p.join("runtime.py").is_file() {
+            return p;
+        }
+        eprintln!("moch: MOCH_DESKTOP_DIR has no runtime.py — ignoring");
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(base) = exe.parent() {
+            for anc in base.ancestors().skip(1).take(6) {
+                if anc.join("runtime.py").is_file() {
+                    return anc.to_path_buf();
+                }
+            }
+        }
+    }
+    let compiled = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+    if compiled.join("runtime.py").is_file() {
+        return compiled;
+    }
+    eprintln!(
+        "moch: desktop dir not found (tried MOCH_DESKTOP_DIR, exe-relative, baked {}) — set MOCH_DESKTOP_DIR",
+        compiled.display()
+    );
+    compiled
 }
 
-fn desktop_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
+fn repo_root() -> PathBuf {
+    desktop_dir()
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../.."))
 }
 
 /// Refuse to start twice: flock() the desktop lock file for the process
