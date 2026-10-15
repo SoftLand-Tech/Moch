@@ -25,6 +25,8 @@ const LazyFleet = React.lazy(() => import('./ui/Fleet').then((m) => ({ default: 
 const LazySkills = React.lazy(() => import('./ui/Skills').then((m) => ({ default: m.Skills })))
 const LazyConnectors = React.lazy(() => import('./ui/Connectors').then((m) => ({ default: m.Connectors })))
 const LazyTerminal = React.lazy(() => import('./ui/Terminal').then((m) => ({ default: m.TerminalScreen })))
+const LazyModels = React.lazy(() => import('./ui/Models'))
+const LazySettings = React.lazy(() => import('./ui/Settings'))
 
 function Placeholder(props: { screen: ScreenId }): React.JSX.Element {
   const meta = SCREENS.find((s) => s.id === props.screen)
@@ -149,6 +151,16 @@ export function App(): React.JSX.Element {
     terminal: (
       <Suspense fallback={<Placeholder screen="terminal" />}>
         <LazyTerminal />
+      </Suspense>
+    ),
+    agent: (
+      <Suspense fallback={<Placeholder screen="agent" />}>
+        <LazyModels />
+      </Suspense>
+    ),
+    settings: (
+      <Suspense fallback={<Placeholder screen="settings" />}>
+        <LazySettings />
       </Suspense>
     ),
   }
