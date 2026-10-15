@@ -11,3 +11,9 @@ __pycache__/
 .research/
 .gradle-home/
 .audit/
+
+# dedicated desktop app build artifacts
+desktop/app/node_modules/
+desktop/app-desktop-web/
+desktop/.dbg.log
+desktop/.win-geometry

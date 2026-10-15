@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Moch</title>
+    <style>
+      :root { color-scheme: dark; }
+      html, body, #root { height: 100%; margin: 0; }
+      body { background: #0a0813; color: #f4f1fa; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 14px; }
+      #root { display: flex; }
+      *:focus-visible { outline: 2px solid var(--moch-accent, #f79236); outline-offset: 2px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      function beacon(msg) {
+        fetch('/dbg', { method: 'POST', body: msg }).catch(function () {})
+      }
+      beacon('stage: html parsed')
+      window.addEventListener('error', function (e) {
+        beacon('ERR ' + (e.message || 'unknown').slice(0, 160))
+      })
+      window.addEventListener('unhandledrejection', function (e) {
+        beacon('REJ ' + String(e.reason && e.reason.message ? e.reason.message : e.reason).slice(0, 160))
+      })
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

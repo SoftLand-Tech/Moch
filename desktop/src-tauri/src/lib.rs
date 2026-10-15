@@ -76,13 +76,12 @@ fn desktop_dir() -> PathBuf {
 }
 
 /// The web UI the shell serves from disk when an asset is not embedded:
-/// `app-web/` (the shared Moch app's expo web export — what `npm run
-/// build:app-web` writes and `tauri.conf.json` embeds) with `web-ui/` as the
-/// frozen fork's old directory. This is the re-export path, not the normal
-/// one; embedded assets win.
+/// `app-desktop-web/` (the dedicated desktop bundle — what `npm run build`
+/// writes in `desktop/app`) with `app-web/` (the shared expo export) and
+/// `web-ui/` (the frozen fork) as legacy fallbacks. Embedded assets win.
 fn ui_dir() -> Option<PathBuf> {
     let base = desktop_dir();
-    for name in ["app-web", "web-ui"] {
+    for name in ["app-desktop-web", "app-web", "web-ui"] {
         let p = base.join(name);
         if p.is_dir() {
             return Some(p);
@@ -630,10 +629,26 @@ fn start_static_server(cfg: serde_json::Value, assets: Box<dyn tauri::Assets<tau
                     }
                 }
                 if let Some((ct, bytes)) = served {
+                    // no-store on every response: the UI is served from a
+                    // loopback origin and must never come back stale from
+                    // the WebKit disk cache after a rebuild (that shipped a
+                    // frozen onboarding screen over a fresh bundle once).
                     let _ = request.respond(
-                        Response::from_data(bytes).with_header(
-                            tiny_http::Header::from_bytes(&b"Content-Type"[..], ct.as_bytes()).unwrap(),
-                        ),
+                        Response::from_data(bytes)
+                            .with_header(
+                                tiny_http::Header::from_bytes(
+                                    &b"Content-Type"[..],
+                                    ct.as_bytes(),
+                                )
+                                .unwrap(),
+                            )
+                            .with_header(
+                                tiny_http::Header::from_bytes(
+                                    &b"Cache-Control"[..],
+                                    &b"no-store, max-age=0"[..],
+                                )
+                                .unwrap(),
+                            ),
                     );
                     continue;
                 }
