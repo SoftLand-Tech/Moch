@@ -14,7 +14,7 @@
 use std::io::Write;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use tauri::{WebviewUrl, WebviewWindowBuilder};
@@ -25,6 +25,9 @@ const HERMES_PORT: u16 = 9118;
 const ATTACH_PORT: u16 = 9119;
 
 static HERMES_CHILD: OnceLock<Mutex<Option<std::process::Child>>> = OnceLock::new();
+/// CDP debug port of the agent browser spawned by runtime.py (from the
+/// handshake JSON's browser_port). None = no browser this boot.
+static BROWSER_PORT: OnceLock<u16> = OnceLock::new();
 
 fn hermes_child() -> &'static Mutex<Option<std::process::Child>> {
     HERMES_CHILD.get_or_init(|| Mutex::new(None))
@@ -74,16 +77,40 @@ fn repo_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../.."))
 }
 
-/// Refuse to start twice: flock() the desktop lock file for the process
-/// lifetime. The kernel releases the flock on exit; the file itself is
-/// left in place (the next run just re-locks it).
+/// Refuse to start twice: flock() a lock file for the process lifetime.
+/// The kernel releases the flock on exit; the file itself is left in
+/// place (the next run just re-locks it). The lock sits at a FIXED
+/// user-level path, NOT inside desktop_dir(): what it guards (the
+/// gateway port) is machine-global, so a per-desktop_dir lock was
+/// bypassable by two launches with different MOCH_DESKTOP_DIRs — and a
+/// nonexistent desktop_dir used to make the open panic off-tree.
 fn acquire_single_instance() {
-    let lock = std::fs::OpenOptions::new()
+    let lock_dir = std::env::var("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir());
+    if let Err(e) = std::fs::create_dir_all(&lock_dir) {
+        eprintln!(
+            "moch: cannot create lock dir {} ({e}) — set XDG_RUNTIME_DIR",
+            lock_dir.display()
+        );
+        std::process::exit(1);
+    }
+    let lock_path = lock_dir.join("moch-desktop.lock");
+    let lock = match std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(false)
-        .open(desktop_dir().join(".moch-desktop.lock"))
-        .expect("open .moch-desktop.lock");
+        .open(&lock_path)
+    {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!(
+                "moch: cannot open single-instance lock {} ({e}) — fix permissions or remove the file",
+                lock_path.display()
+            );
+            std::process::exit(1);
+        }
+    };
     use std::os::unix::io::AsRawFd;
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         eprintln!("moch: already running");
@@ -131,6 +158,68 @@ fn wait_port(port: u16, timeout_ms: u64) -> bool {
     false
 }
 
+/// True for lines that must never reach the serve log:
+///  - MOCH_GATEWAY_INFO handshake markers (they carry the live token),
+///  - `"token":"<alnum>` JSON fragments — covers lines arriving BEFORE
+///    the handshake, when the literal token string is still unknown,
+///  - the literal token itself, once the handshake mints it.
+fn line_carries_token(line: &str, token: &str) -> bool {
+    if line.contains("MOCH_GATEWAY_INFO") {
+        return true;
+    }
+    const TOKEN_PREFIX: &str = "\"token\":\"";
+    if let Some(i) = line.find(TOKEN_PREFIX) {
+        let rest = &line[i + TOKEN_PREFIX.len()..];
+        if matches!(rest.chars().next(), Some(c) if c.is_ascii_alphanumeric()) {
+            return true;
+        }
+    }
+    !token.is_empty() && line.contains(token)
+}
+
+/// Drain a child stream (stdout AND stderr) into the serve log through
+/// the redaction above — one thread per stream, sharing the token cell
+/// the handshake fills in.
+fn spawn_log_drain<R>(stream: R, mut log: std::fs::File, token: Arc<Mutex<String>>)
+where
+    R: std::io::Read + Send + 'static,
+{
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        for line in std::io::BufReader::new(stream).lines().map_while(Result::ok) {
+            let tok = token.lock().unwrap().clone();
+            if line_carries_token(&line, &tok) {
+                continue;
+            }
+            let _ = writeln!(log, "{line}");
+        }
+    });
+}
+
+/// One-shot in-place redaction of the PREVIOUS run's log before the new
+/// runtime appends to it: old builds wired the child's stderr to this
+/// file RAW, so token-bearing lines can already be sitting in it. Cheap
+/// no-op unless a line scan finds a marker; rewrites only when it does.
+fn scrub_serve_log(path: &Path) {
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(_) => return, // missing/unreadable: nothing to scrub
+    };
+    let contents = String::from_utf8_lossy(&bytes);
+    if !contents.lines().any(|l| line_carries_token(l, "")) {
+        return;
+    }
+    let mut kept = contents
+        .lines()
+        .filter(|l| !line_carries_token(l, ""))
+        .collect::<Vec<&str>>()
+        .join("\n");
+    if !kept.is_empty() {
+        kept.push('\n');
+    }
+    let _ = std::fs::write(path, kept);
+}
+
 /// Spawn the user's hermes fork (app/hermes-src) as a local serve.
 /// Returns (ws_url, token, mode) or an error string.
 fn start_fork() -> Result<(String, String, &'static str), String> {
@@ -165,11 +254,19 @@ fn start_fork() -> Result<(String, String, &'static str), String> {
     // Run the phone's embedded gateway (moch/gateway_server.py) as a child:
     // headless serve, MOCH_FLEET=1 (bots/crew surface), supervised boots.
     let runner = desktop_dir().join("runtime.py");
-    let mut log = std::fs::OpenOptions::new()
+    let log_path = desktop_dir().join(".hermes-serve.log");
+    let log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(desktop_dir().join(".hermes-serve.log"))
+        .open(&log_path)
         .map_err(|e| format!("open serve log: {e}"))?;
+    // Owner-only perms: defense in depth on top of the redaction below —
+    // this file used to land world-readable (umask default 0644) and its
+    // lines can carry the session token.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = log.set_permissions(std::fs::Permissions::from_mode(0o600));
+    }
     let log_err = log
         .try_clone()
         .map_err(|e| format!("clone serve log: {e}"))?;
@@ -187,30 +284,29 @@ fn start_fork() -> Result<(String, String, &'static str), String> {
         // we shut it down explicitly via terminate_runtime().
         .process_group(0)
         .stdout(Stdio::piped())
-        .stderr(log_err)
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("spawn {}: {e}", python.display()))?;
     eprintln!("moch: runtime spawned pid={:?}", child.id());
 
     let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
     // Register the child right away (not after the handshake) so a signal
     // arriving during boot still finds it and tears it down.
     *hermes_child().lock().unwrap() = Some(child);
 
-    // Drain stdout into the log (observability only — the real handshake
-    // is file-based). Skip MOCH_GATEWAY_INFO lines: they carry the live
-    // session token and this file is world-readable.
+    // Drain BOTH streams into the log through the same redaction (the
+    // old wiring sent stderr to the file RAW, so any traceback echoing
+    // the handshake line leaked the token). Observability only — the
+    // real handshake is file-based. The token is only minted after the
+    // handshake, so pre-handshake lines are filtered structurally; once
+    // known, the literal token is dropped too (see line_carries_token).
+    let token_cell = Arc::new(Mutex::new(String::new()));
     if let Some(out) = stdout {
-        std::thread::spawn(move || {
-            use std::io::BufRead;
-            let reader = std::io::BufReader::new(out);
-            for line in reader.lines().map_while(Result::ok) {
-                if line.starts_with("MOCH_GATEWAY_INFO") {
-                    continue;
-                }
-                let _ = writeln!(log, "{line}");
-            }
-        });
+        spawn_log_drain(out, log, token_cell.clone());
+    }
+    if let Some(err) = stderr {
+        spawn_log_drain(err, log_err, token_cell.clone());
     }
 
     // File-based handshake: runtime.py writes .moch-gateway.json into its
@@ -253,6 +349,9 @@ fn start_fork() -> Result<(String, String, &'static str), String> {
     eprintln!("moch: handshake received");
     let port = info["port"].as_u64().unwrap_or(HERMES_PORT as u64) as u16;
     let token = info["token"].as_str().unwrap_or_default().to_string();
+    // Publish the token to the drain threads — from here on, any line
+    // quoting it verbatim (debug prints, tracebacks) is dropped too.
+    *token_cell.lock().unwrap() = token.clone();
     if token.is_empty() || !wait_port(port, 5_000) {
         // The handshake JSON carries the runtime's own error, if any —
         // surface it instead of the generic "port not accepting".
@@ -260,6 +359,22 @@ fn start_fork() -> Result<(String, String, &'static str), String> {
             Some(e) => format!("gateway startup failed: {e}"),
             None => "gateway info arrived but port not accepting".to_string(),
         });
+    }
+    // Zombie-gateway defuse: the port probe can pass even if the child
+    // died right after binding — a race that used to hand run() a dead
+    // runtime. Refuse to return Ok unless the child is still alive.
+    // (The poll loop above already fast-fails DURING the wait.)
+    if let Some(status) = hermes_child()
+        .lock()
+        .unwrap()
+        .as_mut()
+        .and_then(|c| c.try_wait().ok())
+        .flatten()
+    {
+        return Err(format!("runtime exited during handshake: {status}"));
+    }
+    if let Some(bp) = info["browser_port"].as_u64() {
+        let _ = BROWSER_PORT.set(bp as u16);
     }
     Ok((
         format!("ws://127.0.0.1:{port}/api/ws"),
@@ -286,6 +401,36 @@ fn attach_existing() -> Result<(String, String, &'static str), String> {
         token,
         "attached",
     ))
+}
+
+/// Minimal HTTP/1.1 GET against the agent browser's CDP HTTP endpoint
+/// (GET /json — the target list). Hand-rolled: loopback, no TLS, one
+/// short-lived connection per call.
+fn cdp_get_json(port: u16, path: &str) -> Result<String, String> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port))
+        .map_err(|e| format!("cdp connect: {e}"))?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .map_err(|e| format!("cdp timeout: {e}"))?;
+    use std::io::{Read as _, Write as _};
+    let req = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    stream
+        .write_all(req.as_bytes())
+        .map_err(|e| format!("cdp write: {e}"))?;
+    let mut raw = Vec::new();
+    stream
+        .read_to_end(&mut raw)
+        .map_err(|e| format!("cdp read: {e}"))?;
+    let text = String::from_utf8_lossy(&raw);
+    let body = text
+        .split_once("\r\n\r\n")
+        .map(|(_, b)| b)
+        .ok_or("cdp: malformed response")?;
+    let status_ok = text.starts_with("HTTP/1.1 200") || text.starts_with("HTTP/1.0 200");
+    if !status_ok {
+        return Err(format!("cdp: non-200 from {path}"));
+    }
+    Ok(body.to_string())
 }
 
 fn content_type(path: &Path) -> &'static str {
@@ -317,6 +462,19 @@ fn start_static_server(cfg: serde_json::Value, assets: Box<dyn tauri::Assets<tau
         // DNS-rebinding guard: every request (any method) must target this
         // server's own loopback host:port.
         let expected_host = format!("127.0.0.1:{port}");
+        // CSRF guard for the state-changing POSTs below: a hostile
+        // website can fire no-cors POSTs at this loopback host (the Host
+        // check above passes for them — the browser targets OUR host).
+        // Browsers ALWAYS attach Origin on cross-origin POSTs; local
+        // curl/tools send none — so any POST whose Origin isn't exactly
+        // our own page origin is rejected with 403.
+        let expected_origin = format!("http://127.0.0.1:{port}");
+        let cross_site_post = |req: &tiny_http::Request| {
+            req.headers().iter().any(|h| {
+                h.field.as_str().as_str().eq_ignore_ascii_case("origin")
+                    && h.value.as_str() != expected_origin
+            })
+        };
         for mut request in server.incoming_requests() {
             let host_ok = request.headers().iter().any(|h| {
                 h.field.as_str().as_str().eq_ignore_ascii_case("host")
@@ -332,6 +490,12 @@ fn start_static_server(cfg: serde_json::Value, assets: Box<dyn tauri::Assets<tau
             let path = url.split('?').next().unwrap_or("/").to_string();
 
             if method == Method::Post && path == "/dbg" {
+                if cross_site_post(&request) {
+                    let _ = request.respond(
+                        Response::from_string("forbidden").with_status_code(403),
+                    );
+                    continue;
+                }
                 // Cap the body: a runaway client must not grow .dbg.log.
                 use std::io::Read;
                 let mut body = String::new();
@@ -360,6 +524,12 @@ fn start_static_server(cfg: serde_json::Value, assets: Box<dyn tauri::Assets<tau
             }
 
             if method == Method::Post && path == "/setup-done" {
+                if cross_site_post(&request) {
+                    let _ = request.respond(
+                        Response::from_string("forbidden").with_status_code(403),
+                    );
+                    continue;
+                }
                 let _ = std::fs::write(
                     desktop_dir().join(".setup.json"),
                     serde_json::json!({ "done": true, "t": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() }).to_string(),
@@ -371,6 +541,24 @@ fn start_static_server(cfg: serde_json::Value, assets: Box<dyn tauri::Assets<tau
             if method == Method::Get && path == "/moch-config.json" {
                 let _ = request.respond(
                     Response::from_string(cfg.to_string())
+                        .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], b"application/json").unwrap()),
+                );
+                continue;
+            }
+
+            // Agent-browser target list proxy: the UI can't fetch the CDP
+            // port cross-origin, so the shell relays GET /json for it.
+            if method == Method::Get && path == "/cdp/json" {
+                let (code, body) = match BROWSER_PORT.get() {
+                    Some(bp) => match cdp_get_json(*bp, "/json") {
+                        Ok(b) => (200, b),
+                        Err(e) => (503, format!("{{\"error\":\"{e}\"}}")),
+                    },
+                    None => (503, "{\"error\":\"agent browser not running\"}".to_string()),
+                };
+                let _ = request.respond(
+                    Response::from_string(body)
+                        .with_status_code(code)
                         .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], b"application/json").unwrap()),
                 );
                 continue;
@@ -430,6 +618,24 @@ fn start_static_server(cfg: serde_json::Value, assets: Box<dyn tauri::Assets<tau
 pub fn run() {
     // Single instance first — before spawning anything.
     acquire_single_instance();
+    // Scrub token-bearing lines the PREVIOUS run left in the serve log
+    // (old builds piped the child's stderr there raw) before this run
+    // appends to it. Cheap no-op unless a marker line is present.
+    scrub_serve_log(&desktop_dir().join(".hermes-serve.log"));
+    // Install the signal handler BEFORE start_fork(): the handshake can
+    // take up to 150s, and a signal in that window used to hit the
+    // default disposition — killing the shell and orphaning the python
+    // gateway (which kept port 9118 bound). terminate_runtime() already
+    // tolerates HERMES_CHILD still being None (pre-spawn). Requires
+    // ctrlc's "termination" feature; without it only SIGINT is handled.
+    if let Err(e) = ctrlc::set_handler(move || {
+        terminate_runtime();
+        std::process::exit(0);
+    }) {
+        eprintln!(
+            "moch: ctrlc handler not installed ({e}) — a signal during boot may orphan the runtime"
+        );
+    }
     // Supervisor first, then the window onto it. Moch runs ITS OWN runtime
     // (the fork, in a Moch-owned home) — attach is an explicit emergency
     // escape hatch (MOCH_ATTACH=1), never the default path.
@@ -490,15 +696,6 @@ pub fn run() {
         if selftest { "?selftest=1" } else { "" }
     ))
     .expect("window url");
-
-    // Tear the supervised runtime down on SIGTERM/SIGINT too — RunEvent::Exit
-    // only fires on a clean loop exit, so signals used to orphan the
-    // python child (which kept port 9118 bound). Requires ctrlc's
-    // "termination" feature; without it only SIGINT is handled.
-    let _ = ctrlc::set_handler(move || {
-        terminate_runtime();
-        std::process::exit(0);
-    });
 
     let app = tauri::Builder::default()
         .setup(move |app| {
