@@ -20,6 +20,11 @@ import { newChat, stopRun } from '../../../app/src/lib/chat'
 const LazyChat = React.lazy(() => import('./ui/Chat').then((m) => ({ default: m.Chat })))
 const LazySessions = React.lazy(() => import('./ui/Sessions'))
 const LazyBrowser = React.lazy(() => import('./ui/Browser').then((m) => ({ default: m.Browser })))
+const LazyAutomations = React.lazy(() => import('./ui/Automations').then((m) => ({ default: m.Automations })))
+const LazyFleet = React.lazy(() => import('./ui/Fleet').then((m) => ({ default: m.Fleet })))
+const LazySkills = React.lazy(() => import('./ui/Skills').then((m) => ({ default: m.Skills })))
+const LazyConnectors = React.lazy(() => import('./ui/Connectors').then((m) => ({ default: m.Connectors })))
+const LazyTerminal = React.lazy(() => import('./ui/Terminal').then((m) => ({ default: m.TerminalScreen })))
 
 function Placeholder(props: { screen: ScreenId }): React.JSX.Element {
   const meta = SCREENS.find((s) => s.id === props.screen)
@@ -116,9 +121,34 @@ export function App(): React.JSX.Element {
         <LazySessions />
       </Suspense>
     ),
+    automations: (
+      <Suspense fallback={<Placeholder screen="automations" />}>
+        <LazyAutomations />
+      </Suspense>
+    ),
+    fleet: (
+      <Suspense fallback={<Placeholder screen="fleet" />}>
+        <LazyFleet />
+      </Suspense>
+    ),
+    skills: (
+      <Suspense fallback={<Placeholder screen="skills" />}>
+        <LazySkills />
+      </Suspense>
+    ),
+    connectors: (
+      <Suspense fallback={<Placeholder screen="connectors" />}>
+        <LazyConnectors />
+      </Suspense>
+    ),
     browser: (
       <Suspense fallback={<Placeholder screen="browser" />}>
         <LazyBrowser />
+      </Suspense>
+    ),
+    terminal: (
+      <Suspense fallback={<Placeholder screen="terminal" />}>
+        <LazyTerminal />
       </Suspense>
     ),
   }

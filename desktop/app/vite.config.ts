@@ -30,6 +30,7 @@ export default defineConfig({
       { find: /^expo-audio$/, replacement: r('src/shim/expoAudio.ts') },
       { find: /^expo-image$/, replacement: r('src/shim/expoImage.ts') },
       { find: /^expo$/, replacement: r('src/shim/expo.ts') },
+      { find: /^expo-router$/, replacement: r('src/shim/expoRouter.tsx') },
       { find: /^react-native$/, replacement: r('src/shim/reactNative.ts') },
       { find: /^react-native\//, replacement: r('src/shim/reactNative.ts') },
     ],
