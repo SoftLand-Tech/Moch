@@ -11,10 +11,11 @@
 //!  3. OPEN the window on that origin. The UI talks to hermes directly
 //!     over ws://127.0.0.1 using the app's own TS protocol stack.
 
+use parking_lot::Mutex;
 use std::io::Write;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::Duration;
 
 use tauri::{WebviewUrl, WebviewWindowBuilder};
@@ -24,13 +25,17 @@ const HERMES_PORT: u16 = 9118;
 /// A machine-level serve that may already be running (systemd service).
 const ATTACH_PORT: u16 = 9119;
 
-static HERMES_CHILD: OnceLock<Mutex<Option<std::process::Child>>> = OnceLock::new();
+static HERMES_CHILD: LazyLock<Mutex<Option<std::process::Child>>> =
+    LazyLock::new(|| Mutex::new(None));
+/// Set by terminate_runtime() so the respawn watchdog stops before it can
+/// restart a runtime the operator is tearing down.
+static SHUTDOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// CDP debug port of the agent browser spawned by runtime.py (from the
 /// handshake JSON's browser_port). None = no browser this boot.
 static BROWSER_PORT: OnceLock<u16> = OnceLock::new();
 
 fn hermes_child() -> &'static Mutex<Option<std::process::Child>> {
-    HERMES_CHILD.get_or_init(|| Mutex::new(None))
+    &HERMES_CHILD
 }
 
 /// Resolve the desktop/ dir at RUNTIME, not compile time:
@@ -68,6 +73,22 @@ fn desktop_dir() -> PathBuf {
         compiled.display()
     );
     compiled
+}
+
+/// The web UI the shell serves from disk when an asset is not embedded:
+/// `app-web/` (the shared Moch app's expo web export — what `npm run
+/// build:app-web` writes and `tauri.conf.json` embeds) with `web-ui/` as the
+/// frozen fork's old directory. This is the re-export path, not the normal
+/// one; embedded assets win.
+fn ui_dir() -> Option<PathBuf> {
+    let base = desktop_dir();
+    for name in ["app-web", "web-ui"] {
+        let p = base.join(name);
+        if p.is_dir() {
+            return Some(p);
+        }
+    }
+    None
 }
 
 fn repo_root() -> PathBuf {
@@ -123,7 +144,8 @@ fn acquire_single_instance() {
 /// Stop the supervised runtime politely: SIGTERM, wait up to 5s, then
 /// SIGKILL. Shared by both exit paths (signal handler + RunEvent::Exit).
 fn terminate_runtime() {
-    let mut child = match hermes_child().lock().unwrap().take() {
+    SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+    let mut child = match hermes_child().lock().take() {
         Some(c) => c,
         None => return,
     };
@@ -187,7 +209,7 @@ where
     std::thread::spawn(move || {
         use std::io::BufRead;
         for line in std::io::BufReader::new(stream).lines().map_while(Result::ok) {
-            let tok = token.lock().unwrap().clone();
+            let tok = token.lock().clone();
             if line_carries_token(&line, &tok) {
                 continue;
             }
@@ -293,7 +315,7 @@ fn start_fork() -> Result<(String, String, &'static str), String> {
     let stderr = child.stderr.take();
     // Register the child right away (not after the handshake) so a signal
     // arriving during boot still finds it and tears it down.
-    *hermes_child().lock().unwrap() = Some(child);
+    *hermes_child().lock() = Some(child);
 
     // Drain BOTH streams into the log through the same redaction (the
     // old wiring sent stderr to the file RAW, so any traceback echoing
@@ -321,7 +343,6 @@ fn start_fork() -> Result<(String, String, &'static str), String> {
         // died — report its exit status immediately.
         if let Some(status) = hermes_child()
             .lock()
-            .unwrap()
             .as_mut()
             .and_then(|c| c.try_wait().ok())
             .flatten()
@@ -351,7 +372,7 @@ fn start_fork() -> Result<(String, String, &'static str), String> {
     let token = info["token"].as_str().unwrap_or_default().to_string();
     // Publish the token to the drain threads — from here on, any line
     // quoting it verbatim (debug prints, tracebacks) is dropped too.
-    *token_cell.lock().unwrap() = token.clone();
+    *token_cell.lock() = token.clone();
     if token.is_empty() || !wait_port(port, 5_000) {
         // The handshake JSON carries the runtime's own error, if any —
         // surface it instead of the generic "port not accepting".
@@ -366,7 +387,6 @@ fn start_fork() -> Result<(String, String, &'static str), String> {
     // (The poll loop above already fast-fails DURING the wait.)
     if let Some(status) = hermes_child()
         .lock()
-        .unwrap()
         .as_mut()
         .and_then(|c| c.try_wait().ok())
         .flatten()
@@ -568,19 +588,27 @@ fn start_static_server(cfg: serde_json::Value, assets: Box<dyn tauri::Assets<tau
                 // Embedded assets: map lookup only, so the key can't
                 // traverse. The DISK fallback below is a real filesystem
                 // read and guards explicitly: reject ".."/absolute keys,
-                // then verify containment in web-ui/.
+                // then verify containment in the UI dir.
                 let rel = path.trim_start_matches('/').to_string();
                 let key: &str = if rel.is_empty() { "index.html" } else { &rel };
+                // SPA routing: expo-router owns the URL space client-side, so
+                // a ROUTE (no file extension) falls back to index.html. A
+                // missing ASSET must 404 instead — serving HTML under a .js/
+                // .css/.ttf content type is a MIME error the page cannot
+                // recover from, and it hid real 404s.
+                let is_route = key == "index.html"
+                    || !key.rsplit('/').next().unwrap_or("").contains('.');
                 let ik = key.into();
-                let bytes = assets
-                    .get(&ik)
-                    .or_else(|| assets.get(&"index.html".into()))
-                    .map(|b| b.into_owned())
-                    .or_else(|| {
-                        if key.contains("..") || key.starts_with('/') {
-                            return None;
-                        }
-                        let web_ui = desktop_dir().join("web-ui");
+                let mut served: Option<(&'static str, Vec<u8>)> = None;
+                if let Some(b) = assets.get(&ik) {
+                    served = Some((content_type(std::path::Path::new(key)), b.into_owned()));
+                } else if is_route {
+                    if let Some(b) = assets.get(&"index.html".into()) {
+                        served = Some(("text/html; charset=utf-8", b.into_owned()));
+                    }
+                }
+                if served.is_none() && !key.contains("..") && !key.starts_with('/') {
+                    if let Some(web_ui) = ui_dir() {
                         let f = web_ui.join(key);
                         if f.is_file() {
                             let inside = f
@@ -589,16 +617,19 @@ fn start_static_server(cfg: serde_json::Value, assets: Box<dyn tauri::Assets<tau
                                 .zip(web_ui.canonicalize().ok())
                                 .map(|(c, root)| c.starts_with(root))
                                 .unwrap_or(false);
-                            if !inside {
-                                return None;
+                            if inside {
+                                if let Ok(bytes) = std::fs::read(&f) {
+                                    served = Some((content_type(&f), bytes));
+                                }
                             }
-                            std::fs::read(f).ok()
-                        } else {
-                            std::fs::read(web_ui.join("index.html")).ok()
+                        } else if is_route {
+                            if let Ok(bytes) = std::fs::read(web_ui.join("index.html")) {
+                                served = Some(("text/html; charset=utf-8", bytes));
+                            }
                         }
-                    });
-                if let Some(bytes) = bytes {
-                    let ct = content_type(std::path::Path::new(key));
+                    }
+                }
+                if let Some((ct, bytes)) = served {
                     let _ = request.respond(
                         Response::from_data(bytes).with_header(
                             tiny_http::Header::from_bytes(&b"Content-Type"[..], ct.as_bytes()).unwrap(),
@@ -616,6 +647,13 @@ fn start_static_server(cfg: serde_json::Value, assets: Box<dyn tauri::Assets<tau
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Dev-only inspector seam: MOCH_DEV=1 exposes the WebKit inspector on a
+    // fixed loopback port so verify lanes can read DOM text instead of
+    // screenshot OCR. Must run before webkit initializes in this process.
+    if std::env::var("MOCH_DEV").ok().as_deref() == Some("1") {
+        std::env::set_var("WEBKIT_INSPECTOR_SERVER", "127.0.0.1:9223");
+        eprintln!("moch: dev inspector on http://127.0.0.1:9223");
+    }
     // Single instance first — before spawning anything.
     acquire_single_instance();
     // Scrub token-bearing lines the PREVIOUS run left in the serve log
@@ -651,6 +689,49 @@ pub fn run() {
         })
     };
     eprintln!("moch: hermes mode={mode} ws={ws_url}");
+
+    // Watchdog: if the supervised runtime dies while the app lives, spawn
+    // it again. The pairing token is stable per hermes home, so the UI's
+    // saved config stays valid across a respawn. In ATTACH mode
+    // HERMES_CHILD stays None and this loop is a no-op. The SHUTDOWN check
+    // before each respawn keeps the watchdog from racing a teardown that
+    // just took the child away.
+    std::thread::spawn(|| loop {
+        if SHUTDOWN.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        std::thread::sleep(Duration::from_secs(3));
+        let exited = {
+            let mut guard = hermes_child().lock();
+            match guard.as_mut() {
+                Some(child) => match child.try_wait() {
+                    Ok(Some(_)) => {
+                        guard.take();
+                        true
+                    }
+                    _ => false,
+                },
+                None => false,
+            }
+        };
+        if !exited || SHUTDOWN.load(std::sync::atomic::Ordering::SeqCst) {
+            continue;
+        }
+        eprintln!("moch: runtime exited — respawning in 5s");
+        std::thread::sleep(Duration::from_secs(5));
+        while !SHUTDOWN.load(std::sync::atomic::Ordering::SeqCst) {
+            match start_fork() {
+                Ok((ws, _tok, rmode)) => {
+                    eprintln!("moch: runtime respawned mode={rmode} ws={ws}");
+                    break;
+                }
+                Err(e) => {
+                    eprintln!("moch: respawn failed ({e}) — retry in 15s");
+                    std::thread::sleep(Duration::from_secs(15));
+                }
+            }
+        }
+    });
 
     let log_tail = std::fs::read_to_string(desktop_dir().join(".hermes-serve.log"))
         .map(|s| {
