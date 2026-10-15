@@ -4,6 +4,7 @@
  * modified combos and Escape are global. */
 import { closePalette, openPalette, paletteOpen, setShellLayout, shellLayout } from './state'
 import { SCREENS } from './registry'
+import type { ScreenId } from './state'
 
 function isEditable(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null
@@ -11,7 +12,11 @@ function isEditable(target: EventTarget | null): boolean {
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true
 }
 
-export function installAccelerators(handlers: { newChat: () => void; stopRun: () => void }): () => void {
+export function installAccelerators(handlers: {
+  newChat: () => void
+  stopRun: () => void
+  focusScreen: (id: ScreenId) => void
+}): () => void {
   const onKeyDown = (e: KeyboardEvent) => {
     const mod = e.ctrlKey || e.metaKey
     if (e.key === 'Escape') {

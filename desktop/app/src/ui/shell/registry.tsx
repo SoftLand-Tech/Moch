@@ -42,7 +42,7 @@ export const SCREEN_ICONS: Record<ScreenId, ComponentType<{ size?: number }>> = 
 ) as Record<ScreenId, ComponentType<{ size?: number }>>
 
 /** Screens whose main content is prose — the 760px measure cap applies. */
-export const MEASURE_CAPPED: Record<ScreenId, true> = {
+export const MEASURE_CAPPED: Partial<Record<ScreenId, true>> = {
   chat: true,
   skills: true,
   settings: true,

@@ -117,7 +117,7 @@ function buildItems(
   query: string,
   catalog: Record<string, CatalogCommand>,
   descriptions: Record<string, string>,
-  rows: Array<{ id: string; title: string; last_activity_at?: number }>,
+  rows: Array<{ id: string; title?: string; last_activity_at?: number }>,
   props: { onOpenChatDraft: (draft: string) => void },
 ): Item[] {
   if (!query) return []

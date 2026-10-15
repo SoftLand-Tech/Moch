@@ -4,7 +4,7 @@
  */
 export interface RankableItem {
   id: string
-  title: string
+  title?: string
   hint?: string
   recency?: number
 }
@@ -12,7 +12,7 @@ export interface RankableItem {
 export function scoreItem(query: string, item: RankableItem): number {
   const q = query.trim().toLowerCase()
   if (q === '') return 50 + (item.recency ?? 0)
-  const t = item.title.toLowerCase()
+  const t = (item.title ?? '').toLowerCase()
   const h = (item.hint ?? '').toLowerCase()
   if (t === q) return 1000 + (item.recency ?? 0)
   if (t.startsWith(q)) return 800 + (item.recency ?? 0)
@@ -40,6 +40,6 @@ export function rankItems<T extends RankableItem>(query: string, items: T[]): T[
   return items
     .map((item) => ({ item, score: scoreItem(query, item) }))
     .filter((r) => r.score >= 0)
-    .sort((a, b) => b.score - a.score || a.item.title.localeCompare(b.item.title))
+    .sort((a, b) => b.score - a.score || (a.item.title ?? '').localeCompare(b.item.title ?? ''))
     .map((r) => r.item)
 }

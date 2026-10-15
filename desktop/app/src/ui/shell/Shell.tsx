@@ -117,6 +117,7 @@ export function Shell(props: {
   inspector?: React.ReactNode
   children: React.ReactNode
   onNavigate: (id: ScreenId) => void
+  onOpenChatDraft: (draft: string) => void
 }): React.JSX.Element {
   useThemeVersion()
   const layout = useStore(shellLayout)
