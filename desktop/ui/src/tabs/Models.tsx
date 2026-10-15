@@ -21,8 +21,8 @@
  *  --global", session_id }`. The value string carries the scope flag the
  *  gateway parses for /model; scope:'global' as a separate param is reasoning/
  *  yolo-only. The gateway REFUSES a sessionless model set (4001 —
- *  methods_config_set.py _set_model), so a pick first mints a scratch session
- *  via `session.create` (same shape the Automations tab already uses). A
+ *  methods_config_set.py _set_model), so a pick rides ONE scratch session held
+ *  in a ref for the tab's lifetime (agent-leak fix — see pickModel). A
  *  guarded switch answers `confirm_required` + `confirm_message`; the retry
  *  sends `confirm_expensive_model: true`.
  *
@@ -31,7 +31,7 @@
  *  stayed empty forever. Now a boot attempt that finds rpc.current null or a
  *  connection-type rejection retries every 2s for up to 30s; the timer is
  *  cleared on success and unmount. */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 /** RpcRef shape App passes every tab (inlined — types.ts is owned elsewhere). */
 type RpcRef = { current: ((m: string, p?: any) => Promise<any>) | null }
@@ -67,12 +67,19 @@ const EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ul
 const RETRY_MS = 2000
 const RETRY_WINDOW_MS = 30000
 
-/** Connection-type failure (M-b1): rpc not attached yet, or the client's own
- *  not-connected/closed/connect errors (json-rpc-gateway.ts defaults:
- *  "gateway not connected", "WebSocket connection failed", superseded, closed). */
+/** Connection-type failure (M-b1): rpc not attached yet, or a transport-level
+ *  rejection. The matchers must stay SPECIFIC: the old bare 'connect'/'closed'/
+ *  'socket' words false-positived on gateway 5001s (provider-side connect
+ *  failures) and made the boot loop retry non-transport errors. Kept tokens
+ *  cover the client's own texts (json-rpc-gateway.ts defaults: "gateway not
+ *  connected", "WebSocket connection failed"/"WebSocket closed", superseded)
+ *  plus errno-ish 'socket is'/'network'/'econn'. 'timed out' matches the
+ *  shared channel's GatewayTimeoutError ("request timed out after Ns:
+ *  <method>", app/src/protocol/json-rpc-channel.ts) so transient timeouts
+ *  retry instead of erroring the tab. */
 function isConnErr(rpc: RpcRef, e: unknown): boolean {
   if (!rpc.current) return true
-  return /not connected|websocket|socket|superseded|connect|closed|econn|network/i.test(String(e))
+  return /not connected|websocket|socket is|superseded|network|timed out|econn/i.test(String(e))
 }
 
 /** Picker order (modelState.ts rankProviders): current, configured, rest. */
@@ -134,6 +141,15 @@ export default function ModelsTab({ rpc }: { rpc: RpcRef }) {
   const [confirmPick, setConfirmPick] = useState<{ slug: string; model: string; message: string } | null>(null)
   /** M-b1: true while boot loads are waiting on the socket to come up. */
   const [waiting, setWaiting] = useState(false)
+  /** Agent-leak fix: THE scratch session id for this tab's lifetime. Every
+   *  pick used to mint its own session.create {title:'model-pick'} — and the
+   *  create handler pre-warms a FULL AIAgent server-side
+   *  (methods_session.py:390 _schedule_agent_build) that nothing ever
+   *  destroyed (the reaper wants 6h idle + a dead transport), so picks leaked
+   *  one warm agent each — two when the confirm retry re-minted. Now one ref
+   *  serves all picks; each attempt closes the session when it settles (see
+   *  closeScratch). */
+  const scratchRef = useRef('')
 
   /** Apply a model.options payload to state (shared by boot + refresh). */
   const applyOptions = (r: { providers?: ProviderOption[]; model?: unknown; provider?: unknown }) => {
@@ -181,6 +197,7 @@ export default function ModelsTab({ rpc }: { rpc: RpcRef }) {
       if (!rpc.current) {
         if (Date.now() - startedAt < RETRY_WINDOW_MS) {
           setWaiting(true)
+          if (timer !== undefined) clearTimeout(timer) // never stack retry timers
           timer = setTimeout(() => void attempt(), RETRY_MS)
         } else {
           setWaiting(false)
@@ -210,7 +227,10 @@ export default function ModelsTab({ rpc }: { rpc: RpcRef }) {
           setWaiting(false)
         }
       }
-      if (retry && !stopped) timer = setTimeout(() => void attempt(), RETRY_MS)
+      if (retry && !stopped) {
+        if (timer !== undefined) clearTimeout(timer) // never stack retry timers
+        timer = setTimeout(() => void attempt(), RETRY_MS)
+      }
     }
     void attempt()
     return () => { stopped = true; if (timer !== undefined) clearTimeout(timer) }
@@ -228,9 +248,49 @@ export default function ModelsTab({ rpc }: { rpc: RpcRef }) {
     }
   }
 
+  /** Gateway texts meaning "the scratch session id is stale": the dispatcher's
+   *  eager 4001 "session not found", and _set_model's own 4001 for a dead id
+   *  ("config.set model requires a live session" — our pick passes session_id
+   *  without scope, so a stale id takes that path). */
+  const isSessionGone = (e: unknown) => /session not found|requires a live session/i.test(String(e))
+
+  /** Mint (and remember) the tab's scratch session — the Automations tab's
+   *  session.create shape. Called only when the ref is empty or the held id
+   *  proved stale (4001), so at most one scratch session is ever live. */
+  const mintScratch = async (r: (m: string, p?: any) => Promise<any>): Promise<string> => {
+    const cr: { session_id?: string } = await r('session.create', { title: 'model-pick', cols: 120, source: 'mobile' })
+    const sid = cr?.session_id
+    if (!sid) throw new Error('session.create returned no session_id')
+    scratchRef.current = sid
+    return sid
+  }
+
+  /** Tear the scratch session down after EVERY pick attempt settles (success,
+   *  confirm park, or final failure). Contract: session.close {session_id}
+   *  (contracts/sessions.py:339 SessionCloseParams(SessionParams), param name
+   *  from contracts/common.py:197); the handler (methods_session.py:1950)
+   *  pops + tears down a live session unconditionally — closing while the
+   *  tab holds no attachment is exactly what it is for — and an already-gone
+   *  id answers {closed:false}, never an error, so a double close is a no-op.
+   *  On a confirmed-dead id the ref is dropped; on a rejected close it KEEPS
+   *  the id — the session may still be live, and the next pick then either
+   *  genuinely reuses it or remints via the 4001 path. */
+  const closeScratch = (r: ((m: string, p?: any) => Promise<any>) | null) => {
+    const sid = scratchRef.current
+    if (!sid || !r) return
+    r('session.close', { session_id: sid })
+      .then((res: { closed?: boolean } | null) => { if (res && res.closed === false) scratchRef.current = '' })
+      .catch(() => { /* keep the id: maybe still live — next pick reuses or remints on 4001 */ })
+  }
+
   /** Make <model> the everywhere default: the phone's applyModel('global')
-   *  wire shape. The gateway refuses sessionless model sets (4001), so mint a
-   *  scratch session first (the Automations tab's session.create shape). */
+   *  wire shape. The gateway refuses sessionless model sets (4001), so the
+   *  pick rides the tab's ONE scratch session (agent-leak fix): reuse the ref
+   *  if it holds an id, remint only when a call fails session-not-found.
+   *  Reuse is safe — _apply_model_switch (model_switch.py) re-parses the full
+   *  "<model> --provider <slug> --global" value each call and OVERWRITES
+   *  session.model_override, so a session that already had a model set
+   *  carries nothing into the next pick. */
   const pickModel = async (p: ProviderOption, m: string, confirmed = false) => {
     const r = rpc.current
     if (!r || pickBusy) return
@@ -239,18 +299,29 @@ export default function ModelsTab({ rpc }: { rpc: RpcRef }) {
     setPickOk('')
     setConfirmPick(null)
     try {
-      const cr: { session_id?: string } = await r('session.create', { title: 'model-pick', cols: 120, source: 'mobile' })
-      const sid = cr?.session_id
-      if (!sid) throw new Error('session.create returned no session_id')
-      const res: ModelSetRes = await r('config.set', {
-        key: 'model',
-        value: buildModelValue(m, p.slug),
-        session_id: sid,
-        ...(confirmed ? { confirm_expensive_model: true } : {}),
-      })
+      const apply = (sid: string) =>
+        r('config.set', {
+          key: 'model',
+          value: buildModelValue(m, p.slug),
+          session_id: sid,
+          ...(confirmed ? { confirm_expensive_model: true } : {}),
+        }) as Promise<ModelSetRes>
+      let sid = scratchRef.current || (await mintScratch(r))
+      let res: ModelSetRes
+      try {
+        res = await apply(sid)
+      } catch (e) {
+        // Stale scratch id (previous close landed / reaper took it): remint
+        // ONCE and retry — the gateway wrote nothing on a 4001.
+        if (!isSessionGone(e)) throw e
+        sid = await mintScratch(r)
+        res = await apply(sid)
+      }
       if (res?.confirm_required && res?.confirm_message) {
         // Guarded switch (expensive model / catalog warning): the gateway
-        // wrote nothing yet — ask, then retry with the confirm flag.
+        // wrote nothing yet — ask, then retry with the confirm flag. The
+        // value string is fully self-contained, so the confirm round may run
+        // on a fresh scratch session.
         setConfirmPick({ slug: p.slug, model: m, message: String(res.confirm_message) })
         return
       }
@@ -261,6 +332,10 @@ export default function ModelsTab({ rpc }: { rpc: RpcRef }) {
       setPickErr(String(e))
     } finally {
       setPickBusy('')
+      // Every settle path tears the scratch agent down — this is the whole
+      // leak fix; no unmount fallback needed because a pick in flight during
+      // unmount still runs this finally.
+      closeScratch(rpc.current)
     }
   }
 

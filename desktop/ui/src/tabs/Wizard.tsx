@@ -8,18 +8,29 @@ export default function Wizard({ conn, cfg, rpc, onDone }: { conn: string; cfg: 
   const [providers, setProviders] = useState<Provider[]>([])
   const [slug, setSlug] = useState(''); const [key, setKey] = useState('')
   const [err, setErr] = useState('')
+  const [saving, setSaving] = useState(false)
+  /** Boot-step fallback: conn still not 'open' after 45s — offer Retry/Skip
+   *  instead of an unlabeled spinner the user can't leave. */
+  const [bootSlow, setBootSlow] = useState(false)
 
   useEffect(() => { if (step === 'boot' && conn === 'open') setStep('provider') }, [step, conn])
 
   useEffect(() => {
+    if (step !== 'boot') return
+    const t = setTimeout(() => setBootSlow(true), 45_000)
+    return () => clearTimeout(t)
+  }, [step])
+
+  useEffect(() => {
     if (step !== 'provider' || conn !== 'open') return
     rpc.current!('model.options', { include_unconfigured: true })
-      .then((r: any) => setProviders(r.providers ?? []))
+      .then((r: any) => { setProviders(r.providers ?? []); setErr('') })
       .catch((e: any) => setErr(String(e)))
   }, [step, conn])
 
   const saveKey = async () => {
-    if (!slug.trim() || !key.trim()) return
+    if (saving || !slug.trim() || !key.trim()) return
+    setSaving(true)
     setErr('')
     try {
       await rpc.current!('model.save_key', { slug: slug.trim(), api_key: key.trim() })
@@ -28,10 +39,19 @@ export default function Wizard({ conn, cfg, rpc, onDone }: { conn: string; cfg: 
       setProviders(r.providers ?? [])
       dbg('setup:key-saved', { slug })
     } catch (e) { setErr(String(e)) }
+    finally { setSaving(false) }
   }
   const finish = async () => {
     await fetch('/setup-done', { method: 'POST' }).catch(() => {})
     dbg('setup:done', {})
+    onDone()
+  }
+  /** Boot-dead-end escape: the same onDone path as finish() but WITHOUT the
+   *  /setup-done POST (setup stays marked unfinished — the wizard will offer
+   *  itself again next launch). The runtime may still be booting; App shows
+   *  its live connection state either way. */
+  const skip = () => {
+    dbg('setup:skip', {})
     onDone()
   }
   const connected = providers.some((p) => p.authenticated)
@@ -68,6 +88,15 @@ export default function Wizard({ conn, cfg, rpc, onDone }: { conn: string; cfg: 
           <h1>Starting your runtime…</h1>
           <p className="dim">Booting the agent from <code>app/hermes-src</code> in a Moch-owned home.</p>
           <p className="dim small">mode: {cfg?.mode ?? '…'} · gateway: {cfg?.wsUrl || '…'}</p>
+          {bootSlow && (
+            <>
+              <p className="dim">Still starting… the runtime may still be booting — the app will show its connection state.</p>
+              <div className="row">
+                <button className="primary" onClick={() => location.reload()}>Retry</button>
+                <button className="ghost" onClick={skip}>Skip →</button>
+              </div>
+            </>
+          )}
         </>
       )}
       {step === 'provider' && (
@@ -91,8 +120,10 @@ export default function Wizard({ conn, cfg, rpc, onDone }: { conn: string; cfg: 
               <input type="password" placeholder="API key" value={key} onChange={(e) => setKey(e.target.value)} />
             </div>
             <div className="row">
-              <button className="primary" onClick={saveKey}>Save key</button>
-              <button className="ghost" onClick={finish}>{connected ? 'Finish ✓' : 'Skip for now'}</button>
+              <button className="primary" disabled={saving || !slug.trim() || !key.trim()} onClick={saveKey}>
+                {saving ? 'Saving…' : 'Save key'}
+              </button>
+              <button className="ghost" disabled={saving} onClick={finish}>{connected ? 'Finish ✓' : 'Skip for now'}</button>
             </div>
           </div>
           {connected && <p className="dim small">Provider connected — you're set. Finish to start chatting.</p>}

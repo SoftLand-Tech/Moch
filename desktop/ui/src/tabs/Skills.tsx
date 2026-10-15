@@ -24,8 +24,11 @@ type Catalog = {
 /** B1 cold-start mount load: the first load races the socket dial. While
  *  rpc is still null, poll every 2s (30s cap); once up, run `load` — a
  *  failed load (error UI already shown) gets exactly one 5s-later retry.
- *  Returns the unmount cleanup that clears every pending timer. */
-function mountLoad(rpc: RpcRef, load: () => Promise<boolean>): () => void {
+ *  If the deadline expires with rpc still null, `onTimeout` fires instead of
+ *  parking forever — otherwise `loading` stayed true and the loading gate hid
+ *  the refresh button with no way out (deadlock). Returns the unmount
+ *  cleanup that clears every pending timer. */
+function mountLoad(rpc: RpcRef, load: () => Promise<boolean>, onTimeout?: () => void): () => void {
   const timers: ReturnType<typeof setTimeout>[] = []
   let alive = true
   let retries = 1
@@ -35,6 +38,7 @@ function mountLoad(rpc: RpcRef, load: () => Promise<boolean>): () => void {
     if (!alive) return
     if (!rpc.current) {
       if (Date.now() < deadline) later(go, 2000)
+      else onTimeout?.()
       return
     }
     void load().then((ok) => {
@@ -51,8 +55,14 @@ export default function SkillsTab({ rpc }: { rpc: RpcRef }) {
   const [commands, setCommands] = useState<Array<[string, string]>>([])
   const [skillCmds, setSkillCmds] = useState(0)
   const [loading, setLoading] = useState(true)
+  /** Deadline expired with no socket (mountLoad's onTimeout) — honest
+   *  message + retry instead of the loading gate that hid every button. */
+  const [timedOut, setTimedOut] = useState(false)
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
+  /** Bumped by the timeout view's retry to re-enter the mount poll with a
+   *  fresh 30s deadline (the effect cleanup clears the old timers). */
+  const [bootAttempt, setBootAttempt] = useState(0)
 
   const load = async (): Promise<boolean> => {
     setErr('')
@@ -60,40 +70,50 @@ export default function SkillsTab({ rpc }: { rpc: RpcRef }) {
     try {
       const r = rpc.current
       if (!r) return false
-      setSkills((await r('moch.skills.list', {})).skills ?? [])
-    } catch (e) {
-      setErr(String(e))
-      ok = false
-    }
-    try {
-      const r = rpc.current
-      if (!r) return false
-      const c: Catalog = await r('commands.catalog', {})
-      // Category pairs carry the one-liners (RN loadCatalog builds the very
-      // same bare-name → desc map from this field).
-      const descs: Record<string, string> = {}
-      for (const cat of c.categories ?? []) {
-        for (const [key, desc] of cat.pairs ?? []) {
-          const bare = key.replace(/^\//, '').toLowerCase()
-          if (desc && !descs[bare]) descs[bare] = desc
-        }
+      try {
+        setSkills((await r('moch.skills.list', {})).skills ?? [])
+      } catch (e) {
+        setErr(String(e))
+        ok = false
       }
-      setCommands(
-        Object.entries(c.commands ?? {})
-          .map(([name, def]) => {
-            const bare = name.replace(/^\//, '')
-            return [`/${bare}`, def?.description || descs[bare.toLowerCase()] || ''] as [string, string]
-          })
-          .sort((a, b) => a[0].localeCompare(b[0])),
-      )
-      setSkillCmds(c.skill_count ?? Object.keys(c.skills ?? {}).length)
-    } catch {
-      /* catalog is best-effort — the section owns its own empty state */
+      const r2 = rpc.current
+      if (!r2) return false
+      try {
+        const c: Catalog = await r2('commands.catalog', {})
+        // Category pairs carry the one-liners (RN loadCatalog builds the very
+        // same bare-name → desc map from this field).
+        const descs: Record<string, string> = {}
+        for (const cat of c.categories ?? []) {
+          for (const [key, desc] of cat.pairs ?? []) {
+            const bare = key.replace(/^\//, '').toLowerCase()
+            if (desc && !descs[bare]) descs[bare] = desc
+          }
+        }
+        setCommands(
+          Object.entries(c.commands ?? {})
+            .map(([name, def]) => {
+              const bare = name.replace(/^\//, '')
+              return [`/${bare}`, def?.description || descs[bare.toLowerCase()] || ''] as [string, string]
+            })
+            .sort((a, b) => a[0].localeCompare(b[0])),
+        )
+        setSkillCmds(c.skill_count ?? Object.keys(c.skills ?? {}).length)
+      } catch {
+        /* catalog is best-effort — the section owns its own empty state */
+      }
+      return ok
+    } finally {
+      // EVERY exit path clears loading — the early returns above used to
+      // skip this and park the loading gate forever.
+      setLoading(false)
     }
-    setLoading(false)
-    return ok
   }
-  useEffect(() => mountLoad(rpc, load), [])
+  useEffect(
+    () => mountLoad(rpc, load, () => { setTimedOut(true); setLoading(false) }),
+    // bootAttempt: the timeout retry re-enters the poll with a fresh deadline.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bootAttempt],
+  )
 
   const needle = q.trim().toLowerCase()
   const hit = (...xs: Array<string | undefined>) =>
@@ -109,6 +129,21 @@ export default function SkillsTab({ rpc }: { rpc: RpcRef }) {
 
   if (loading) {
     return <div className="page"><div className="empty"><p>loading skills…</p></div></div>
+  }
+  if (timedOut) {
+    return (
+      <div className="page">
+        <div className="empty">
+          <p>Still no gateway connection after 30s — the runtime may still be starting.</p>
+          <button
+            className="ghost"
+            onClick={() => { setTimedOut(false); setLoading(true); setBootAttempt((n) => n + 1) }}
+          >
+            retry
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (
