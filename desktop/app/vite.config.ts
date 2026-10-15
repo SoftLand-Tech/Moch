@@ -29,6 +29,7 @@ export default defineConfig({
       { find: /^expo-image-manipulator$/, replacement: r('src/shim/expoFileSystem.ts') },
       { find: /^expo-audio$/, replacement: r('src/shim/expoAudio.ts') },
       { find: /^expo-image$/, replacement: r('src/shim/expoImage.ts') },
+      { find: /^expo$/, replacement: r('src/shim/expo.ts') },
       { find: /^react-native$/, replacement: r('src/shim/reactNative.ts') },
       { find: /^react-native\//, replacement: r('src/shim/reactNative.ts') },
     ],
