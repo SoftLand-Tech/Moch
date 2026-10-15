@@ -16,11 +16,24 @@ import { useEffect, useRef, useState } from 'react'
 import type { CronJob, RpcRef } from '../types'
 import Markdown from '../Markdown'
 
-/** B1 cold-start mount load: the first load races the socket dial. While
- *  rpc is still null, poll every 2s (30s cap); once up, run `load` — a
- *  failed load (error UI already shown) gets exactly one 5s-later retry.
- *  Returns the unmount cleanup that clears every pending timer. */
-function mountLoad(rpc: RpcRef, load: () => Promise<boolean>): () => void {
+/** B1 cold-start mount load: the first load races the socket dial — App
+ *  assigns rpcRef.current synchronously inside dial() BEFORE connect(), so
+ *  an early load hard-rejects ('gateway not connected') until the socket
+ *  opens. A connection-class failure therefore keeps the 2s cadence for
+ *  the whole 30s window (a retry that starts clears the error banner in
+ *  load, and only a new failure re-arms it); any other failure keeps the
+ *  single 5s-later retry. Returns the unmount cleanup that clears every
+ *  pending timer. */
+type LoadResult = { ok: boolean; err?: unknown }
+
+/** Connection-type failure (Models.tsx isConnErr parity): rpc not attached,
+ *  or the client's own not-connected/closed/connect errors. */
+function isConnErr(rpc: RpcRef, e: unknown): boolean {
+  if (!rpc.current) return true
+  return /not connected|websocket|socket|superseded|connect|closed|econn|network/i.test(String(e))
+}
+
+function mountLoad(rpc: RpcRef, load: () => Promise<LoadResult>): () => void {
   const timers: ReturnType<typeof setTimeout>[] = []
   let alive = true
   let retries = 1
@@ -32,13 +45,33 @@ function mountLoad(rpc: RpcRef, load: () => Promise<boolean>): () => void {
       if (Date.now() < deadline) later(go, 2000)
       return
     }
-    void load().then((ok) => {
-      if (alive && !ok && retries > 0) { retries -= 1; later(go, 5000) }
+    void load().then((res) => {
+      if (!alive || res.ok) return
+      if (isConnErr(rpc, res.err) && Date.now() < deadline) { later(go, 2000); return }
+      if (retries > 0) { retries -= 1; later(go, 5000) }
     })
   }
   go()
   return () => { alive = false; for (const t of timers) clearTimeout(t) }
 }
+
+/** #3: cron.manage wraps the tool JSON in an RPC SUCCESS even when the tool
+ *  failed — the gateway does `_ok(rid, json.loads(cronjob(...)))`
+ *  (methods_tools.py) and tools/registry.py tool_error emits
+ *  `{"success": false, "error": ...}`. So a resolved call can still be a
+ *  failure: read the envelope before toasting. */
+const cronEnvelopeErr = (res: unknown): string | null => {
+  if (res && typeof res === 'object' && (res as Record<string, unknown>).success === false) {
+    return String((res as Record<string, unknown>).error ?? 'cron.manage reported failure')
+  }
+  return null
+}
+
+/** #4: slash.exec RESOLVES with the printed output even on failure — /cron
+ *  CLI handlers mark errors "(x_x) Failed to … job: …"
+ *  (hermes_cli/cli_commands_mixin.py). */
+const isSlashFail = (out: string): boolean =>
+  /\(x_x\)|failed to (update|create|run|pause|resume|remove)/i.test(out)
 
 /** A1: does this failure mean the reused session id no longer exists
  *  (gateway restart / expired session)? Phone parity: chat.ts matches
@@ -105,6 +138,10 @@ export default function AutomationsTab({ rpc }: { rpc: RpcRef }) {
   /** A1: the ONE shared 'automation' session for run-now/edit (reused
    *  across commands; recreated only when missing or dead). */
   const autoSession = useRef<string | null>(null)
+  /** #5: mutex around the ensure-session + command sequence (saveForm and
+   *  run-now): without it two concurrent paths can both see
+   *  autoSession===null and create duplicate 'automation' sessions. */
+  const cronBusy = useRef(false)
   /** B2: armed-delete confirm timers, cleared on unmount. */
   const armTimers = useRef<ReturnType<typeof setTimeout>[]>([])
   useEffect(() => () => { for (const t of armTimers.current) clearTimeout(t) }, [])
@@ -114,13 +151,13 @@ export default function AutomationsTab({ rpc }: { rpc: RpcRef }) {
     return res?.jobs ?? []
   }
 
-  const load = async (): Promise<boolean> => {
-    const r = rpc.current; if (!r) return false
+  const load = async (): Promise<LoadResult> => {
+    const r = rpc.current; if (!r) return { ok: false, err: new Error('gateway not connected') }
     setErr('')
     try {
       setJobs(await listJobs())
-      return true
-    } catch (e) { setErr(String(e)); return false }
+      return { ok: true }
+    } catch (e) { setErr(String(e)); return { ok: false, err: e } }
   }
   useEffect(() => mountLoad(rpc, load), [])
 
@@ -166,24 +203,38 @@ export default function AutomationsTab({ rpc }: { rpc: RpcRef }) {
 
   const withBusy = async (jobId: string, fn: () => Promise<void>) => {
     setBusyJob(jobId); setErr('')
-    try { await fn() } catch (e) { setErr(String(e)) } finally { setBusyJob(null) }
+    try { await fn() } catch (e) { setErr(e instanceof Error ? e.message : String(e)) } finally { setBusyJob(null) }
   }
 
   const togglePause = (j: CronJob) => void withBusy(j.job_id, async () => {
     const action = j.enabled === false ? 'resume' : 'pause'
-    await rpc.current!('cron.manage', { action, name: j.job_id })
+    const res: any = await rpc.current!('cron.manage', { action, name: j.job_id })
+    // #3: a tool failure resolves as RPC success ({success:false, error}) —
+    // surface the real error, never the green status toast.
+    const fail = cronEnvelopeErr(res)
+    if (fail) throw new Error(`${action} failed: ${fail}`)
     setStatus(action === 'pause' ? `Paused “${j.name ?? j.job_id}”` : `Resumed “${j.name ?? j.job_id}”`)
     await load()
   })
 
   const runNow = (j: CronJob) => void withBusy(j.job_id, async () => {
-    const out = await cronSlash(`/cron run ${j.job_id}`)
-    setStatus(out.split('\n')[0] || `Queued “${j.name ?? j.job_id}” to run`)
-    await refreshQuiet() // A2: last_status / next-run pills update right away
+    // #5: never race saveForm (or another run) into the shared session.
+    if (cronBusy.current) return
+    cronBusy.current = true
+    try {
+      const out = await cronSlash(`/cron run ${j.job_id}`)
+      // #4: slash.exec resolves with printed output — a failure carries the
+      // "(x_x) Failed to …" marker and must not read as a green status.
+      if (isSlashFail(out)) throw new Error(out.split('\n')[0] || `Failed to run “${j.name ?? j.job_id}”`)
+      setStatus(out.split('\n')[0] || `Queued “${j.name ?? j.job_id}” to run`)
+      await refreshQuiet() // A2: last_status / next-run pills update right away
+    } finally { cronBusy.current = false }
   })
 
   const remove = (j: CronJob) => void withBusy(j.job_id, async () => {
-    await rpc.current!('cron.manage', { action: 'remove', name: j.job_id })
+    const res: any = await rpc.current!('cron.manage', { action: 'remove', name: j.job_id })
+    const fail = cronEnvelopeErr(res) // #3: envelope, not the RPC promise
+    if (fail) throw new Error(`remove failed: ${fail}`)
     setStatus(`Deleted “${j.name ?? j.job_id}”`)
     await load()
   })
@@ -219,7 +270,7 @@ export default function AutomationsTab({ rpc }: { rpc: RpcRef }) {
   }
 
   const saveForm = async () => {
-    if (form.saving) return
+    if (form.saving || cronBusy.current) return // #5: one session-touching action at a time
     const schedule = form.schedule.trim()
     const prompt = form.prompt.trim()
     const name = form.name.trim()
@@ -229,22 +280,33 @@ export default function AutomationsTab({ rpc }: { rpc: RpcRef }) {
       setErr('Name, schedule and prompt are all needed.')
       return
     }
+    cronBusy.current = true // #5: guard the ensure-session + command sequence
     setForm({ ...form, saving: true }); setErr('')
     try {
       if (form.jobId) {
         // /cron edit has no --name; schedule + prompt are the editable levers.
         const promptFlag = unchanged ? '' : ` --prompt ${shq(prompt)}`
         const out = await cronSlash(`/cron edit ${form.jobId} --schedule ${shq(schedule)}${promptFlag}`)
+        // #4: slash.exec RESOLVES with the printed output — a failed edit
+        // answers "(x_x) Failed to update job: …" and must not read as a
+        // success. Throwing keeps the form open with the user's edits.
+        if (isSlashFail(out)) throw new Error(out.split('\n')[0] || 'Failed to update job')
         setStatus(out.split('\n')[0] || 'Updated')
       } else {
-        await rpc.current!('cron.manage', { action: 'add', name, schedule, prompt })
+        const res: any = await rpc.current!('cron.manage', { action: 'add', name, schedule, prompt })
+        // #3: a tool failure resolves as RPC success ({success:false, error}).
+        const fail = cronEnvelopeErr(res)
+        if (fail) throw new Error(`create failed: ${fail}`)
         setStatus(`Created “${name}”`)
       }
       setForm(ADD_FORM)
       await load()
     } catch (e) {
-      setErr(String(e))
+      // Failure keeps the form open with the edits intact (no ADD_FORM reset).
+      setErr(e instanceof Error ? e.message : String(e))
       setForm((f) => (f.saving ? { ...f, saving: false } : f))
+    } finally {
+      cronBusy.current = false
     }
   }
 

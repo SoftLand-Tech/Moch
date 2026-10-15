@@ -53,11 +53,24 @@ const runPill = (r: Run): string => {
   return 'pill dim'
 }
 
-/** B1 cold-start mount load: the first load races the socket dial. While
- *  rpc is still null, poll every 2s (30s cap); once up, run `load` — a
- *  failed load (error UI already shown) gets exactly one 5s-later retry.
- *  Returns the unmount cleanup that clears every pending timer. */
-function mountLoad(rpc: RpcRef, load: () => Promise<boolean>): () => void {
+/** B1 cold-start mount load: the first load races the socket dial — App
+ *  assigns rpcRef.current synchronously inside dial() BEFORE connect(), so
+ *  an early load hard-rejects ('gateway not connected') until the socket
+ *  opens. A connection-class failure therefore keeps the 2s cadence for
+ *  the whole 30s window (a retry that starts clears the error banner in
+ *  load, and only a new failure re-arms it); any other failure keeps the
+ *  single 5s-later retry. Returns the unmount cleanup that clears every
+ *  pending timer. */
+type LoadResult = { ok: boolean; err?: unknown }
+
+/** Connection-type failure (Models.tsx isConnErr parity): rpc not attached,
+ *  or the client's own not-connected/closed/connect errors. */
+function isConnErr(rpc: RpcRef, e: unknown): boolean {
+  if (!rpc.current) return true
+  return /not connected|websocket|socket|superseded|connect|closed|econn|network/i.test(String(e))
+}
+
+function mountLoad(rpc: RpcRef, load: () => Promise<LoadResult>): () => void {
   const timers: ReturnType<typeof setTimeout>[] = []
   let alive = true
   let retries = 1
@@ -69,8 +82,10 @@ function mountLoad(rpc: RpcRef, load: () => Promise<boolean>): () => void {
       if (Date.now() < deadline) later(go, 2000)
       return
     }
-    void load().then((ok) => {
-      if (alive && !ok && retries > 0) { retries -= 1; later(go, 5000) }
+    void load().then((res) => {
+      if (!alive || res.ok) return
+      if (isConnErr(rpc, res.err) && Date.now() < deadline) { later(go, 2000); return }
+      if (retries > 0) { retries -= 1; later(go, 5000) }
     })
   }
   go()
@@ -102,13 +117,13 @@ export default function CrewTab({ rpc }: { rpc: RpcRef }) {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [busyTask, setBusyTask] = useState<string | null>(null)
 
-  const load = async (): Promise<boolean> => {
-    const r = rpc.current; if (!r) return false
+  const load = async (): Promise<LoadResult> => {
+    const r = rpc.current; if (!r) return { ok: false, err: new Error('gateway not connected') }
     setErr('')
     try {
       const kt: any = await r('moch.kanban.tasks', { limit: 120 })
       setTasks(kt.tasks ?? [])
-    } catch (e) { setErr(String(e)); return false }
+    } catch (e) { setErr(String(e)); return { ok: false, err: e } }
     // The ledger needs the fleet runtime armed — the board alone is still
     // useful, so a timeline failure is silent (RN parity).
     try {
@@ -121,7 +136,7 @@ export default function CrewTab({ rpc }: { rpc: RpcRef }) {
     } catch { /* picker falls back to Moch alone */ }
     const fs: FleetStatus | null = await r<FleetStatus | null>('moch.fleet.status', {}).catch(() => null)
     setFrozenStatus(new Set((fs?.profiles ?? []).filter((p) => p.frozen).map((p) => p.name)))
-    return true
+    return { ok: true }
   }
   useEffect(() => mountLoad(rpc, load), [])
 

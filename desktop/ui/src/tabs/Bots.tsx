@@ -12,11 +12,24 @@ import {
   type CreateChecklist, type FleetProfile, type FleetStatus, type LaunchSkill, type RpcRef, type SeedResult,
 } from '../types'
 
-/** B1 cold-start mount load: the first load races the socket dial. While
- *  rpc is still null, poll every 2s (30s cap); once up, run `load` — a
- *  failed load (error UI already shown) gets exactly one 5s-later retry.
- *  Returns the unmount cleanup that clears every pending timer. */
-function mountLoad(rpc: RpcRef, load: () => Promise<boolean>): () => void {
+/** B1 cold-start mount load: the first load races the socket dial — App
+ *  assigns rpcRef.current synchronously inside dial() BEFORE connect(), so
+ *  an early load hard-rejects ('gateway not connected') until the socket
+ *  opens. A connection-class failure therefore keeps the 2s cadence for
+ *  the whole 30s window (a retry that starts clears the error banner in
+ *  load, and only a new failure re-arms it); any other failure keeps the
+ *  single 5s-later retry. Returns the unmount cleanup that clears every
+ *  pending timer. */
+type LoadResult = { ok: boolean; err?: unknown }
+
+/** Connection-type failure (Models.tsx isConnErr parity): rpc not attached,
+ *  or the client's own not-connected/closed/connect errors. */
+function isConnErr(rpc: RpcRef, e: unknown): boolean {
+  if (!rpc.current) return true
+  return /not connected|websocket|socket|superseded|connect|closed|econn|network/i.test(String(e))
+}
+
+function mountLoad(rpc: RpcRef, load: () => Promise<LoadResult>): () => void {
   const timers: ReturnType<typeof setTimeout>[] = []
   let alive = true
   let retries = 1
@@ -28,8 +41,10 @@ function mountLoad(rpc: RpcRef, load: () => Promise<boolean>): () => void {
       if (Date.now() < deadline) later(go, 2000)
       return
     }
-    void load().then((ok) => {
-      if (alive && !ok && retries > 0) { retries -= 1; later(go, 5000) }
+    void load().then((res) => {
+      if (!alive || res.ok) return
+      if (isConnErr(rpc, res.err) && Date.now() < deadline) { later(go, 2000); return }
+      if (retries > 0) { retries -= 1; later(go, 5000) }
     })
   }
   go()
@@ -107,8 +122,8 @@ export default function BotsTab({ rpc, onChat }: { rpc: RpcRef; onChat: (name: s
   /** Profile name armed for a second-click delete confirm. */
   const [confirmDel, setConfirmDel] = useState<string | null>(null)
 
-  const load = async (): Promise<boolean> => {
-    const r = rpc.current; if (!r) return false
+  const load = async (): Promise<LoadResult> => {
+    const r = rpc.current; if (!r) return { ok: false, err: new Error('gateway not connected') }
     setErr('')
     try {
       const lst: any = await r('profiles.list', {})
@@ -116,8 +131,8 @@ export default function BotsTab({ rpc, onChat }: { rpc: RpcRef; onChat: (name: s
       setProfiles(rows)
       const st: FleetStatus | null = await r<FleetStatus | null>('moch.fleet.status', {}).catch(() => null)
       setStatus(st)
-      return true
-    } catch (e) { setErr(String(e)); return false }
+      return { ok: true }
+    } catch (e) { setErr(String(e)); return { ok: false, err: e } }
   }
   useEffect(() => mountLoad(rpc, load), [])
 
@@ -132,7 +147,12 @@ export default function BotsTab({ rpc, onChat }: { rpc: RpcRef; onChat: (name: s
     if (!creating) return
     setChecklist(loadCreateDefaults())
     if (!skillsLoaded) {
-      rpc.current!('moch.skills.list', {})
+      // Pre-connect (rpc still null → client not ready) the raw call would
+      // throw a TypeError and unmount the tree — guard like mountLoad and
+      // leave skillsLoaded false so the next open retries.
+      const r = rpc.current
+      if (!r) return
+      r('moch.skills.list', {})
         .then((res: { skills?: LaunchSkill[] }) => setSkillsList(res.skills ?? []))
         .catch(() => setSkillsList([]))
         .finally(() => setSkillsLoaded(true))
@@ -235,6 +255,9 @@ export default function BotsTab({ rpc, onChat }: { rpc: RpcRef; onChat: (name: s
           Bot created, but some checklist items weren't copied (missing, or already existed). Everything else is in place.
         </div>
       )}
+      {/* Page-level (not inside the form): a seed failure is recorded AFTER
+          the form has closed below — in-form it would vanish instantly. */}
+      {createErr && <div className="err">{createErr}</div>}
 
       {creating && (
         <div className="card form">
@@ -287,7 +310,6 @@ export default function BotsTab({ rpc, onChat }: { rpc: RpcRef; onChat: (name: s
             </div>
           )}
 
-          {createErr && <div className="err">{createErr}</div>}
           <div className="row">
             <button className="primary" onClick={create} disabled={!desc.trim() || busy === 'create'}>
               {busy === 'create' ? 'Creating…' : 'Create bot'}
@@ -309,13 +331,18 @@ export default function BotsTab({ rpc, onChat }: { rpc: RpcRef; onChat: (name: s
         const gateHeld = st?.gateHeld ?? p.gateHeld
         const isBusy = busy === p.name
         const armed = confirmDel === p.name
+        // profiles.list sends `model` as a PLAIN STRING (methods_profiles.py
+        // row shape); types.ts's {default} object is stale — read both
+        // defensively instead of editing the shared type.
+        const rawModel = p.model as unknown as string | { default?: string } | null | undefined
+        const model = typeof rawModel === 'string' ? rawModel : rawModel?.default
         return (
           <div key={p.name} className="card bot">
             <div className="row">
               <strong>{p.name}</strong>
               {frozen && <span className="pill warn">frozen</span>}
               {gateHeld && <span className="pill warn">gate held</span>}
-              {p.model?.default && <span className="pill dim">{p.model.default}</span>}
+              {model && <span className="pill dim">{model}</span>}
               <span className="spacer" />
               <button className="ghost" disabled={!!busy || frozen}
                 onClick={() => onChat(p.name)}>
