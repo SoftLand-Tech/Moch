@@ -1,3 +1,4 @@
 fn main() {
-    tauri_build::build()
+    println!("cargo:rerun-if-changed=../web-ui");
+    tauri_build::build();
 }

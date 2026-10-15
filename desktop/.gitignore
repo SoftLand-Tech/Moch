@@ -18,3 +18,5 @@ runtime-home/
 .setup.json
 .chrome-profile/
 .probe.cjs
+.shell-err.log
+.tmp/

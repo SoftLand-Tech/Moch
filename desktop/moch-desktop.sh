@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
-# Moch Desktop — release launcher (runs from the repo worktree).
+# Moch Desktop — launcher (runs from the repo worktree).
 cd "$(dirname "$0")"
-exec ./src-tauri/target/release/moch-desktop "$@"
+BIN="./src-tauri/target/release/moch-desktop"
+if [ ! -f "$BIN" ] || [ "./src-tauri/target/debug/moch-desktop" -nt "$BIN" ]; then
+  BIN="./src-tauri/target/debug/moch-desktop"
+fi
+exec "$BIN" "$@"

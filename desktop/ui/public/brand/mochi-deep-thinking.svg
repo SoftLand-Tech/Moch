@@ -41,7 +41,6 @@
     </filter>
   </defs>
 
-  <rect id="background" width="1254" height="1254" fill="#000000"/>
 
   <g id="mochi" transform="rotate(3 627 880)">
     <path id="sprout" d="M 780 375 C 820 410, 835 365, 890 350 C 945 350, 972 310, 960 286 C 958 264, 940 260, 910 255 C 872 255, 832 275, 806 310 C 770 348, 772 370, 780 375 Z" fill="url(#sproutGrad)"/>

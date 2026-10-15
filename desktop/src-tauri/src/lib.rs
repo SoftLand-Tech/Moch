@@ -10,7 +10,7 @@
 //!  3. OPEN the window on that origin. The UI talks to hermes directly
 //!     over ws://127.0.0.1 using the app's own TS protocol stack.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -40,6 +40,7 @@ fn desktop_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
+#[allow(dead_code)]
 fn mint_token() -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -259,7 +260,18 @@ fn start_static_server(cfg: serde_json::Value, assets: Box<dyn tauri::Assets<tau
                 let rel = path.trim_start_matches('/').to_string();
                 let key: &str = if rel.is_empty() { "index.html" } else { &rel };
                 let ik = key.into();
-                let bytes = assets.get(&ik).or_else(|| assets.get(&"index.html".into())).map(|b| b.into_owned());
+                let bytes = assets
+                    .get(&ik)
+                    .or_else(|| assets.get(&"index.html".into()))
+                    .map(|b| b.into_owned())
+                    .or_else(|| {
+                        let f = desktop_dir().join("web-ui").join(key);
+                        if f.is_file() {
+                            std::fs::read(f).ok()
+                        } else {
+                            std::fs::read(desktop_dir().join("web-ui/index.html")).ok()
+                        }
+                    });
                 if let Some(bytes) = bytes {
                     let ct = content_type(std::path::Path::new(key));
                     let _ = request.respond(
@@ -346,8 +358,8 @@ pub fn run() {
         .setup(move |app| {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title("Moch")
-                .inner_size(480.0, 900.0)
-                .min_inner_size(420.0, 640.0)
+                .inner_size(1280.0, 840.0)
+                .min_inner_size(960.0, 600.0)
                 .resizable(true)
                 .center()
                 .build()?;

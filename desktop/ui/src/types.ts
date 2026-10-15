@@ -8,7 +8,7 @@ export type Cfg = { wsUrl: string; token: string; mode: string; home?: string; l
 export type Tab = 'chat' | 'bots' | 'crew' | 'automations' | 'skills' | 'models' | 'run'
 
 /** The RPC handle App passes into every tab (the gateway client's request fn). */
-export type RpcRef = { current: ((m: string, p?: any) => Promise<any>) | null }
+export type RpcRef = { current: (<T = unknown>(m: string, p?: Record<string, unknown>) => Promise<T>) | null }
 
 export type Block = { id: number; kind: 'user' | 'assistant' | 'thinking' | 'tool' | 'status'; text: string; live?: boolean; meta?: string }
 export type SessionRow = {
@@ -82,8 +82,22 @@ export function relTime(ts?: number): string {
 export function dbg(what: string, extra: Record<string, unknown> = {}) {
   fetch('/dbg', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ t: Date.now(), what, ...extra }) }).catch(() => {})
 }
-export const ev = (e: unknown): { type: string; session_id?: string; payload: any } => e as any
-
+export type GatewayEvent = {
+  type: string
+  session_id?: string
+  payload?: Record<string, unknown>
+}
+export function ev(e: unknown): GatewayEvent {
+  if (e && typeof e === 'object') {
+    const o = e as Record<string, unknown>
+    return {
+      type: typeof o.type === 'string' ? o.type : '',
+      session_id: typeof o.session_id === 'string' ? o.session_id : undefined,
+      payload: (o.payload && typeof o.payload === 'object' ? o.payload : o) as Record<string, unknown>,
+    }
+  }
+  return { type: '' }
+}
 /* ══ Round 5 — Crew + Automations (phone parity) ══ */
 
 /** moch.runs.timeline row — the merged kanban/cron/delegation run ledger
