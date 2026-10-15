@@ -1,3 +1,27 @@
+> ## SUPERSEDED — 2026-10-15. Do not implement this document.
+>
+> This file records the **abandoned step-1 approach**: wrapping the phone's
+> Expo web export in a **420x860 phone-shaped window** running **linked mode**
+> through the relay. It contradicts the current app and the current plan on
+> the fundamentals:
+>
+> - The desktop now runs the **REAL app screens** (`app/app/**`) and the real
+>   `app/src/lib` logic in the Tauri webview via **react-native-web**, against
+>   the **local runtime** — not a web export in a phone-sized window.
+> - The desktop owns only the native shell, a desktop presentation layer, and
+>   the local runtime + packaging; **no business/protocol logic may live in
+>   the desktop tree**.
+> - `desktop/ui/` — the hand-written parallel UI built after this doc — is
+>   **frozen** and is being migrated screen by screen into the shared core.
+> - Its window assumptions (420x860, min 360), its linked-mode framing, and
+>   its line references no longer match this branch.
+>
+> The authoritative document is
+> [desktop/ARCHITECTURE.md](desktop/ARCHITECTURE.md) (decision, layers,
+> P0-P6 roadmap); the parity debt is tracked in
+> [desktop/PARITY-BACKLOG.md](desktop/PARITY-BACKLOG.md). The body below is
+> kept verbatim for history.
+
 # FEATURE-DESKTOP-TAURI.md — Moch Desktop (Tauri 2), step 1: the proof
 
 > Branch `desktop-tauri` (worktree `worktrees/desktop-tauri`), off `main` @

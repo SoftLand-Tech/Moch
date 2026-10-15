@@ -5,6 +5,46 @@ The desktop twin of the phone's embedded mode: the app runs its OWN agent
 runtime (the fork, in a Moch-owned home) and a fresh web UI talks to it
 over loopback with the app's TypeScript protocol stack, imported verbatim.
 
+## Status (2026-10-15)
+
+This README describes `desktop/ui` — the hand-written fork of the phone UI.
+That fork is now **frozen** (see [ui/FROZEN.md](ui/FROZEN.md)) and the
+desktop is moving to the phone app's real screens rendered via
+react-native-web. The authoritative document is
+[ARCHITECTURE.md](ARCHITECTURE.md); the parity debt is in
+[PARITY-BACKLOG.md](PARITY-BACKLOG.md). Until they land, read the claims
+below with these corrections:
+
+- **"token redacted from logs + config" (Rounds table, audit row) is false
+  for config.** Logs: true — the shell filters token-bearing lines
+  (`line_carries_token` in `src-tauri/src/lib.rs`). Config: false — the shell
+  serves the live token verbatim to any local reader at
+  `GET /moch-config.json` (handler in `src-tauri/src/lib.rs:557-563`; the
+  served `cfg` embeds `"token": token`, `src-tauri/src/lib.rs:702-705`).
+  That endpoint is how the UI boots; "redacted from config" is not what the
+  code does.
+- **`MOCH_SELFTEST=1` — "autonomous round trip on every tab's RPCs"
+  overstates it.** The selftest effect (`ui/src/App.tsx:261-291`) covers
+  only 7 read RPCs (`session.list`, `profiles.list`, `moch.fleet.status`,
+  `moch.skills.list`, `cron.manage`, `moch.kanban.tasks`, `model.options`,
+  at `App.tsx:277-283`) plus `session.create` + one `prompt.submit`
+  (`App.tsx:284-286`). Nothing from the Bots/Crew/Automations/Skills/Browser
+  write paths, and `desktop/.dbg.log` currently contains 0 selftest lines
+  (checked 2026-10-15).
+- **"The UI is EMBEDDED in the binary" is true only for fresh `target/`
+  builds.** The SHIPPED deb/AppImage embed a stale bundle: the AppImage
+  binary contains `index-Bxg3r1Gs.js` (via `strings`), while today's build
+  is `web-ui/assets/index-DgiOoQ5x.js`. Rebuild before shipping anything.
+- **The deb/AppImage cannot run without the repo checkout.** "The lightweight
+  installable" oversells it: the bundles contain only the binary — no
+  `runtime.py`, no hermes fork, no Python — and runtime discovery falls back
+  to machine-baked absolute paths (e.g. the hardcoded venv python in
+  `src-tauri/src/lib.rs` python discovery). "Known limits" below says this;
+  the "Bundles (built)" framing does not.
+- **`desktop/ui` is frozen.** The Rounds table below is the fork's history,
+  not the product roadmap; new work goes to the shared layer
+  ([ARCHITECTURE.md](ARCHITECTURE.md) hard rule).
+
 ```
 ┌ Tauri shell (Rust) ────────────────────────────────────────────────┐
 │ RUNTIME: spawns the phone's own gateway module as a supervised     │
