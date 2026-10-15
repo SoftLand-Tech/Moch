@@ -21,6 +21,30 @@ type Catalog = {
   categories?: Array<{ name?: string; pairs: Array<[string, string]> }>
 }
 
+/** B1 cold-start mount load: the first load races the socket dial. While
+ *  rpc is still null, poll every 2s (30s cap); once up, run `load` — a
+ *  failed load (error UI already shown) gets exactly one 5s-later retry.
+ *  Returns the unmount cleanup that clears every pending timer. */
+function mountLoad(rpc: RpcRef, load: () => Promise<boolean>): () => void {
+  const timers: ReturnType<typeof setTimeout>[] = []
+  let alive = true
+  let retries = 1
+  const deadline = Date.now() + 30_000
+  const later = (fn: () => void, ms: number) => { if (alive) timers.push(setTimeout(fn, ms)) }
+  const go = () => {
+    if (!alive) return
+    if (!rpc.current) {
+      if (Date.now() < deadline) later(go, 2000)
+      return
+    }
+    void load().then((ok) => {
+      if (alive && !ok && retries > 0) { retries -= 1; later(go, 5000) }
+    })
+  }
+  go()
+  return () => { alive = false; for (const t of timers) clearTimeout(t) }
+}
+
 export default function SkillsTab({ rpc }: { rpc: RpcRef }) {
   const [skills, setSkills] = useState<LaunchSkill[]>([])
   /** ["/name", one-line description ('' when the gateway has none)] */
@@ -30,39 +54,46 @@ export default function SkillsTab({ rpc }: { rpc: RpcRef }) {
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
 
-  useEffect(() => {
-    ;(async () => {
-      try {
-        setSkills((await rpc.current!('moch.skills.list', {})).skills ?? [])
-      } catch (e) {
-        setErr(String(e))
-      }
-      try {
-        const c: Catalog = await rpc.current!('commands.catalog', {})
-        // Category pairs carry the one-liners (RN loadCatalog builds the very
-        // same bare-name → desc map from this field).
-        const descs: Record<string, string> = {}
-        for (const cat of c.categories ?? []) {
-          for (const [key, desc] of cat.pairs ?? []) {
-            const bare = key.replace(/^\//, '').toLowerCase()
-            if (desc && !descs[bare]) descs[bare] = desc
-          }
+  const load = async (): Promise<boolean> => {
+    setErr('')
+    let ok = true
+    try {
+      const r = rpc.current
+      if (!r) return false
+      setSkills((await r('moch.skills.list', {})).skills ?? [])
+    } catch (e) {
+      setErr(String(e))
+      ok = false
+    }
+    try {
+      const r = rpc.current
+      if (!r) return false
+      const c: Catalog = await r('commands.catalog', {})
+      // Category pairs carry the one-liners (RN loadCatalog builds the very
+      // same bare-name → desc map from this field).
+      const descs: Record<string, string> = {}
+      for (const cat of c.categories ?? []) {
+        for (const [key, desc] of cat.pairs ?? []) {
+          const bare = key.replace(/^\//, '').toLowerCase()
+          if (desc && !descs[bare]) descs[bare] = desc
         }
-        setCommands(
-          Object.entries(c.commands ?? {})
-            .map(([name, def]) => {
-              const bare = name.replace(/^\//, '')
-              return [`/${bare}`, def?.description || descs[bare.toLowerCase()] || ''] as [string, string]
-            })
-            .sort((a, b) => a[0].localeCompare(b[0])),
-        )
-        setSkillCmds(c.skill_count ?? Object.keys(c.skills ?? {}).length)
-      } catch {
-        /* catalog is best-effort — the section owns its own empty state */
       }
-      setLoading(false)
-    })()
-  }, [])
+      setCommands(
+        Object.entries(c.commands ?? {})
+          .map(([name, def]) => {
+            const bare = name.replace(/^\//, '')
+            return [`/${bare}`, def?.description || descs[bare.toLowerCase()] || ''] as [string, string]
+          })
+          .sort((a, b) => a[0].localeCompare(b[0])),
+      )
+      setSkillCmds(c.skill_count ?? Object.keys(c.skills ?? {}).length)
+    } catch {
+      /* catalog is best-effort — the section owns its own empty state */
+    }
+    setLoading(false)
+    return ok
+  }
+  useEffect(() => mountLoad(rpc, load), [])
 
   const needle = q.trim().toLowerCase()
   const hit = (...xs: Array<string | undefined>) =>
@@ -85,6 +116,7 @@ export default function SkillsTab({ rpc }: { rpc: RpcRef }) {
       <div className="pagehead">
         <h2>Skills</h2>
         <span className="pill dim">{commands.length} commands · {skillCmds} skills</span>
+        <button className="ghost" onClick={() => void load()}>refresh</button>
       </div>
 
       <div className="card form">

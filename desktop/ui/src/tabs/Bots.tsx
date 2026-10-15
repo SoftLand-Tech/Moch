@@ -6,11 +6,35 @@
  *   after profiles.create), freeze/unfreeze (moch.fleet.freeze), two-click
  *   delete (moch.profiles.delete). Per-step errors, never fatal seeding.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   DEFAULT_CHECKLIST, seedHasSkips,
   type CreateChecklist, type FleetProfile, type FleetStatus, type LaunchSkill, type RpcRef, type SeedResult,
 } from '../types'
+
+/** B1 cold-start mount load: the first load races the socket dial. While
+ *  rpc is still null, poll every 2s (30s cap); once up, run `load` — a
+ *  failed load (error UI already shown) gets exactly one 5s-later retry.
+ *  Returns the unmount cleanup that clears every pending timer. */
+function mountLoad(rpc: RpcRef, load: () => Promise<boolean>): () => void {
+  const timers: ReturnType<typeof setTimeout>[] = []
+  let alive = true
+  let retries = 1
+  const deadline = Date.now() + 30_000
+  const later = (fn: () => void, ms: number) => { if (alive) timers.push(setTimeout(fn, ms)) }
+  const go = () => {
+    if (!alive) return
+    if (!rpc.current) {
+      if (Date.now() < deadline) later(go, 2000)
+      return
+    }
+    void load().then((ok) => {
+      if (alive && !ok && retries > 0) { retries -= 1; later(go, 5000) }
+    })
+  }
+  go()
+  return () => { alive = false; for (const t of timers) clearTimeout(t) }
+}
 
 /** §2.7 starter templates (phone fleet.tsx): tappable job seeds — zero typing. */
 const STARTERS: { label: string; job: string }[] = [
@@ -83,17 +107,24 @@ export default function BotsTab({ rpc, onChat }: { rpc: RpcRef; onChat: (name: s
   /** Profile name armed for a second-click delete confirm. */
   const [confirmDel, setConfirmDel] = useState<string | null>(null)
 
-  const load = async () => {
-    const r = rpc.current; if (!r) return
+  const load = async (): Promise<boolean> => {
+    const r = rpc.current; if (!r) return false
     setErr('')
     try {
-      const lst = await r('profiles.list', {})
+      const lst: any = await r('profiles.list', {})
       const rows = lst.profiles ?? lst.items ?? (Array.isArray(lst) ? lst : [])
       setProfiles(rows)
-      setStatus(await r('moch.fleet.status', {}).catch(() => null))
-    } catch (e) { setErr(String(e)) }
+      const st: FleetStatus | null = await r<FleetStatus | null>('moch.fleet.status', {}).catch(() => null)
+      setStatus(st)
+      return true
+    } catch (e) { setErr(String(e)); return false }
   }
-  useEffect(() => { if (rpc.current) load() }, [])
+  useEffect(() => mountLoad(rpc, load), [])
+
+  // B2: a disarmed (unmounted) tab must not fire its stale confirm reset —
+  // track the arm timers and clear them all on unmount.
+  const armTimers = useRef<ReturnType<typeof setTimeout>[]>([])
+  useEffect(() => () => { for (const t of armTimers.current) clearTimeout(t) }, [])
 
   // Open create → restore last checklist + fetch launch skills (never blocks:
   // older gateways answer nothing and the picker renders its empty state).
@@ -118,7 +149,7 @@ export default function BotsTab({ rpc, onChat }: { rpc: RpcRef; onChat: (name: s
     setBusy('create'); setCreateErr(''); setPartial(false)
     // Step 1 — the bot itself (§2.8: mirror the launch MODEL key only).
     try {
-      const res = await rpc.current!('profiles.create', {
+      const res: any = await rpc.current!('profiles.create', {
         name: botName,
         description: desc.trim(),
         soul: soul.trim() || soulDraft(desc, botName),
@@ -178,7 +209,7 @@ export default function BotsTab({ rpc, onChat }: { rpc: RpcRef; onChat: (name: s
 
   const armDelete = (name: string) => {
     setConfirmDel(name)
-    setTimeout(() => setConfirmDel((c) => (c === name ? null : c)), 4000)
+    armTimers.current.push(setTimeout(() => setConfirmDel((c) => (c === name ? null : c)), 4000))
   }
 
   const waiting = status?.queue?.waiting ?? []

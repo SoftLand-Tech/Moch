@@ -53,6 +53,39 @@ const runPill = (r: Run): string => {
   return 'pill dim'
 }
 
+/** B1 cold-start mount load: the first load races the socket dial. While
+ *  rpc is still null, poll every 2s (30s cap); once up, run `load` — a
+ *  failed load (error UI already shown) gets exactly one 5s-later retry.
+ *  Returns the unmount cleanup that clears every pending timer. */
+function mountLoad(rpc: RpcRef, load: () => Promise<boolean>): () => void {
+  const timers: ReturnType<typeof setTimeout>[] = []
+  let alive = true
+  let retries = 1
+  const deadline = Date.now() + 30_000
+  const later = (fn: () => void, ms: number) => { if (alive) timers.push(setTimeout(fn, ms)) }
+  const go = () => {
+    if (!alive) return
+    if (!rpc.current) {
+      if (Date.now() < deadline) later(go, 2000)
+      return
+    }
+    void load().then((ok) => {
+      if (alive && !ok && retries > 0) { retries -= 1; later(go, 5000) }
+    })
+  }
+  go()
+  return () => { alive = false; for (const t of timers) clearTimeout(t) }
+}
+
+/** CR2: stable task identity — the bare array index moved the expanded
+ *  row to a different task after every reload. id first, then a
+ *  title:assignee composite, index only as a last resort. */
+const taskKey = (t: Task, i: number): string =>
+  t.id
+    ?? ((t.title ?? '').trim() || (t.assignee ?? '').trim()
+      ? `${t.title ?? ''}:${t.assignee ?? ''}`
+      : `i${i}`)
+
 export default function CrewTab({ rpc }: { rpc: RpcRef }) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [runs, setRuns] = useState<Run[]>([])
@@ -69,23 +102,28 @@ export default function CrewTab({ rpc }: { rpc: RpcRef }) {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [busyTask, setBusyTask] = useState<string | null>(null)
 
-  const load = async () => {
-    const r = rpc.current; if (!r) return
+  const load = async (): Promise<boolean> => {
+    const r = rpc.current; if (!r) return false
     setErr('')
     try {
-      setTasks((await r('moch.kanban.tasks', { limit: 120 })).tasks ?? [])
-    } catch (e) { setErr(String(e)) }
+      const kt: any = await r('moch.kanban.tasks', { limit: 120 })
+      setTasks(kt.tasks ?? [])
+    } catch (e) { setErr(String(e)); return false }
     // The ledger needs the fleet runtime armed — the board alone is still
     // useful, so a timeline failure is silent (RN parity).
-    try { setRuns((await r('moch.runs.timeline', { limit: 40 })).runs ?? []) } catch { /* optional */ }
     try {
-      const lst = await r('profiles.list', {})
+      const tl: any = await r('moch.runs.timeline', { limit: 40 })
+      setRuns(tl.runs ?? [])
+    } catch { /* optional */ }
+    try {
+      const lst: any = await r('profiles.list', {})
       setRoster(lst.profiles ?? lst.items ?? (Array.isArray(lst) ? lst : []))
     } catch { /* picker falls back to Moch alone */ }
-    const fs: FleetStatus | null = await r('moch.fleet.status', {}).catch(() => null)
+    const fs: FleetStatus | null = await r<FleetStatus | null>('moch.fleet.status', {}).catch(() => null)
     setFrozenStatus(new Set((fs?.profiles ?? []).filter((p) => p.frozen).map((p) => p.name)))
+    return true
   }
-  useEffect(() => { if (rpc.current) void load() }, [])
+  useEffect(() => mountLoad(rpc, load), [])
 
   /** Frozen = fleet status OR the profile row's own flag (Bots tab parity). */
   const frozenSet = useMemo(() => {
@@ -190,7 +228,7 @@ export default function CrewTab({ rpc }: { rpc: RpcRef }) {
               <p className="colempty">—</p>
             ) : (
               list.map((t, i) => {
-                const key = t.id ?? `i${i}`
+                const key = taskKey(t, i)
                 const open = expanded === key
                 const done = isDone(t)
                 const isBusy = !!t.id && busyTask === t.id

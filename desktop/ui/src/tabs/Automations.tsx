@@ -2,8 +2,9 @@
  * Automations — cron jobs, phone parity with app/(tabs)/automations.tsx:
  * cron.manage list (include_disabled — without it paused jobs vanish and
  * could never be resumed), pause/resume/remove and add. RUN-NOW and EDIT
- * go through slash.exec '/cron …', which needs a live session id — a
- * throwaway 'automation' session is created per command (RN ensureSession).
+ * go through slash.exec '/cron …', which needs a live session id — ONE
+ * shared 'automation' session is reused across commands and recreated
+ * only when missing or dead (A1; the phone created one per command).
  * prompt_preview is capped at 100 chars server-side (#108): the editor
  * fetches the FULL prompt via cron.manage action:'get', and a
  * schedule-only edit never re-sends --prompt (the backend overwrites the
@@ -11,9 +12,38 @@
  * truncated preview). Edit flags are shell-quoted; schedules contain
  * spaces ("every 30m").
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CronJob, RpcRef } from '../types'
 import Markdown from '../Markdown'
+
+/** B1 cold-start mount load: the first load races the socket dial. While
+ *  rpc is still null, poll every 2s (30s cap); once up, run `load` — a
+ *  failed load (error UI already shown) gets exactly one 5s-later retry.
+ *  Returns the unmount cleanup that clears every pending timer. */
+function mountLoad(rpc: RpcRef, load: () => Promise<boolean>): () => void {
+  const timers: ReturnType<typeof setTimeout>[] = []
+  let alive = true
+  let retries = 1
+  const deadline = Date.now() + 30_000
+  const later = (fn: () => void, ms: number) => { if (alive) timers.push(setTimeout(fn, ms)) }
+  const go = () => {
+    if (!alive) return
+    if (!rpc.current) {
+      if (Date.now() < deadline) later(go, 2000)
+      return
+    }
+    void load().then((ok) => {
+      if (alive && !ok && retries > 0) { retries -= 1; later(go, 5000) }
+    })
+  }
+  go()
+  return () => { alive = false; for (const t of timers) clearTimeout(t) }
+}
+
+/** A1: does this failure mean the reused session id no longer exists
+ *  (gateway restart / expired session)? Phone parity: chat.ts matches
+ *  "session not found" (rpc error id 4001). */
+const isUnknownSession = (e: unknown): boolean => /session not found|unknown session/i.test(String(e))
 
 /** Shell-quote a value for /cron edit flags (RN automations.tsx shq). */
 const shq = (v: string): string => `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
@@ -72,16 +102,34 @@ export default function AutomationsTab({ rpc }: { rpc: RpcRef }) {
   /** job_id armed for a second-click delete confirm (Bots tab pattern). */
   const [confirmDel, setConfirmDel] = useState<string | null>(null)
   const [form, setForm] = useState<FormState>(ADD_FORM)
+  /** A1: the ONE shared 'automation' session for run-now/edit (reused
+   *  across commands; recreated only when missing or dead). */
+  const autoSession = useRef<string | null>(null)
+  /** B2: armed-delete confirm timers, cleared on unmount. */
+  const armTimers = useRef<ReturnType<typeof setTimeout>[]>([])
+  useEffect(() => () => { for (const t of armTimers.current) clearTimeout(t) }, [])
 
-  const load = async () => {
-    const r = rpc.current; if (!r) return
+  const listJobs = async (): Promise<CronJob[]> => {
+    const res: any = await rpc.current!('cron.manage', { action: 'list', include_disabled: true })
+    return res?.jobs ?? []
+  }
+
+  const load = async (): Promise<boolean> => {
+    const r = rpc.current; if (!r) return false
     setErr('')
     try {
-      const res = await r('cron.manage', { action: 'list', include_disabled: true })
-      setJobs(res?.jobs ?? [])
-    } catch (e) { setErr(String(e)) }
+      setJobs(await listJobs())
+      return true
+    } catch (e) { setErr(String(e)); return false }
   }
-  useEffect(() => { if (rpc.current) void load() }, [])
+  useEffect(() => mountLoad(rpc, load), [])
+
+  /** A2: silent refresh — update last_status/next-run without touching
+   *  the error line or clobbering a just-shown status. */
+  const refreshQuiet = async () => {
+    if (!rpc.current) return
+    try { setJobs(await listJobs()) } catch { /* keep the last view */ }
+  }
 
   useEffect(() => {
     if (!status) return
@@ -91,17 +139,29 @@ export default function AutomationsTab({ rpc }: { rpc: RpcRef }) {
 
   const armDelete = (jobId: string) => {
     setConfirmDel(jobId)
-    setTimeout(() => setConfirmDel((c) => (c === jobId ? null : c)), 4000)
+    armTimers.current.push(setTimeout(() => setConfirmDel((c) => (c === jobId ? null : c)), 4000))
   }
 
-  /** Run a /cron subcommand through slash.exec — it needs a live session id
-   *  (RN ensureSession; here a fresh 'automation' session per command). */
+  /** Run a /cron subcommand through slash.exec — it needs a live session id.
+   *  A1: reuse the ONE 'automation' session instead of creating a throwaway
+   *  per command (the drawer filled with dead sessions). Create only when
+   *  we have none, or recreate once when the reused id turns out dead. */
   const cronSlash = async (command: string): Promise<string> => {
     const r = rpc.current!
-    const s = await r('session.create', { title: 'automation', cols: 120, source: 'mobile' })
+    const exec = async (sid: string) => {
+      const res: any = await r('slash.exec', { session_id: sid, command })
+      return String(res?.output ?? '').trim()
+    }
+    if (autoSession.current) {
+      try { return await exec(autoSession.current) } catch (e) {
+        if (!isUnknownSession(e)) throw e
+        autoSession.current = null
+      }
+    }
+    const s: any = await r('session.create', { title: 'automation', cols: 120, source: 'mobile' })
     if (!s?.session_id) throw new Error('session.create returned no session_id')
-    const res = await r('slash.exec', { session_id: s.session_id, command })
-    return String(res?.output ?? '').trim()
+    autoSession.current = s.session_id
+    return exec(s.session_id)
   }
 
   const withBusy = async (jobId: string, fn: () => Promise<void>) => {
@@ -119,6 +179,7 @@ export default function AutomationsTab({ rpc }: { rpc: RpcRef }) {
   const runNow = (j: CronJob) => void withBusy(j.job_id, async () => {
     const out = await cronSlash(`/cron run ${j.job_id}`)
     setStatus(out.split('\n')[0] || `Queued “${j.name ?? j.job_id}” to run`)
+    await refreshQuiet() // A2: last_status / next-run pills update right away
   })
 
   const remove = (j: CronJob) => void withBusy(j.job_id, async () => {
@@ -144,7 +205,7 @@ export default function AutomationsTab({ rpc }: { rpc: RpcRef }) {
       loadedPrompt: null, promptDegraded: false, saving: false,
     })
     try {
-      const r = await rpc.current!('cron.manage', { action: 'get', name: j.job_id })
+      const r: any = await rpc.current!('cron.manage', { action: 'get', name: j.job_id })
       const full = r?.job?.prompt
       if (typeof full !== 'string') throw new Error('cron.manage get: no job in response')
       setForm((f) => (f.jobId === j.job_id ? { ...f, prompt: full, loadedPrompt: full } : f))
