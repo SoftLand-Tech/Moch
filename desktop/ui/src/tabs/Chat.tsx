@@ -4,7 +4,9 @@
  * - Top Quick Task Box (per-mode placeholder + Send/Stop)
  * - Hero Empty State (Center Mochi mascot + "Ready when you are" + per-mode Example Tasks)
  * - Message Stream (cream user bubble, assistant markdown, thinking, tools, errors)
- * - Approval / clarify cards (server->client requests, answered over the same socket)
+ * - Ask cards (server->client requests) render in the GLOBAL overlay owned by
+ *   App (ui/src/Asks.tsx) — the subscription lives with the persistent client
+ *   so questions are answerable from every tab, not just this one.
  * - Floating Bottom Composer (per-mode placeholder + model badge + Send/Stop)
  * - Clean session switcher pills bar; resume renders the session.resume transcript
  */
@@ -26,28 +28,6 @@ import {
 import { ev, relTime, type Block, type RpcRef, type SessionRow } from '../types'
 import type { ActiveTaskState, ActivityItem } from '../RightPanel'
 import MochiInteractive from '../MochiInteractive'
-
-/** A server->client request as handed to `client.onRequest` (json-rpc-channel.ts ServerRequest). */
-type ServerRequestLike = {
-  id: string
-  method: string
-  params: Record<string, unknown> & { session_id?: string }
-  sessionId?: string
-  replayed?: boolean
-  respond: (result: Record<string, unknown>) => void
-  fail: (code: number, message: string) => void
-}
-
-/** One pending approval/clarify question, kept OUT of the blocks map. */
-type AskCard = {
-  id: string
-  method: 'approval' | 'clarify'
-  sessionId: string
-  title: string
-  body: string
-  choices?: string[]
-  req: ServerRequestLike
-}
 
 type ExampleTask = { icon: string; title: string; desc: string; prompt: string }
 
@@ -98,7 +78,6 @@ export default function ChatTab({
   rpc: RpcRef
   client: {
     onAny: (cb: (e: unknown) => void) => () => void
-    onRequest: (cb: (req: ServerRequestLike) => boolean | void) => () => void
   } | null
   profile: string
   onProfile: (p: string) => void
@@ -119,14 +98,13 @@ export default function ChatTab({
   const [roster, setRoster] = useState<string[]>([])
   const [modelName, setModelName] = useState('Hermes')
   const [showSessionsDrawer, setShowSessionsDrawer] = useState(false)
-  const [asks, setAsks] = useState<AskCard[]>([])
-  const [askText, setAskText] = useState('')
 
   const blockId = useRef(1)
   const blocksRef = useRef(blocks); blocksRef.current = blocks
   const activeRef = useRef(activeSid); activeRef.current = activeSid
   const onActivityRef = useRef(onActivity); onActivityRef.current = onActivity
   const onWorkingChangeRef = useRef(onWorkingChange); onWorkingChangeRef.current = onWorkingChange
+  const onTaskUpdateRef = useRef(onTaskUpdate); onTaskUpdateRef.current = onTaskUpdate
   /** Block id -> gateway tool_id (tool.complete matches by tool_id, C5). */
   const toolIds = useRef(new Map<number, string>())
   /** Per-session busy truth; global `busy` mirrors ONLY the active session (C3/C13). */
@@ -136,6 +114,12 @@ export default function ChatTab({
   const celebrationTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const streamRef = useRef<HTMLDivElement>(null)
   const nearBottomRef = useRef(true)
+  /** Real per-turn tool steps for the RightPanel task card (FX-3b #1) —
+   *  no fabricated step counts, ever. */
+  const taskSteps = useRef<Array<{ label: string; done?: boolean; active?: boolean }>>([])
+  const taskTitle = useRef('')
+  /** stored session id -> live id, for drawer highlight (FX-3b #6). */
+  const liveByStored = useRef(new Map<string, string>())
 
   useEffect(() => () => { if (celebrationTimer.current) clearTimeout(celebrationTimer.current) }, [])
 
@@ -155,6 +139,15 @@ export default function ChatTab({
     if (celebrationTimer.current) clearTimeout(celebrationTimer.current)
     setTurnMochi('celebration')
     celebrationTimer.current = setTimeout(() => { celebrationTimer.current = null; setTurnMochi('') }, 2600)
+  }
+
+  /** Emit the RightPanel task card from REAL steps only (FX-3b #1). */
+  const emitTask = (subtitle: string) => {
+    onTaskUpdateRef.current?.({
+      title: taskTitle.current,
+      subtitle,
+      steps: taskSteps.current.map((s) => ({ ...s })),
+    })
   }
 
   const pushBlock = (sid: string, b: Omit<Block, 'id'>): Block => {
@@ -234,12 +227,17 @@ export default function ChatTab({
       }
       case 'message.complete': {
         const failed = p?.status === 'error' || !!p?.error
+        // FX-3b #7: an interrupted turn is the USER's cancel — no celebration.
+        const interrupted = p?.status === 'interrupted'
         patchBlock(sid, (b) => b.kind === 'assistant' && b.live, (b: Block) => ({ live: false, text: p?.text != null && String(p.text) ? String(p.text) : b.text }))
         patchBlock(sid, (b) => b.kind === 'thinking' && b.live, { live: false })
         if (failed) pushBlock(sid, { kind: 'error', text: String(p?.error ?? p?.failure_reason ?? 'Turn failed') })
         applyBusy(sid, false)
+        // FX-3b #1: close out the real task steps.
+        taskSteps.current = taskSteps.current.map((s) => ({ ...s, active: false, done: true }))
         if (active) {
-          if (failed) setTurnMochi('')
+          emitTask(failed ? 'Turn failed' : interrupted ? 'Interrupted' : 'Done')
+          if (failed || interrupted) setTurnMochi('')
           else fireCelebration()
           onWorkingChangeRef.current?.(false)
         }
@@ -263,13 +261,18 @@ export default function ChatTab({
         const toolName = String(p?.name ?? p?.tool ?? 'tool')
         const tid = String(p?.tool_id ?? '')
         const sub = toolSubtitle(p)
+        const toolTitle = toolName.includes('read') ? 'Read file' : toolName.includes('write') ? 'Write file' : toolName.includes('bash') ? 'Run command' : toolName.includes('search') ? 'Search' : `Execute ${toolName}`
         const created = pushBlock(sid, { kind: 'tool', text: toolName, live: true, meta: sub || undefined })
         if (tid) toolIds.current.set(created.id, tid)
         if (active) {
+          // FX-3b #1: advance the REAL task steps (previous done, this active).
+          taskSteps.current = taskSteps.current.map((s) => ({ ...s, active: false, done: true }))
+          taskSteps.current.push({ label: toolTitle, active: true })
+          emitTask('Working…')
           onActivityRef.current?.({
             id: Date.now() + Math.random(),
             kind: toolName.includes('file') || toolName.includes('read') ? 'file' : toolName.includes('bash') || toolName.includes('terminal') ? 'command' : toolName.includes('search') ? 'search' : 'tool',
-            title: toolName.includes('read') ? 'Read file' : toolName.includes('write') ? 'Write file' : toolName.includes('bash') ? 'Run command' : toolName.includes('search') ? 'Search' : `Execute ${toolName}`,
+            title: toolTitle,
             subtitle: sub || toolName,
             time: 'just now',
           })
@@ -278,26 +281,30 @@ export default function ChatTab({
       }
       case 'tool.complete': {
         // C5: match by the gateway's tool_id; duration arrives in SECONDS.
+        // FX-3b #4: ToolCompletePayload carries NO status/error fields
+        // (contracts/events.py:259-274) — the old failure read was dead code.
         const tid = String(p?.tool_id ?? '')
-        const failed = p?.status === 'failed' || !!p?.error
         const dur = typeof p?.duration_s === 'number' ? p.duration_s : null
         const durTxt = dur != null ? `${dur < 10 ? dur.toFixed(1) : String(Math.round(dur))}s` : null
         patchBlock(
           sid,
           (b) => b.kind === 'tool' && b.live && (!tid || toolIds.current.get(b.id) === tid),
-          { live: false, meta: [failed ? 'failed' : null, durTxt].filter(Boolean).join(' · ') || undefined },
+          { live: false, meta: durTxt ?? undefined },
         )
         break
       }
-      case 'status.update': {
-        // Wire payload is {kind, text} (tui_gateway/contracts/events.py). A busy
-        // edge reconciles the active session's spinner; anything else is a status line.
-        if (p?.kind === 'busy') {
-          if (active && p?.busy === false) { applyBusy(sid, false); setTurnMochi(''); onWorkingChangeRef.current?.(false) }
-          break
-        }
-        const text = String(p?.text ?? ''); if (!text) break
-        pushBlock(sid, { kind: 'status', text })
+      case 'status.update':
+        // FX-3b #5: heartbeat/loop/goal/process chatter — the phone renders
+        // none of it (chat.ts:2764). The old busy-edge branch was dead code:
+        // no emitter ever sends kind:'busy' (contracts/events.py:193-200).
+        // Missed turn-ends are reconciled via gateway.ready → resume instead.
+        break
+      case 'session.reclaimed': {
+        // FX-3b #3: the backend evicted the session (events.py:371) — unlock
+        // the UI instead of spinning on a dead id (Stop would 4001).
+        applyBusy(sid, false)
+        if (active) { setTurnMochi(''); onWorkingChangeRef.current?.(false) }
+        pushBlock(sid, { kind: 'status', text: 'Session was reclaimed by the server.' })
         break
       }
       case 'error': {
@@ -331,10 +338,10 @@ export default function ChatTab({
   }, [rpc])
 
   // Display-only badge: the configured default model, from model.options
-  // (config.get is not a gateway RPC). Prefer the response's top-level model,
-  // else default/model on the authenticated provider (modelState.ts shapes).
+  // (config.get is not a gateway RPC). Keyed on `client` so it (re)runs when
+  // the connection lands — at mount rpc can still be null (FX-3b #9).
   useEffect(() => {
-    if (!rpc.current) return
+    if (!client || !rpc.current) return
     rpc.current('model.options', {})
       .then((r: unknown) => {
         const o = (r && typeof r === 'object' ? r : {}) as { model?: unknown; providers?: unknown }
@@ -348,41 +355,11 @@ export default function ChatTab({
         if (name) setModelName(name.split('/').pop() || name)
       })
       .catch(() => {})
-  }, [rpc])
-
-  // C2: answer server->client requests instead of letting the channel
-  // auto-decline everything with -32601. Cards live in local state.
-  useEffect(() => {
-    if (!client) return
-    const off = client.onRequest((req) => {
-      const method = String(req?.method ?? '')
-      if (method !== 'approval' && method !== 'clarify') {
-        // Preserve the channel's default answer for anything not rendered here.
-        req.fail(-32601, `no handler for server request: ${method}`)
-        return true
-      }
-      const sid = req.sessionId || activeRef.current
-      if (!sid) return false // unaddressable: channel answers -32601 (phone BUG-067)
-      const p = req.params ?? {}
-      const card: AskCard = method === 'approval'
-        ? {
-            id: req.id, method, sessionId: sid,
-            title: typeof p.tool_name === 'string' && p.tool_name ? p.tool_name : 'Approval needed',
-            body: (typeof p.command === 'string' && p.command ? p.command : typeof p.description === 'string' && p.description ? p.description : 'The agent wants to run a command.').slice(0, 800),
-            req,
-          }
-        : {
-            id: req.id, method, sessionId: sid,
-            title: 'Mochi needs you',
-            body: (typeof p.question === 'string' && p.question ? p.question : 'Clarification needed').slice(0, 1000),
-            choices: Array.isArray(p.choices) ? p.choices.map(String).slice(0, 12) : undefined,
-            req,
-          }
-      setAsks((prev) => (prev.some((c) => c.id === card.id) ? prev : [...prev, card]))
-      return true
-    })
-    return off
   }, [client])
+
+  // NOTE: server→client requests (approval/clarify/sudo/secret) are answered at
+  // APP level now (App.tsx → Asks store/overlay) — a subscription here would
+  // unmount with this tab and auto-decline questions on other tabs.
 
   const profRef = useRef(profile); profRef.current = profile
   useEffect(() => {
@@ -391,22 +368,20 @@ export default function ChatTab({
     void loadRoster()
     const un = client.onAny((e: unknown) => {
       const { type } = ev(e)
-      if (type === 'gateway.ready') { void loadSessions(profRef.current); void loadRoster() }
+      if (type === 'gateway.ready') {
+        void loadSessions(profRef.current); void loadRoster()
+        // FX-3b #2: a turn that ENDED during the disconnect leaves
+        // busyBySess stale (no message.complete ever arrived). The server's
+        // transcript is the truth — reconcile the wedged active session.
+        const sid = activeRef.current
+        if (sid && busyBySess.current[sid]) void resumeSession(sid)
+      }
       applyEvent(e)
     })
     return un
   }, [client, applyEvent, loadSessions, loadRoster])
 
-  useEffect(() => { setActiveSid(''); void loadSessions(profile) }, [profile, loadSessions])
-
-  const answerAsk = (card: AskCard, result: Record<string, unknown>) => {
-    card.req.respond(result)
-    setAsks((prev) => prev.filter((c) => c.id !== card.id))
-  }
-  const cancelAsk = (card: AskCard) => {
-    card.req.fail(-32601, `${card.method} cancelled by user`)
-    setAsks((prev) => prev.filter((c) => c.id !== card.id))
-  }
+  useEffect(() => { setActiveSid(''); taskSteps.current = []; onTaskUpdateRef.current?.(null); void loadSessions(profile) }, [profile, loadSessions])
 
   const handleStop = async () => {
     const sid = activeRef.current
@@ -429,20 +404,11 @@ export default function ChatTab({
     const r = rpc.current!; setDraft(''); setQuickDraft(''); applyBusy(activeRef.current, true)
     onWorkingChangeRef.current?.(true)
 
-    // Notify task update
-    onTaskUpdate?.({
-      title: text.slice(0, 50),
-      subtitle: 'Executing autonomous turn...',
-      step: 1,
-      total: 5,
-      steps: [
-        { label: 'Parse user prompt', time: 'just now', done: true },
-        { label: 'Search relevant tools & context', active: true },
-        { label: 'Execute plan and subtasks' },
-        { label: 'Verify result' },
-        { label: 'Deliver response' },
-      ],
-    })
+    // FX-3b #1: seed the task card EMPTY and honest — real steps arrive from
+    // tool.start; no fabricated step counts.
+    taskTitle.current = text.slice(0, 50)
+    taskSteps.current = []
+    onTaskUpdateRef.current?.({ title: taskTitle.current, subtitle: 'Working…', steps: [] })
 
     const prof = profile && profile !== 'default' ? profile : undefined
 
@@ -457,6 +423,10 @@ export default function ChatTab({
           ...(prof ? { profile: prof, follow_profile_config: true } : {}),
         })
         sid = cr.session_id
+        // FX-3b #8: mark busy under the NEW sid BEFORE switching — the switch
+        // effect re-reads busyBySess[sid]; without this there's a double-submit
+        // window and a hidden Stop button.
+        applyBusy(sid, true)
         activeRef.current = sid
         setBlocks((p) => ({ ...p, [sid]: [{ id: blockId.current++, kind: 'user', text }] }))
         setActiveSid(sid)
@@ -472,10 +442,11 @@ export default function ChatTab({
 
       await r('prompt.submit', { session_id: sid, text })
     } catch (err) {
-      // C19: a failed submit is never silent.
+      // C19: a failed submit is never silent — surface it in the VIEW THE
+      // USER IS LOOKING AT (FX-3b #10; create failures have no sid yet).
       console.error('prompt.submit failed:', err)
-      if (sid) pushBlock(sid, { kind: 'error', text: `Failed to send: ${err instanceof Error ? err.message : String(err)}` })
-      applyBusy(sid, false)
+      pushBlock(activeRef.current || sid || '', { kind: 'error', text: `Failed to send: ${err instanceof Error ? err.message : String(err)}` })
+      applyBusy(activeRef.current || sid || '', false)
       onWorkingChangeRef.current?.(false)
     }
   }
@@ -536,86 +507,36 @@ export default function ChatTab({
     </button>
   )
 
-  const renderAskCard = (card: AskCard) => (
-    <div
-      key={card.id}
-      style={{
-        margin: '0 auto 10px', maxWidth: 720, borderRadius: 14, padding: '10px 12px',
-        border: '1px solid rgba(255,176,32,.45)', background: 'rgba(255,176,32,.08)',
-        display: 'flex', flexDirection: 'column', gap: 8,
-      }}
-    >
-      <div style={{ fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <IconLock width={12} height={12} />
-        <span>{card.method === 'approval' ? card.title : 'Mochi needs you'}</span>
-      </div>
-      <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', opacity: 0.85, maxHeight: 140, overflow: 'auto' }}>
-        {card.body}
-      </div>
-      {card.method === 'approval' ? (
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            className="tool-chip-btn"
-            style={{ background: 'rgba(48,164,108,.9)', color: '#fff', border: 'none' }}
-            onClick={() => answerAsk(card, { choice: 'once', all: undefined })}
-          >
-            Approve
-          </button>
-          <button
-            className="tool-chip-btn"
-            style={{ color: '#e5484d' }}
-            onClick={() => answerAsk(card, { choice: 'deny', all: undefined })}
-          >
-            Deny
-          </button>
-        </div>
-      ) : (
-        <>
-          {(card.choices ?? []).map((o) => (
-            <button
-              key={o}
-              className="tool-chip-btn"
-              style={{ justifyContent: 'flex-start', textAlign: 'left' }}
-              onClick={() => answerAsk(card, { answer: o })}
-            >
-              {o}
-            </button>
-          ))}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input
-              type="text"
-              className="composer-input"
-              style={{ flex: 1, minWidth: 0 }}
-              placeholder="Or type your answer…"
-              value={askText}
-              onChange={(e) => setAskText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  const t = askText.trim().slice(0, 4000)
-                  if (t) { setAskText(''); answerAsk(card, { answer: t }) }
-                }
-              }}
-            />
-            <button
-              className="tool-chip-btn"
-              disabled={!askText.trim()}
-              style={{ opacity: askText.trim() ? 1 : 0.5 }}
-              onClick={() => {
-                const t = askText.trim().slice(0, 4000)
-                if (!t) return
-                setAskText('')
-                answerAsk(card, { answer: t })
-              }}
-            >
-              Send
-            </button>
-            <button className="tool-chip-btn" onClick={() => cancelAsk(card)}>Cancel</button>
-          </div>
-        </>
-      )}
-    </div>
-  )
+  /** C1/FX-3b #2: render the transcript session.resume RETURNS — the gateway's
+   *  event ring is a capped FIFO (512) and misses long history. Live tail rides
+   *  the socket as usual. Also the reconcile path for a wedged post-drop
+   *  session (gateway.ready → resume when busyBySess is stale). */
+  const resumeSession = useCallback(async (key: string) => {
+    const r = rpc.current
+    if (!r) return
+    try {
+      const rr = await r<{
+        session_id?: string
+        stored_session_id?: string
+        messages?: Array<Record<string, unknown>>
+        running?: boolean
+        /** contracts/sessions.py:84 — the REAL field (rr.truncated never exists). */
+        messages_omitted?: boolean
+      }>('session.resume', { session_id: key, cols: 120 })
+      const live = rr.session_id
+      if (!live) return
+      liveByStored.current.set(key, live)
+      setActiveSid(live)
+      busyBySess.current[live] = rr.running === true
+      setBusy(rr.running === true)
+      onWorkingChangeRef.current?.(rr.running === true)
+      const restored = transcriptToBlocks(rr.messages)
+      if (rr.messages_omitted) {
+        restored.unshift({ id: blockId.current++, kind: 'status', text: 'Earlier messages omitted — showing the most recent history.' })
+      }
+      setBlocks((p) => ({ ...p, [live]: restored }))
+    } catch { }
+  }, [rpc])
 
   return (
     <div className="agent-workspace">
@@ -638,7 +559,7 @@ export default function ChatTab({
         <div className="session-switcher-bar">
           <button
             className="session-pill-btn new"
-            onClick={() => { setActiveSid(''); setDraft(''); setQuickDraft('') }}
+            onClick={() => { setActiveSid(''); setDraft(''); setQuickDraft(''); taskSteps.current = []; onTaskUpdateRef.current?.(null) }}
           >
             <IconPlus width={13} height={13} />
             <span>New chat</span>
@@ -702,33 +623,10 @@ export default function ChatTab({
                 return (
                   <button
                     key={key}
-                    className={`drawer-session-row ${activeSid === s.session_id ? 'active' : ''}`}
+                    className={`drawer-session-row ${activeSid === s.session_id || activeSid === liveByStored.current.get(key) ? 'active' : ''}`}
                     onClick={async () => {
                       setShowSessionsDrawer(false)
-                      const r = rpc.current!
-                      try {
-                        // C1: render the transcript session.resume RETURNS — the
-                        // gateway's event ring is a capped FIFO (512) and misses
-                        // long history. Live tail rides the socket as usual.
-                        const rr = await r<{
-                          session_id?: string
-                          stored_session_id?: string
-                          messages?: Array<Record<string, unknown>>
-                          running?: boolean
-                          truncated?: boolean
-                        }>('session.resume', { session_id: key, cols: 120 })
-                        const live = rr.session_id
-                        if (!live) return
-                        setActiveSid(live)
-                        busyBySess.current[live] = rr.running === true
-                        setBusy(rr.running === true)
-                        onWorkingChangeRef.current?.(rr.running === true)
-                        const restored = transcriptToBlocks(rr.messages)
-                        if (rr.truncated) {
-                          restored.unshift({ id: blockId.current++, kind: 'status', text: 'Earlier messages truncated — showing the most recent history.' })
-                        }
-                        setBlocks((p) => ({ ...p, [live]: restored }))
-                      } catch { }
+                      await resumeSession(key)
                     }}
                   >
                     <span className="row-title">{label}</span>
@@ -884,7 +782,6 @@ export default function ChatTab({
       {/* ── Floating Bottom Composer (only visible once session has messages) ── */}
       {hasMessages && (
         <div className="floating-bottom-composer">
-          {asks.filter((c) => c.sessionId === activeSid).map(renderAskCard)}
         <div className="composer-pill-container">
           {turnMochi && (
             <img

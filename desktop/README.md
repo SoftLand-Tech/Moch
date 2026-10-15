@@ -22,10 +22,26 @@ over loopback with the app's TypeScript protocol stack, imported verbatim.
 │  ┌ UI (Vite+React, desktop/ui → web-ui) ─────────────────────────┐ │
 │  │ JsonRpcGatewayClient — the app's protocol stack, unchanged    │ │
 │  │ First-run wizard: welcome → boot → provider key → done        │ │
-│  │ Tabs: Chat · Bots · Crew · Automations · Skills · Models · Run│ │
+│  │ Tabs: Chat · Bots · Crew · Automations · Skills · Models ·    │ │
+│  │       Browser · Run                                           │ │
 │  └───────────────────────────────────────────────────────────────┘ │
 └────────────────────────────────────────────────────────────────────┘
 ```
+
+## Agent browser
+
+runtime.py spawns a **Moch-owned Chromium** (`--remote-debugging-port`,
+fresh `--user-data-dir` under the runtime home) BEFORE the gateway boots
+and publishes `BROWSER_CDP_URL` — the exact env the agent's browser tool
+layer reads (`tools/browser_tool_cdp.py`). The agent gets the full
+`browser_*` toolset (navigate, click, type, snapshot, tabs, console) and
+drives a **real browser on your screen** — no relay, no in-app WebView
+like the phone needed. The **Browser tab** is the control panel: live
+target list via the shell's `/cdp/json` proxy, refreshed every 3s.
+
+- Disable with `MOCH_BROWSER=0`; port with `MOCH_BROWSER_PORT`
+  (default 9222, +10 fallbacks). The browser is Moch's own profile —
+  your normal Chrome is never touched.
 
 ## Design
 
@@ -73,6 +89,7 @@ chat). Subsequent runs go straight in. Everything lives in
 | build | Release profile verified live: 4.4MB binary + moch-desktop.sh launcher |
 | 8 | Real branding — Moch logo, favicon, Mochi expressions (greeting/deep-thinking/idea/error/offline/listening/celebration), turn-reactive mochi |
 | audit | 5-agent read-only audit, then the fix wave: approvals/clarify cards (onRequest — previously every agent ask was auto-declined), stop/interrupt, error blocks (no more celebrating failures), per-session busy gating, transcript-correct resume, chat wire fixes (tool_id, duration_s, reasoning.delta, {kind,text}), honest shell (real chat search + live status bell, Automations nav restored, honest nav labels, fake dots/avatar/popover/mode-cards made real or removed), truthful right panel (mock Laravel task + fake feed/files/integrations deleted), model switching (phone-exact config.set), tab hardening (cold-start retries, timer cleanup, shared automation session, 3s ping cap), shell hardening (SIGTERM via ctrlc termination, process group + graceful SIGTERM→SIGKILL, token redacted from logs + config, Host check, traversal guard, single-instance flock, handshake fast-fail), markdown links open safely + https images render, 111 lines dead CSS pruned |
+| audit 2 | 8-agent adversarial re-hunt (max effort), then fix wave 2: persistent WS client (reconnect no longer stacks dials/loses replay), tab-independent ask overlay (approvals answerable from ANY tab), batch-clarify `{answers}` (was silently cancel-all), request.cancel handling (no immortal cards), sudo/secret cards, reconnect resync + session.reclaimed, session.close after model picks (was leaking an agent per click), mountLoad keyed to socket-openness (cold tabs no longer die), cron envelope success flag, Skills timeout state, Wizard boot fallback + busy guards, stderr filtered + token log scrubbed 0600, XDG single-instance lock, Origin check on POSTs, **Agent Browser tab** (real Chromium via CDP) |
 
 ## Bundles (built)
 
@@ -89,8 +106,9 @@ runtime (runtime.py + the hermes fork) — future packaging round.
 ## Known limits
 
 - Voice/media not wired (protocol exists; UI later).
-- Approvals/clarify cards cover the common asks; sudo/secret prompts and
-  batched multi-question clarifies are still declined (channel -32601).
+- Batched multi-question clarifies render as one card with per-question
+  inputs; `session.title` / `session.usage` / `cron.changed` events are
+  not yet surfaced (manual refresh for now).
 - Runtime discovery: `MOCH_DESKTOP_DIR` env → exe-relative
   `src-tauri/target/*` scan → compile-time path. Installed deb/AppImage
   bundles still need the repo checkout (or `MOCH_DESKTOP_DIR`) for
