@@ -72,6 +72,7 @@ chat). Subsequent runs go straight in. Everything lives in
 | 7 | Markdown in task bodies/prompts; dead-CSS prune |
 | build | Release profile verified live: 4.4MB binary + moch-desktop.sh launcher |
 | 8 | Real branding — Moch logo, favicon, Mochi expressions (greeting/deep-thinking/idea/error/offline/listening/celebration), turn-reactive mochi |
+| audit | 5-agent read-only audit, then the fix wave: approvals/clarify cards (onRequest — previously every agent ask was auto-declined), stop/interrupt, error blocks (no more celebrating failures), per-session busy gating, transcript-correct resume, chat wire fixes (tool_id, duration_s, reasoning.delta, {kind,text}), honest shell (real chat search + live status bell, Automations nav restored, honest nav labels, fake dots/avatar/popover/mode-cards made real or removed), truthful right panel (mock Laravel task + fake feed/files/integrations deleted), model switching (phone-exact config.set), tab hardening (cold-start retries, timer cleanup, shared automation session, 3s ping cap), shell hardening (SIGTERM via ctrlc termination, process group + graceful SIGTERM→SIGKILL, token redacted from logs + config, Host check, traversal guard, single-instance flock, handshake fast-fail), markdown links open safely + https images render, 111 lines dead CSS pruned |
 
 ## Bundles (built)
 
@@ -87,7 +88,13 @@ runtime (runtime.py + the hermes fork) — future packaging round.
 
 ## Known limits
 
-- Voice/media not wired (protocol exists; UI later). Automations
-  run-now/edit not yet in the tab (list/pause/resume/add are).
+- Voice/media not wired (protocol exists; UI later).
+- Approvals/clarify cards cover the common asks; sudo/secret prompts and
+  batched multi-question clarifies are still declined (channel -32601).
+- Runtime discovery: `MOCH_DESKTOP_DIR` env → exe-relative
+  `src-tauri/target/*` scan → compile-time path. Installed deb/AppImage
+  bundles still need the repo checkout (or `MOCH_DESKTOP_DIR`) for
+  `runtime.py` + the hermes fork — packaging the runtime is a future
+  round.
 - Wayland rendering under sandboxed launches shows the WebKitGTK scale
   bug — launch from a normal terminal (x11 default) for clean rendering.
