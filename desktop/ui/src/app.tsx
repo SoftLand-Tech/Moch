@@ -8,6 +8,7 @@ import { connectionState, gatewayInfo, isConnected, runtimeBoot, startGateway, w
 import { hookChatEvents, pendingCount, loadMarks, refreshSessionOrder } from './lib/chat'
 import { activeBotAtom, fleetProfiles, loadActiveBot, refreshFleet } from './lib/fleet'
 import { useKnocks } from './lib/knocks'
+import { locale, tr } from './lib/strings'
 import ChatView from './views/ChatView'
 import FleetView from './views/FleetView'
 import CrewView from './views/CrewView'
@@ -38,6 +39,7 @@ export function App() {
   const bot = useStore(activeBotAtom)
   const info = useStore(gatewayInfo)
   const conn = useStore(connectionState)
+  useStore(locale) // subscribe so rail labels re-render when the language changes
 
   activeView.current = view
 
@@ -112,15 +114,15 @@ export function App() {
   }, [])
 
   const navItems: { id: ViewId; icon: typeof Bot; label: string; badge?: number }[] = [
-    { id: 'chat', icon: MessageSquareText, label: 'Chats' },
-    { id: 'fleet', icon: Bot, label: 'Fleet' },
-    { id: 'crew', icon: UsersRound, label: 'Crew' },
-    { id: 'inbox', icon: Inbox, label: 'Inbox', badge: pending || undefined },
-    { id: 'browser', icon: Globe, label: 'Browser' },
-    { id: 'terminal', icon: SquareTerminal, label: 'Terminal' },
-    { id: 'automations', icon: CalendarClock, label: 'Automations' },
-    { id: 'skills', icon: Sparkles, label: 'Skills' },
-    { id: 'connectors', icon: Plug, label: 'Connectors' },
+    { id: 'chat', icon: MessageSquareText, label: tr('nav.chats') },
+    { id: 'fleet', icon: Bot, label: tr('nav.fleet') },
+    { id: 'crew', icon: UsersRound, label: tr('nav.crew') },
+    { id: 'inbox', icon: Inbox, label: tr('nav.inbox'), badge: pending || undefined },
+    { id: 'browser', icon: Globe, label: tr('nav.browser') },
+    { id: 'terminal', icon: SquareTerminal, label: tr('nav.terminal') },
+    { id: 'automations', icon: CalendarClock, label: tr('nav.automations') },
+    { id: 'skills', icon: Sparkles, label: tr('nav.skills') },
+    { id: 'connectors', icon: Plug, label: tr('nav.connectors') },
   ]
 
   const fullStageViews: ViewId[] = ['browser', 'terminal']
@@ -148,8 +150,8 @@ export function App() {
           <button
             className={`rail-btn${view === 'settings' ? ' active' : ''}`}
             onClick={() => setView('settings')}
-            title="Settings"
-            aria-label="Settings"
+            title={tr('nav.settings')}
+            aria-label={tr('nav.settings')}
           >
             <Settings size={19} strokeWidth={1.9} />
           </button>

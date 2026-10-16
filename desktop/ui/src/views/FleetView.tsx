@@ -1,8 +1,9 @@
 import { useStore } from '@nanostores/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Bot, Check, FileText, Folder, MessageSquare, Pause, Play, Plus, Search,
-  Sparkles, Trash2, TriangleAlert, X, Zap,
+  Bot, Check, FileText, Folder, GitBranch, KanbanSquare, ChevronRight, Clock,
+  MessageSquare, Pause, Play, Plus, Search, Sparkles, Trash2, TriangleAlert,
+  X, Zap,
 } from 'lucide-react'
 import {
   accentFor, activeBotAtom, createProfile, deleteProfile, fleetProfiles,
@@ -12,7 +13,7 @@ import {
 } from '../lib/fleet'
 import { newChat } from '../lib/chat'
 import { isConnected, rpc } from '../lib/gateway'
-import { displayBotName } from '../lib/crew'
+import { displayBotName, fmtWhen, type RunEntry } from '../lib/crew'
 
 interface DescribeResult {
   soul?: string
@@ -433,6 +434,8 @@ function BotDetail({ profile, notice, onErr }: { profile: FleetProfile; notice: 
         )}
       </section>
 
+      <BotRuns profile={profile.name} />
+
       <section style={{ marginTop: 'auto', paddingTop: 18, borderTop: '1px solid var(--border-soft)' }}>
         <div style={{ ...label, color: 'var(--red)' }}>Danger zone</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 'var(--radius)', background: 'var(--red-soft)', border: '1px solid rgba(255,90,90,0.3)', flexWrap: 'wrap' }}>
@@ -451,6 +454,57 @@ function BotDetail({ profile, notice, onErr }: { profile: FleetProfile; notice: 
         </div>
       </section>
     </div>
+  )
+}
+
+
+// ── per-bot run history (the fleet observability slice) ────────────────────
+
+function BotRuns({ profile }: { profile: string }) {
+  const [runs, setRuns] = useState<RunEntry[]>([])
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    const load = () => {
+      rpc<{ runs?: RunEntry[] }>('moch.runs.timeline', { limit: 60 }, 15000)
+        .then((res) => { if (!cancelled) setRuns((res.runs ?? []).filter((r) => (profile === 'default' ? r.profile === 'default' || !r.profile : r.profile === profile))) })
+        .catch(() => { if (!cancelled) setRuns([]) })
+    }
+    load()
+    const t = setInterval(load, 30_000)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [open, profile])
+
+  const icon = (src: RunEntry['source']) =>
+    src === 'cron' ? <Clock size={12} /> : src === 'delegate' ? <GitBranch size={12} /> : <KanbanSquare size={12} />
+  const failed = (r: RunEntry) => /fail|error|blocked|cancel/i.test(r.status)
+
+  return (
+    <section style={{ paddingTop: 18 }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+      >
+        <div style={{ fontSize: 11.5, fontWeight: 650, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>Recent runs</div>
+        <ChevronRight size={13} color="var(--text-faint)" style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 120ms' }} />
+      </button>
+      {open ? (
+        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {runs.length === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--text-faint)', padding: '6px 0' }}>No runs recorded for this bot yet.</div>
+          ) : runs.slice(0, 12).map((r) => (
+            <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: failed(r) ? 'var(--red)' : 'var(--text-dim)', padding: '4px 0' }}>
+              {icon(r.source)}
+              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title || r.id}</span>
+              <span style={{ color: 'var(--text-faint)', flexShrink: 0 }}>{r.status}</span>
+              {r.ts ? <span style={{ color: 'var(--text-faint)', flexShrink: 0 }}>{fmtWhen(r.ts)}</span> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
   )
 }
 

@@ -17,6 +17,7 @@ import { isConnected } from '../lib/gateway'
 import { renderMarkdown } from '../lib/markdown'
 import { commandCatalog, completeSlash, dispatchSlash, refreshCommandCatalog } from '../lib/slash'
 import { currentModel, providers, refreshModels } from '../lib/model'
+import { locale, tr } from '../lib/strings'
 import { startRecording, stopRecording } from '../lib/voice'
 import { attachFiles } from '../lib/media'
 import InteractiveCard from '../components/InteractiveCard'
@@ -217,6 +218,7 @@ function Transcript() {
 
 function EmptyChat() {
   const bot = useStore(activeBotAtom)
+  useStore(locale) // subscribe so the empty state re-renders when the language changes
   const name = bot ?? null
   return (
     <div className="empty" style={{ padding: '60px 20px' }}>
@@ -227,11 +229,8 @@ function EmptyChat() {
       ) : (
         <Mochi mood="greeting" size={88} />
       )}
-      <div className="empty-title">{name ? `Talk to ${name}` : 'What should Mochi do?'}</div>
-      <div className="empty-sub">
-        Your agents run entirely on this machine — they can use the terminal, browse the web,
-        remember across chats, and work while you're elsewhere. Ask for anything.
-      </div>
+      <div className="empty-title">{name ? tr('chat.empty.title.bot', { name }) : tr('chat.empty.title')}</div>
+      <div className="empty-sub">{tr('chat.empty.sub')}</div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginTop: 6 }}>
         {['What can you do?', 'Look up something in the browser', 'Set up an automation', 'Show me the workspace'].map(s => (
           <button key={s} className="chip" onClick={() => void send(s)}>{s}</button>
@@ -367,6 +366,7 @@ function Composer() {
   const catalog = useStore(commandCatalog)
   const model = useStore(currentModel)
   const provs = useStore(providers)
+  useStore(locale) // subscribe so placeholders re-render when the language changes
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -500,7 +500,7 @@ function Composer() {
         <textarea
           ref={taRef}
           rows={1}
-          placeholder={steerMode ? 'Steer the running turn — delivered at the next boundary…' : botName ? `Message ${botName}…` : 'Ask Mochi anything — / for commands'}
+          placeholder={steerMode ? tr('chat.composer.placeholder.steer') : botName ? tr('chat.composer.placeholder.bot', { name: botName }) : tr('chat.composer.placeholder')}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {

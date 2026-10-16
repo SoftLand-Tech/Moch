@@ -103,3 +103,24 @@ input, textarea { user-select: text; }
 
 /* Links inside rendered markdown stay orange */
 .md a { color: var(--accent); }
+
+/* ── RTL (Arabic locale) ───────────────────────────────────────────
+   applyDirection() sets [dir="rtl"] on <html> when locale === 'ar'.
+   Most of the shell is flexbox, which `direction: rtl` mirrors for free;
+   these rules fix the physical-direction leftovers (text-align, the active
+   row marker, one-sided paddings/margins). */
+
+[dir="rtl"] { direction: rtl; }
+
+/* Rows read right-to-left; the active marker bar moves to the right edge. */
+[dir="rtl"] .row { direction: rtl; text-align: right; }
+[dir="rtl"] .row.active { box-shadow: inset -2px 0 0 var(--accent); }
+
+/* Section labels sit at the right edge. */
+[dir="rtl"] .row-section { text-align: right; }
+
+/* Composer bar padding mirrors (base: 6px 10px 8px 12px). */
+[dir="rtl"] .composer-bar { padding: 6px 12px 8px 10px; }
+
+/* Status dots lead their label from the right in RTL (base: margin-right). */
+[dir="rtl"] .status-dot { margin-right: 0; margin-left: 5px; }

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '@nanostores/react'
-import { BotMessageSquare, ChevronDown, ChevronRight, FolderOpen, Info, Palette, RotateCw, Terminal } from 'lucide-react'
+import { BotMessageSquare, ChevronDown, ChevronRight, FolderOpen, Info, Languages, Palette, RotateCw, Terminal } from 'lucide-react'
 import { gatewayInfo, gatewayLogs, hermesHome, isConnected, restartGateway, rpc, workspaceDir } from '../lib/gateway'
+import { locale, setLocale } from '../lib/strings'
 import { revealPath } from '../lib/shell-ops'
 import type { ViewId } from '../app'
 
@@ -22,6 +23,7 @@ export default function SettingsView({ onOpenView }: { onOpenView?: (v: ViewId) 
   const home = useStore(hermesHome)
   const ws = useStore(workspaceDir)
   const logs = useStore(gatewayLogs)
+  const loc = useStore(locale)
 
   const [version, setVersion] = useState<string | null>(null)
   const [statusError, setStatusError] = useState('')
@@ -115,6 +117,22 @@ export default function SettingsView({ onOpenView }: { onOpenView?: (v: ViewId) 
             </div>
             <div style={{ padding: '14px 0', fontSize: 'var(--text-sm)', color: 'var(--text-faint)', lineHeight: 1.6 }}>
               Mocheme dark — the desktop ships one theme.
+            </div>
+          </section>
+
+          {/* ── Language ── */}
+          <section>
+            <div style={{ ...labelStyle, borderBottom: '1px solid var(--border-soft)', paddingBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Languages size={13} /> Language / اللغة
+            </div>
+            <div style={{ padding: '14px 0', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)', flex: 1 }}>
+                English or العربية — the interface switches to right-to-left with Arabic.
+              </span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className={`chip${loc === 'en' ? ' active' : ''}`} onClick={() => setLocale('en')}>EN</button>
+                <button className={`chip${loc === 'ar' ? ' active' : ''}`} onClick={() => setLocale('ar')}>العربية</button>
+              </div>
             </div>
           </section>
 
