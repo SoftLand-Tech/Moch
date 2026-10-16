@@ -3,6 +3,7 @@ package com.hermes.pocket.hermes
 import android.net.LocalSocket
 import android.net.LocalSocketAddress
 import android.util.Log
+import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.EOFException
 import java.io.InputStream
@@ -68,7 +69,17 @@ object CdpRelay {
   private const val TAG = "CdpRelay"
   private const val MAX_LINE = 64 * 1024
   private const val MAX_HEADERS = 256 * 1024
-  private const val PUMP_CHUNK = 1 shl 20
+  // Speed pass: 64 KiB is plenty for a loopback byte pump (reads return what
+  // is available — throughput is syscall-bound, not buffer-bound) and cuts
+  // the long-lived per-tunnel heap from 2 MiB to 128 KiB.
+  private const val PUMP_CHUNK = 64 * 1024
+  // Speed pass: head parsing is line/CRLF-scanned; a 16 KiB buffer keeps it
+  // off the per-byte JNI path without changing any semantics.
+  private const val HEAD_BUF = 16 * 1024
+
+  // Speed pass: hoisted — it ran on every upstream response (including each
+  // resolveOpenedPage poll iteration) and Regex compilation is not free.
+  private val CONTENT_LENGTH_RE = Regex("(?i)content-length:\\s*(\\d+)")
 
   // BUG-136 tab-lifecycle round-trip (see class doc).
   private const val TAB_OP_EVENT = "mochTabOp"
@@ -79,10 +90,13 @@ object CdpRelay {
   // lockstep (same contract as the hermesHomeDir mirror below). The hidden
   // agent host page is a REAL upstream target but never a browserTabs-store
   // tab; /json/moch-tabs and the open-diff filter it out so listings match
-  // the tab strip exactly. A user tab on the very same URL would be hidden
+  // the tab strip exactly. The host now parks at about:blank (zero network
+  // per cold start); BOTH prefixes stay hidden so a mixed JS/native deploy
+  // (OTA JS ahead of the native build, or the reverse) never leaks the host
+  // page into tab listings. A user tab on the very same URL would be hidden
   // from moch-tabs too — accepted (the boring-safe option): its target still
   // exists upstream, only the listing folds the duplicate away.
-  private const val AGENT_TAB_URL_PREFIX = "https://example.com/"
+  private val AGENT_TAB_URL_PREFIXES = listOf("about:blank", "https://example.com/")
 
   data class Status(
     val running: Boolean,
@@ -296,7 +310,11 @@ object CdpRelay {
     try {
       client.soTimeout = 30_000
       client.tcpNoDelay = true
-      val head = readHttpHead(client.getInputStream())
+      // Speed pass: buffered head parsing (see HEAD_BUF). The SAME stream is
+      // handed to tunnelWebSocket so any bytes the buffer read past the head
+      // still reach the pump — nothing is lost, semantics are unchanged.
+      val cin = BufferedInputStream(client.getInputStream(), HEAD_BUF)
+      val head = readHttpHead(cin)
       val path = head.path.substringBefore('?')
       val query = head.path.substringAfter('?', "")
       val segs = path.trimStart('/').split('/')
@@ -324,10 +342,10 @@ object CdpRelay {
             writeSimpleResponse(out, 503, "no live page target (open the Moch browser screen)")
           } else {
             ws = true
-            tunnelWebSocket(client, head, "/devtools/page/${page.optString("id", "")}", query)
+            tunnelWebSocket(client, cin, head, "/devtools/page/${page.optString("id", "")}", query)
           }
         }
-        head.method == "GET" && inner.startsWith("/devtools/") -> { ws = true; tunnelWebSocket(client, head, inner, query) }
+        head.method == "GET" && inner.startsWith("/devtools/") -> { ws = true; tunnelWebSocket(client, cin, head, inner, query) }
         else -> writeSimpleResponse(out, 404, "no route: $inner")
       }
       if (ws) return // tunnel owns the client socket from here
@@ -398,8 +416,8 @@ object CdpRelay {
     return pages
   }
 
-  /** The hidden agent host page (see AGENT_TAB_URL_PREFIX). */
-  private fun isHiddenAgentPage(url: String): Boolean = url.startsWith(AGENT_TAB_URL_PREFIX)
+  /** The hidden agent host page (see AGENT_TAB_URL_PREFIXES). */
+  private fun isHiddenAgentPage(url: String): Boolean = AGENT_TAB_URL_PREFIXES.any { url.startsWith(it) }
 
   /** The relay's own tokenized ws URL for a page target. */
   private fun pageWsUrl(id: String) = "ws://127.0.0.1:$port/$token/devtools/page/$id"
@@ -531,6 +549,7 @@ object CdpRelay {
   private fun resolveOpenedPage(out: OutputStream, url: String, beforeIds: Set<String>) {
     val deadlineMs = System.currentTimeMillis() + TAB_OPEN_RESOLVE_TIMEOUT_MS
     var freshLoading: JSONObject? = null
+    var ticks = 0
     while (true) {
       val fresh = upstreamPages()
         .filter { it.id !in beforeIds && !isHiddenAgentPage(it.url) }
@@ -544,7 +563,12 @@ object CdpRelay {
       // first navigation commits — remember a lone such target as fallback.
       freshLoading = fresh.singleOrNull { it.url.isEmpty() || it.url == "about:blank" }?.json ?: freshLoading
       if (System.currentTimeMillis() >= deadlineMs) break
-      Thread.sleep(250)
+      // Speed pass: front-load the cadence — a fresh target normally appears
+      // within a few hundred ms of the RN ack, so poll fast first (an agent
+      // tab-open was eating a flat 250 ms of extra latency on average), then
+      // back off. Deadline and fallback are unchanged.
+      ticks++
+      Thread.sleep(if (ticks <= 6) 40L else 250L)
     }
     freshLoading?.let {
       it.put("webSocketDebuggerUrl", pageWsUrl(it.optString("id", "")))
@@ -574,7 +598,8 @@ object CdpRelay {
       val req = "GET $path HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
       sock.outputStream.write(req.toByteArray(StandardCharsets.ISO_8859_1))
       sock.outputStream.flush()
-      return readHttpBody(sock.inputStream)
+      // Speed pass: buffered head scan (per-byte reads crossed JNI per char).
+      return readHttpBody(BufferedInputStream(sock.inputStream, HEAD_BUF))
     } catch (e: Exception) {
       lastError = "upstream $path failed: $e"
       log("upstream $path failed: $e")
@@ -607,8 +632,10 @@ object CdpRelay {
    * Sec-WebSocket-Key — the upstream computes the accept hash from it) with
    * only the path rewritten; pass the 101 back verbatim; pump bytes.
    * `head` was already parsed by the router — never re-read here.
+   * `clientIn` is the (buffered) stream the router already read the head
+   * from: the pump MUST consume it so buffered-ahead bytes are not lost.
    */
-  private fun tunnelWebSocket(client: Socket, head: ParsedHead, innerPath: String, query: String) {
+  private fun tunnelWebSocket(client: Socket, clientIn: InputStream, head: ParsedHead, innerPath: String, query: String) {
     val fullTarget = if (query.isEmpty()) innerPath else "$innerPath?$query"
     val upstream = connectUpstream() ?: run {
       writeSimpleResponse(client.getOutputStream(), 502, "no devtools socket")
@@ -627,7 +654,10 @@ object CdpRelay {
       upstream.outputStream.write(req.toString().toByteArray(StandardCharsets.ISO_8859_1))
       upstream.outputStream.flush()
 
-      val respHead = readUntilDoubleCrlf(upstream.inputStream)
+      // Speed pass: buffered head read on this leg too (the 101 headers);
+      // the u2c pump reads the SAME buffered stream so nothing is lost.
+      val uin = BufferedInputStream(upstream.inputStream, HEAD_BUF)
+      val respHead = readUntilDoubleCrlf(uin)
       client.getOutputStream().write(respHead)
       client.getOutputStream().flush()
       if (!String(respHead, StandardCharsets.ISO_8859_1).startsWith("HTTP/1.1 101")) {
@@ -642,9 +672,7 @@ object CdpRelay {
       val tunnelId = "t${tunnelSeq.incrementAndGet()}"
       liveTunnels[tunnelId] = client
 
-      val cin = client.getInputStream()
       val uout = upstream.outputStream
-      val uin = upstream.inputStream
       val cout = client.getOutputStream()
       val done = AtomicBoolean(false)
       val closeBoth = Runnable {
@@ -668,7 +696,7 @@ object CdpRelay {
           log("tunnel $name closed")
         }
       }
-      val c2u = pump(cin, uout, "c2u").apply { name = "cdp-pump-c2u"; isDaemon = true; start() }
+      val c2u = pump(clientIn, uout, "c2u").apply { name = "cdp-pump-c2u"; isDaemon = true; start() }
       val u2c = pump(uin, cout, "u2c").apply { name = "cdp-pump-u2c"; isDaemon = true; start() }
       // This handler thread parks until the tunnel dies; the accept loop
       // keeps accepting meanwhile.
@@ -713,7 +741,7 @@ object CdpRelay {
   private fun readHttpBody(input: InputStream): String {
     val head = readUntilDoubleCrlf(input)
     val text = String(head, StandardCharsets.ISO_8859_1)
-    val cl = Regex("(?i)content-length:\\s*(\\d+)").find(text)?.groupValues?.get(1)?.toIntOrNull() ?: -1
+    val cl = CONTENT_LENGTH_RE.find(text)?.groupValues?.get(1)?.toIntOrNull() ?: -1
     val body = if (cl >= 0) {
       val buf = ByteArray(cl)
       var off = 0

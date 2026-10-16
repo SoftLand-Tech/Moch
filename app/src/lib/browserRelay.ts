@@ -239,7 +239,20 @@ export function switchTab(id: string) {
 }
 
 export function updateTab(id: string, patch: Partial<BrowserTab>) {
-  browserTabs.set(browserTabs.get().map((t) => (t.id === id ? { ...t, ...patch } : t)))
+  const tabs = browserTabs.get()
+  const idx = tabs.findIndex((t) => t.id === id)
+  if (idx === -1) return
+  // Speed pass (SPEED_REPORT A2-4 pattern): onNavigationStateChange fires
+  // several times per load and onLoadEnd adds one more — most patches repeat
+  // the same title/ready values. A fresh array identity per no-op write made
+  // every subscriber (the whole Browser screen, all N WebView wrappers)
+  // re-render mid-load. Skip the set entirely when nothing differs.
+  const cur = tabs[idx]
+  const curRec = cur as unknown as Record<string, unknown>
+  const patchRec = patch as unknown as Record<string, unknown>
+  const changed = Object.keys(patch).some((k) => patchRec[k] !== curRec[k])
+  if (!changed) return
+  browserTabs.set(tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)))
   if (patch.url && activeTabId.get() === id) syncActiveUrl(patch.url)
 }
 

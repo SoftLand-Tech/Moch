@@ -204,19 +204,26 @@ class BrowserRelayModule(reactContext: ReactApplicationContext) :
    */
   @ReactMethod
   fun tabTargets(promise: Promise) {
-    try {
-      val arr = Arguments.createArray()
-      for (page in CdpRelay.tabTargets()) {
-        val m = Arguments.createMap()
-        m.putString("id", page.optString("id", ""))
-        m.putString("url", page.optString("url", ""))
-        m.putString("title", page.optString("title", ""))
-        arr.pushMap(m)
+    // Speed pass: this is upstream LocalSocket I/O + a JSON parse per call,
+    // and JS calls it on every tab op / URL sync (throttled 800 ms JS-side).
+    // It used to run synchronously on the native-modules bridge thread,
+    // stalling every other bridge call behind it. React promises resolve
+    // safely on any thread — the exact shape ensureRunning already uses.
+    Thread {
+      try {
+        val arr = Arguments.createArray()
+        for (page in CdpRelay.tabTargets()) {
+          val m = Arguments.createMap()
+          m.putString("id", page.optString("id", ""))
+          m.putString("url", page.optString("url", ""))
+          m.putString("title", page.optString("title", ""))
+          arr.pushMap(m)
+        }
+        promise.resolve(arr)
+      } catch (e: Exception) {
+        promise.reject("cdp_relay_tab_targets", e.message, e)
       }
-      promise.resolve(arr)
-    } catch (e: Exception) {
-      promise.reject("cdp_relay_tab_targets", e.message, e)
-    }
+    }.start()
   }
 
   private fun statusMap(): WritableMap {
