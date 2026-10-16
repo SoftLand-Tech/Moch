@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUp, Brain, ChevronRight, CircleStop, Copy, GitBranch, ListTodo, LockKeyhole,
   MessageSquarePlus, Mic, Paperclip, Pin, PinOff, Search, Sparkles, Trash2, Wrench,
-  Check, Volume2, Cpu,
+  Check, Volume2, Cpu, GraduationCap,
 } from 'lucide-react'
 import {
   activeSession, activeTitle, agentBusy, answerCard, deleteSession,
@@ -254,6 +254,21 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
   const reasoning = msg.segments.filter((s) => s.kind === 'reasoning' || s.kind === 'thinking')
   const text = msg.segments.filter((s) => s.kind === 'text')
   const streaming = msg.streaming
+
+  /** Teach-a-skill: the agent distills this chat into a SKILL.md it saves itself. */
+  const teachSkill = () => {
+    const name = prompt('Name this skill (a short slug, e.g. release-checklist)')
+    if (!name) return
+    const slug = name.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
+    if (!slug) return
+    void send(
+      `Please distill what you learned in this conversation into a reusable skill named "${slug}". ` +
+      `Use the skill_manage tool to create it: the skill should describe WHEN to use it, the exact steps ` +
+      `as performed here (including any corrections I made), inputs to ask for, and failure notes. ` +
+      `Confirm with the skill's path when saved.`,
+    )
+  }
+
   return (
     <div className="msg assistant">
       {reasoning.map((s, i) => <ThinkBlock key={i} seg={s} streaming={!!streaming && i === reasoning.length - 1 && text.length === 0} />)}
@@ -271,6 +286,7 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
           <div className="msg-actions">
             <button className="msg-action" onClick={() => void navigator.clipboard.writeText(text.map(s => s.text).join(''))}><Copy size={11} /> copy</button>
             <button className="msg-action" onClick={() => void speak(text.map(s => s.text).join(''))}><Volume2 size={11} /> listen</button>
+            <button className="msg-action" title="Distill this conversation into a reusable skill the agent saves via skill_manage" onClick={teachSkill}><GraduationCap size={11} /> save as skill</button>
           </div>
         </div>
       ) : null}
