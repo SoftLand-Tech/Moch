@@ -3,6 +3,7 @@
  * Layout only — every behaviour comes from the shared engine and the
  * screen components. */
 import React from 'react'
+import './desktop.css'
 import { useStore } from '@nanostores/react'
 import {
   applyMode,
