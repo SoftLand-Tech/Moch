@@ -111,6 +111,18 @@ export const IconSearch = (p: { size?: number }): React.JSX.Element => (
     <path d="m21 21-4.35-4.35" />
   </Svg>
 )
+export const IconHome = (p: { size?: number }): React.JSX.Element => (
+  <Svg size={p.size}>
+    <path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    <path d="M9 22V12h6v10" />
+  </Svg>
+)
+export const IconFiles = (p: { size?: number }): React.JSX.Element => (
+  <Svg size={p.size}>
+    <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+    <path d="M13 2v7h7" />
+  </Svg>
+)
 export const IconClose = (p: { size?: number }): React.JSX.Element => (
   <Svg size={p.size}>
     <path d="M18 6 6 18M6 6l12 12" />

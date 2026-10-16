@@ -1,11 +1,10 @@
-/**
- * Desktop shell state — layout geometry + the active screen, persisted
- * under localStorage `moch.shell.v1`. One atom, one writer (setShellLayout).
- */
+/** Desktop shell state — layout, active screen, workspace mode.
+ * Persisted under localStorage `moch.shell.v1`. */
 import { atom } from 'nanostores'
 
 export type Density = 'compact' | 'default' | 'comfortable'
 export type ScreenId =
+  | 'home'
   | 'chat'
   | 'sessions'
   | 'crew'
@@ -13,10 +12,30 @@ export type ScreenId =
   | 'automations'
   | 'agent'
   | 'terminal'
+  | 'files'
   | 'browser'
   | 'connectors'
   | 'settings'
   | 'skills'
+
+/** Workspace modes: a preset that focuses a screen and optionally
+ * drafts a starter prompt. */
+export type ShellMode = 'chat' | 'agent' | 'coding' | 'research'
+
+export const MODE_PRESETS: Record<
+  ShellMode,
+  { label: string; subtitle: string; screen: ScreenId; draft?: string }
+> = {
+  chat: { label: 'Chat', subtitle: 'Just talk, get things done', screen: 'chat' },
+  agent: { label: 'Agent', subtitle: 'Autonomous tasks & tools', screen: 'home' },
+  coding: { label: 'Coding', subtitle: 'Code, terminal, dev tools', screen: 'terminal' },
+  research: {
+    label: 'Research',
+    subtitle: 'Deep research & analysis',
+    screen: 'chat',
+    draft: '/research ',
+  },
+}
 
 export interface ShellLayout {
   listCollapsed: boolean
@@ -25,6 +44,7 @@ export interface ShellLayout {
   railExpanded: boolean
   density: Density
   screen: ScreenId
+  mode: ShellMode
 }
 
 export const LIST_MIN = 208
@@ -39,7 +59,8 @@ const DEFAULTS: ShellLayout = {
   inspectorCollapsed: true,
   railExpanded: false,
   density: 'default',
-  screen: 'chat',
+  screen: 'home',
+  mode: 'agent',
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -50,14 +71,14 @@ function load(): ShellLayout {
   if (typeof localStorage === 'undefined') return { ...DEFAULTS }
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Partial<ShellLayout>
-    const screen = raw.screen
     return {
       listCollapsed: !!raw.listCollapsed,
       listWidth: clamp(Number(raw.listWidth) || LIST_DEFAULT, LIST_MIN, LIST_MAX),
       inspectorCollapsed: raw.inspectorCollapsed !== false,
       railExpanded: !!raw.railExpanded,
       density: raw.density === 'compact' || raw.density === 'comfortable' ? raw.density : 'default',
-      screen: (typeof screen === 'string' ? screen : 'chat') as ScreenId,
+      screen: (typeof raw.screen === 'string' ? raw.screen : 'home') as ScreenId,
+      mode: (raw.mode ?? 'agent') as ShellMode,
     }
   } catch {
     return { ...DEFAULTS }
@@ -75,6 +96,15 @@ export function setShellLayout(patch: Partial<ShellLayout>): void {
   } catch {
     // Private-mode storage refusals just stop persistence.
   }
+}
+
+/** Apply a workspace mode: sets the mode and focuses its screen. The
+ * caller applies any starter draft (needs the chat engine, which this
+ * module deliberately does not import). */
+export function applyMode(mode: ShellMode): { screen: ScreenId; draft?: string } {
+  const preset = MODE_PRESETS[mode]
+  setShellLayout({ mode, screen: preset.screen })
+  return { screen: preset.screen, draft: preset.draft }
 }
 
 export const paletteOpen = atom(false)

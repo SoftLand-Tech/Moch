@@ -85,20 +85,16 @@ function useOnline(): boolean {
 export function App(): React.JSX.Element {
   const connected = useOnline()
   const cfg = useStore(connConfig)
-  const [screen, setScreen] = useState<ScreenId>(() => shellLayout.get().screen)
+  const layout = useStore(shellLayout)
+  const screen = layout.screen
 
   useEffect(() => installTheme(), [])
-  useEffect(() => {
-    const off = shellLayout.subscribe((l) => setScreen(l.screen))
-    return off
-  }, [])
   useEffect(() => {
     if (connected) void loadSessions()
   }, [connected])
 
   const focusScreen = useCallback((id: ScreenId) => {
     setShellLayout({ screen: id })
-    setScreen(id)
   }, [])
   const doNewChat = useCallback(() => {
     focusScreen('chat')
@@ -179,6 +175,7 @@ export function App(): React.JSX.Element {
   return (
     <Shell
       active={screen}
+      mode={layout.mode}
       list={screen === 'chat' ? <SessionsList onOpen={(id) => focusScreen('chat')} /> : undefined}
       onNavigate={focusScreen}
       onOpenChatDraft={openChatDraft}

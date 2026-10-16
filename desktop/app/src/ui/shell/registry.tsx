@@ -1,5 +1,5 @@
-/** Screen registry — one table drives the rail, Ctrl+digit map, and the
- * palette's screen entries. */
+/** Screen registry — one table drives the sidebar, the Ctrl+digit map,
+ * and the palette's screen entries. */
 import type { ComponentType } from 'react'
 import type { ScreenId } from './state'
 import {
@@ -8,16 +8,15 @@ import {
   IconChip,
   IconCrew,
   IconCube,
+  IconFiles,
   IconGear,
+  IconHome,
   IconLink,
   IconList,
-  IconMoch,
   IconSkills,
   IconTerminal,
   IconTimer,
 } from './icons'
-
-export { IconMoch }
 
 export interface ScreenEntry {
   id: ScreenId
@@ -26,18 +25,19 @@ export interface ScreenEntry {
   icon: ComponentType<{ size?: number }>
 }
 
+/** Sidebar order. */
 export const SCREENS: ScreenEntry[] = [
-  { id: 'chat', label: 'Chat', digit: '1', icon: IconChat },
+  { id: 'home', label: 'Home', digit: '1', icon: IconHome },
   { id: 'sessions', label: 'Chats', digit: '2', icon: IconList },
-  { id: 'crew', label: 'Crew', digit: '3', icon: IconCrew },
-  { id: 'fleet', label: 'Fleet', digit: '4', icon: IconChip },
-  { id: 'automations', label: 'Automations', digit: '5', icon: IconTimer },
-  { id: 'agent', label: 'Models', digit: '6', icon: IconCube },
+  { id: 'fleet', label: 'Agents', digit: '3', icon: IconChip },
+  { id: 'automations', label: 'Automations', digit: '4', icon: IconTimer },
+  { id: 'files', label: 'Files', digit: '5', icon: IconFiles },
+  { id: 'connectors', label: 'Tools', digit: '6', icon: IconLink },
+  { id: 'skills', label: 'Skills', digit: null, icon: IconSkills },
   { id: 'terminal', label: 'Terminal', digit: '7', icon: IconTerminal },
   { id: 'browser', label: 'Browser', digit: '8', icon: IconBrowser },
-  { id: 'connectors', label: 'Connectors', digit: '9', icon: IconLink },
+  { id: 'crew', label: 'Crew', digit: null, icon: IconCrew },
   { id: 'settings', label: 'Settings', digit: '0', icon: IconGear },
-  { id: 'skills', label: 'Skills', digit: null, icon: IconSkills },
 ]
 
 export const SCREEN_ICONS: Record<ScreenId, ComponentType<{ size?: number }>> = Object.fromEntries(
