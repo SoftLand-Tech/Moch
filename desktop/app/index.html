@@ -7,7 +7,14 @@
     <style>
       :root { color-scheme: dark; }
       html, body, #root { height: 100%; margin: 0; }
-      body { background: #0a0813; color: #f4f1fa; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 14px; }
+      body {
+        background: #0a0813;
+        color: #f4f1fa;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 14px;
+        -webkit-font-smoothing: antialiased;
+        overscroll-behavior: none;
+      }
       #root { display: flex; }
       *:focus-visible { outline: 2px solid var(--moch-accent, #f79236); outline-offset: 2px; }
     </style>

@@ -1,36 +1,103 @@
 /* Moch Desktop chrome. Every color is a token var generated from
- * src/lib/theme.ts (see themeVars.ts) — no hex literals. */
+ * src/lib/theme.ts (see themeVars.ts) — no hex literals. This file also
+ * owns the ONE shared table/dialog kit (`mos-*`): Sessions, Skills,
+ * Connectors, Automations and Fleet all render through it, so row height,
+ * hover, selection and headers are defined exactly once. */
+
+/* ── Layout tokens (density lives here and nowhere else) ─────────────── */
+
+.shell {
+  --moch-row-h: 34px;
+  --moch-head-h: 46px;
+  --moch-status-h: 26px;
+  --moch-radius: 10px;
+  --moch-radius-sm: 6px;
+  --moch-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+.shell.density-compact {
+  --moch-row-h: 26px;
+  --moch-head-h: 40px;
+}
+.shell.density-comfortable {
+  --moch-row-h: 42px;
+  --moch-head-h: 52px;
+}
 
 .shell {
   display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   background: var(--moch-bg);
   color: var(--moch-text);
+  font-size: 13px;
 }
 
-/* nav rail */
+.shell-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Thin desktop scrollbars everywhere inside the shell. */
+.shell ::-webkit-scrollbar,
+.moch-chat ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.shell ::-webkit-scrollbar-thumb,
+.moch-chat ::-webkit-scrollbar-thumb {
+  background: var(--moch-border);
+  border-radius: 5px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.shell ::-webkit-scrollbar-thumb:hover,
+.moch-chat ::-webkit-scrollbar-thumb:hover {
+  background: var(--moch-text-faint);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.shell ::-webkit-scrollbar-corner,
+.moch-chat ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ── Nav rail ────────────────────────────────────────────────────────── */
+
 .rail {
   width: 56px;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 8px 0;
+  padding: 8px;
   align-items: center;
   background: var(--moch-bg-card);
   border-right: 1px solid var(--moch-border);
+  flex-shrink: 0;
 }
-.rail.expanded {
-  width: 200px;
-  align-items: stretch;
-  padding: 8px;
-}
-.rail-item {
+.rail-logo {
   display: flex;
   align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 8px;
+  color: var(--moch-text);
+}
+.rail.expanded {
+  width: 188px;
+  align-items: stretch;
+}
+.rail-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   gap: 10px;
-  height: 40px;
-  padding: 0 8px;
+  height: 36px;
+  width: 36px;
+  padding: 0;
   border: 0;
   border-radius: 8px;
   background: transparent;
@@ -38,28 +105,49 @@
   cursor: pointer;
   font: inherit;
   font-size: 13px;
+  transition: background 120ms ease, color 120ms ease;
 }
 .rail.expanded .rail-item {
   width: auto;
-}
-.rail-item.active {
-  background: var(--moch-accent-soft);
-  color: var(--moch-text);
+  justify-content: flex-start;
+  padding: 0 10px;
 }
 .rail-item:hover:not(.active) {
   background: var(--moch-bg-hover);
+  color: var(--moch-text);
+}
+.rail-item.active {
+  background: var(--moch-accent-soft);
+  color: var(--moch-accent);
+}
+/* The active marker: a 3px accent bar riding the rail's left edge. */
+.rail-item.active::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--moch-accent);
 }
 .rail-label {
   white-space: nowrap;
 }
 .rail-item.active .rail-label {
   font-weight: 600;
+  color: var(--moch-text);
 }
 .rail-expand {
   margin-top: auto;
 }
+.rail-expand .rail-dots {
+  font-size: 15px;
+  line-height: 1;
+}
 
-/* panes */
+/* ── Panes ───────────────────────────────────────────────────────────── */
+
 .pane {
   background: var(--moch-bg);
   border-right: 1px solid var(--moch-border);
@@ -78,6 +166,7 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  background: var(--moch-bg);
 }
 .main-pane.measured > * {
   max-width: 760px;
@@ -93,7 +182,104 @@
   padding: 12px;
 }
 
-/* splitter */
+/* Chat list pane (SessionsList in App.tsx). */
+.pane-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: none;
+  height: var(--moch-head-h);
+  padding: 0 10px 0 14px;
+  border-bottom: 1px solid var(--moch-border);
+}
+.pane-header-row .screen-empty {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.session-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0 12px;
+  height: var(--moch-row-h);
+  line-height: var(--moch-row-h);
+  background: transparent;
+  border: 0;
+  border-left: 2px solid transparent;
+  color: var(--moch-text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-row:hover {
+  background: var(--moch-bg-hover);
+  color: var(--moch-text);
+}
+.session-row.active {
+  background: var(--moch-accent-soft);
+  border-left-color: var(--moch-accent);
+  color: var(--moch-text);
+}
+
+/* ── Status bar ──────────────────────────────────────────────────────── */
+
+.statusbar {
+  flex: none;
+  height: var(--moch-status-h);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 12px;
+  background: var(--moch-bg-card);
+  border-top: 1px solid var(--moch-border);
+  color: var(--moch-text-faint);
+  font-size: 11px;
+  user-select: none;
+}
+.statusbar__app {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--moch-text-dim);
+}
+.statusbar__conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.statusbar__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  background: var(--moch-text-faint);
+}
+.statusbar__dot--ok {
+  background: var(--moch-green);
+}
+.statusbar__dot--warn {
+  background: var(--moch-amber);
+}
+.statusbar__dot--err {
+  background: var(--moch-red);
+}
+.statusbar__spring {
+  flex: 1;
+}
+.statusbar__hint kbd {
+  font-family: var(--moch-mono);
+  font-size: 10px;
+  border: 1px solid var(--moch-border);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-right: 4px;
+}
+
+/* ── Splitter ────────────────────────────────────────────────────────── */
+
 .splitter {
   width: 6px;
   margin: 0 -3px;
@@ -102,27 +288,562 @@
   background: transparent;
   border: 0;
   padding: 0;
+  transition: background 120ms ease;
 }
 .splitter.active,
 .splitter:hover {
   background: var(--moch-accent-soft);
 }
 
-/* palette */
+/* ── Generic screen frame ────────────────────────────────────────────── */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.screen-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+.screen-empty {
+  color: var(--moch-text-dim);
+  font-size: 13px;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────── */
+
+.btn {
+  background: transparent;
+  color: var(--moch-text-dim);
+  border: 1px solid var(--moch-border);
+  border-radius: var(--moch-radius-sm);
+  height: 28px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+.btn:hover:not(:disabled) {
+  color: var(--moch-text);
+  border-color: var(--moch-text-faint);
+  background: var(--moch-bg-hover);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.btn.primary {
+  background: var(--moch-accent);
+  border-color: var(--moch-accent);
+  color: var(--moch-on-accent);
+  font-weight: 600;
+}
+.btn.primary:hover:not(:disabled) {
+  background: var(--moch-accent-dark);
+  border-color: var(--moch-accent-dark);
+  color: var(--moch-on-accent);
+}
+
+/* ── Tabs ────────────────────────────────────────────────────────────── */
+
+.mos-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 16px 0;
+  border-bottom: 1px solid var(--moch-border);
+  flex: none;
+}
+.mos-tabs--flat {
+  padding: 0;
+  border-bottom: none;
+}
+.mos-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--moch-text-dim);
+  font-size: 12.5px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.mos-tab:hover {
+  color: var(--moch-text);
+}
+.mos-tab.mos-tabOn {
+  color: var(--moch-text);
+  border-bottom-color: var(--moch-accent);
+  font-weight: 600;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Shared table kit (`mos-*`) — the one table style for Sessions, Skills,
+   Connectors, Automations and Fleet. Screens add only genuinely local
+   widgets next to this vocabulary.
+   ══════════════════════════════════════════════════════════════════════ */
+
+.mos-root {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  color: var(--moch-text);
+  font-family: var(--moch-font);
+}
+.mos-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  flex: none;
+  height: var(--moch-head-h);
+  border-bottom: 1px solid var(--moch-border);
+}
+.mos-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.mos-sub {
+  color: var(--moch-text-dim);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Pushes everything after it to the right edge of a head/dialog row. */
+.mos-spring {
+  margin-left: auto;
+}
+.mos-search {
+  margin-left: auto;
+  background: var(--moch-input);
+  color: var(--moch-text);
+  border: 1px solid var(--moch-border);
+  border-radius: var(--moch-radius-sm);
+  padding: 5px 10px;
+  font-size: 12.5px;
+  font-family: inherit;
+  width: 220px;
+}
+.mos-search:focus {
+  border-color: var(--moch-accent);
+  outline: none;
+}
+.mos-scroller {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+.mos-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.mos-th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--moch-bg-card);
+  color: var(--moch-text-faint);
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0 10px;
+  height: 32px;
+  border-bottom: 1px solid var(--moch-border);
+  white-space: nowrap;
+}
+.mos-row {
+  height: var(--moch-row-h);
+  cursor: pointer;
+  transition: background 80ms ease;
+}
+.mos-row:hover {
+  background: var(--moch-bg-hover);
+}
+.mos-row.mos-sel {
+  background: var(--moch-accent-soft);
+}
+.mos-row.mos-paused .mos-name {
+  color: var(--moch-text-dim);
+}
+.mos-td {
+  padding: 0 10px;
+  border-bottom: 1px solid var(--moch-border-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 380px;
+}
+.mos-namecell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.mos-name {
+  font-family: var(--moch-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--moch-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mos-subline {
+  display: block;
+  color: var(--moch-text-faint);
+  font-weight: 400;
+  font-family: var(--moch-font);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mos-desc {
+  color: var(--moch-text-dim);
+  max-width: 560px;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.mos-mono {
+  font-family: var(--moch-mono);
+  font-size: 11.5px;
+}
+.mos-w-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+.mos-badge {
+  color: var(--moch-text-faint);
+  font-size: 10.5px;
+  border: 1px solid var(--moch-border);
+  border-radius: 8px;
+  padding: 0 6px;
+  flex: none;
+}
+.mos-red {
+  color: var(--moch-red);
+}
+.mos-green {
+  color: var(--moch-green);
+}
+.mos-amber {
+  color: var(--moch-amber);
+}
+.mos-btn {
+  background: transparent;
+  color: var(--moch-text-dim);
+  border: 1px solid var(--moch-border);
+  border-radius: var(--moch-radius-sm);
+  font-size: 11.5px;
+  height: 22px;
+  padding: 0 9px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.mos-btn + .mos-btn {
+  margin-left: 6px;
+}
+.mos-btn:hover:not(:disabled) {
+  color: var(--moch-text);
+  border-color: var(--moch-text-faint);
+  background: var(--moch-bg-hover);
+}
+.mos-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.mos-btn.mos-accent {
+  background: var(--moch-accent);
+  color: var(--moch-on-accent);
+  border-color: transparent;
+  font-weight: 600;
+}
+.mos-btn.mos-accent:hover:not(:disabled) {
+  background: var(--moch-accent-dark);
+  color: var(--moch-on-accent);
+}
+.mos-btn.mos-danger {
+  color: var(--moch-red);
+}
+.mos-btn.mos-dangerSolid {
+  background: var(--moch-red);
+  color: var(--moch-bg);
+  border-color: transparent;
+  font-weight: 600;
+}
+.mos-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 1;
+  padding: 56px 24px;
+  color: var(--moch-text-dim);
+}
+.mos-emptyTitle {
+  margin: 0 0 4px;
+  color: var(--moch-text);
+  font-size: 15px;
+  font-weight: 600;
+}
+.mos-emptyBody {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  text-align: center;
+  max-width: 420px;
+}
+.mos-errrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  color: var(--moch-red);
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--moch-border-soft);
+  flex: none;
+}
+.mos-errrow span {
+  flex: 1;
+}
+.mos-err {
+  margin: 0;
+  color: var(--moch-red);
+  font-size: 12.5px;
+}
+.mos-spin {
+  width: 22px;
+  height: 22px;
+  margin: 48px auto;
+  border: 2px solid var(--moch-border);
+  border-top-color: var(--moch-accent);
+  border-radius: 50%;
+  animation: mos-rot 800ms linear infinite;
+}
+.mos-spinSm {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 1.5px solid var(--moch-border);
+  border-top-color: var(--moch-accent);
+  border-radius: 50%;
+  animation: mos-rot 800ms linear infinite;
+}
+@keyframes mos-rot {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.mos-toast {
+  position: fixed;
+  left: 16px;
+  bottom: 40px;
+  z-index: 40;
+  background: var(--moch-bg-elev);
+  border: 1px solid var(--moch-border);
+  color: var(--moch-text);
+  font-size: 12.5px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  box-shadow: var(--moch-shadow-pop);
+}
+.mos-hint {
+  margin: 0;
+  color: var(--moch-text-faint);
+  font-size: 11.5px;
+}
+.mos-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mos-chip {
+  background: transparent;
+  border: 1px solid var(--moch-border);
+  color: var(--moch-text-dim);
+  border-radius: 999px;
+  font-size: 11.5px;
+  height: 24px;
+  padding: 0 11px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+.mos-chip:hover {
+  color: var(--moch-text);
+  border-color: var(--moch-text-faint);
+  background: var(--moch-bg-hover);
+}
+.mos-chip.mos-chipOn {
+  background: var(--moch-accent-soft);
+  border-color: var(--moch-accent);
+  color: var(--moch-text);
+}
+
+/* Toggle switch (Automations pause, Fleet freeze). */
+.mos-toggle {
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
+  border: none;
+  background: var(--moch-accent);
+  position: relative;
+  cursor: pointer;
+  padding: 0;
+}
+.mos-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.mos-toggleOff {
+  background: var(--moch-text-faint);
+}
+.mos-knob {
+  position: absolute;
+  top: 2px;
+  left: 14px;
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--moch-bg);
+  transition: left 120ms ease;
+}
+.mos-toggleOff .mos-knob {
+  left: 2px;
+}
+
+/* Dialog (sheet) — shared scrim, card, fields. */
+.mos-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--moch-scrim);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8vh 16px 16px;
+}
+.mos-card {
+  background: var(--moch-bg-card);
+  border: 1px solid var(--moch-border);
+  border-radius: var(--moch-radius);
+  width: 480px;
+  max-width: 100%;
+  max-height: 84vh;
+  overflow: auto;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: var(--moch-shadow-pop);
+}
+.mos-cardSm {
+  width: 360px;
+}
+.mos-cardHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.mos-cardHead strong {
+  font-size: 14px;
+}
+.mos-cardTitle {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.mos-cardTitle strong {
+  font-size: 14px;
+}
+.mos-x {
+  background: none;
+  border: none;
+  color: var(--moch-text-faint);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 6px;
+  margin-left: auto;
+}
+.mos-x:hover {
+  color: var(--moch-text);
+}
+.mos-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mos-label {
+  color: var(--moch-text-faint);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.mos-input {
+  background: var(--moch-input);
+  color: var(--moch-text);
+  border: 1px solid var(--moch-border);
+  border-radius: var(--moch-radius-sm);
+  padding: 6px 9px;
+  font-size: 13px;
+  font-family: inherit;
+}
+.mos-input:focus {
+  border-color: var(--moch-accent);
+  outline: none;
+}
+textarea.mos-input {
+  resize: vertical;
+}
+.mos-input.mos-mono {
+  font-size: 12px;
+}
+.mos-dialogBtns {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.mos-dialogBtns .mos-btn + .mos-btn {
+  margin-left: 0;
+}
+.mos-confirmBody {
+  margin: 0;
+  color: var(--moch-text-dim);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* ── Palette (Ctrl+K) ────────────────────────────────────────────────── */
+
 .palette-scrim {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--moch-scrim);
   z-index: 100;
 }
 .palette-card {
-  margin: 15vh auto 0;
+  margin: 14vh auto 0;
   max-width: 640px;
   width: 92%;
   background: var(--moch-bg-card);
   border: 1px solid var(--moch-border);
   border-radius: 12px;
   overflow: hidden;
+  box-shadow: var(--moch-shadow-pop);
 }
 .palette-input {
   width: 100%;
@@ -143,12 +864,13 @@
 .palette-list {
   max-height: 50vh;
   overflow-y: auto;
+  padding: 4px 0;
 }
 .palette-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 36px;
+  height: 34px;
   padding: 0 14px;
   cursor: pointer;
 }
@@ -158,13 +880,13 @@
 .palette-title {
   flex: 1;
   color: var(--moch-text);
-  font-size: 14px;
+  font-size: 13.5px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .palette-hint {
-  color: var(--moch-text-dim);
+  color: var(--moch-text-faint);
   font-size: 12px;
   max-width: 40%;
   white-space: nowrap;
@@ -172,57 +894,16 @@
   text-overflow: ellipsis;
 }
 .palette-kind {
-  color: var(--moch-text-dim);
+  color: var(--moch-text-faint);
   font-size: 10px;
   border: 1px solid var(--moch-border);
   border-radius: 4px;
   padding: 1px 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 .palette-empty {
   color: var(--moch-text-dim);
   font-size: 13px;
   padding: 14px;
-}
-
-/* generic screen frame */
-.screen {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-.screen-title {
-  font-size: 16px;
-  font-weight: 600;
-  margin: 0 0 12px;
-}
-.screen-empty {
-  color: var(--moch-text-dim);
-  font-size: 13px;
-}
-
-/* buttons */
-.btn {
-  background: transparent;
-  color: var(--moch-text-dim);
-  border: 1px solid var(--moch-border);
-  border-radius: 6px;
-  padding: 4px 10px;
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-.btn:hover:not(:disabled) {
-  color: var(--moch-text);
-  border-color: var(--moch-accent);
-}
-.btn:disabled {
-  color: var(--moch-text-dim);
-  border-color: var(--moch-border-soft);
-  cursor: default;
-}
-.btn.primary {
-  background: var(--moch-accent);
-  border-color: var(--moch-accent);
-  color: var(--moch-bg);
 }

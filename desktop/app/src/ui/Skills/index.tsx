@@ -107,7 +107,6 @@ export default function Skills(): React.JSX.Element {
 
   return (
     <div className="mos-root">
-      <style>{css}</style>
       <header className="mos-head">
         <h2>Skills</h2>
         <span className="mos-sub">Commands and skills served by your computer's registry.</span>
@@ -144,7 +143,7 @@ export default function Skills(): React.JSX.Element {
           <table className="mos-table">
             <thead>
               <tr>
-                <th className="mos-th mos-w-name">{tab === 'commands' ? 'Command' : 'Skill'}</th>
+                <th className="mos-th" style={{ width: 200 }}>{tab === 'commands' ? 'Command' : 'Skill'}</th>
                 <th className="mos-th">Description</th>
                 <th className="mos-th mos-w-actions" aria-label="Run" />
               </tr>
@@ -174,34 +173,3 @@ export default function Skills(): React.JSX.Element {
   )
 }
 
-const css = `
-.mos-root { display: flex; flex-direction: column; flex: 1; min-height: 0; color: var(--moch-text); font-family: var(--moch-font); }
-.mos-head { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--moch-border); }
-.mos-head h2 { margin: 0; font-size: 15px; }
-.mos-sub { color: var(--moch-text-dim); font-size: 12px; }
-.mos-search { margin-left: auto; background: var(--moch-bg); color: var(--moch-text); border: 1px solid var(--moch-border); border-radius: 6px; padding: 4px 9px; font-size: 12.5px; font-family: inherit; width: 220px; }
-.mos-tabs { display: flex; gap: 2px; padding: 6px 16px 0; border-bottom: 1px solid var(--moch-border); }
-.mos-tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--moch-text-dim); font-size: 12.5px; padding: 5px 10px; cursor: pointer; font-family: inherit; }
-.mos-tab:hover { color: var(--moch-text); }
-.mos-tab.mos-tabOn { color: var(--moch-text); border-bottom-color: var(--moch-accent); }
-.mos-scroller { flex: 1; overflow: auto; min-height: 0; }
-.mos-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.mos-th { position: sticky; top: 0; z-index: 1; background: var(--moch-bg-card); color: var(--moch-text-faint); text-align: left; font-weight: 500; padding: 0 10px; height: 30px; border-bottom: 1px solid var(--moch-border); white-space: nowrap; }
-.mos-row { height: var(--moch-row-h, 32px); cursor: default; }
-.mos-row:hover { background: var(--moch-bg-hover); }
-.mos-row.mos-sel { background: var(--moch-accent-soft); }
-.mos-td { padding: 0 10px; border-bottom: 1px solid var(--moch-border-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mos-name { font-family: var(--moch-mono); font-size: 12px; font-weight: 500; color: var(--moch-accent); }
-.mos-desc { color: var(--moch-text-dim); max-width: 560px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
-.mos-w-name { width: 200px; }
-.mos-w-actions { width: 1%; white-space: nowrap; }
-.mos-btn { background: transparent; color: var(--moch-text-dim); border: 1px solid var(--moch-border); border-radius: 5px; font-size: 11.5px; padding: 2px 8px; cursor: pointer; font-family: inherit; }
-.mos-btn:hover { color: var(--moch-text); border-color: var(--moch-text-faint); }
-.mos-btn.mos-accent { background: var(--moch-accent); color: var(--moch-bg); border-color: transparent; }
-.mos-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 56px 24px; color: var(--moch-text-dim); }
-.mos-emptyTitle { margin: 0 0 8px; color: var(--moch-text); font-size: 14px; }
-.mos-spin { width: 22px; height: 22px; margin: 48px auto; border: 2px solid var(--moch-border); border-top-color: var(--moch-accent); border-radius: 50%; animation: mos-rot 800ms linear infinite; }
-@keyframes mos-rot { to { transform: rotate(360deg); } }
-.mos-toast { position: fixed; left: 16px; bottom: 16px; z-index: 40; background: var(--moch-bg-elev); border: 1px solid var(--moch-border); color: var(--moch-text); font-size: 12.5px; padding: 7px 12px; border-radius: 8px; box-shadow: 0 4px 18px rgba(0,0,0,0.35); }
-.mos-root :focus-visible { outline: 2px solid var(--moch-accent); outline-offset: 1px; }
-`

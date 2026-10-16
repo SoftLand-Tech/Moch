@@ -11,10 +11,13 @@ import {
   IconGear,
   IconLink,
   IconList,
+  IconMoch,
   IconSkills,
   IconTerminal,
   IconTimer,
 } from './icons'
+
+export { IconMoch }
 
 export interface ScreenEntry {
   id: ScreenId

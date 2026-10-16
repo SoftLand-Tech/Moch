@@ -116,3 +116,23 @@ export const IconClose = (p: { size?: number }): React.JSX.Element => (
     <path d="M18 6 6 18M6 6l12 12" />
   </Svg>
 )
+
+/** Moch brand mark — the mascot's visor head with its sprout. Colors ride
+ *  the token vars (with brand fallbacks) so the mark follows the theme. */
+export const IconMoch = (p: { size?: number }): React.JSX.Element => (
+  <svg width={p.size ?? 20} height={p.size ?? 20} viewBox="0 0 24 24" fill="none" aria-hidden>
+    <path
+      d="M15.2 5.6c.7-1.2 2.1-1.9 3.6-1.7-.1 1.5-1 2.9-2.4 3.4"
+      stroke="var(--moch-accent, #F79236)"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+    />
+    <rect x="2.2" y="4.6" width="19.6" height="15.2" rx="7.6" fill="var(--moch-user-bubble, #F6ECE1)" />
+    <path
+      d="M5.4 10.8c0-2.5 3.3-3.9 6.6-3.9s6.6 1.4 6.6 3.9c0 1.3-.6 2.2-1.6 2.7-1.2.6-3 .7-5 .7s-3.8-.1-5-.7c-1-.5-1.6-1.4-1.6-2.7Z"
+      fill="var(--moch-user-text, #2B283B)"
+    />
+    <circle cx="9.3" cy="11" r="1.05" fill="var(--moch-user-bubble, #F6ECE1)" />
+    <circle cx="14.7" cy="11" r="1.05" fill="var(--moch-user-bubble, #F6ECE1)" />
+  </svg>
+)

@@ -6,7 +6,6 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '@nanostores/react'
-import { C } from '../../../../../app/src/lib/theme'
 import { isConnected } from '../../../../../app/src/lib/gateway'
 import {
   McpServer,
@@ -63,9 +62,9 @@ function Tile(props: { name: string; size?: number; installed?: boolean }): Reac
   const size = props.size ?? 36
   const letter = props.name.replace(/[^a-z0-9]/gi, '').charAt(0).toUpperCase() || '?'
   return (
-    <span className="moc-tile" style={{ width: size, height: size, borderRadius: size * 0.28, background: tileColor(props.name), fontSize: size * 0.44 }} aria-hidden>
+    <span className="mos-tile" style={{ width: size, height: size, borderRadius: size * 0.28, background: tileColor(props.name), fontSize: size * 0.44 }} aria-hidden>
       {letter}
-      {props.installed ? <span className="moc-tileCheck">✓</span> : null}
+      {props.installed ? <span className="mos-tileCheck">✓</span> : null}
     </span>
   )
 }
@@ -177,78 +176,78 @@ export default function Connectors(): React.JSX.Element {
 
   if (unsupported) {
     return (
-      <div className="moc-root">
+      <div className="mos-root">
         <style>{css}</style>
-        <header className="moc-head"><h2>Connectors</h2></header>
-        <div className="moc-empty">
-          <p className="moc-emptyTitle">Not available on this machine</p>
-          <p className="moc-emptyBody">The connected Mochi doesn't expose connector management yet. Update Mochi on that machine, then reconnect.</p>
+        <header className="mos-head"><h2>Connectors</h2></header>
+        <div className="mos-empty">
+          <p className="mos-emptyTitle">Not available on this machine</p>
+          <p className="mos-emptyBody">The connected Mochi doesn't expose connector management yet. Update Mochi on that machine, then reconnect.</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="moc-root">
+    <div className="mos-root">
       <style>{css}</style>
-      <header className="moc-head">
+      <header className="mos-head">
         <h2>Connectors</h2>
-        <span className="moc-sub">MCP servers on this machine — same surface as `hermes mcp`.</span>
+        <span className="mos-sub">MCP servers on this machine — same surface as `hermes mcp`.</span>
         <input
-          className="moc-search"
+          className="mos-search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={tab === 'yours' ? 'Filter your servers…' : 'Search the catalog…'}
           aria-label="Filter"
           spellCheck={false}
         />
-        <button className="moc-btn" onClick={refresh} disabled={!online} aria-label="Refresh servers">Refresh</button>
-        <button className="moc-btn moc-accent" onClick={() => setAdding(true)} disabled={!online}>＋ Add</button>
+        <button className="mos-btn" onClick={refresh} disabled={!online} aria-label="Refresh servers">Refresh</button>
+        <button className="mos-btn mos-accent" onClick={() => setAdding(true)} disabled={!online}>＋ Add</button>
       </header>
 
-      <div className="moc-tabs" role="tablist">
-        <button role="tab" aria-selected={tab === 'yours'} className={`moc-tab${tab === 'yours' ? ' moc-tabOn' : ''}`} onClick={() => setTab('yours')}>
+      <div className="mos-tabs" role="tablist">
+        <button role="tab" aria-selected={tab === 'yours'} className={`mos-tab${tab === 'yours' ? ' mos-tabOn' : ''}`} onClick={() => setTab('yours')}>
           Yours ({servers.length})
         </button>
-        <button role="tab" aria-selected={tab === 'browse'} className={`moc-tab${tab === 'browse' ? ' moc-tabOn' : ''}`} onClick={() => setTab('browse')}>
+        <button role="tab" aria-selected={tab === 'browse'} className={`mos-tab${tab === 'browse' ? ' mos-tabOn' : ''}`} onClick={() => setTab('browse')}>
           Browse
         </button>
       </div>
 
-      {note ? <div className="moc-toast" role="status">{note}</div> : null}
+      {note ? <div className="mos-toast" role="status">{note}</div> : null}
 
       {listError ? (
-        <div className="moc-errrow" role="alert">
+        <div className="mos-errrow" role="alert">
           <span>Couldn't load servers — {listError}</span>
-          <button className="moc-btn" onClick={refresh}>Retry</button>
+          <button className="mos-btn" onClick={refresh}>Retry</button>
         </div>
       ) : null}
 
       {tab === 'yours' ? (
         !online && servers.length === 0 ? (
-          <div className="moc-empty" role="status">
-            <p className="moc-emptyTitle">Offline</p>
-            <p className="moc-emptyBody">Connectors live on your computer. Connect, then refresh.</p>
-            <button className="moc-btn" onClick={refresh}>Refresh</button>
+          <div className="mos-empty" role="status">
+            <p className="mos-emptyTitle">Offline</p>
+            <p className="mos-emptyBody">Connectors live on your computer. Connect, then refresh.</p>
+            <button className="mos-btn" onClick={refresh}>Refresh</button>
           </div>
         ) : loading && servers.length === 0 && !listError ? (
-          <div className="moc-spin" aria-label="Loading servers" />
+          <div className="mos-spin" aria-label="Loading servers" />
         ) : serverList.length === 0 && !listError ? (
-          <div className="moc-empty">
-            <p className="moc-emptyTitle">No MCP servers yet</p>
-            <p className="moc-emptyBody">Browse the catalog or add one by URL or command.</p>
-            <button className="moc-btn moc-accent" onClick={() => setTab('browse')}>Browse catalog</button>
+          <div className="mos-empty">
+            <p className="mos-emptyTitle">No MCP servers yet</p>
+            <p className="mos-emptyBody">Browse the catalog or add one by URL or command.</p>
+            <button className="mos-btn mos-accent" onClick={() => setTab('browse')}>Browse catalog</button>
           </div>
         ) : (
-          <div className="moc-scroller">
-            <table className="moc-table">
+          <div className="mos-scroller">
+            <table className="mos-table">
               <thead>
                 <tr>
-                  <th className="moc-th">Name</th>
-                  <th className="moc-th">Status</th>
-                  <th className="moc-th moc-w-tools">Tools</th>
-                  <th className="moc-th moc-w-enabled">Enabled</th>
-                  <th className="moc-th moc-w-actions" aria-label="Manage" />
+                  <th className="mos-th">Name</th>
+                  <th className="mos-th">Status</th>
+                  <th className="mos-th mos-w-tools">Tools</th>
+                  <th className="mos-th mos-w-enabled">Enabled</th>
+                  <th className="mos-th mos-w-actions" aria-label="Manage" />
                 </tr>
               </thead>
               <tbody>
@@ -257,22 +256,22 @@ export default function Connectors(): React.JSX.Element {
                   return (
                     <tr
                       key={s.name}
-                      className={`moc-row${selected === s.name ? ' moc-sel' : ''}`}
+                      className={`mos-row${selected === s.name ? ' mos-sel' : ''}`}
                       onClick={() => setSelected(s.name)}
                       onDoubleClick={() => setOpenName(s.name)}
                     >
-                      <td className="moc-td">
-                        <span className="moc-nameCell">
+                      <td className="mos-td">
+                        <span className="mos-namecell">
                           <Tile name={s.name} size={22} />
-                          <span className="moc-name">{s.name}</span>
-                          <span className="moc-badge">{s.transport}</span>
+                          <span className="mos-name">{s.name}</span>
+                          <span className="mos-badge">{s.transport}</span>
                         </span>
                       </td>
-                      <td className={`moc-td${st.danger ? ' moc-red' : st.warn ? ' moc-amber' : ''}`}>{st.text}</td>
-                      <td className="moc-td moc-w-tools">{runtime[s.name]?.tools ?? '—'}</td>
-                      <td className="moc-td moc-w-enabled">{s.enabled === false ? 'no' : 'yes'}</td>
-                      <td className="moc-td moc-w-actions">
-                        <button className="moc-btn" onClick={(e) => { e.stopPropagation(); setOpenName(s.name) }}>Manage</button>
+                      <td className={`mos-td${st.danger ? ' mos-red' : st.warn ? ' mos-amber' : ''}`}>{st.text}</td>
+                      <td className="mos-td mos-w-tools">{runtime[s.name]?.tools ?? '—'}</td>
+                      <td className="mos-td mos-w-enabled">{s.enabled === false ? 'no' : 'yes'}</td>
+                      <td className="mos-td mos-w-actions">
+                        <button className="mos-btn" onClick={(e) => { e.stopPropagation(); setOpenName(s.name) }}>Manage</button>
                       </td>
                     </tr>
                   )
@@ -282,24 +281,24 @@ export default function Connectors(): React.JSX.Element {
           </div>
         )
       ) : catLoading && catalog.length === 0 && online ? (
-        <div className="moc-spin" aria-label="Loading catalog" />
+        <div className="mos-spin" aria-label="Loading catalog" />
       ) : catalogList.length === 0 ? (
-        <div className="moc-empty">
-          <p className="moc-emptyTitle">{online ? (query.trim() ? 'No matches' : 'Catalog is empty') : 'Offline'}</p>
+        <div className="mos-empty">
+          <p className="mos-emptyTitle">{online ? (query.trim() ? 'No matches' : 'Catalog is empty') : 'Offline'}</p>
         </div>
       ) : (
-        <div className="moc-scroller">
-          <div className="moc-grid">
+        <div className="mos-scroller">
+          <div className="mos-grid">
             {catalogList.map((item) => (
-              <div key={item.name} className="moc-gridCard">
-                <div className="moc-gridHead">
+              <div key={item.name} className="mos-gridCard">
+                <div className="mos-gridHead">
                   <Tile name={item.name} size={34} installed={item.installed} />
-                  <span className="moc-gridName">{item.name}</span>
-                  {item.requires.length > 0 ? <span className="moc-keyChip">API key</span> : null}
+                  <span className="mos-gridName">{item.name}</span>
+                  {item.requires.length > 0 ? <span className="mos-keyChip">API key</span> : null}
                 </div>
-                <p className="moc-gridDesc">{item.description}</p>
+                <p className="mos-gridDesc">{item.description}</p>
                 <button
-                  className={`moc-btn${item.installed ? '' : ' moc-accent'}`}
+                  className={`mos-btn${item.installed ? '' : ' mos-accent'}`}
                   disabled={item.installed || busy === item.name || !online}
                   onClick={() => void install(item.name, item.requires)}
                   aria-label={item.installed ? `${item.name} installed` : `Install ${item.name}`}
@@ -349,13 +348,13 @@ export default function Connectors(): React.JSX.Element {
       ) : null}
 
       {confirm ? (
-        <div className="moc-scrim" onClick={() => setConfirm(null)}>
-          <div className="moc-card moc-cardSm" role="dialog" aria-modal aria-label={confirm.title} onClick={(e) => e.stopPropagation()}>
+        <div className="mos-scrim" onClick={() => setConfirm(null)}>
+          <div className="mos-card mos-cardSm" role="dialog" aria-modal aria-label={confirm.title} onClick={(e) => e.stopPropagation()}>
             <strong>{confirm.title}</strong>
-            <p className="moc-confirmBody">{confirm.body}</p>
-            <div className="moc-dialogBtns">
-              <button className="moc-btn" onClick={() => setConfirm(null)}>Not now</button>
-              <button className="moc-btn moc-accent" onClick={() => { const c = confirm; setConfirm(null); void c.run() }}>{confirm.action}</button>
+            <p className="mos-confirmBody">{confirm.body}</p>
+            <div className="mos-dialogBtns">
+              <button className="mos-btn" onClick={() => setConfirm(null)}>Not now</button>
+              <button className="mos-btn mos-accent" onClick={() => { const c = confirm; setConfirm(null); void c.run() }}>{confirm.action}</button>
             </div>
           </div>
         </div>
@@ -487,79 +486,79 @@ function ServerSheet(props: {
   const close = () => { if (!testing && !removing) props.onClose() }
 
   return (
-    <div className="moc-scrim" onClick={close}>
-      <div className="moc-card" role="dialog" aria-modal aria-label={`Manage ${server.name}`} onClick={(e) => e.stopPropagation()}>
-        <div className="moc-cardHead">
+    <div className="mos-scrim" onClick={close}>
+      <div className="mos-card" role="dialog" aria-modal aria-label={`Manage ${server.name}`} onClick={(e) => e.stopPropagation()}>
+        <div className="mos-cardHead">
           <Tile name={server.name} size={34} />
-          <span className="moc-cardTitle">
+          <span className="mos-cardTitle">
             <strong>{server.name}</strong>
-            <span className={`moc-sub${st.danger ? ' moc-red' : st.warn ? ' moc-amber' : ''}`}>{st.text}</span>
+            <span className={`mos-sub${st.danger ? ' mos-red' : st.warn ? ' mos-amber' : ''}`}>{st.text}</span>
           </span>
-          <span className="moc-badge">{server.transport}</span>
-          <button className="moc-x" aria-label="Close" onClick={close}>✕</button>
+          <span className="mos-badge">{server.transport}</span>
+          <button className="mos-x" aria-label="Close" onClick={close}>✕</button>
         </div>
 
-        <div className="moc-cfg">
-          {server.url ? <p className="moc-cfgLine">{server.url}</p> : null}
-          {server.command ? <p className="moc-cfgLine">{[server.command, ...(server.args ?? [])].join(' ')}</p> : null}
-          {server.auth === 'oauth' ? <p className="moc-cfgLine">OAuth{server.oauth_tokens_present ? ' · signed in' : ''}</p> : null}
-          {server.env && server.env.length > 0 ? <p className="moc-cfgLine">env: {server.env.join(', ')}</p> : null}
+        <div className="mos-cfg">
+          {server.url ? <p className="mos-cfgLine">{server.url}</p> : null}
+          {server.command ? <p className="mos-cfgLine">{[server.command, ...(server.args ?? [])].join(' ')}</p> : null}
+          {server.auth === 'oauth' ? <p className="mos-cfgLine">OAuth{server.oauth_tokens_present ? ' · signed in' : ''}</p> : null}
+          {server.env && server.env.length > 0 ? <p className="mos-cfgLine">env: {server.env.join(', ')}</p> : null}
         </div>
 
         {oauthMissing ? (
           oauthFlow ? (
             oauthFlow.phase === 'waiting' ? (
-              <div className="moc-oauthRow">
-                <span className="moc-spinSm" aria-label="Waiting" />
-                <span className="moc-sub">Waiting for browser approval…</span>
-                <button className="moc-btn" onClick={cancelSignIn}>Cancel</button>
+              <div className="mos-oauthRow">
+                <span className="mos-spinSm" aria-label="Waiting" />
+                <span className="mos-sub">Waiting for browser approval…</span>
+                <button className="mos-btn" onClick={cancelSignIn}>Cancel</button>
               </div>
             ) : (
-              <div className="moc-oauthRow">
-                <span className="moc-sub moc-amber">{oauthFlow.message ?? 'Sign-in failed'}</span>
-                <button className="moc-btn" onClick={() => void startSignIn()}>Try again</button>
+              <div className="mos-oauthRow">
+                <span className="mos-sub mos-amber">{oauthFlow.message ?? 'Sign-in failed'}</span>
+                <button className="mos-btn" onClick={() => void startSignIn()}>Try again</button>
               </div>
             )
           ) : (
-            <div className="moc-oauthRow">
-              <span className="moc-sub">This server uses OAuth. Sign in from your browser.</span>
-              <button className="moc-btn moc-accent" onClick={() => void startSignIn()}>Sign in</button>
+            <div className="mos-oauthRow">
+              <span className="mos-sub">This server uses OAuth. Sign in from your browser.</span>
+              <button className="mos-btn mos-accent" onClick={() => void startSignIn()}>Sign in</button>
             </div>
           )
         ) : null}
 
         {testing ? (
-          <div className="moc-oauthRow">
-            <span className="moc-spinSm" aria-label="Testing" />
-            <span className="moc-sub">Testing — can take a minute on a cold start…</span>
+          <div className="mos-oauthRow">
+            <span className="mos-spinSm" aria-label="Testing" />
+            <span className="mos-sub">Testing — can take a minute on a cold start…</span>
           </div>
         ) : null}
 
         {result ? (
-          <div className="moc-testResult">
+          <div className="mos-testResult">
             {result.ok ? (
               <>
-                <p className="moc-cfgLine moc-green">
+                <p className="mos-cfgLine mos-green">
                   Connected — {result.tools.length} tools{result.prompts ? `, ${result.prompts} prompts` : ''}{result.resources ? `, ${result.resources} resources` : ''}
                 </p>
                 {result.tools.slice(0, 20).map((t) => (
-                  <p key={t.name} className="moc-toolLine">
-                    <span className="moc-toolName">{t.name}</span>
+                  <p key={t.name} className="mos-toolLine">
+                    <span className="mos-toolName">{t.name}</span>
                     {t.description ? ` — ${t.description}` : ''}
                   </p>
                 ))}
-                {result.tools.length > 20 ? <p className="moc-cfgLine">…and {result.tools.length - 20} more</p> : null}
+                {result.tools.length > 20 ? <p className="mos-cfgLine">…and {result.tools.length - 20} more</p> : null}
               </>
             ) : (
-              <p className="moc-cfgLine moc-red">Failed — {result.error}</p>
+              <p className="mos-cfgLine mos-red">Failed — {result.error}</p>
             )}
           </div>
         ) : null}
 
-        <div className="moc-dialogBtns">
-          <button className="moc-btn" onClick={() => void runTest()} disabled={testing}>{testing ? 'Testing…' : 'Test'}</button>
-          <button className="moc-btn" onClick={() => props.onNeedKey(server.name)}>API key</button>
-          <button className="moc-btn moc-danger" onClick={() => void runRemove()} disabled={removing}>{removing ? 'Removing…' : 'Remove'}</button>
+        <div className="mos-dialogBtns">
+          <button className="mos-btn" onClick={() => void runTest()} disabled={testing}>{testing ? 'Testing…' : 'Test'}</button>
+          <button className="mos-btn" onClick={() => props.onNeedKey(server.name)}>API key</button>
+          <button className="mos-btn mos-danger" onClick={() => void runRemove()} disabled={removing}>{removing ? 'Removing…' : 'Remove'}</button>
         </div>
       </div>
     </div>
@@ -613,43 +612,43 @@ function AddSheet(props: { onClose: () => void; onAdded: (name: string) => void 
   const close = () => { if (!saving) props.onClose() }
 
   return (
-    <div className="moc-scrim" onClick={close}>
-      <div className="moc-card" role="dialog" aria-modal aria-label="Add a server" onClick={(e) => e.stopPropagation()}>
-        <div className="moc-cardHead">
+    <div className="mos-scrim" onClick={close}>
+      <div className="mos-card" role="dialog" aria-modal aria-label="Add a server" onClick={(e) => e.stopPropagation()}>
+        <div className="mos-cardHead">
           <strong>Add a server</strong>
-          <button className="moc-x" aria-label="Close" onClick={close}>✕</button>
+          <button className="mos-x" aria-label="Close" onClick={close}>✕</button>
         </div>
 
-        <div className="moc-tabs moc-tabsFlat" role="tablist">
-          <button role="tab" aria-selected={kind === 'url'} className={`moc-tab${kind === 'url' ? ' moc-tabOn' : ''}`} onClick={() => setKind('url')}>HTTP URL</button>
-          <button role="tab" aria-selected={kind === 'command'} className={`moc-tab${kind === 'command' ? ' moc-tabOn' : ''}`} onClick={() => setKind('command')}>Command</button>
+        <div className="mos-tabs mos-tabs--flat" role="tablist">
+          <button role="tab" aria-selected={kind === 'url'} className={`mos-tab${kind === 'url' ? ' mos-tabOn' : ''}`} onClick={() => setKind('url')}>HTTP URL</button>
+          <button role="tab" aria-selected={kind === 'command'} className={`mos-tab${kind === 'command' ? ' mos-tabOn' : ''}`} onClick={() => setKind('command')}>Command</button>
         </div>
 
-        <label className="moc-field">
-          <span className="moc-label">Name</span>
-          <input className="moc-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. deepwiki" autoFocus spellCheck={false} />
+        <label className="mos-field">
+          <span className="mos-label">Name</span>
+          <input className="mos-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. deepwiki" autoFocus spellCheck={false} />
         </label>
         {kind === 'url' ? (
-          <label className="moc-field">
-            <span className="moc-label">URL</span>
-            <input className="moc-input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://mcp.example.com/mcp" spellCheck={false} />
+          <label className="mos-field">
+            <span className="mos-label">URL</span>
+            <input className="mos-input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://mcp.example.com/mcp" spellCheck={false} />
           </label>
         ) : (
-          <label className="moc-field">
-            <span className="moc-label">Command</span>
-            <input className="moc-input" value={command} onChange={(e) => setCommand(e.target.value)} placeholder="npx -y @modelcontextprotocol/server-everything" spellCheck={false} />
+          <label className="mos-field">
+            <span className="mos-label">Command</span>
+            <input className="mos-input" value={command} onChange={(e) => setCommand(e.target.value)} placeholder="npx -y @modelcontextprotocol/server-everything" spellCheck={false} />
           </label>
         )}
-        <label className="moc-field">
-          <span className="moc-label">Bearer token (optional)</span>
-          <input className="moc-input" type="password" value={bearer} onChange={(e) => setBearer(e.target.value)} placeholder="Authorization: Bearer …" />
+        <label className="mos-field">
+          <span className="mos-label">Bearer token (optional)</span>
+          <input className="mos-input" type="password" value={bearer} onChange={(e) => setBearer(e.target.value)} placeholder="Authorization: Bearer …" />
         </label>
 
-        {err ? <p className="moc-err" role="alert">{err}</p> : null}
+        {err ? <p className="mos-err" role="alert">{err}</p> : null}
 
-        <div className="moc-dialogBtns">
-          <button className="moc-btn" onClick={close} disabled={saving}>Cancel</button>
-          <button className="moc-btn moc-accent" onClick={() => void submit()} disabled={saving}>{saving ? 'Adding…' : 'Add server'}</button>
+        <div className="mos-dialogBtns">
+          <button className="mos-btn" onClick={close} disabled={saving}>Cancel</button>
+          <button className="mos-btn mos-accent" onClick={() => void submit()} disabled={saving}>{saving ? 'Adding…' : 'Add server'}</button>
         </div>
       </div>
     </div>
@@ -683,25 +682,25 @@ function KeySheet(props: { name: string; onClose: () => void; onSaved: (name: st
   const close = () => { if (!saving) props.onClose() }
 
   return (
-    <div className="moc-scrim" onClick={close}>
-      <div className="moc-card moc-cardSm" role="dialog" aria-modal aria-label={`API key for ${props.name}`} onClick={(e) => e.stopPropagation()}>
-        <div className="moc-cardHead">
+    <div className="mos-scrim" onClick={close}>
+      <div className="mos-card mos-cardSm" role="dialog" aria-modal aria-label={`API key for ${props.name}`} onClick={(e) => e.stopPropagation()}>
+        <div className="mos-cardHead">
           <strong>API key — {props.name}</strong>
-          <button className="moc-x" aria-label="Close" onClick={close}>✕</button>
+          <button className="mos-x" aria-label="Close" onClick={close}>✕</button>
         </div>
-        <p className="moc-sub">Stored in this machine's .env — never leaves it except to the server itself.</p>
+        <p className="mos-sub">Stored in this machine's .env — never leaves it except to the server itself.</p>
         <input
-          className="moc-input"
+          className="mos-input"
           type="password"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder="Paste the key…"
           autoFocus
         />
-        {err ? <p className="moc-err" role="alert">{err}</p> : null}
-        <div className="moc-dialogBtns">
-          <button className="moc-btn" onClick={close} disabled={saving}>Cancel</button>
-          <button className="moc-btn moc-accent" onClick={() => void submit()} disabled={saving}>{saving ? 'Saving…' : 'Save key'}</button>
+        {err ? <p className="mos-err" role="alert">{err}</p> : null}
+        <div className="mos-dialogBtns">
+          <button className="mos-btn" onClick={close} disabled={saving}>Cancel</button>
+          <button className="mos-btn mos-accent" onClick={() => void submit()} disabled={saving}>{saving ? 'Saving…' : 'Save key'}</button>
         </div>
       </div>
     </div>
@@ -709,73 +708,22 @@ function KeySheet(props: { name: string; onClose: () => void; onSaved: (name: st
 }
 
 const css = `
-.moc-root { display: flex; flex-direction: column; flex: 1; min-height: 0; color: var(--moch-text); font-family: var(--moch-font); }
-.moc-head { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--moch-border); }
-.moc-head h2 { margin: 0; font-size: 15px; }
-.moc-sub { color: var(--moch-text-dim); font-size: 12px; }
-.moc-search { margin-left: auto; background: var(--moch-bg); color: var(--moch-text); border: 1px solid var(--moch-border); border-radius: 6px; padding: 4px 9px; font-size: 12.5px; font-family: inherit; width: 200px; }
-.moc-tabs { display: flex; gap: 2px; padding: 6px 16px 0; border-bottom: 1px solid var(--moch-border); }
-.moc-tabsFlat { padding: 0; border-bottom: none; }
-.moc-tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--moch-text-dim); font-size: 12.5px; padding: 5px 10px; cursor: pointer; font-family: inherit; }
-.moc-tab:hover { color: var(--moch-text); }
-.moc-tab.moc-tabOn { color: var(--moch-text); border-bottom-color: var(--moch-accent); }
-.moc-scroller { flex: 1; overflow: auto; min-height: 0; }
-.moc-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.moc-th { position: sticky; top: 0; z-index: 1; background: var(--moch-bg-card); color: var(--moch-text-faint); text-align: left; font-weight: 500; padding: 0 10px; height: 30px; border-bottom: 1px solid var(--moch-border); white-space: nowrap; }
-.moc-row { height: var(--moch-row-h, 32px); cursor: default; }
-.moc-row:hover { background: var(--moch-bg-hover); }
-.moc-row.moc-sel { background: var(--moch-accent-soft); }
-.moc-td { padding: 0 10px; border-bottom: 1px solid var(--moch-border-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.moc-nameCell { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
-.moc-name { font-weight: 500; }
-.moc-badge { color: var(--moch-text-faint); font-size: 10.5px; border: 1px solid var(--moch-border); border-radius: 8px; padding: 0 6px; }
-.moc-w-tools { width: 64px; }
-.moc-w-enabled { width: 72px; }
-.moc-w-actions { width: 1%; white-space: nowrap; }
-.moc-red { color: var(--moch-red); }
-.moc-green { color: var(--moch-green-soft); }
-.moc-amber { color: var(--moch-amber, ${C.amber}); }
-.moc-tile { display: inline-flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; position: relative; flex: none; }
-.moc-tileCheck { position: absolute; top: -5px; right: -5px; width: 14px; height: 14px; border-radius: 7px; background: var(--moch-green-soft); color: var(--moch-text); font-size: 9px; line-height: 14px; text-align: center; }
-.moc-btn { background: transparent; color: var(--moch-text-dim); border: 1px solid var(--moch-border); border-radius: 5px; font-size: 11.5px; padding: 2px 8px; cursor: pointer; font-family: inherit; }
-.moc-btn:hover:not(:disabled) { color: var(--moch-text); border-color: var(--moch-text-faint); }
-.moc-btn:disabled { opacity: 0.5; cursor: default; }
-.moc-btn.moc-accent { background: var(--moch-accent); color: var(--moch-bg); border-color: transparent; }
-.moc-btn.moc-danger { color: var(--moch-red); }
-.moc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; padding: 12px 16px 24px; }
-.moc-gridCard { background: var(--moch-bg-card); border: 1px solid var(--moch-border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
-.moc-gridHead { display: flex; align-items: center; gap: 8px; }
-.moc-gridName { font-weight: 500; font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.moc-keyChip { color: var(--moch-amber, ${C.amber}); font-size: 10.5px; border: 1px solid var(--moch-border); border-radius: 8px; padding: 0 6px; flex: none; }
-.moc-gridDesc { margin: 0; color: var(--moch-text-dim); font-size: 11.5px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; flex: 1; }
-.moc-gridCard .moc-btn { align-self: flex-start; }
-.moc-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 56px 24px; color: var(--moch-text-dim); }
-.moc-emptyTitle { margin: 0; color: var(--moch-text); font-size: 16px; font-weight: 600; }
-.moc-emptyBody { margin: 0 0 8px; font-size: 12.5px; text-align: center; max-width: 420px; }
-.moc-errrow { display: flex; align-items: center; gap: 12px; padding: 8px 16px; color: var(--moch-red); font-size: 12.5px; border-bottom: 1px solid var(--moch-border-soft); }
-.moc-errrow span { flex: 1; }
-.moc-err { margin: 0; color: var(--moch-red); font-size: 12.5px; }
-.moc-spin { width: 22px; height: 22px; margin: 48px auto; border: 2px solid var(--moch-border); border-top-color: var(--moch-accent); border-radius: 50%; animation: moc-rot 800ms linear infinite; }
-.moc-spinSm { display: inline-block; width: 13px; height: 13px; border: 1.5px solid var(--moch-border); border-top-color: var(--moch-accent); border-radius: 50%; animation: moc-rot 800ms linear infinite; }
-@keyframes moc-rot { to { transform: rotate(360deg); } }
-.moc-toast { position: fixed; left: 16px; bottom: 16px; z-index: 40; background: var(--moch-bg-elev); border: 1px solid var(--moch-border); color: var(--moch-text); font-size: 12.5px; padding: 7px 12px; border-radius: 8px; box-shadow: 0 4px 18px rgba(0,0,0,0.35); }
-.moc-scrim { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.45); display: flex; align-items: flex-start; justify-content: center; padding: 8vh 16px 16px; }
-.moc-card { background: var(--moch-bg-card); border: 1px solid var(--moch-border); border-radius: 10px; width: 480px; max-width: 100%; max-height: 84vh; overflow: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 12px 40px rgba(0,0,0,0.4); }
-.moc-cardSm { width: 360px; }
-.moc-cardHead { display: flex; align-items: center; gap: 10px; }
-.moc-cardTitle { display: flex; flex-direction: column; flex: 1; min-width: 0; }
-.moc-cardTitle strong { font-size: 14px; }
-.moc-x { background: none; border: none; color: var(--moch-text-faint); cursor: pointer; font-size: 12px; padding: 2px 6px; }
-.moc-cfg { display: flex; flex-direction: column; gap: 4px; }
-.moc-cfgLine { margin: 0; font-family: var(--moch-mono); font-size: 11.5px; color: var(--moch-text-dim); overflow-wrap: anywhere; }
-.moc-oauthRow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.moc-testResult { border-top: 1px solid var(--moch-border-soft); padding-top: 8px; display: flex; flex-direction: column; gap: 3px; }
-.moc-toolLine { margin: 0; font-size: 11.5px; color: var(--moch-text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.moc-toolName { font-family: var(--moch-mono); color: var(--moch-text); }
-.moc-field { display: flex; flex-direction: column; gap: 4px; }
-.moc-label { color: var(--moch-text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
-.moc-input { background: var(--moch-bg); color: var(--moch-text); border: 1px solid var(--moch-border); border-radius: 6px; padding: 6px 8px; font-size: 13px; font-family: inherit; }
-.moc-dialogBtns { display: flex; justify-content: flex-end; gap: 8px; }
-.moc-confirmBody { margin: 0; color: var(--moch-text-dim); font-size: 13px; }
-.moc-root :focus-visible { outline: 2px solid var(--moch-accent); outline-offset: 1px; }
+/* Local to Connectors: the shared table kit (desktop.css) covers the rest. */
+.mos-w-tools { width: 64px; }
+.mos-w-enabled { width: 72px; }
+.mos-tile { display: inline-flex; align-items: center; justify-content: center; color: var(--moch-on-accent, #fff); font-weight: 700; position: relative; flex: none; }
+.mos-tileCheck { position: absolute; top: -5px; right: -5px; width: 14px; height: 14px; border-radius: 7px; background: var(--moch-green-soft); color: var(--moch-text); font-size: 9px; line-height: 14px; text-align: center; }
+.mos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; padding: 12px 16px 24px; }
+.mos-gridCard { background: var(--moch-bg-card); border: 1px solid var(--moch-border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.mos-gridHead { display: flex; align-items: center; gap: 8px; }
+.mos-gridName { font-weight: 500; font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mos-keyChip { color: var(--moch-amber); font-size: 10.5px; border: 1px solid var(--moch-border); border-radius: 8px; padding: 0 6px; flex: none; }
+.mos-gridDesc { margin: 0; color: var(--moch-text-dim); font-size: 11.5px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; flex: 1; }
+.mos-gridCard .mos-btn { align-self: flex-start; }
+.mos-cfg { display: flex; flex-direction: column; gap: 4px; }
+.mos-cfgLine { margin: 0; font-family: var(--moch-mono); font-size: 11.5px; color: var(--moch-text-dim); overflow-wrap: anywhere; }
+.mos-oauthRow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mos-testResult { border-top: 1px solid var(--moch-border-soft); padding-top: 8px; display: flex; flex-direction: column; gap: 3px; }
+.mos-toolLine { margin: 0; font-size: 11.5px; color: var(--moch-text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mos-toolName { font-family: var(--moch-mono); color: var(--moch-text); }
 `

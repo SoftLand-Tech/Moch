@@ -13,6 +13,7 @@ import {
 } from '../../../../../app/src/lib/gateway'
 import { httpBase } from '../../../../../app/src/lib/http'
 import { formatThinkMeta, type ChatMessage, type ChatSegment, type ToolItem } from '../../../../../app/src/lib/chat'
+import { IconMoch } from '../shell/icons'
 
 // Open markdown links in a new browser context — the desktop webview must
 // never navigate the whole app away. Default sanitizer keeps href; this hook
@@ -154,50 +155,14 @@ function CommandCard({ m }: { m: ChatMessage }) {
 
 export const MessageRow = memo(function MessageRow({ m, onRetry }: { m: ChatMessage; onRetry: (id: string) => void }) {
   if (m.role === 'assistant') {
-    if (m.cmd) {
-      return (
-        <div className="moch-row-bot">
-          <CommandCard m={m} />
-        </div>
-      )
-    }
-    const segs = segmentsOf(m)
-    const lastIdx = segs.length - 1
-    // Hidden thinking doesn't count as visible content, or the working dots
-    // would never show while the model reasons quietly (phone parity).
-    const hasVisibleText = segs.some((seg) => seg.kind === 'text' && seg.text.trim())
     return (
       <div className="moch-row-bot">
-        {segs.map((seg, i) =>
-          seg.kind === 'media' ? (
-            <div key={i} className="moch-seg">
-              <MediaChip seg={seg} />
-            </div>
-          ) : seg.kind === 'thinking' ? (
-            <ThinkingBlock key={i} seg={seg} live={!!m.streaming && i === lastIdx} />
-          ) : m.streaming && i === lastIdx ? (
-            // Plain text while streaming: re-parsing markdown per flush churns
-            // the whole subtree; the full render happens once, on completion.
-            <div key={i} className="moch-stream moch-seg">
-              {seg.text}
-              <span className="moch-cursor" aria-hidden>
-                ▍
-              </span>
-            </div>
-          ) : (
-            <Markdown key={i} text={seg.text} />
-          ),
-        )}
-        {m.streaming && !hasVisibleText ? (
-          <div className="moch-seg">
-            <span className="moch-dots" aria-label="Working">
-              <i />
-              <i />
-              <i />
-            </span>
-          </div>
-        ) : null}
-        <FailedStrip m={m} onRetry={onRetry} />
+        <div className="moch-bot__avatar" aria-hidden>
+          <IconMoch size={22} />
+        </div>
+        <div className="moch-bot__main">
+          <AssistantBody m={m} onRetry={onRetry} />
+        </div>
       </div>
     )
   }
@@ -221,6 +186,53 @@ export const MessageRow = memo(function MessageRow({ m, onRetry }: { m: ChatMess
     </div>
   )
 })
+
+/** Assistant content: command card, or segments + failure strip. Split out
+ *  so MessageRow can own the avatar/measure layout. */
+function AssistantBody({ m, onRetry }: { m: ChatMessage; onRetry: (id: string) => void }) {
+  if (m.cmd) {
+    return <CommandCard m={m} />
+  }
+  const segs = segmentsOf(m)
+  const lastIdx = segs.length - 1
+  // Hidden thinking doesn't count as visible content, or the working dots
+  // would never show while the model reasons quietly (phone parity).
+  const hasVisibleText = segs.some((seg) => seg.kind === 'text' && seg.text.trim())
+  return (
+    <>
+      {segs.map((seg, i) =>
+        seg.kind === 'media' ? (
+          <div key={i} className="moch-seg">
+            <MediaChip seg={seg} />
+          </div>
+        ) : seg.kind === 'thinking' ? (
+          <ThinkingBlock key={i} seg={seg} live={!!m.streaming && i === lastIdx} />
+        ) : m.streaming && i === lastIdx ? (
+          // Plain text while streaming: re-parsing markdown per flush churns
+          // the whole subtree; the full render happens once, on completion.
+          <div key={i} className="moch-stream moch-seg">
+            {seg.text}
+            <span className="moch-cursor" aria-hidden>
+              ▍
+            </span>
+          </div>
+        ) : (
+          <Markdown key={i} text={seg.text} />
+        ),
+      )}
+      {m.streaming && !hasVisibleText ? (
+        <div className="moch-seg">
+          <span className="moch-dots" aria-label="Working">
+            <i />
+            <i />
+            <i />
+          </span>
+        </div>
+      ) : null}
+      <FailedStrip m={m} onRetry={onRetry} />
+    </>
+  )
+}
 
 export function ToolRow({ t }: { t: ToolItem }) {
   return (

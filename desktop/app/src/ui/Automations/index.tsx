@@ -229,50 +229,50 @@ export default function Automations(): React.JSX.Element {
   }
 
   return (
-    <div className="moa-root">
+    <div className="mos-root">
       <style>{css}</style>
-      <header className="moa-head">
+      <header className="mos-head">
         <h2>Automations</h2>
-        <span className="moa-sub">Scheduled jobs run on your computer — they work even when this app is closed.</span>
-        <button className="moa-btn moa-headadd" onClick={() => void load()} disabled={!online} aria-label="Refresh automations">Refresh</button>
-        <button className="moa-btn moa-accent" onClick={openAdd} aria-label="New automation">＋ New automation</button>
+        <span className="mos-sub">Scheduled jobs run on your computer — they work even when this app is closed.</span>
+        <button className="mos-btn mos-spring" onClick={() => void load()} disabled={!online} aria-label="Refresh automations">Refresh</button>
+        <button className="mos-btn mos-accent" onClick={openAdd} aria-label="New automation">＋ New automation</button>
       </header>
 
-      {status ? <div className="moa-toast" role="status">{status}</div> : null}
+      {status ? <div className="mos-toast" role="status">{status}</div> : null}
 
       {error ? (
-        <div className="moa-errrow" role="alert">
+        <div className="mos-errrow" role="alert">
           <span>{error}</span>
-          <button className="moa-btn" onClick={() => void load()}>Retry</button>
+          <button className="mos-btn" onClick={() => void load()}>Retry</button>
         </div>
       ) : null}
 
       {!online && loaded && !error ? (
-        <div className="moa-empty" role="status">
-          <p className="moa-emptyTitle">Not connected</p>
-          <p className="moa-emptyBody">Automations live on your computer. Connect, then retry.</p>
-          <button className="moa-btn" onClick={() => void load()}>Retry</button>
+        <div className="mos-empty" role="status">
+          <p className="mos-emptyTitle">Not connected</p>
+          <p className="mos-emptyBody">Automations live on your computer. Connect, then retry.</p>
+          <button className="mos-btn" onClick={() => void load()}>Retry</button>
         </div>
       ) : !loaded ? (
-        <div className="moa-spin" aria-label="Loading automations" />
+        <div className="mos-spin" aria-label="Loading automations" />
       ) : jobs.length === 0 && !error ? (
-        <div className="moa-empty">
-          <p className="moa-emptyTitle">No automations yet</p>
-          <p className="moa-emptyBody">Schedule your first job here, or create one from chat with /cron add</p>
-          <button className="moa-btn moa-accent" onClick={openAdd}>New automation</button>
+        <div className="mos-empty">
+          <p className="mos-emptyTitle">No automations yet</p>
+          <p className="mos-emptyBody">Schedule your first job here, or create one from chat with /cron add</p>
+          <button className="mos-btn mos-accent" onClick={openAdd}>New automation</button>
         </div>
       ) : (
-        <div className="moa-scroller">
-          <table className="moa-table">
+        <div className="mos-scroller">
+          <table className="mos-table">
             <thead>
               <tr>
-                <th className="moa-th moa-w-toggle">Enabled</th>
-                <th className="moa-th">Name</th>
-                <th className="moa-th">Schedule</th>
-                <th className="moa-th">Next run</th>
-                <th className="moa-th">Last status</th>
-                <th className="moa-th moa-w-actions" aria-label="Actions" />
-                <th className="moa-th moa-w-chev" aria-label="Details" />
+                <th className="mos-th mos-w-toggle">Enabled</th>
+                <th className="mos-th">Name</th>
+                <th className="mos-th">Schedule</th>
+                <th className="mos-th">Next run</th>
+                <th className="mos-th">Last status</th>
+                <th className="mos-th mos-w-actions" aria-label="Actions" />
+                <th className="mos-th mos-w-chev" aria-label="Details" />
               </tr>
             </thead>
             <tbody>
@@ -284,41 +284,41 @@ export default function Automations(): React.JSX.Element {
                 return (
                   <React.Fragment key={j.job_id}>
                     <tr
-                      className={`moa-row${selected === j.job_id ? ' moa-sel' : ''}${paused ? ' moa-paused' : ''}`}
+                      className={`mos-row${selected === j.job_id ? ' mos-sel' : ''}${paused ? ' mos-paused' : ''}`}
                       onClick={() => setSelected(j.job_id)}
                     >
-                      <td className="moa-td moa-w-toggle">
+                      <td className="mos-td mos-w-toggle">
                         <button
-                          className={`moa-toggle${paused ? ' moa-toggleOff' : ''}`}
+                          className={`mos-toggle${paused ? ' mos-toggleOff' : ''}`}
                           disabled={busy}
                           title={paused ? 'Resume' : 'Pause'}
                           aria-label={paused ? `Resume ${j.name ?? j.job_id}` : `Pause ${j.name ?? j.job_id}`}
                           onClick={(e) => { e.stopPropagation(); void toggle(j) }}
                         >
-                          <span className="moa-knob" />
+                          <span className="mos-knob" />
                         </button>
                       </td>
-                      <td className="moa-td moa-name" title={j.prompt_preview ?? j.name ?? j.job_id}>
+                      <td className="mos-td mos-name" title={j.prompt_preview ?? j.name ?? j.job_id}>
                         {j.name ?? j.job_id}
-                        {j.prompt_preview ? <span className="moa-prompt">{j.prompt_preview}</span> : null}
+                        {j.prompt_preview ? <span className="mos-subline">{j.prompt_preview}</span> : null}
                       </td>
-                      <td className="moa-td moa-mono">{j.schedule ?? '—'}</td>
-                      <td className="moa-td">{paused ? <span className="moa-chipPaused">paused</span> : j.next_run_at ? when(j.next_run_at) : '—'}</td>
-                      <td className="moa-td">{j.last_status ?? '—'}</td>
-                      <td className="moa-td moa-w-actions">
+                      <td className="mos-td mos-mono">{j.schedule ?? '—'}</td>
+                      <td className="mos-td">{paused ? <span className="mos-badge">paused</span> : j.next_run_at ? when(j.next_run_at) : '—'}</td>
+                      <td className="mos-td">{j.last_status ?? '—'}</td>
+                      <td className="mos-td mos-w-actions">
                         {busy ? (
-                          <span className="moa-spinSm" aria-label="Working" />
+                          <span className="mos-spinSm" aria-label="Working" />
                         ) : (
                           <>
-                            <button className="moa-btn" onClick={(e) => { e.stopPropagation(); void runNow(j) }}>Run now</button>
-                            <button className="moa-btn" onClick={(e) => { e.stopPropagation(); void openEdit(j) }}>Edit</button>
-                            <button className="moa-btn moa-danger" onClick={(e) => { e.stopPropagation(); remove(j) }}>Delete</button>
+                            <button className="mos-btn" onClick={(e) => { e.stopPropagation(); void runNow(j) }}>Run now</button>
+                            <button className="mos-btn" onClick={(e) => { e.stopPropagation(); void openEdit(j) }}>Edit</button>
+                            <button className="mos-btn mos-danger" onClick={(e) => { e.stopPropagation(); remove(j) }}>Delete</button>
                           </>
                         )}
                       </td>
-                      <td className="moa-td moa-w-chev">
+                      <td className="mos-td mos-w-chev">
                         <button
-                          className="moa-chev"
+                          className="mos-chev"
                           aria-label={open ? `Collapse ${j.name ?? j.job_id}` : `Expand ${j.name ?? j.job_id}`}
                           aria-expanded={open}
                           onClick={(e) => { e.stopPropagation(); setSelected(j.job_id); setExpanded(open ? null : j.job_id) }}
@@ -328,9 +328,9 @@ export default function Automations(): React.JSX.Element {
                       </td>
                     </tr>
                     {open ? (
-                      <tr className="moa-detail">
+                      <tr className="mos-detail">
                         <td colSpan={7}>
-                          <div className="moa-grid">
+                          <div className="mos-grid">
                             <Detail label="Job ID" value={j.job_id} copy={() => { void copyId(j) }} />
                             <Detail label="Next run" value={fmtFull(j.next_run_at)} />
                             <Detail label="Last run" value={fmtFull(j.last_run_at)} />
@@ -352,38 +352,38 @@ export default function Automations(): React.JSX.Element {
 
       {form ? (
         <Dialog onClose={() => { if (!form.saving) setForm(null) }} title={form.jobId ? 'Edit automation' : 'New automation'}>
-          <label className="moa-field">
-            <span className="moa-label">Name</span>
+          <label className="mos-field">
+            <span className="mos-label">Name</span>
             {form.jobId ? (
-              <span className="moa-locked">{form.name || form.jobId}</span>
+              <span className="mos-locked">{form.name || form.jobId}</span>
             ) : (
-              <input className="moa-input" value={form.name} autoFocus onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Morning brief" />
+              <input className="mos-input" value={form.name} autoFocus onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Morning brief" />
             )}
           </label>
-          <label className="moa-field">
-            <span className="moa-label">Schedule</span>
-            <input className="moa-input moa-mono" value={form.schedule} onChange={(e) => setForm({ ...form, schedule: e.target.value })} placeholder='cron expression or "every 30m"' />
+          <label className="mos-field">
+            <span className="mos-label">Schedule</span>
+            <input className="mos-input mos-mono" value={form.schedule} onChange={(e) => setForm({ ...form, schedule: e.target.value })} placeholder='cron expression or "every 30m"' />
           </label>
-          <label className="moa-field">
-            <span className="moa-label">Prompt</span>
-            <textarea className="moa-input moa-promptBox" rows={5} value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })} placeholder="What the agent should do on each run" />
+          <label className="mos-field">
+            <span className="mos-label">Prompt</span>
+            <textarea className="mos-input" rows={5} value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })} placeholder="What the agent should do on each run" />
           </label>
           {form.promptDegraded ? (
-            <p className="moa-degraded">The full prompt could not be loaded — the box holds a truncated preview. Saving keeps it only if you edited it.</p>
+            <p className="mos-degraded">The full prompt could not be loaded — the box holds a truncated preview. Saving keeps it only if you edited it.</p>
           ) : null}
-          <div className="moa-dialogBtns">
-            <button className="moa-btn" onClick={() => { if (!form.saving) setForm(null) }}>Cancel</button>
-            <button className="moa-btn moa-accent" disabled={form.saving} onClick={() => void saveForm()}>{form.jobId ? 'Save' : 'Create'}</button>
+          <div className="mos-dialogBtns">
+            <button className="mos-btn" onClick={() => { if (!form.saving) setForm(null) }}>Cancel</button>
+            <button className="mos-btn mos-accent" disabled={form.saving} onClick={() => void saveForm()}>{form.jobId ? 'Save' : 'Create'}</button>
           </div>
         </Dialog>
       ) : null}
 
       {confirm ? (
         <Dialog onClose={() => setConfirm(null)} title={confirm.title} small>
-          <p className="moa-confirmBody">{confirm.body}</p>
-          <div className="moa-dialogBtns">
-            <button className="moa-btn" onClick={() => setConfirm(null)}>Cancel</button>
-            <button className="moa-btn moa-dangerSolid" onClick={() => { const c = confirm; setConfirm(null); void c.run() }}>{confirm.action}</button>
+          <p className="mos-confirmBody">{confirm.body}</p>
+          <div className="mos-dialogBtns">
+            <button className="mos-btn" onClick={() => setConfirm(null)}>Cancel</button>
+            <button className="mos-btn mos-dangerSolid" onClick={() => { const c = confirm; setConfirm(null); void c.run() }}>{confirm.action}</button>
           </div>
         </Dialog>
       ) : null}
@@ -393,10 +393,10 @@ export default function Automations(): React.JSX.Element {
 
 function Detail(props: { label: string; value: string; copy?: () => void; danger?: boolean }): React.JSX.Element {
   return (
-    <div className="moa-detailItem">
-      <span className="moa-detailLabel">{props.label}</span>
-      <span className={`moa-detailValue${props.danger ? ' moa-detailDanger' : ''}`}>{props.value}</span>
-      {props.copy ? <button className="moa-btn" onClick={props.copy}>Copy</button> : null}
+    <div className="mos-detailItem">
+      <span className="mos-detailLabel">{props.label}</span>
+      <span className={`mos-detailValue${props.danger ? ' mos-detailDanger' : ''}`}>{props.value}</span>
+      {props.copy ? <button className="mos-btn" onClick={props.copy}>Copy</button> : null}
     </div>
   )
 }
@@ -409,11 +409,11 @@ export function Dialog(props: { title: string; small?: boolean; onClose: () => v
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
   return (
-    <div className="moa-scrim" onClick={props.onClose}>
-      <div className={`moa-card${props.small ? ' moa-cardSm' : ''}`} role="dialog" aria-modal aria-label={props.title} onClick={(e) => e.stopPropagation()}>
-        <div className="moa-cardHead">
+    <div className="mos-scrim" onClick={props.onClose}>
+      <div className={`mos-card${props.small ? ' mos-cardSm' : ''}`} role="dialog" aria-modal aria-label={props.title} onClick={(e) => e.stopPropagation()}>
+        <div className="mos-cardHead">
           <strong>{props.title}</strong>
-          <button className="moa-x" aria-label="Close" onClick={props.onClose}>✕</button>
+          <button className="mos-x" aria-label="Close" onClick={props.onClose}>✕</button>
         </div>
         {props.children}
       </div>
@@ -422,65 +422,16 @@ export function Dialog(props: { title: string; small?: boolean; onClose: () => v
 }
 
 const css = `
-.moa-root { display: flex; flex-direction: column; flex: 1; min-height: 0; color: var(--moch-text); font-family: var(--moch-font); }
-.moa-head { display: flex; align-items: baseline; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--moch-border); }
-.moa-head h2 { margin: 0; font-size: 15px; }
-.moa-sub { color: var(--moch-text-dim); font-size: 12px; }
-.moa-head .moa-btn.moa-headadd { margin-left: auto; }
-.moa-scroller { flex: 1; overflow: auto; min-height: 0; }
-.moa-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.moa-th { position: sticky; top: 0; z-index: 1; background: var(--moch-bg-card); color: var(--moch-text-faint); text-align: left; font-weight: 500; padding: 0 10px; height: 30px; border-bottom: 1px solid var(--moch-border); white-space: nowrap; }
-.moa-row { height: var(--moch-row-h, 32px); cursor: default; }
-.moa-row:hover { background: var(--moch-bg-hover); }
-.moa-row.moa-sel { background: var(--moch-accent-soft); }
-.moa-row.moa-paused .moa-name { color: var(--moch-text-dim); }
-.moa-td { padding: 0 10px; border-bottom: 1px solid var(--moch-border-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 340px; }
-.moa-name { font-weight: 500; }
-.moa-prompt { display: block; color: var(--moch-text-faint); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.moa-mono { font-family: var(--moch-mono); font-size: 11.5px; }
-.moa-w-toggle { width: 64px; }
-.moa-w-actions { width: 1%; white-space: nowrap; }
-.moa-w-chev { width: 34px; }
-.moa-toggle { width: 28px; height: 16px; border-radius: 8px; border: none; background: var(--moch-accent); position: relative; cursor: pointer; padding: 0; }
-.moa-toggleOff { background: var(--moch-text-faint); }
-.moa-knob { position: absolute; top: 2px; left: 14px; width: 12px; height: 12px; border-radius: 6px; background: var(--moch-bg); transition: left 120ms ease; }
-.moa-toggleOff .moa-knob { left: 2px; }
-.moa-btn { background: transparent; color: var(--moch-text-dim); border: 1px solid var(--moch-border); border-radius: 5px; font-size: 11.5px; padding: 2px 8px; cursor: pointer; font-family: inherit; }
-.moa-btn:hover { color: var(--moch-text); border-color: var(--moch-text-faint); }
-.moa-btn.moa-accent { background: var(--moch-accent); color: var(--moch-bg); border-color: transparent; }
-.moa-btn.moa-danger { color: var(--moch-red); }
-.moa-btn.moa-dangerSolid { background: var(--moch-red); color: var(--moch-bg); border-color: transparent; }
-.moa-chev { background: none; border: none; color: var(--moch-text-faint); cursor: pointer; padding: 2px 6px; font-size: 11px; }
-.moa-chipPaused { color: var(--moch-text-faint); font-size: 11px; border: 1px solid var(--moch-border); border-radius: 8px; padding: 0 6px; }
-.moa-detail td { background: var(--moch-bg-card); padding: 10px 16px 12px 74px; }
-.moa-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 18px; }
-.moa-detailItem { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.moa-detailLabel { color: var(--moch-text-faint); font-size: 11px; flex: none; }
-.moa-detailValue { font-family: var(--moch-mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.moa-detailDanger { color: var(--moch-red); }
-.moa-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 56px 24px; color: var(--moch-text-dim); }
-.moa-emptyTitle { margin: 0; color: var(--moch-text); font-size: 16px; font-weight: 600; }
-.moa-emptyBody { margin: 0 0 8px; font-size: 12.5px; text-align: center; }
-.moa-errrow { display: flex; align-items: center; gap: 12px; padding: 8px 16px; color: var(--moch-red); font-size: 12.5px; border-bottom: 1px solid var(--moch-border-soft); }
-.moa-errrow span { flex: 1; }
-.moa-spin { width: 22px; height: 22px; margin: 48px auto; border: 2px solid var(--moch-border); border-top-color: var(--moch-accent); border-radius: 50%; animation: moa-rot 800ms linear infinite; }
-.moa-spinSm { display: inline-block; width: 13px; height: 13px; border: 1.5px solid var(--moch-border); border-top-color: var(--moch-accent); border-radius: 50%; animation: moa-rot 800ms linear infinite; }
-@keyframes moa-rot { to { transform: rotate(360deg); } }
-.moa-toast { position: fixed; left: 16px; bottom: 16px; z-index: 40; background: var(--moch-bg-elev); border: 1px solid var(--moch-border); color: var(--moch-text); font-size: 12.5px; padding: 7px 12px; border-radius: 8px; box-shadow: 0 4px 18px rgba(0,0,0,0.35); }
-.moa-scrim { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.45); display: flex; align-items: flex-start; justify-content: center; padding: 8vh 16px 16px; }
-.moa-card { background: var(--moch-bg-card); border: 1px solid var(--moch-border); border-radius: 10px; width: 460px; max-width: 100%; max-height: 82vh; overflow: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 12px 40px rgba(0,0,0,0.4); }
-.moa-cardSm { width: 360px; }
-.moa-cardHead { display: flex; align-items: center; }
-.moa-cardHead strong { font-size: 14px; flex: 1; }
-.moa-x { background: none; border: none; color: var(--moch-text-faint); cursor: pointer; font-size: 12px; padding: 2px 6px; }
-.moa-field { display: flex; flex-direction: column; gap: 4px; }
-.moa-label { color: var(--moch-text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
-.moa-input { background: var(--moch-bg); color: var(--moch-text); border: 1px solid var(--moch-border); border-radius: 6px; padding: 6px 8px; font-size: 13px; font-family: inherit; }
-.moa-input.moa-mono { font-family: var(--moch-mono); font-size: 12px; }
-.moa-promptBox { resize: vertical; }
-.moa-locked { color: var(--moch-text-dim); font-size: 13px; padding: 6px 0; }
-.moa-degraded { margin: 0; color: var(--moch-amber, #f5a524); font-size: 12px; }
-.moa-dialogBtns { display: flex; justify-content: flex-end; gap: 8px; }
-.moa-confirmBody { margin: 0; color: var(--moch-text-dim); font-size: 13px; overflow-wrap: anywhere; }
-.moa-root :focus-visible { outline: 2px solid var(--moch-accent); outline-offset: 1px; }
+/* Local to Automations: the shared table kit (desktop.css) covers the rest. */
+.mos-w-toggle { width: 64px; }
+.mos-w-chev { width: 34px; }
+.mos-chev { background: none; border: none; color: var(--moch-text-faint); cursor: pointer; padding: 2px 6px; font-size: 11px; }
+.mos-detail td { background: var(--moch-bg-card); padding: 10px 16px 12px 74px; }
+.mos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 18px; }
+.mos-detailItem { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mos-detailLabel { color: var(--moch-text-faint); font-size: 11px; flex: none; }
+.mos-detailValue { font-family: var(--moch-mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mos-detailDanger { color: var(--moch-red); }
+.mos-locked { color: var(--moch-text-dim); font-size: 13px; padding: 6px 0; }
+.mos-degraded { margin: 0; color: var(--moch-amber); font-size: 12px; }
 `

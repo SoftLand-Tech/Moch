@@ -13,9 +13,11 @@ import {
   shellLayout,
   type ScreenId,
 } from './state'
-import { SCREENS, SCREEN_ICONS } from './registry'
+import { SCREENS, SCREEN_ICONS, IconMoch } from './registry'
 import { Palette } from './palette'
 import { useThemeVersion } from './themeVars'
+import { connectionState, everConnected } from '../../../../../app/src/lib/gateway'
+import type { ConnectionState } from '../../../../../app/src/protocol/json-rpc-gateway'
 
 export interface ShellPane {
   id: ScreenId
@@ -30,6 +32,9 @@ function Rail(props: {
   const cls = layout.railExpanded ? 'rail expanded' : 'rail'
   return (
     <nav className={cls} aria-label="Screens">
+      <div className="rail-logo" aria-hidden>
+        <IconMoch size={26} />
+      </div>
       {SCREENS.map((s) => {
         const Icon = SCREEN_ICONS[s.id]
         const active = s.id === props.active
@@ -126,46 +131,49 @@ export function Shell(props: {
     props.inspector != null && !layout.inspectorCollapsed && window.innerWidth >= INSPECTOR_AUTO_COLLAPSE_BELOW
   const measure = props.active === 'chat' || props.active === 'skills' || props.active === 'settings'
   return (
-    <div className="shell">
-      <Rail active={props.active} onNavigate={props.onNavigate} />
-      {showList ? (
-        <>
-          <aside className="pane list-pane" style={{ width: layout.listWidth }}>
-            {props.list}
-          </aside>
-          <div
-            className="splitter"
-            role="separator"
-            aria-orientation="vertical"
-            aria-valuenow={layout.listWidth}
-            aria-valuemin={LIST_MIN}
-            aria-valuemax={LIST_MAX}
-            tabIndex={0}
-            aria-label="Resize list pane"
-            onMouseDown={(e) => {
-              const start = { x: e.pageX, w: layout.listWidth }
-              const move = (ev: MouseEvent) =>
-                setShellLayout({ listWidth: Math.min(LIST_MAX, Math.max(LIST_MIN, start.w + (ev.pageX - start.x))) })
-              const up = () => {
-                window.removeEventListener('mousemove', move)
-                window.removeEventListener('mouseup', up)
-              }
-              window.addEventListener('mousemove', move)
-              window.addEventListener('mouseup', up)
-            }}
-            onDoubleClick={() => setShellLayout({ listWidth: LIST_DEFAULT })}
-            onKeyDown={(e) => {
-              const step = e.shiftKey ? 32 : 8
-              if (e.key === 'ArrowLeft') setShellLayout({ listWidth: Math.max(LIST_MIN, layout.listWidth - step) })
-              else if (e.key === 'ArrowRight') setShellLayout({ listWidth: Math.min(LIST_MAX, layout.listWidth + step) })
-              else return
-              e.preventDefault()
-            }}
-          />
-        </>
-      ) : null}
-      <main className={measure ? 'main-pane measured' : 'main-pane'}>{props.children}</main>
-      {showInspector ? <aside className="inspector-pane">{props.inspector}</aside> : null}
+    <div className={`shell density-${layout.density}`}>
+      <div className="shell-body">
+        <Rail active={props.active} onNavigate={props.onNavigate} />
+        {showList ? (
+          <>
+            <aside className="pane list-pane" style={{ width: layout.listWidth }}>
+              {props.list}
+            </aside>
+            <div
+              className="splitter"
+              role="separator"
+              aria-orientation="vertical"
+              aria-valuenow={layout.listWidth}
+              aria-valuemin={LIST_MIN}
+              aria-valuemax={LIST_MAX}
+              tabIndex={0}
+              aria-label="Resize list pane"
+              onMouseDown={(e) => {
+                const start = { x: e.pageX, w: layout.listWidth }
+                const move = (ev: MouseEvent) =>
+                  setShellLayout({ listWidth: Math.min(LIST_MAX, Math.max(LIST_MIN, start.w + (ev.pageX - start.x))) })
+                const up = () => {
+                  window.removeEventListener('mousemove', move)
+                  window.removeEventListener('mouseup', up)
+                }
+                window.addEventListener('mousemove', move)
+                window.addEventListener('mouseup', up)
+              }}
+              onDoubleClick={() => setShellLayout({ listWidth: LIST_DEFAULT })}
+              onKeyDown={(e) => {
+                const step = e.shiftKey ? 32 : 8
+                if (e.key === 'ArrowLeft') setShellLayout({ listWidth: Math.max(LIST_MIN, layout.listWidth - step) })
+                else if (e.key === 'ArrowRight') setShellLayout({ listWidth: Math.min(LIST_MAX, layout.listWidth + step) })
+                else return
+                e.preventDefault()
+              }}
+            />
+          </>
+        ) : null}
+        <main className={measure ? 'main-pane measured' : 'main-pane'}>{props.children}</main>
+        {showInspector ? <aside className="inspector-pane">{props.inspector}</aside> : null}
+      </div>
+      <StatusBar />
       <Palette onOpenChatDraft={props.onOpenChatDraft} />
     </div>
   )
@@ -173,3 +181,31 @@ export function Shell(props: {
 
 // Splitter component retained for future multi-pane layouts.
 export { Splitter }
+
+/** Connection line: one dot + plain words, from the shared gateway stores. */
+function StatusBar(): React.JSX.Element {
+  const conn = useStore(connectionState)
+  const ever = useStore(everConnected)
+  const meta: Record<ConnectionState, { tone: string; label: string }> = {
+    open: { tone: 'ok', label: 'Connected' },
+    connecting: { tone: 'warn', label: 'Connecting…' },
+    closed: { tone: ever ? 'warn' : 'off', label: ever ? 'Reconnecting…' : 'Offline' },
+    error: { tone: 'err', label: 'Connection error' },
+    idle: { tone: 'off', label: 'Offline' },
+  }
+  const m = meta[conn]
+  return (
+    <footer className="statusbar">
+      <span className="statusbar__app">Moch</span>
+      <span className="statusbar__conn">
+        <span className={`statusbar__dot statusbar__dot--${m.tone}`} aria-hidden />
+        {m.label}
+      </span>
+      <span className="statusbar__spring" />
+      <span className="statusbar__hint">
+        <kbd>Ctrl</kbd>
+        <kbd>K</kbd> command palette
+      </span>
+    </footer>
+  )
+}

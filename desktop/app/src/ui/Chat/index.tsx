@@ -30,6 +30,9 @@ import {
 import { connectionState } from '../../../../../app/src/lib/gateway'
 import { enqueueSend, removeQueued, type QueuedSend } from '../../../../../app/src/lib/sendQueue'
 import { drafts, setDraft } from '../../../../../app/src/lib/drafts'
+import { sessionRows } from '../../../../../app/src/lib/sessionList'
+import { liveModel, liveProvider } from '../../../../../app/src/lib/modelState'
+import { setShellLayout } from '../shell/state'
 import { contentGrew, evaluateStick, shouldFollowOnAppend } from '../../../../../app/src/lib/chatScroll'
 import { MessageRow, ToolRow } from './Message'
 import { QuestionCards } from './Cards'
@@ -42,6 +45,104 @@ function toolSummary(list: { name: string }[]): string {
   return Object.entries(counts)
     .map(([name, n]) => (n > 1 ? `${name} ×${n}` : name))
     .join(', ')
+}
+
+/**
+ * The brand mascot (the greeting pose from desktop/ui/public/brand/
+ * mochi-greeting.svg), inlined so the empty chat is unmistakably
+ * intentional. Token-colored where a token exists — sprout, visor, blush
+ * and body follow the theme; pure shading stops keep their brand values
+ * as var fallbacks.
+ */
+function MochiMascot({ size = 104 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 1254 1254" aria-hidden className="moch-empty__art">
+      <defs>
+        <linearGradient id="mg-sprout" x1="790" y1="380" x2="950" y2="265" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="var(--moch-accent-dark, #E76437)" />
+          <stop offset="55%" stopColor="var(--moch-accent, #F89236)" />
+          <stop offset="100%" stopColor="var(--moch-blush, #FA9F3C)" />
+        </linearGradient>
+        <linearGradient id="mg-body" x1="627" y1="330" x2="627" y2="990" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="var(--moch-user-bubble, #F8EFE5)" />
+          <stop offset="68%" stopColor="var(--moch-user-bubble, #F6ECE1)" />
+          <stop offset="78%" stopColor="#ECE0D2" />
+          <stop offset="88%" stopColor="#DECFC0" />
+          <stop offset="96%" stopColor="#C7B3A1" />
+          <stop offset="100%" stopColor="#BCA594" />
+        </linearGradient>
+        <linearGradient id="mg-visor" x1="627" y1="420" x2="627" y2="812" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="var(--moch-user-text, #2B283B)" />
+          <stop offset="100%" stopColor="var(--moch-bg-card, #211F2D)" />
+        </linearGradient>
+        <linearGradient id="mg-hand" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor="#FFFDFB" />
+          <stop offset="50%" stopColor="#FAF1E7" />
+          <stop offset="100%" stopColor="#D5C1AF" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M 780 375 C 820 410, 835 365, 890 350 C 945 350, 972 310, 960 286 C 958 264, 940 260, 910 255 C 872 255, 832 275, 806 310 C 770 348, 772 370, 780 375 Z"
+        fill="url(#mg-sprout)"
+      />
+      <path
+        d="M 627 335 C 730 335, 835 375, 905 440 C 960 495, 974 570, 974 645 C 974 770, 930 870, 835 940 C 775 985, 700 985, 627 985 C 554 985, 479 985, 419 940 C 324 870, 280 770, 280 645 C 280 570, 294 495, 349 440 C 419 375, 524 335, 627 335 Z"
+        fill="url(#mg-body)"
+      />
+      <path
+        d="M 627 420 C 725 420, 815 440, 858 480 C 892 515, 897 565, 897 615 C 897 670, 890 720, 855 758 C 812 795, 725 812, 627 812 C 529 812, 442 795, 399 758 C 364 720, 357 670, 357 615 C 357 565, 362 515, 396 480 C 439 440, 529 420, 627 420 Z"
+        fill="url(#mg-visor)"
+      />
+      <g fill="var(--moch-user-bubble, #FAF1E7)">
+        <path d="M 457 655 C 446 655, 439 646, 439 634 C 439 598, 468 572, 505 572 C 542 572, 571 598, 571 634 C 571 646, 564 655, 553 655 C 543 655, 537 646, 536 635 C 533 618, 521 608, 505 608 C 489 608, 477 618, 474 635 C 473 646, 467 655, 457 655 Z" />
+        <path d="M 797 655 C 808 655, 815 646, 815 634 C 815 598, 786 572, 749 572 C 712 572, 683 598, 683 634 C 683 646, 690 655, 701 655 C 711 655, 717 646, 718 635 C 721 618, 733 608, 749 608 C 765 608, 777 618, 780 635 C 781 646, 787 655, 797 655 Z" />
+      </g>
+      <g fill="var(--moch-blush, #FA9B6A)">
+        <ellipse cx="442" cy="695" rx="24" ry="12" transform="rotate(35 442 695)" />
+        <ellipse cx="482" cy="705" rx="22" ry="12" transform="rotate(22 482 705)" />
+        <ellipse cx="812" cy="695" rx="24" ry="12" transform="rotate(-35 812 695)" />
+        <ellipse cx="772" cy="705" rx="22" ry="12" transform="rotate(-22 772 705)" />
+      </g>
+      <ellipse cx="790" cy="980" rx="52" ry="34" transform="rotate(-12 790 980)" fill="url(#mg-hand)" />
+    </svg>
+  )
+}
+
+/** Empty-state suggestion chips. Prompt chips draft text into the shared
+ *  drafts store (the user reviews and sends); the slash chip drafts the
+ *  command; "Browse" switches to the Skills screen via the shell. */
+const SUGGESTIONS: { label: string; draft: string; cmd?: boolean }[] = [
+  { label: 'Summarize my day', draft: 'Summarize what changed today across my chats and automations.' },
+  { label: 'Research a topic', draft: 'Research this topic and write up what you find, with sources: ' },
+  { label: '/cron add', draft: '/cron add ', cmd: true },
+]
+
+function EmptyChat(props: { onPick: (text: string) => void; onBrowse: () => void }) {
+  return (
+    <div className="moch-empty">
+      <MochiMascot />
+      <h1 className="moch-empty__title">Hey, I’m Moch</h1>
+      <p className="moch-empty__sub">Your agent, running on your computer. Ask anything — or start from a command.</p>
+      <div className="moch-empty__chips">
+        {SUGGESTIONS.map((s) => (
+          <button
+            key={s.label}
+            type="button"
+            className={s.cmd ? 'moch-chip moch-chip--cmd' : 'moch-chip'}
+            onClick={() => props.onPick(s.draft)}
+          >
+            {s.label}
+          </button>
+        ))}
+        <button type="button" className="moch-chip moch-chip--link" onClick={props.onBrowse}>
+          Browse slash commands →
+        </button>
+      </div>
+      <p className="moch-empty__hint">
+        <kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline · <kbd>Ctrl K</kbd> command palette
+      </p>
+    </div>
+  )
 }
 
 function TodoList({ td }: { td: TodoItem[] }) {
@@ -116,6 +217,9 @@ export function Chat() {
   const loadings = useStore(sessionLoadings)
   const conn = useStore(connectionState)
   const draftsMap = useStore(drafts)
+  const allRows = useStore(sessionRows)
+  const model = useStore(liveModel)
+  const modelProvider = useStore(liveProvider)
 
   // The composer's single source of truth is the shared drafts atom (keyed
   // by stored id): typing writes setDraft, and an external draft drop (e.g.
@@ -275,8 +379,20 @@ export function Chat() {
     [storedId],
   )
 
+  // Suggestion chips draft into the shared drafts store (same hand-off the
+  // Skills screen uses) and focus the composer — the user reviews and sends.
+  const pickSuggestion = useCallback(
+    (text: string) => {
+      setDraft(storedId, text)
+      inputRef.current?.focus()
+    },
+    [storedId],
+  )
+
   const summary = toolSummary(tls)
   const composerPlaceholder = busy ? 'Reply — queued until it finishes' : 'Message Moch'
+  const sessionTitle = allRows.find((r) => r.id === storedId)?.title || 'New chat'
+  const modelLabel = model ? (modelProvider ? `${modelProvider} / ${model}` : model) : 'default model'
 
   return (
     <div className="moch-chat">
@@ -286,14 +402,35 @@ export function Chat() {
         </button>
       ) : null}
 
+      <header className="moch-chat__head">
+        <span className="moch-chat__title">{sessionTitle}</span>
+        <button
+          type="button"
+          className="moch-modelchip"
+          onClick={() => setShellLayout({ screen: 'agent' })}
+          title="Change model"
+          aria-label={`Model: ${modelLabel}. Open Models to change it`}
+        >
+          <span className="moch-modelchip__dot" aria-hidden />
+          {modelLabel}
+        </button>
+      </header>
+
       <div className="moch-chat__scrollwrap">
         <div className="moch-chat__scroll" ref={scrollRef} onScroll={readScroll}>
           <div className="moch-col moch-chat__col" ref={contentRef}>
             {msgs.length === 0 ? (
               booting ? (
-                <div className="moch-booting">Loading chat…</div>
+                <div className="moch-booting">
+                  <span className="moch-dots" aria-hidden>
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                  Loading chat…
+                </div>
               ) : (
-                <div className="moch-empty">New conversation — type below to start</div>
+                <EmptyChat onPick={pickSuggestion} onBrowse={() => setShellLayout({ screen: 'skills' })} />
               )
             ) : (
               msgs.map((m) => <MessageRow key={m.id} m={m} onRetry={onRetryMsg} />)

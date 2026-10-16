@@ -80,10 +80,14 @@ def _spawn_browser():
     """Spawn chromium with --remote-debugging-port and publish BROWSER_CDP_URL.
 
     Same flag set the repo's own launcher uses (hermes_cli/browser_connect.py:
-    764-766); readiness = 2xx from GET /json/version (:777-800). A Moch-owned
-    --user-data-dir is mandatory: Chromium >=136 refuses CDP on the default
-    profile (:315-317) and a same-profile singleton silently absorbs the
-    launch (:898-904). Returns the listening port or None."""
+    764-766) plus --headless + --window-size; readiness = 2xx from GET
+    /json/version (:777-800). A Moch-owned --user-data-dir is mandatory:
+    Chromium >=136 refuses CDP on the default profile (:315-317) and a
+    same-profile singleton silently absorbs the launch (:898-904). Headless,
+    not windowed: a windowed Chromium stops compositing when fully occluded,
+    so Page.startScreencast frames go stale; headless composites regardless
+    (and defaults to 800x600 without an explicit --window-size). Returns the
+    listening port or None."""
     global _browser_proc
     if os.environ.get("MOCH_BROWSER", "1") != "1":
         return None
@@ -107,6 +111,11 @@ def _spawn_browser():
                 [exe,
                  f"--remote-debugging-port={port}",
                  f"--user-data-dir={profile}",
+                 # Headless: an occluded windowed Chromium pushes no compositor
+                 # output, so the Browser pane's screencast freezes. Headless
+                 # composites regardless; 1440x900 so frames are full-size.
+                 "--headless",
+                 "--window-size=1440,900",
                  "--no-first-run",
                  "--no-default-browser-check"],
                 stdout=subprocess.DEVNULL,
