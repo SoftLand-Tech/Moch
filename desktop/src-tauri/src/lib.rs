@@ -23,6 +23,7 @@ pub fn run() {
             gateway::gateway_restart,
             gateway::gateway_stop,
             gateway::runtime_setup_hint,
+            gateway::gw_fetch,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,

@@ -20,6 +20,7 @@ pub struct GatewayState {
     pub info: Mutex<Option<GatewayInfo>>,
 }
 
+#[derive(Clone)]
 pub struct GatewayInfo {
     pub port: u16,
     pub token: String,
@@ -338,4 +339,135 @@ pub fn gateway_stop(app: AppHandle) -> Result<bool, String> {
 #[tauri::command]
 pub fn runtime_setup_hint() -> Option<String> {
     repo_root().map(|r| r.join("desktop").join("runtime").display().to_string())
+}
+
+/// Proxy one HTTP request to OUR loopback gateway with the session token
+/// attached (the gateway's CORS allowlist doesn't cover the webview origin,
+/// so REST calls — uploads, TTS, STT — must go through the shell).
+/// Returns the raw body text (JSON or audio bytes base64'd by the caller).
+#[tauri::command]
+pub fn gw_fetch(
+    app: AppHandle,
+    path: String,
+    method: String,
+    body_b64: Option<String>,
+    content_type: Option<String>,
+) -> Result<String, String> {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+    let info = state().info.lock().unwrap().clone();
+    let (port, token) = match info {
+        Some(i) => (i.port, i.token),
+        None => {
+            // Adopted gateways have no in-memory info — read the state file.
+            let dir = state_dir(&app);
+            let v = read_state_file(&dir).ok_or("gateway not running")?;
+            let port = v.get("port").and_then(|p| p.as_u64()).and_then(|p| u16::try_from(p).ok())
+                .ok_or("gateway state has no port")?;
+            let token = v.get("token").and_then(|t| t.as_str()).map(|s| s.to_string())
+                .ok_or("gateway state has no token")?;
+            (port, token)
+        }
+    };
+    let method = method.to_uppercase();
+    let body = body_b64
+        .as_deref()
+        .map(base64_decode)
+        .transpose()
+        .map_err(|e| format!("bad body base64: {e}"))?;
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).map_err(|e| e.to_string())?;
+    stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
+    stream.set_write_timeout(Some(Duration::from_secs(30))).ok();
+    let req = format!(
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\nX-Hermes-Session-Token: {token}\r\n{}{}{}\r\n",
+        match content_type.as_deref() {
+            Some(ct) => format!("Content-Type: {ct}\r\n"),
+            None => String::new(),
+        },
+        match &body {
+            Some(b) => format!("Content-Length: {}\r\n", b.len()),
+            None => String::new(),
+        },
+        match &body {
+            Some(_) => "\r\n",
+            None => "",
+        },
+    );
+    stream.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
+    if let Some(b) = &body {
+        stream.write_all(b).map_err(|e| e.to_string())?;
+    }
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(&buf).to_string();
+    let split = text.find("\r\n\r\n").ok_or("gw: malformed response")?;
+    let (head, body_out) = text.split_at(split);
+    let body_out = &body_out[4..];
+    let status: u16 = head
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|c| c.parse().ok())
+        .unwrap_or(0);
+    if status == 204 || head.to_ascii_lowercase().contains("transfer-encoding: chunked") {
+        if head.to_ascii_lowercase().contains("transfer-encoding: chunked") {
+            let mut out = Vec::new();
+            let mut rest = body_out;
+            loop {
+                let Some(le) = rest.find("\r\n") else { break };
+                let size = usize::from_str_radix(rest[..le].trim(), 16).unwrap_or(0);
+                if size == 0 { break; }
+                let start = le + 2;
+                let end = (start + size).min(rest.len());
+                out.extend_from_slice(&rest.as_bytes()[start..end]);
+                rest = if end + 2 <= rest.len() { &rest[end + 2..] } else { "" };
+            }
+            return base64_encode(&out);
+        }
+        return Ok(String::new());
+    }
+    if !(200..300).contains(&status) {
+        return Err(format!("gw: HTTP {status} for {path}: {}", body_out.chars().take(200).collect::<String>()));
+    }
+    // Binary-safe: return base64 so audio bytes survive the IPC boundary.
+    base64_encode(body_out.as_bytes())
+}
+
+fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
+    // Minimal std-only base64 decoder (standard alphabet, padded).
+    const TBL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut vals = Vec::with_capacity(s.len());
+    for c in s.bytes() {
+        if c == b'=' || c == b'\n' || c == b'\r' {
+            continue;
+        }
+        let v = TBL.iter().position(|&t| t == c).ok_or_else(|| format!("bad base64 byte {c}"))?;
+        vals.push(v as u8);
+    }
+    let mut out = Vec::with_capacity(vals.len() * 3 / 4);
+    for chunk in vals.chunks(4) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let b3 = *chunk.get(3).unwrap_or(&0) as u32;
+        let n = (b0 << 18) | (b1 << 12) | (b2 << 6) | b3;
+        out.push((n >> 16) as u8);
+        if chunk.len() > 2 { out.push((n >> 8) as u8); }
+        if chunk.len() > 3 { out.push(n as u8); }
+    }
+    Ok(out)
+}
+
+fn base64_encode(data: &[u8]) -> Result<String, String> {
+    const TBL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+        out.push(TBL[(n >> 18) as usize & 63] as char);
+        out.push(TBL[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { TBL[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { TBL[n as usize & 63] as char } else { '=' });
+    }
+    Ok(out)
 }

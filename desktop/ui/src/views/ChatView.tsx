@@ -19,6 +19,7 @@ import { commandCatalog, completeSlash, dispatchSlash, refreshCommandCatalog } f
 import { currentModel, providers, refreshModels } from '../lib/model'
 import { startRecording, stopRecording } from '../lib/voice'
 import { attachFiles } from '../lib/media'
+import InteractiveCard from '../components/InteractiveCard'
 
 export default function ChatView() {
   const order = useStore(sessionOrder)
@@ -204,7 +205,7 @@ function Transcript() {
       ) : null}
       {msgs.map((m) => <MessageRow key={m.id} msg={m} />)}
       {visibleTools.filter(t => t.status === 'running').map((t) => <ToolRow key={t.id} tool={t} />)}
-      {card ? <Card card={card} /> : null}
+      {card ? <InteractiveCard card={card} /> : null}
       {busy && !msgs.some(m => m.streaming) ? (
         <div className="busy-strip"><div className="spinner" style={{ width: 12, height: 12 }} /> thinking…</div>
       ) : null}
@@ -270,16 +271,14 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
 
 async function speak(text: string): Promise<void> {
   try {
-    const { gatewayInfo } = await import('../lib/gateway')
-    const info = gatewayInfo.get()
-    if (!info?.port || !info.token) return
-    const res = await fetch(`http://127.0.0.1:${info.port}/api/audio/speak`, {
+    const { gwFetch } = await import('../lib/gateway')
+    const bytes = (await gwFetch('/api/audio/speak', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Hermes-Session-Token': info.token },
       body: JSON.stringify({ text }),
-    })
-    if (!res.ok) throw new Error(`tts ${res.status}`)
-    const blob = await res.blob()
+      contentType: 'application/json',
+      binary: true,
+    })) as Uint8Array
+    const blob = new Blob([bytes.buffer as ArrayBuffer], { type: 'audio/mpeg' })
     const url = URL.createObjectURL(blob)
     const audio = new Audio(url)
     audio.onended = () => URL.revokeObjectURL(url)
@@ -341,45 +340,6 @@ function ToolRow({ tool }: { tool: ToolItem }) {
   )
 }
 
-function Card({ card }: { card: PendingCard }) {
-  const [value, setValue] = useState('')
-  const isSudo = card.kind === 'sudo'
-  const isSecret = card.kind === 'secret'
-  const needsText = isSudo || isSecret || card.kind === 'clarify'
-  return (
-    <div className={`card${card.danger ? ' danger' : ''}`}>
-      <div className="card-title">
-        {isSudo ? <LockKeyhole size={15} /> : isSecret ? <LockKeyhole size={15} /> : <GitBranch size={15} />}
-        {card.title}
-      </div>
-      {card.body ? <div className="card-body mono">{card.body}</div> : null}
-      {needsText ? (
-        <input
-          className="input card-input"
-          type={isSudo ? 'password' : 'text'}
-          placeholder={isSudo ? 'sudo password' : isSecret ? 'the secret value' : 'your answer'}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-        />
-      ) : null}
-      <div className="card-actions">
-        {card.options?.length ? (
-          card.options.map((o) => (
-            <button key={o.value} className="btn" onClick={() => void answerCard(card, { value: o.value })}>{o.label}</button>
-          ))
-        ) : null}
-        {needsText ? (
-          <button className="btn primary" disabled={!value} onClick={() => void answerCard(card, { value })}>Answer</button>
-        ) : (
-          <>
-            <button className="btn primary" onClick={() => void answerCard(card, { approved: true })}>Approve</button>
-            <button className="btn danger" onClick={() => void answerCard(card, { approved: false })}>Deny</button>
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
 
 function Composer() {
   const [text, setText] = useState('')
@@ -389,6 +349,7 @@ function Composer() {
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [sending, setSending] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
   const [slashSel, setSlashSel] = useState(0)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const busy = useStore(agentBusy)
@@ -430,8 +391,10 @@ function Composer() {
         }
       }
       if (pendingFiles.length) {
-        if (!active) return // attachments need a live session
-        const ok = await attachFiles(active, pendingFiles).catch(() => false)
+        // Attachments need a live session — create one lazily like send().
+        const sid = activeSession.get() ?? (await newChat().catch(() => null))
+        if (!sid) return
+        const ok = await attachFiles(sid, pendingFiles).catch(() => false)
         setPendingFiles([])
         if (!ok) return
       }
@@ -458,8 +421,21 @@ function Composer() {
     })
   }
 
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    const files = Array.from(e.dataTransfer.files ?? [])
+    if (files.length) setPendingFiles((prev) => [...prev, ...files].slice(0, 8))
+  }
+
   return (
-    <div className="composer-wrap">
+    <div
+      className="composer-wrap"
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={onDrop}
+      style={dragOver ? { outline: '2px dashed var(--accent)', outlineOffset: -6, borderRadius: 18 } : undefined}
+    >
       {completions.length > 0 && text.startsWith('/') && !text.includes('\n') ? (
         <div className="slash-pop">
           {completions.map((c, i) => (
@@ -595,7 +571,13 @@ function ModelPicker({ onClose, providers: provs }: { onClose: () => void; provi
     setErr('')
     try {
       const { rpc } = await import('../lib/gateway')
-      await rpc('config.set', { model: { provider, model } }, 20000)
+      // The gateway's own /model grammar — one code path with the CLI.
+      const value = `${model} --provider ${provider} --session`
+      await rpc('config.set', {
+        key: 'model',
+        value,
+        session_id: activeSession.get() ?? undefined,
+      }, 20000)
       const { refreshModels } = await import('../lib/model')
       await refreshModels()
       onClose()

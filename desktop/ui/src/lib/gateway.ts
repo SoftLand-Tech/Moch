@@ -98,20 +98,25 @@ async function dial(): Promise<void> {
   const info = gatewayInfo.get()
   if (!info?.port || !info.token) return
   const url = `ws://127.0.0.1:${info.port}/api/ws?token=${encodeURIComponent(info.token)}`
-  if (url === currentUrl && client && (client as unknown as { socket: unknown }).socket) {
-    // connected or connecting on the same URL — the client's own idempotence guard
-  }
   currentUrl = url
   const cli = ensureClient()
-  connectionState.set('connecting')
+  if (cli.connectionState !== 'open') connectionState.set('connecting')
   try {
     await cli.connect(url)
   } catch (err) {
-    if (gen !== connectGen) return
+    if (gen !== connectGen) {
+      // A newer dial owns the atom — still resync so it never lies.
+      connectionState.set(cli.connectionState)
+      return
+    }
     connectionState.set('error')
     scheduleReconnect()
     return
   }
+  // The client's socket state is the truth — sync the atom on every exit so
+  // concurrent dials (StrictMode double-boot) can never strand it at
+  // 'connecting' over a live connection.
+  connectionState.set(cli.connectionState)
   if (gen !== connectGen) return
   reconnectAttempt = 0
 }
@@ -170,8 +175,89 @@ export function getClient(): JsonRpcGatewayClient | null {
   return client
 }
 
+/** Live debug handle (console): `__moch.net()` shows the connection guts. */
+if (typeof window !== 'undefined') {
+  ;(window as unknown as { __moch?: { net: () => unknown } }).__moch = {
+    net: () => ({
+      hasClient: !!client,
+      clientState: client?.connectionState ?? 'no client',
+      socketUrl: (client as unknown as { socketUrl?: string } | null)?.socketUrl ?? null,
+      socketReady: (client as unknown as { socket?: WebSocket } | null)?.socket?.readyState ?? null,
+      wantConnection,
+      atomState: connectionState.get(),
+      reconnectTimerActive: reconnectTimer !== null,
+      reconnectAttempt,
+      gatewayInfo: gatewayInfo.get(),
+      boot: runtimeBoot.get(),
+    }),
+  }
+}
+
 export async function rpc<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<T> {
   if (!client) throw new Error('gateway not connected')
   if (timeoutMs !== undefined) return client.request<T>(method, params, timeoutMs)
   return client.request<T>(method, params)
+}
+
+/**
+ * REST call into the gateway (uploads, TTS, STT) — always proxied: the
+ * gateway's CORS allowlist doesn't cover the webview origin, so plain
+ * fetch() is refused. Returns the raw body: text when `binary` is false,
+ * decoded bytes (Uint8Array) when true.
+ */
+export async function gwFetch(
+  path: string,
+  opts: { method?: 'GET' | 'POST'; body?: Uint8Array | string; contentType?: string; binary?: boolean } = {},
+): Promise<Uint8Array | string> {
+  const method = opts.method ?? 'GET'
+  let b64: string | undefined
+  if (opts.body !== undefined) {
+    const bytes = typeof opts.body === 'string' ? new TextEncoder().encode(opts.body) : opts.body
+    b64 = bytesToBase64(bytes)
+  }
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    const raw = await invoke<string>('gw_fetch', {
+      path,
+      method,
+      bodyB64: b64,
+      contentType: opts.contentType,
+    })
+    return opts.binary ? base64ToBytes(raw) : bytesToUtf8(base64ToBytes(raw))
+  }
+  // Preview: the dev-bridge proxies with the token from the state file.
+  const res = await fetch(`/dev-bridge/gw?method=${method}&path=${encodeURIComponent(path)}`, {
+    method: opts.body !== undefined ? 'POST' : 'GET',
+    ...(opts.body !== undefined
+      ? {
+          headers: {
+            'x-dev-method': method,
+            ...(opts.contentType ? { 'content-type': opts.contentType } : {}),
+          },
+          body: opts.body as BodyInit | undefined,
+        }
+      : {}),
+  })
+  if (!res.ok) throw new Error(`gw proxy -> HTTP ${res.status}`)
+  if (opts.binary) return new Uint8Array(await res.arrayBuffer())
+  return res.text()
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = ''
+  const chunk = 0x8000
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  return btoa(bin)
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out
+}
+
+function bytesToUtf8(bytes: Uint8Array): string {
+  return new TextDecoder().decode(bytes)
 }

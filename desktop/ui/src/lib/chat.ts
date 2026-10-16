@@ -60,7 +60,12 @@ export interface PendingCard {
   sessionId?: string
   title: string
   body?: string
+  command?: string
   options?: { label: string; value: string }[]
+  /** Batch clarify: one entry per question. */
+  questions?: { qid: string; question?: string; choices?: string[] }[]
+  allowPermanent?: boolean
+  allowSession?: boolean
   danger?: boolean
   /** Set when the backend withdrew the question (request.cancel). */
   cancelled?: boolean
@@ -372,21 +377,42 @@ function numOrUndef(v: unknown): number | undefined {
 function intakeServerRequest(req: ServerRequest): void {
   const p = req.params as Record<string, unknown>
   const kind: PendingCard['kind'] =
-    req.method.startsWith('approval') ? 'approval'
-      : req.method.startsWith('clarify') ? 'clarify'
-        : req.method.startsWith('sudo') ? 'sudo'
-          : req.method.startsWith('vault') ? 'vault'
-            : 'secret'
-  const options = Array.isArray(p.options)
-    ? (p.options as { label?: string; value?: string }[]).map((o) => ({ label: String(o.label ?? o.value ?? '?'), value: String(o.value ?? o.label ?? '') }))
+    req.method === 'approval' ? 'approval'
+      : req.method === 'clarify' ? 'clarify'
+        : req.method === 'sudo' ? 'sudo'
+          : req.method === 'secret' ? 'secret'
+            : req.method.startsWith('vault') ? 'vault'
+              : 'secret'
+  // v7 shapes (mirrors the phone's intake exactly):
+  //   approval: {command, description, choices, allow_permanent, allow_session, tool_name}
+  //   clarify:  {question, choices} OR {questions: [{qid, question, choices, multi_select}]}
+  //   sudo/secret: {prompt/title-ish fields}
+  const plainChoices = Array.isArray(p.choices) ? p.choices.map(String).slice(0, 12) : undefined
+  const questions = Array.isArray(p.questions)
+    ? (p.questions as Array<Record<string, unknown>>).map((q) => ({
+      qid: String(q.qid ?? ''),
+      question: typeof q.question === 'string' ? q.question.slice(0, 1000) : undefined,
+      choices: Array.isArray(q.choices) ? q.choices.map(String).slice(0, 12) : undefined,
+    }))
     : undefined
   const card: PendingCard = {
     id: req.id,
     kind,
     sessionId: req.sessionId,
-    title: String(p.title ?? p.prompt ?? p.question ?? (kind === 'sudo' ? 'Sudo requested' : kind === 'secret' ? 'A secret is needed' : 'Needs your approval')),
-    body: typeof p.body === 'string' ? p.body : typeof p.command === 'string' ? p.command : typeof p.detail === 'string' ? p.detail : undefined,
-    options,
+    title: kind === 'approval'
+      ? 'Needs your approval'
+      : kind === 'clarify' ? 'Agent asks'
+        : kind === 'sudo' ? 'Sudo password needed'
+          : kind === 'secret' ? 'A secret is needed' : 'Vault',
+    body: typeof p.question === 'string' ? p.question
+      : typeof p.command === 'string' ? p.command
+        : typeof p.description === 'string' ? p.description
+          : typeof p.body === 'string' ? p.body : undefined,
+    command: typeof p.command === 'string' ? p.command.slice(0, 800) : undefined,
+    options: plainChoices?.map((c) => ({ label: c, value: c })),
+    questions,
+    allowPermanent: p.allow_permanent === true,
+    allowSession: p.allow_session === true,
     danger: kind === 'sudo' || p.danger === true,
     raw: req,
   }
@@ -411,14 +437,29 @@ export function cancelPending(reqId: string): void {
   }
 }
 
-export async function answerCard(card: PendingCard, answer: { approved?: boolean; value?: string; editedText?: string }): Promise<void> {
-  card.raw.respond({
-    ...(card.kind === 'approval' ? { approved: answer.approved ?? false } : {}),
-    ...((card.kind === 'clarify' && answer.value !== undefined) ? { answer: answer.value } : {}),
-    ...((card.kind === 'sudo' && answer.value !== undefined) ? { password: answer.value } : {}),
-    ...((card.kind === 'secret' && answer.value !== undefined) ? { value: answer.value } : {}),
-    ...(answer.editedText !== undefined ? { edited: answer.editedText } : {}),
-  })
+export type ApprovalChoice = 'once' | 'session' | 'always' | 'deny'
+
+/**
+ * Answer an interactive card with the v7 wire shapes (the phone's contract):
+ *   approval → { choice, all? }            choice ∈ once|session|always|deny
+ *   clarify  → { answer }  (single) or { answers: {qid: text} }  (batch)
+ *   sudo/secret → { value } to allow, {} to deny
+ */
+export async function answerCard(
+  card: PendingCard,
+  answer: { choice?: ApprovalChoice; value?: string; batch?: Record<string, string>; editedText?: string },
+): Promise<void> {
+  let payload: Record<string, unknown> = {}
+  if (card.kind === 'approval') {
+    payload = { choice: answer.choice ?? 'deny', ...(answer.choice === 'always' ? { all: true } : {}) }
+  } else if (card.kind === 'clarify') {
+    if (answer.batch && Object.keys(answer.batch).length) payload = { answers: answer.batch }
+    else payload = { answer: (answer.value ?? '').slice(0, 4000) }
+  } else if (card.kind === 'sudo' || card.kind === 'secret' || card.kind === 'vault') {
+    payload = answer.value !== undefined && answer.value !== '' ? { value: answer.value } : {}
+  }
+  if (answer.editedText !== undefined) payload.edited = answer.editedText
+  card.raw.respond(payload)
   const map = { ...pendingBySession.get() }
   delete map[card.sessionId ?? '']
   pendingBySession.set(map)

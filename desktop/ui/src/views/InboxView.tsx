@@ -1,12 +1,13 @@
 import { useStore } from '@nanostores/react'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { GitBranch, Inbox, LockKeyhole } from 'lucide-react'
+import { useEffect, useMemo, useRef } from 'react'
+import { Inbox } from 'lucide-react'
 import {
-  answerCard, pendingBySession, pendingCount, sessionsById, sessionOrder,
+  pendingBySession, pendingCount, sessionsById, sessionOrder,
   type PendingCard,
 } from '../lib/chat'
 import { accentFor } from '../lib/fleet'
 import { displayBotName } from '../lib/crew'
+import InteractiveCard from '../components/InteractiveCard'
 
 const KIND_LABEL: Record<PendingCard['kind'], string> = {
   approval: 'Approval',
@@ -99,14 +100,9 @@ export default function InboxView() {
 
 /** Same card visual as the chat transcript, plus who is asking. */
 function InboxCard({ card, bot, sessionTitle }: { card: PendingCard; bot: string; sessionTitle: string }) {
-  const [value, setValue] = useState('')
-  const isSudo = card.kind === 'sudo'
-  const isSecret = card.kind === 'secret'
-  const needsText = isSudo || isSecret || card.kind === 'clarify'
-
   return (
-    <div className={`card${card.danger ? ' danger' : ''}`}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+    <div className={`card${card.danger ? ' danger' : ''}`} style={{ padding: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px 0' }}>
         <span className="avatar" style={{ width: 22, height: 22, fontSize: 9, background: accentFor(bot) }}>
           {displayBotName(bot).slice(0, 2)}
         </span>
@@ -118,35 +114,7 @@ function InboxCard({ card, bot, sessionTitle }: { card: PendingCard; bot: string
         </span>
         <span className="chip" style={{ cursor: 'default', padding: '2px 9px', flexShrink: 0 }}>{KIND_LABEL[card.kind]}</span>
       </div>
-      <div className="card-title">
-        {isSudo || isSecret ? <LockKeyhole size={15} /> : <GitBranch size={15} />}
-        {card.title}
-      </div>
-      {card.body ? <div className="card-body mono">{card.body}</div> : null}
-      {needsText ? (
-        <input
-          className="input card-input"
-          type={isSudo ? 'password' : 'text'}
-          placeholder={isSudo ? 'sudo password' : isSecret ? 'the secret value' : 'your answer'}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-        />
-      ) : null}
-      <div className="card-actions">
-        {card.options?.length ? (
-          card.options.map((o) => (
-            <button key={o.value} className="btn" onClick={() => void answerCard(card, { value: o.value })}>{o.label}</button>
-          ))
-        ) : null}
-        {needsText ? (
-          <button className="btn primary" disabled={!value} onClick={() => void answerCard(card, { value })}>Answer</button>
-        ) : (
-          <>
-            <button className="btn primary" onClick={() => void answerCard(card, { approved: true })}>Approve</button>
-            <button className="btn danger" onClick={() => void answerCard(card, { approved: false })}>Deny</button>
-          </>
-        )}
-      </div>
+      <InteractiveCard card={card} />
     </div>
   )
 }

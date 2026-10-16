@@ -100,6 +100,48 @@ export function devBridge(): Plugin {
   return {
     name: 'moch-dev-bridge',
     configureServer(server) {
+      // Gateway REST proxy: the page can't fetch the gateway directly (CORS).
+      // Token comes from the runtime state file; the method rides x-dev-method
+      // so the outer request is a plain POST/GET.
+      server.middlewares.use('/dev-bridge/gw', (req, res, next) => {
+        if (!STATE_FILE) {
+          res.statusCode = 503
+          res.end(JSON.stringify({ error: 'no state file' }))
+          return
+        }
+        const url = new URL(req.url ?? '/', 'http://x')
+        const path = url.searchParams.get('path') ?? '/'
+        const method = (req.headers['x-dev-method'] as string | undefined) ?? (req.method ?? 'GET')
+        const state = readState()
+        if (!state) {
+          res.statusCode = 503
+          res.end(JSON.stringify({ error: 'runtime state unavailable' }))
+          return
+        }
+        const chunks: Buffer[] = []
+        req.on('data', (c: Buffer) => chunks.push(c))
+        req.on('end', () => {
+          const body = chunks.length ? Buffer.concat(chunks) : undefined
+          fetch(`http://127.0.0.1:${state.port}${path}`, {
+            method,
+            headers: {
+              'X-Hermes-Session-Token': state.token,
+              ...(body ? { 'Content-Type': (req.headers['content-type'] as string | undefined) ?? 'application/octet-stream' } : {}),
+            },
+            body,
+          })
+            .then(async (up) => {
+              res.statusCode = up.status
+              const buf = Buffer.from(await up.arrayBuffer())
+              res.setHeader('Content-Type', up.headers.get('content-type') ?? 'application/octet-stream')
+              res.end(buf)
+            })
+            .catch((err) => {
+              res.statusCode = 502
+              res.end(JSON.stringify({ error: String(err) }))
+            })
+        })
+      })
       server.middlewares.use('/dev-bridge/cdp', (req, res, next) => {
         const url = new URL(req.url ?? '/', 'http://x')
         const port = Number(url.searchParams.get('port') ?? 0)

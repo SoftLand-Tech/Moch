@@ -5,7 +5,7 @@
  * composer for review (never auto-sent).
  */
 
-import { gatewayInfo } from './gateway'
+import { gatewayInfo, gwFetch } from './gateway'
 
 export interface VoiceState {
   recording: boolean
@@ -90,17 +90,23 @@ function cleanupMeter(): void {
 }
 
 async function transcribe(blob: Blob): Promise<string> {
-  const info = gatewayInfo.get()
-  if (!info?.port || !info.token) throw new Error('gateway not connected')
-  const form = new FormData()
-  form.append('file', blob, 'speech.webm')
-  form.append('model', 'whisper-1')
-  const res = await fetch(`http://127.0.0.1:${info.port}/api/audio/transcribe`, {
+  const boundary = `----mochvoice${Date.now()}`
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  const head = new TextEncoder().encode(
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="speech.webm"\r\nContent-Type: ${blob.type || 'audio/webm'}\r\n\r\n`,
+  )
+  const fields = new TextEncoder().encode(
+    `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n--${boundary}--\r\n`,
+  )
+  const body = new Uint8Array(head.length + bytes.length + fields.length)
+  body.set(head, 0)
+  body.set(bytes, head.length)
+  body.set(fields, head.length + bytes.length)
+  const text = (await gwFetch('/api/audio/transcribe', {
     method: 'POST',
-    headers: { 'X-Hermes-Session-Token': info.token },
-    body: form,
-  })
-  if (!res.ok) throw new Error(`stt ${res.status}`)
-  const payload = (await res.json()) as { text?: string }
+    body,
+    contentType: `multipart/form-data; boundary=${boundary}`,
+  })) as string
+  const payload = JSON.parse(text || '{}') as { text?: string }
   return (payload.text ?? '').trim()
 }

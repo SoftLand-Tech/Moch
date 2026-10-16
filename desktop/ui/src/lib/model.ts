@@ -26,7 +26,8 @@ export const modelError = atom<string>('')
 
 interface ModelOptionsResult {
   providers?: Array<Record<string, unknown>>
-  current?: Record<string, unknown>
+  model?: string
+  provider?: string
   reasoning?: string
 }
 
@@ -53,14 +54,20 @@ export async function refreshModels(): Promise<void> {
   try {
     const res = await rpc<ModelOptionsResult>('model.options', {}, 15000)
     providers.set(normalizeProviders(res))
-    const cur = res.current ?? {}
+    // The gateway names the current model at the TOP level (model+provider),
+    // not in a nested current object.
+    const currentProvider = provs().find((p) => p.isCurrent)
     currentModel.set({
-      provider: typeof cur.provider === 'string' ? cur.provider : typeof cur.slug === 'string' ? cur.slug : undefined,
-      model: typeof cur.model === 'string' ? cur.model : typeof cur.id === 'string' ? cur.id : undefined,
+      provider: typeof res.provider === 'string' ? res.provider : currentProvider?.slug,
+      model: typeof res.model === 'string' ? res.model : currentProvider?.models[0]?.id,
       reasoning: typeof res.reasoning === 'string' ? res.reasoning : undefined,
     })
     modelError.set('')
   } catch (e) {
     modelError.set(e instanceof Error ? e.message : String(e))
   }
+}
+
+function provs(): ProviderOption[] {
+  return providers.get()
 }
