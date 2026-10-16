@@ -28,6 +28,7 @@ const LazyConnectors = React.lazy(() => import('./ui/Connectors'))
 const LazyTerminal = React.lazy(() => import('./ui/Terminal').then((m) => ({ default: m.TerminalScreen })))
 const LazyModels = React.lazy(() => import('./ui/Models'))
 const LazySettings = React.lazy(() => import('./ui/Settings'))
+const LazyHome = React.lazy(() => import('./ui/Home'))
 const LazyInspector = React.lazy(() => import('./ui/inspector'))
 
 function Placeholder(props: { screen: ScreenId }): React.JSX.Element {
@@ -114,6 +115,11 @@ export function App(): React.JSX.Element {
   }, [doNewChat, doStop, focusScreen])
 
   const views: Partial<Record<ScreenId, React.ReactNode>> = {
+    home: (
+      <Suspense fallback={<Placeholder screen="home" />}>
+        <LazyHome />
+      </Suspense>
+    ),
     chat: (
       <Suspense fallback={<Placeholder screen="chat" />}>
         <LazyChat />
