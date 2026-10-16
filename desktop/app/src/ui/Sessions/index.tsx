@@ -2,9 +2,15 @@
  * session list stores. Styling rides the shell's shared `mos-*` kit. */
 import React, { useCallback } from 'react'
 import { useStore } from '@nanostores/react'
-import { sessionRows, loadSessions } from '../../../../../app/src/lib/sessionList'
+import {
+  sessionListError,
+  sessionListLoading,
+  sessionRows,
+  loadSessions,
+} from '../../../../../app/src/lib/sessionList'
 import { openSession } from '../../core/openSession'
 import { setShellLayout } from '../shell/state'
+import { IconMoch } from '../shell/icons'
 import { newChat } from '../../../../../app/src/lib/chat'
 import { messageCountText } from '../../../../../app/src/lib/sessionRowMeta'
 
@@ -20,6 +26,8 @@ function when(sec?: number): string {
 
 export default function Sessions(): React.JSX.Element {
   const rows = useStore(sessionRows)
+  const loading = useStore(sessionListLoading)
+  const error = useStore(sessionListError)
   const refresh = useCallback(() => void loadSessions(), [])
   return (
     <div className="mos-root">
@@ -33,14 +41,23 @@ export default function Sessions(): React.JSX.Element {
           New chat
         </button>
       </header>
-      {rows.length === 0 ? (
+      {error ? (
+        <div className="mos-errrow" role="alert">
+          <span>Couldn't load chats — {error}</span>
+          <button className="mos-btn" onClick={refresh}>Retry</button>
+        </div>
+      ) : null}
+      {!loading && rows.length === 0 && !error ? (
         <div className="mos-empty">
+          <IconMoch size={56} />
           <p className="mos-emptyTitle">No conversations yet</p>
           <p className="mos-emptyBody">Start one from Chat — press Ctrl+1.</p>
           <button className="mos-btn mos-accent" onClick={() => void newChat()}>
             New chat
           </button>
         </div>
+      ) : loading && rows.length === 0 ? (
+        <div className="mos-spin" aria-label="Loading chats" />
       ) : (
         <div className="mos-scroller">
           <table className="mos-table">

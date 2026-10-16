@@ -29,6 +29,7 @@ import {
 } from '../../../../../app/src/lib/fleet'
 import { newChat } from '../../../../../app/src/lib/chat'
 import { isConnected } from '../../../../../app/src/lib/gateway'
+import { IconMoch } from '../shell/icons'
 import { setShellLayout } from '../shell/state'
 
 /** §2.7 starter templates: tappable job seeds — zero typing path. */
@@ -127,6 +128,7 @@ export default function Fleet(): React.JSX.Element {
 
       {!online && loaded ? (
         <div className="mos-empty" role="status">
+          <IconMoch size={56} />
           <p className="mos-emptyTitle">Not connected</p>
           <p className="mos-emptyBody">Bots live on your computer. Connect, then refresh.</p>
           <button className="mos-btn" onClick={() => void refresh()}>Refresh</button>
@@ -135,6 +137,7 @@ export default function Fleet(): React.JSX.Element {
         <div className="mos-spin" aria-label="Loading bots" />
       ) : profiles.length === 0 ? (
         <div className="mos-empty">
+          <IconMoch size={56} />
           <p className="mos-emptyTitle">No bots yet</p>
           <p className="mos-emptyBody">Give the agent a name and a job — it becomes a profile you can chat with, freeze, and equip.</p>
           <button className="mos-btn mos-accent" onClick={() => setCreating(true)} disabled={!online}>Create bot</button>

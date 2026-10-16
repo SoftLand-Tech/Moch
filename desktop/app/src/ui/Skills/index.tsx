@@ -18,6 +18,7 @@ import {
 import { activeStoredId } from '../../../../../app/src/lib/chat'
 import { setDraft } from '../../../../../app/src/lib/drafts'
 import { isConnected } from '../../../../../app/src/lib/gateway'
+import { IconMoch } from '../shell/icons'
 import { setShellLayout } from '../shell/state'
 
 export default function Skills(): React.JSX.Element {
@@ -135,6 +136,7 @@ export default function Skills(): React.JSX.Element {
         <div className="mos-spin" aria-label="Loading registry" />
       ) : rows.length === 0 ? (
         <div className="mos-empty">
+          <IconMoch size={56} />
           <p className="mos-emptyTitle">{emptyText}</p>
           {online && !query.trim() ? <button className="mos-btn mos-accent" onClick={reload}>Reload registry</button> : null}
         </div>

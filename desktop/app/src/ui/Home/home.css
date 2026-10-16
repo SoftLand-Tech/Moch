@@ -1,0 +1,409 @@
+/* Home screen — the Agent-mode landing view. Tokens only; the two hex
+ * families here are the mascot art's brand shading (no token exists) and
+ * fallbacks mirroring chat.css conventions. */
+
+.moch-home {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 28px 32px 40px;
+}
+
+.moch-home__col {
+  width: 100%;
+  max-width: 980px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Hero composer card ──────────────────────────────────────────────── */
+
+.moch-home__hero {
+  flex: none;
+  background: var(--moch-bg-card);
+  border: 1px solid var(--moch-border);
+  border-radius: 12px;
+  padding: 14px 14px 10px;
+  transition: border-color 120ms ease;
+}
+
+.moch-home__hero:focus-within {
+  border-color: var(--moch-text-faint);
+}
+
+.moch-home__composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.moch-home__input {
+  flex: 1;
+  min-height: 44px;
+  max-height: 160px;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--moch-text);
+  font: inherit;
+  font-size: 14.5px;
+  line-height: 1.45;
+  padding: 10px 4px;
+}
+
+.moch-home__input::placeholder {
+  color: var(--moch-text-faint);
+}
+
+.moch-home__rail {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+}
+
+.moch-home__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 13px;
+  border: 1px solid var(--moch-border);
+  background: var(--moch-accent-soft);
+  color: var(--moch-text-dim);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.moch-home__chip:hover {
+  color: var(--moch-text);
+  border-color: var(--moch-accent);
+}
+
+.moch-home__chip-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--moch-accent);
+}
+
+.moch-home__send {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 17px;
+  border: none;
+  background: var(--moch-accent);
+  color: var(--moch-on-accent);
+  font: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, opacity 120ms ease;
+}
+
+.moch-home__send:hover:not(:disabled) {
+  background: var(--moch-accent-dark);
+}
+
+.moch-home__send:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.moch-home__send:focus-visible,
+.moch-home__chip:focus-visible,
+.moch-home__card:focus-visible {
+  outline: 2px solid var(--moch-accent);
+  outline-offset: 2px;
+}
+
+/* ── Mascot + greeting ───────────────────────────────────────────────── */
+
+.moch-home__greeting {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 34px 12px 10px;
+}
+
+.moch-home__art {
+  flex: none;
+  filter: drop-shadow(0 16px 38px rgba(0, 0, 0, 0.45));
+  animation: moch-home-settle 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.moch-home__title {
+  margin: 18px 0 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--moch-text);
+  animation: moch-home-settle 480ms 60ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.moch-home__sub {
+  margin: 6px 0 0;
+  max-width: 440px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--moch-text-dim);
+  animation: moch-home-settle 480ms 100ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes moch-home-settle {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Mascot art palette: theme-following surfaces use tokens, the pure brand
+ * shading keeps its values. */
+.moch-home__art .mh-stop { stop-color: var(--moch-border); }
+.moch-home__art .mh-stop.sprout-a { stop-color: var(--moch-accent-dark); }
+.moch-home__art .mh-stop.sprout-b { stop-color: var(--moch-accent); }
+.moch-home__art .mh-stop.sprout-c { stop-color: var(--moch-blush); }
+.moch-home__art .mh-stop.body-a { stop-color: var(--moch-user-bubble); }
+.moch-home__art .mh-stop.body-b { stop-color: var(--moch-user-bubble); }
+.moch-home__art .mh-stop.body-c { stop-color: #ECE0D2; }
+.moch-home__art .mh-stop.body-d { stop-color: #DECFC0; }
+.moch-home__art .mh-stop.body-e { stop-color: #C7B3A1; }
+.moch-home__art .mh-stop.body-f { stop-color: #BCA594; }
+.moch-home__art .mh-stop.visor-a { stop-color: var(--moch-user-text); }
+.moch-home__art .mh-stop.visor-b { stop-color: var(--moch-bg-card); }
+.moch-home__art .mh-stop.hand-a { stop-color: #FFFDFB; }
+.moch-home__art .mh-stop.hand-b { stop-color: #FAF1E7; }
+.moch-home__art .mh-stop.hand-c { stop-color: #D5C1AF; }
+.moch-home__art .mh-eyes { fill: var(--moch-user-bubble); }
+.moch-home__art .mh-blush { fill: var(--moch-blush); }
+
+/* ── Example tasks ───────────────────────────────────────────────────── */
+
+.moch-home__section {
+  flex: none;
+  margin-top: 30px;
+}
+
+.moch-home__sechead {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--moch-text-faint);
+}
+
+.moch-home__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  min-height: 96px;
+}
+
+@media (max-width: 1080px) {
+  .moch-home__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.moch-home__card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--moch-bg-card);
+  border: 1px solid var(--moch-border);
+  border-radius: 12px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.moch-home__card:hover {
+  background: var(--moch-bg-hover);
+  border-color: var(--moch-border-soft);
+}
+
+.moch-home__card-icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--moch-bg-hover);
+  color: var(--moch-text-dim);
+}
+
+.moch-home__card:hover .moch-home__card-icon {
+  color: var(--moch-text);
+}
+
+.moch-home__card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.moch-home__card-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--moch-text);
+}
+
+.moch-home__card-blurb {
+  margin-top: 2px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--moch-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.moch-home__card-chev {
+  flex: none;
+  color: var(--moch-text-faint);
+}
+
+.moch-home__catload {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 96px;
+  justify-content: center;
+  color: var(--moch-text-faint);
+  font-size: 13px;
+}
+
+.moch-home__catter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 96px;
+  color: var(--moch-text-dim);
+  font-size: 13px;
+  text-align: center;
+}
+
+.moch-home__dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.moch-home__dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--moch-text-faint);
+  animation: moch-home-dot 1.2s ease-in-out infinite;
+}
+
+.moch-home__dots i:nth-child(2) { animation-delay: 150ms; }
+.moch-home__dots i:nth-child(3) { animation-delay: 300ms; }
+
+@keyframes moch-home-dot {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+/* ── Recent activity ─────────────────────────────────────────────────── */
+
+.moch-home__activity {
+  display: flex;
+  flex-direction: column;
+  background: var(--moch-bg-card);
+  border: 1px solid var(--moch-border);
+  border-radius: 12px;
+  padding: 6px 0;
+}
+
+.moch-home__actrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 4px 14px;
+  font-size: 13px;
+  color: var(--moch-text);
+}
+
+.moch-home__actrow + .moch-home__actrow {
+  border-top: 1px solid var(--moch-border-soft);
+}
+
+.moch-home__actdot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  background: var(--moch-green);
+}
+
+.moch-home__actdot--run {
+  animation: moch-home-dot 1.2s ease-in-out infinite;
+}
+
+.moch-home__actdot--fail {
+  background: var(--moch-red);
+}
+
+.moch-home__actdot--todo {
+  background: transparent;
+  border: 1.5px solid var(--moch-text-faint);
+}
+
+.moch-home__actdot--tododone {
+  background: var(--moch-green);
+  border: none;
+  position: relative;
+}
+
+.moch-home__actname {
+  flex: none;
+  font-weight: 600;
+}
+
+.moch-home__actdetail {
+  flex: 1;
+  min-width: 0;
+  color: var(--moch-text-dim);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.moch-home__actage {
+  flex: none;
+  color: var(--moch-text-faint);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}

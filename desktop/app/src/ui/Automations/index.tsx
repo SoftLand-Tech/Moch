@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { useStore } from '@nanostores/react'
 import { rpc, isConnected } from '../../../../../app/src/lib/gateway'
 import { ensureSession } from '../../../../../app/src/lib/chat'
+import { IconMoch } from '../shell/icons'
 import { runningAutomationCount, countRunningJobs } from '../../../../../app/src/lib/automationsState'
 
 interface Job {
@@ -249,6 +250,7 @@ export default function Automations(): React.JSX.Element {
 
       {!online && loaded && !error ? (
         <div className="mos-empty" role="status">
+          <IconMoch size={56} />
           <p className="mos-emptyTitle">Not connected</p>
           <p className="mos-emptyBody">Automations live on your computer. Connect, then retry.</p>
           <button className="mos-btn" onClick={() => void load()}>Retry</button>
@@ -257,6 +259,7 @@ export default function Automations(): React.JSX.Element {
         <div className="mos-spin" aria-label="Loading automations" />
       ) : jobs.length === 0 && !error ? (
         <div className="mos-empty">
+          <IconMoch size={56} />
           <p className="mos-emptyTitle">No automations yet</p>
           <p className="mos-emptyBody">Schedule your first job here, or create one from chat with /cron add</p>
           <button className="mos-btn mos-accent" onClick={openAdd}>New automation</button>

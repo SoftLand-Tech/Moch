@@ -1,0 +1,424 @@
+/* Inspector (right pane, 340px) — live run panel. Local `ins-*` classes
+   only; colors and type ride the theme tokens installed by shell/themeVars.
+   Accent is reserved for the live badge and the progress bar. */
+
+.ins-root {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 100%;
+}
+
+/* ── Header: "Moch is working…" + Live badge ─────────────────────────── */
+
+.ins-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.ins-head__status {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--moch-text);
+}
+
+.ins-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--moch-accent-soft);
+  color: var(--moch-accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.ins-live__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--moch-accent);
+  animation: ins-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes ins-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ── Cards ───────────────────────────────────────────────────────────── */
+
+.ins-card {
+  background: var(--moch-bg-elev);
+  border: 1px solid var(--moch-border);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.ins-session__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--moch-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ins-session__sub {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--moch-text-faint);
+}
+
+/* ── Progress ────────────────────────────────────────────────────────── */
+
+.ins-progress__bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--moch-bg-hover);
+  overflow: hidden;
+}
+
+.ins-progress__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--moch-accent);
+  transition: width 0.3s ease;
+}
+
+.ins-progress__meta {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--moch-text-dim);
+}
+
+/* ── Sections ────────────────────────────────────────────────────────── */
+
+.ins-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ins-section__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ins-section__title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--moch-text-faint);
+}
+
+.ins-viewall {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--moch-text-dim);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.ins-viewall:hover {
+  color: var(--moch-text);
+}
+
+.ins-viewall:focus-visible {
+  outline: 2px solid var(--moch-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.ins-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--moch-text-faint);
+}
+
+.ins-note--counts {
+  font-family: var(--moch-mono);
+  font-size: 12px;
+}
+
+.ins-note--err {
+  color: var(--moch-red);
+}
+
+/* ── Checklist ───────────────────────────────────────────────────────── */
+
+.ins-todos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ins-todo {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 28px;
+  padding: 3px 0;
+  font-size: 13px;
+  color: var(--moch-text);
+}
+
+.ins-todo__box {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  border: 1px solid var(--moch-border);
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--moch-green);
+}
+
+.ins-todo--done .ins-todo__box {
+  border-color: var(--moch-green);
+  background: var(--moch-green-soft);
+}
+
+.ins-todo--done .ins-todo__text {
+  color: var(--moch-text-faint);
+}
+
+/* ── Tabs + feed ─────────────────────────────────────────────────────── */
+
+.ins-tabs {
+  gap: 0;
+}
+
+.ins-tabbody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 96px;
+}
+
+.ins-feed {
+  display: flex;
+  flex-direction: column;
+}
+
+.ins-tool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 3px 4px;
+  border-radius: 8px;
+}
+
+.ins-tool:hover {
+  background: var(--moch-bg-hover);
+}
+
+.ins-tool__icon {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--moch-bg-hover);
+  color: var(--moch-text-dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ins-tool__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ins-tool__name {
+  font-size: 13px;
+  color: var(--moch-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ins-tool__detail {
+  font-size: 12px;
+  color: var(--moch-text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ins-tool__dur {
+  flex: none;
+  font-size: 11px;
+  font-family: var(--moch-mono);
+  color: var(--moch-text-faint);
+}
+
+/* ── Files rows ──────────────────────────────────────────────────────── */
+
+.ins-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  padding: 3px 4px;
+  border-radius: 8px;
+}
+
+.ins-file:hover {
+  background: var(--moch-bg-hover);
+}
+
+.ins-file__path {
+  font-family: var(--moch-mono);
+  font-size: 12px;
+  color: var(--moch-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.ins-file__meta {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--moch-text-faint);
+}
+
+/* ── Status dots ─────────────────────────────────────────────────────── */
+
+.ins-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--moch-text-faint);
+}
+
+.ins-dot--ok,
+.ins-dot--work {
+  background: var(--moch-green);
+}
+
+.ins-dot--warn {
+  background: var(--moch-amber);
+}
+
+.ins-dot--err {
+  background: var(--moch-red);
+}
+
+.ins-dot--pulse {
+  animation: ins-pulse 1.4s ease-in-out infinite;
+}
+
+/* ── MCP tiles ───────────────────────────────────────────────────────── */
+
+.ins-tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.ins-tile {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 6px 10px;
+  background: var(--moch-bg-elev);
+  border: 1px solid var(--moch-border);
+  border-radius: 10px;
+}
+
+.ins-tile:hover {
+  background: var(--moch-bg-hover);
+}
+
+.ins-tile__name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--moch-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ins-tile__count {
+  font-size: 10px;
+  font-family: var(--moch-mono);
+  color: var(--moch-text-faint);
+}
+
+/* ── Empty states ────────────────────────────────────────────────────── */
+
+.ins-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  padding: 32px 12px;
+  color: var(--moch-text-faint);
+}
+
+.ins-empty__headline {
+  margin: 4px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--moch-text);
+}
+
+.ins-empty__hint {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.ins-card--empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  text-align: center;
+  color: var(--moch-text-faint);
+}
+
+.ins-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}

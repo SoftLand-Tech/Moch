@@ -23,10 +23,12 @@ const LazyBrowser = React.lazy(() => import('./ui/Browser').then((m) => ({ defau
 const LazyAutomations = React.lazy(() => import('./ui/Automations'))
 const LazyFleet = React.lazy(() => import('./ui/Fleet'))
 const LazySkills = React.lazy(() => import('./ui/Skills'))
+const LazyFiles = React.lazy(() => import('./ui/Files'))
 const LazyConnectors = React.lazy(() => import('./ui/Connectors'))
 const LazyTerminal = React.lazy(() => import('./ui/Terminal').then((m) => ({ default: m.TerminalScreen })))
 const LazyModels = React.lazy(() => import('./ui/Models'))
 const LazySettings = React.lazy(() => import('./ui/Settings'))
+const LazyInspector = React.lazy(() => import('./ui/inspector'))
 
 function Placeholder(props: { screen: ScreenId }): React.JSX.Element {
   const meta = SCREENS.find((s) => s.id === props.screen)
@@ -137,6 +139,11 @@ export function App(): React.JSX.Element {
         <LazySkills />
       </Suspense>
     ),
+    files: (
+      <Suspense fallback={<Placeholder screen="files" />}>
+        <LazyFiles />
+      </Suspense>
+    ),
     connectors: (
       <Suspense fallback={<Placeholder screen="connectors" />}>
         <LazyConnectors />
@@ -176,6 +183,11 @@ export function App(): React.JSX.Element {
     <Shell
       active={screen}
       mode={layout.mode}
+      inspector={
+        <Suspense fallback={null}>
+          <LazyInspector />
+        </Suspense>
+      }
       list={screen === 'chat' ? <SessionsList onOpen={(id) => focusScreen('chat')} /> : undefined}
       onNavigate={focusScreen}
       onOpenChatDraft={openChatDraft}

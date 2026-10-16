@@ -1,0 +1,144 @@
+/* Files screen — local widgets only; tables and buttons come from the
+   shared mos-* kit in shell/desktop.css. */
+
+.files-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--moch-border);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.files-up {
+  background: none;
+  border: none;
+  color: var(--moch-text-dim);
+  font: inherit;
+  font-size: 13px;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: var(--moch-radius-sm);
+}
+.files-up:hover {
+  color: var(--moch-text);
+  background: var(--moch-bg-hover);
+}
+.files-crumb {
+  background: none;
+  border: none;
+  color: var(--moch-text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: var(--moch-radius-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+.files-crumb:hover {
+  color: var(--moch-text);
+  background: var(--moch-bg-hover);
+}
+.files-crumb:focus-visible,
+.files-up:focus-visible {
+  outline: 2px solid var(--moch-accent);
+  outline-offset: 1px;
+}
+.files-crumbOn {
+  color: var(--moch-text);
+  font-weight: 600;
+}
+.files-sep {
+  color: var(--moch-text-faint);
+  flex: none;
+}
+
+.files-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.files-table-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.files-del {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11.5px;
+}
+.files-btn-glyph {
+  display: inline-flex;
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+.files-error {
+  color: var(--moch-red);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 420px;
+}
+
+.files-preview {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: min(400px, 42%);
+  min-width: 0;
+  border-left: 1px solid var(--moch-border);
+}
+.files-preview-head {
+  flex: none;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--moch-border);
+}
+.files-preview-head .mos-name {
+  font-size: 13px;
+}
+.files-preview-body {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  padding: 12px 14px;
+}
+.files-pre {
+  margin: 0;
+  font-family: var(--moch-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--moch-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.files-note {
+  color: var(--moch-text-faint);
+  font-size: 12px;
+}
+.files-preview-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.files-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--moch-text-dim);
+}
+.files-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--moch-text);
+}

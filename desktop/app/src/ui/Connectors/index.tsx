@@ -30,6 +30,7 @@ import {
   startMcpOauth,
   testMcpServer,
 } from '../../../../../app/src/lib/mcpState'
+import { IconMoch } from '../shell/icons'
 
 /** Running-state line for a server row — from cached runtime, never a probe. */
 function statusLine(srv: McpServer, rt?: { status?: string; error?: string; tools?: number }): { text: string; danger: boolean; warn: boolean } {
@@ -49,13 +50,13 @@ function statusLine(srv: McpServer, rt?: { status?: string; error?: string; tool
 
 /** The catalog RPC carries no brand art (and the app talks only to your
  * machine, never to a favicon service), so each service gets a stable hue
- * from its name: same tile everywhere, every run. */
-const TILE_COLORS = ['#E8720C', '#1FA7C4', '#10A37F', '#8B5CF6', '#DB2777', '#D97706', '#3B6FE0', '#0D9488', '#E23838', '#6D5AE0']
-
+ * from its name: same tile everywhere, every run. No hex literals in TSX
+ * (DESIGN.md) — the hue is generated, mid-lightness so the on-color token
+ * stays readable. */
 function tileColor(name: string): string {
   let h = 0
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
-  return TILE_COLORS[h % TILE_COLORS.length]
+  return `hsl(${h % 360} 65% 42%)`
 }
 
 function Tile(props: { name: string; size?: number; installed?: boolean }): React.JSX.Element {
@@ -180,6 +181,7 @@ export default function Connectors(): React.JSX.Element {
         <style>{css}</style>
         <header className="mos-head"><h2>Connectors</h2></header>
         <div className="mos-empty">
+          <IconMoch size={56} />
           <p className="mos-emptyTitle">Not available on this machine</p>
           <p className="mos-emptyBody">The connected Mochi doesn't expose connector management yet. Update Mochi on that machine, then reconnect.</p>
         </div>
@@ -226,6 +228,7 @@ export default function Connectors(): React.JSX.Element {
       {tab === 'yours' ? (
         !online && servers.length === 0 ? (
           <div className="mos-empty" role="status">
+            <IconMoch size={56} />
             <p className="mos-emptyTitle">Offline</p>
             <p className="mos-emptyBody">Connectors live on your computer. Connect, then refresh.</p>
             <button className="mos-btn" onClick={refresh}>Refresh</button>
@@ -234,6 +237,7 @@ export default function Connectors(): React.JSX.Element {
           <div className="mos-spin" aria-label="Loading servers" />
         ) : serverList.length === 0 && !listError ? (
           <div className="mos-empty">
+            <IconMoch size={56} />
             <p className="mos-emptyTitle">No MCP servers yet</p>
             <p className="mos-emptyBody">Browse the catalog or add one by URL or command.</p>
             <button className="mos-btn mos-accent" onClick={() => setTab('browse')}>Browse catalog</button>
@@ -284,6 +288,7 @@ export default function Connectors(): React.JSX.Element {
         <div className="mos-spin" aria-label="Loading catalog" />
       ) : catalogList.length === 0 ? (
         <div className="mos-empty">
+          <IconMoch size={56} />
           <p className="mos-emptyTitle">{online ? (query.trim() ? 'No matches' : 'Catalog is empty') : 'Offline'}</p>
         </div>
       ) : (

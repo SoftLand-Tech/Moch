@@ -149,48 +149,42 @@ export function TerminalScreen(): React.JSX.Element {
     setSession((s) => s + 1)
   }, [])
 
-  const strip =
-    phase.state === 'live' ? null : (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '6px 12px',
-          borderTop: '1px solid var(--moch-border)',
-          color: 'var(--moch-text-dim)',
-          fontSize: 13,
-        }}
-      >
-        <span>
-          {phase.state === 'dialing'
-            ? 'Connecting to the runtime shell…'
-            : phase.detail}
-        </span>
-        {phase.state === 'ended' && (
-          <button
-            onClick={reconnect}
-            style={{
-              marginLeft: 'auto',
-              background: 'transparent',
-              color: 'var(--moch-text)',
-              border: '1px solid var(--moch-border)',
-              borderRadius: 6,
-              padding: '4px 12px',
-              cursor: 'pointer',
-              fontSize: 13,
-            }}
-          >
-            Reconnect
-          </button>
-        )}
-      </div>
-    )
+  const dotClass =
+    phase.state === 'live'
+      ? ' mos-term__dot--ok'
+      : phase.state === 'dialing'
+        ? ' mos-term__dot--warn'
+        : ' mos-term__dot--err'
+  const statusLine =
+    phase.state === 'dialing'
+      ? 'Connecting to the runtime shell…'
+      : phase.state === 'live'
+        ? `Live bash — PTY bridge on ${PTY_HOST}:${PTY_PORT}`
+        : phase.detail
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      <div ref={hostRef} style={{ flex: 1, minHeight: 0, padding: '8px 10px' }} />
-      {strip}
+    <div className="mos-root">
+      <style>{css}</style>
+      <header className="mos-head">
+        <span className={`mos-term__dot${dotClass}`} aria-hidden />
+        <h2>Terminal</h2>
+        <span className="mos-sub">{statusLine}</span>
+        {phase.state === 'ended' ? (
+          <button className="mos-btn mos-spring" onClick={reconnect}>
+            Reconnect
+          </button>
+        ) : null}
+      </header>
+      <div ref={hostRef} className="mos-termHost" />
     </div>
   )
 }
+
+const css = `
+/* Local to Terminal: the shared screen frame (desktop.css) covers the rest. */
+.mos-termHost { flex: 1; min-height: 0; padding: 8px 10px; }
+.mos-term__dot { width: 7px; height: 7px; border-radius: 4px; background: var(--moch-text-faint); flex: none; }
+.mos-term__dot--ok { background: var(--moch-green); }
+.mos-term__dot--warn { background: var(--moch-amber); }
+.mos-term__dot--err { background: var(--moch-red); }
+`
