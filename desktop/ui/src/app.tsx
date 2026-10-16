@@ -21,6 +21,7 @@ import SettingsView from './views/SettingsView'
 import StagePane from './components/StagePane'
 import StatusBar from './components/StatusBar'
 import CommandPalette from './components/CommandPalette'
+import Mochi from './components/Mochi'
 
 export type ViewId = 'chat' | 'fleet' | 'crew' | 'inbox' | 'browser' | 'terminal' | 'automations' | 'skills' | 'connectors' | 'settings'
 
@@ -206,7 +207,7 @@ function BootVeil({ boot, conn }: { boot: { phase: string; message: string }; co
           </>
         ) : (
           <>
-            <div className="spinner" style={{ width: 28, height: 28 }} />
+            <Mochi mood="connecting" size={84} />
             <div className="empty-title">{boot.message}</div>
             <div className="empty-sub">The hermes agents, your bots and everything else live right here on this machine — nothing leaves it.</div>
             {conn === 'connecting' ? <div className="text-faint" style={{ fontSize: 12 }}>connecting to the gateway…</div> : null}

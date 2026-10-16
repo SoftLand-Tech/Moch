@@ -21,6 +21,7 @@ import { startRecording, stopRecording } from '../lib/voice'
 import { attachFiles } from '../lib/media'
 import InteractiveCard from '../components/InteractiveCard'
 import MediaBlock from '../components/MediaBlock'
+import Mochi from '../components/Mochi'
 
 export default function ChatView() {
   const order = useStore(sessionOrder)
@@ -208,7 +209,7 @@ function Transcript() {
       {visibleTools.filter(t => t.status === 'running').map((t) => <ToolRow key={t.id} tool={t} />)}
       {card ? <InteractiveCard card={card} /> : null}
       {busy && !msgs.some(m => m.streaming) ? (
-        <div className="busy-strip"><div className="spinner" style={{ width: 12, height: 12 }} /> thinking…</div>
+        <div className="busy-strip"><Mochi mood="deep-thinking" size={34} /> thinking…</div>
       ) : null}
     </div>
   )
@@ -219,9 +220,13 @@ function EmptyChat() {
   const name = bot ?? null
   return (
     <div className="empty" style={{ padding: '60px 20px' }}>
-      <span className="avatar" style={{ width: 54, height: 54, fontSize: 22, borderRadius: 16, background: name ? accentFor(name) : 'var(--accent)' }}>
-        {name ? name.slice(0, 2) : 'M'}
-      </span>
+      {name ? (
+        <span className="avatar" style={{ width: 54, height: 54, fontSize: 22, borderRadius: 16, background: accentFor(name) }}>
+          {name.slice(0, 2)}
+        </span>
+      ) : (
+        <Mochi mood="greeting" size={88} />
+      )}
       <div className="empty-title">{name ? `Talk to ${name}` : 'What should Mochi do?'}</div>
       <div className="empty-sub">
         Your agents run entirely on this machine — they can use the terminal, browse the web,
