@@ -104,8 +104,11 @@ function Transcript() {
               editTools.map((t) => <DiffBlock key={`d-${t.id}`} path={t.editPath!} add={t.add ?? 0} del={t.del ?? 0} src={t.output ?? ''} />)
             ) : null}
             {m.role === 'assistant' && !m.streaming && i === msgs.length - 1 ? (
-              <div className="msgfoot" style={{ marginTop: -6 }}>
-                <span>⧉ copy</span><span>↻ retry</span><span>♪ listen</span><span>✎ save as skill</span>
+              <div className="msgfoot">
+                <span onClick={() => void navigator.clipboard.writeText(turnText(msgs, i))}>⧉ copy</span>
+                <span onClick={() => void speak(turnText(msgs, i))}>♪ listen</span>
+                <span onClick={teachSkill}>✎ save as skill</span>
+                <span onClick={() => { const lastU = findLastIdxLocal(msgs, (x: ChatMessage) => x.role === 'user'); if (lastU >= 0) void send(msgs[lastU].segments.map((sg) => sg.text).join('')) }}>↻ retry</span>
               </div>
             ) : null}
           </div>
@@ -244,7 +247,7 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
   if (msg.role === 'system') {
     return <div className="msg"><div className="msg-sys">{msg.segments.map((s, i) => <span key={i}>{s.text}</span>)}</div></div>
   }
-  const reasoning = msg.segments.filter((s) => s.kind === 'reasoning' || s.kind === 'thinking')
+  const reasoning = msg.segments.filter((s) => s.kind === 'reasoning')
   const text = msg.segments.filter((s) => s.kind === 'text')
   const streaming = msg.streaming
   return (
@@ -255,15 +258,7 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
           {streaming && i === text.length - 1 ? s.text : <span dangerouslySetInnerHTML={{ __html: renderMarkdown(s.text) }} />}
         </div>
       ))}
-      {!streaming && text.length ? (
-        <div className="msg-row-meta">
-          <div className="msg-actions">
-            <button className="msg-action" onClick={() => void navigator.clipboard.writeText(text.map(s => s.text).join(''))}><Copy size={11} /> copy</button>
-            <button className="msg-action" onClick={() => void speak(text.map(s => s.text).join(''))}><Volume2 size={11} /> listen</button>
-            <button className="msg-action" onClick={teachSkill}><GraduationCap size={11} /> save as skill</button>
-          </div>
-        </div>
-      ) : null}
+
     </div>
   )
 }
@@ -622,4 +617,22 @@ function ModelPicker({ onClose, providers: provs }: { onClose: () => void; provi
       </div>
     </div>
   )
+}
+
+function findLastIdxLocal<T>(arr: T[], pred: (t: T) => boolean): number {
+  for (let i = arr.length - 1; i >= 0; i--) if (pred(arr[i])) return i
+  return -1
+}
+
+function turnText(msgs: ChatMessage[], assistantIdx: number): string {
+  const parts: string[] = []
+  for (let i = assistantIdx - 1; i >= 0; i--) {
+    if (msgs[i].role === 'user') {
+      parts.unshift(msgs[i].segments.map((sg) => sg.text).join(''))
+      break
+    }
+    parts.unshift(msgs[i].segments.filter((sg) => sg.kind === 'text').map((sg) => sg.text).join(''))
+  }
+  parts.push(msgs[assistantIdx].segments.filter((sg) => sg.kind === 'text').map((sg) => sg.text).join(''))
+  return parts.filter(Boolean).join('\n\n')
 }

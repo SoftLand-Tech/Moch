@@ -209,9 +209,11 @@ function appendToLast(sid: string, kind: ChatSegment['kind'], chunk: string): vo
     const m = messages[i]
     if (m.role !== 'assistant' || !m.streaming) continue
     const segs = m.segments.slice()
-    // append to the LAST segment of the same kind, else push a new one
     const last = segs[segs.length - 1]
-    if (last && last.kind === kind) {
+    // Reasoning interleaves: it only extends a TRAILING reasoning segment.
+    // If text came after it, the model reasoned AGAIN — open a fresh block
+    // in flow order instead of feeding the old one at the top.
+    if (last && last.kind === kind && (kind === 'text' || segs[segs.length - 1] === last)) {
       segs[segs.length - 1] = { ...last, text: last.text + chunk, chars: (last.chars ?? last.text.length) + chunk.length }
     } else {
       segs.push({ kind, text: chunk, startedAt: Date.now(), chars: chunk.length })
@@ -368,10 +370,11 @@ export function hookChatEvents(): () => void {
         if (sid && typeof p.text === 'string') appendToLast(sid, 'text', p.text)
         break
       case 'reasoning.delta':
-      case 'thinking.delta':
+        // thinking.delta is deliberately ignored: it carries fluffy status
+        // lines ("ruminating...") — the real content is reasoning.delta.
         if (sid) {
           const text = typeof p.text === 'string' ? p.text : typeof p.delta === 'string' ? p.delta : ''
-          if (text) appendToLast(sid, e.type === 'thinking.delta' ? 'thinking' : 'reasoning', text)
+          if (text) appendToLast(sid, 'reasoning', text)
         }
         break
       case 'message.complete': {
@@ -379,32 +382,20 @@ export function hookChatEvents(): () => void {
         const s = sessionsById.get()[sid]
         if (!s) break
         const messages = s.messages.slice()
-        if (p.reasoning || p.text) {
-          const segs: ChatSegment[] = []
-          if (typeof p.reasoning === 'string' && p.reasoning) segs.push({ kind: 'reasoning', text: p.reasoning })
-          if (typeof p.text === 'string' && p.text) segs.push({ kind: 'text', text: p.text })
-          const id = typeof p.id === 'string' ? p.id : undefined
-          // The canonical message REPLACES the streamed draft (same id or
-          // the still-streaming tail) — never renders alongside it. Reasoning
-          // segments survive when the complete event omits them.
-          const byId = id ? messages.findIndex((m) => m.id === id) : -1
-          const lastStreamingIdx = byId >= 0 ? byId : findLastIdx(messages, (m) => !!m.streaming)
-          if (lastStreamingIdx >= 0) {
-            const existingReasoning = messages[lastStreamingIdx].segments.filter((sg) => sg.kind === 'reasoning' || sg.kind === 'thinking')
-            const canonicalReasoning = typeof p.reasoning === 'string' && p.reasoning ? [{ kind: 'reasoning' as const, text: p.reasoning }] : []
-            const finalSegs = segs.some((sg) => sg.kind === 'reasoning') || !existingReasoning.length
-              ? segs
-              : [...existingReasoning, ...segs]
-            messages[lastStreamingIdx] = {
-              ...messages[lastStreamingIdx],
-              segments: finalSegs.length ? finalSegs : messages[lastStreamingIdx].segments,
-              streaming: false,
-              done: true,
-              ...(id ? { id } : {}),
-            }
-          } else if (segs.length) {
-            messages.push({ id: id ?? `m${Date.now()}`, role: 'assistant', segments: segs, done: true, createdAt: Date.now() })
+        const id = typeof p.id === 'string' ? p.id : undefined
+        const byId = id ? messages.findIndex((m) => m.id === id) : -1
+        const target = byId >= 0 ? byId : findLastIdx(messages, (m) => !!m.streaming)
+        if (target >= 0) {
+          const segs = messages[target].segments.slice()
+          // Final text: replace the last text segment (the canonical full text
+          // supersedes the streamed fragments), or append if none streamed.
+          if (typeof p.text === 'string' && p.text) {
+            const lastText = findLastIdx(segs, (sg) => sg.kind === 'text')
+            if (lastText >= 0) segs[lastText] = { ...segs[lastText], text: p.text }
+            else segs.push({ kind: 'text', text: p.text })
           }
+          // Interleaved reasoning segments are kept exactly as streamed.
+          messages[target] = { ...messages[target], segments: segs, streaming: false, done: true, ...(id ? { id } : {}) }
         }
         patchSession(sid, { messages })
         finishStreaming(sid)
