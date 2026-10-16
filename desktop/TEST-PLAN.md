@@ -130,3 +130,14 @@ Goal: test EVERYTHING like a user — click it all, use it long, break it, fix i
 - The Tauri window is the real track: grim screenshots + hyprctl for layout,
   gateway log + devtools console for errors.
 - Every failure found → file in bugs.md style: DESK-### with repro + fix.
+
+## Round-9 verification additions (all PASS, live)
+
+- Slash execution: `/save` dispatched via slash.exec — the agent ran a dozen
+  tool calls executing it.
+- Steer mid-turn: counting turn steered to "stop at 5, say DONE-STEERED" →
+  the agent's very next output was exactly `1 2 3 4 5 DONE-STEERED`.
+- Fleet kill switch: task create AND reassign to a frozen bot both refused
+  with 4071 "assignee is frozen (fleet kill switch)"; freeze/resume round-trips.
+- Crash resilience: gateway SIGTERM'd mid-story → statusbar honestly offline →
+  gateway back → auto-reconnected within 3s → new message answered.
