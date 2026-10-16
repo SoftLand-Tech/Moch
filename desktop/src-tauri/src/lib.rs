@@ -1,6 +1,7 @@
 //! Moch Desktop — Tauri shell.
 
 mod browser;
+mod fs;
 mod gateway;
 mod pty;
 
@@ -26,6 +27,7 @@ pub fn run() {
             gateway::runtime_setup_hint,
             gateway::gw_fetch,
             gateway::read_media_file,
+            fs::fs_list,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,

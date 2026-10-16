@@ -40,6 +40,12 @@ export interface ToolItem {
   output?: string
   startedAt?: number
   endedAt?: number
+  /** Full raw args (uncapped) — the diff capture needs path + content. */
+  argsRaw?: unknown
+  /** Edit tracking (Diff workbench + inline diff block). */
+  editPath?: string
+  add?: number
+  del?: number
 }
 
 export interface TodoItem {
@@ -87,9 +93,45 @@ export interface SessionState {
 
 export const sessionsById = atom<Record<string, SessionState>>({})
 export const activeSession = atom<string | null>(null)
+export const activeSessionAtom = activeSession
 export const pendingBySession = atom<Record<string, PendingCard>>({})
 /** Ordered stored ids from session.list (the sidebar list). */
 export const sessionOrder = atom<{ id: string; title: string; lastActive: number; profile?: string }[]>([])
+
+/** Files the agents edited this session (for the Diff workbench tab). */
+export interface ChangedFile { path: string; add: number; del: number; patch?: string }
+export const changedFiles = atom<Map<string, ChangedFile>>(new Map())
+export const changedOrder = atom<string[]>([])
+
+function recordEdit(path: string, add: number, del: number, patch?: string): void {
+  console.info('[moch-diff] recordEdit', path, add, del, patch?.length ?? 0)
+  const map = new Map(changedFiles.get())
+  const prev = map.get(path)
+  map.set(path, {
+    path,
+    add: (prev?.add ?? 0) + add,
+    del: (prev?.del ?? 0) + del,
+    patch: patch ?? prev?.patch,
+  })
+  changedFiles.set(map)
+  const order = changedOrder.get()
+  if (!order.includes(path)) changedOrder.set([...order, path])
+}
+
+/** Extract a unified-ish diff from patch-tool args/output and count changes. */
+function parsePatch(pathHint: string, rawText: string): { path: string; add: number; del: number; patch: string } | null {
+  if (!rawText || (!rawText.includes('\n---') && !rawText.includes('\n+++') && !/^--- /m.test(rawText))) {
+    const add = (rawText.match(/^\+[^+]/gm) || []).length
+    const del = (rawText.match(/^-[^-]/gm) || []).length
+    if (!add && !del) return null
+    return { path: pathHint, add, del, patch: rawText }
+  }
+  let path = pathHint
+  for (const m of rawText.matchAll(/^\+\+\+\s+\S*\/?([^\n/]+)$/gm)) path = m[1] || path
+  const add = (rawText.match(/^\+[^+]/gm) || []).length
+  const del = (rawText.match(/^-[^-]/gm) || []).length
+  return { path, add, del, patch: rawText }
+}
 
 export const view = computed([sessionsById, activeSession], (map, id) =>
   id && map[id] ? map[id] : null,
@@ -191,21 +233,75 @@ function finishStreaming(sid: string): void {
 
 function handleToolEvent(sid: string, payload: Record<string, unknown>, phase: 'start' | 'complete'): void {
   const s = ensureSession(sid)
-  const id = String(payload.id ?? payload.call_id ?? `${payload.name}-${Date.now()}`)
+  const name = String(payload.name ?? 'tool')
+  const id = String(payload.id ?? payload.call_id ?? '')
   const tools = s.tools.slice()
   const idx = tools.findIndex((t) => t.id === id)
+  // start/complete carry different synthetic ids — match the running item by
+  // name (last match), falling back to id.
+  let cur = idx
+  if (cur < 0) {
+    for (let i = tools.length - 1; i >= 0; i--) {
+      if (tools[i].name === name && tools[i].status === 'running') { cur = i; break }
+    }
+  }
+
   if (phase === 'start') {
-    if (idx >= 0) tools[idx] = { ...tools[idx], status: 'running', startedAt: Date.now() }
-    else tools.push({ id, name: String(payload.name ?? 'tool'), status: 'running', args: summarizeArgs(payload.args ?? payload.input), startedAt: Date.now() })
-  } else if (idx >= 0) {
-    tools[idx] = {
-      ...tools[idx],
+    const rawArgs = payload.args ?? payload.input
+    if (cur >= 0) {
+      tools[cur] = { ...tools[cur], status: 'running', argsRaw: rawArgs ?? tools[cur].argsRaw, startedAt: tools[cur].startedAt ?? Date.now() }
+    } else {
+      tools.push({
+        id: id || `${name}-${Date.now()}`,
+        name,
+        status: 'running',
+        args: summarizeArgs(rawArgs),
+        argsRaw: rawArgs,
+        startedAt: Date.now(),
+      })
+    }
+    patchSession(sid, { tools })
+    return
+  }
+
+  // complete
+  if (cur >= 0) {
+    tools[cur] = {
+      ...tools[cur],
       status: payload.error ? 'error' : 'complete',
+      argsRaw: (tools[cur].argsRaw ?? payload.args) as unknown,
       output: summarizeOutput(payload.output ?? payload.result ?? payload.error),
       endedAt: Date.now(),
     }
   }
   patchSession(sid, { tools })
+
+  // Track edited files for the Diff workbench (patch/Edit/write_file family).
+  if (!payload.error && cur >= 0) {
+    const item = tools[cur]
+    if (/patch|edit|write_file|apply/.test(item.name.toLowerCase())) {
+      let pathHint = item.editPath ?? (id || item.name)
+      let patchText: string | undefined
+      try {
+        const raw: unknown = item.argsRaw
+        const parsedArgs = (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, unknown>
+        pathHint = String(parsedArgs.path ?? parsedArgs.file ?? pathHint)
+        if (typeof parsedArgs.patch === 'string') patchText = parsedArgs.patch
+        if (typeof parsedArgs.content === 'string' && !patchText) {
+          patchText = parsedArgs.content.split('\n').map((l) => `+${l}`).join('\n')
+        }
+      } catch { /* args not JSON */ }
+      const outRaw = typeof item.output === 'string' ? item.output : JSON.stringify(item.output ?? '')
+      const parsed = parsePatch(pathHint, patchText ?? outRaw)
+      if (parsed) {
+        recordEdit(parsed.path, parsed.add, parsed.del, parsed.patch)
+        const now = sessionsById.get()[sid]
+        if (now) {
+          patchSession(sid, { tools: now.tools.map((x) => (x.id === item.id ? { ...x, editPath: parsed.path, add: parsed.add, del: parsed.del } : x)) })
+        }
+      }
+    }
+  }
 }
 
 function summarizeArgs(args: unknown): string | undefined {
@@ -635,4 +731,31 @@ export function toggleMark(kind: 'pinned' | 'archived', id: string): void {
   marks[kind] = list.includes(id) ? list.filter((x) => x !== id) : [...list, id]
   sessionMarks.set(marks)
   try { localStorage.setItem(MARKS_KEY, JSON.stringify(marks)) } catch { /* ok */ }
+}
+
+/** Progressive phase label for the current turn (drives "Mochi ● Editing"). */
+export function phaseForTools(tools: ToolItem[]): string {
+  const last = tools.length ? tools[tools.length - 1] : null
+  if (!last) return 'Thinking'
+  const n = last.name.toLowerCase()
+  if (/patch|edit|write_file|apply/.test(n)) return 'Editing'
+  if (/terminal|bash|exec/.test(n)) return 'Running commands'
+  if (/browser/.test(n)) return 'Browsing'
+  if (/read|search|glob/.test(n)) return 'Researching'
+  if (/skill/.test(n)) return 'Loading skills'
+  if (last.status === 'error') return 'Recovering'
+  return 'Working'
+}
+
+/** Debug handle: `__mochChat()` in the console shows session internals. */
+if (typeof window !== 'undefined') {
+  ;(window as unknown as { __mochChat?: () => unknown }).__mochChat = () => ({
+    sessions: Object.fromEntries(Object.entries(sessionsById.get()).map(([k, v]) => [k, {
+      tools: v.tools.map((t) => ({ name: t.name, id: t.id, editPath: t.editPath, add: t.add, del: t.del, hasArgsRaw: t.argsRaw !== undefined })),
+      msgCount: v.messages.length,
+      userCount: v.messages.filter((m) => m.role === 'user').length,
+    }])),
+    changed: [...changedFiles.get().entries()],
+    order: changedOrder.get(),
+  })
 }

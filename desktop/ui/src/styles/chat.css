@@ -314,3 +314,35 @@
   flex-direction: column;
   gap: 4px;
 }
+
+/* ── FINAL design: turn headers, think checklist, inline diff cards ── */
+
+.turnhead{display:flex;align-items:center;gap:9px;margin:18px 0 10px}
+.turnhead .tav{width:24px;height:24px;border-radius:8px;background:var(--bg-elev);display:grid;place-items:center;font-size:9px;font-weight:700;color:var(--acc2);border:1px solid var(--border)}
+.turnhead b{font-size:13.5px;font-weight:650}
+.turnhead .phase{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-dim)}
+.turnhead .plamp{width:6px;height:6px;border-radius:50%;background:var(--acc);box-shadow:0 0 6px var(--acc)}
+.turnhead .ttime{font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint)}
+
+.think .ckrow{display:flex;align-items:baseline;gap:9px;font-size:12.5px;color:var(--text-dim);padding:3px 0}
+.think .ckrow b{color:var(--text);font-weight:550}
+.think .ckgl{width:14px;display:inline-flex;justify-content:center}
+
+.diffcard{border:1px solid var(--border);border-radius:12px;overflow:hidden;margin:10px 0 6px;background:var(--bg-card);max-width:640px}
+.diffhead{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--bg-elev);font-size:12px;color:var(--text-dim)}
+.diffhead .dnum{font-family:var(--font-mono);font-size:11px;margin-right:auto}
+.dnum .add{color:var(--diff-add)} .dnum .del{color:var(--diff-del)}
+.viewdiff{margin-left:auto;color:var(--acc2);font-size:11px;display:inline-flex;align-items:center;gap:3px;cursor:default}
+.diffln{font-family:var(--font-mono);font-size:11.5px;line-height:1.75;padding:10px 0;white-space:pre;overflow-x:auto}
+.diffln .add{background:var(--diff-add-bg);color:var(--diff-add);display:inline-block;width:100%;padding-left:16px}
+.diffln .del{background:var(--diff-del-bg);color:var(--diff-del);display:inline-block;width:100%;padding-left:16px}
+.diffln .ctx{color:var(--text-dim);padding-left:16px;display:inline-block;width:100%}
+.difffoot{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px solid var(--border);color:var(--text-faint)}
+.dact{font-size:11px;padding:3px 9px;border-radius:6px;cursor:default}
+.dact:hover{background:var(--bg-hover);color:var(--text)}
+.dact.apply{background:var(--acc);color:var(--on-acc);font-weight:600}
+.dact.apply:hover{background:var(--acc-dark)}
+
+.cbar2{display:flex;align-items:center;gap:8px;padding:4px 10px 2px;font-size:11.5px;color:var(--text-faint)}
+.composer{max-width:860px;margin:0 auto;border:1.5px solid var(--border);border-radius:16px;background:var(--input-bg)}
+.composer:focus-within{border-color:var(--acc)}

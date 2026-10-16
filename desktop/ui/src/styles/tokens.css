@@ -1,55 +1,69 @@
-/* Moch Desktop design tokens — the Mocheme palette, desktop typography.
-   Same colors as the mobile app (theme.ts MOHEME_PALETTE); completely
-   different layout language (bot-first desktop shell). */
+/* Moch Desktop — FINAL design tokens (user's fused design, sampled from
+   design-mockups/final-design.png). Same var names as before so every view
+   inherits the new identity; values are the sampled navy/indigo palette. */
 
-:root {
-  /* Surfaces — hue-matched to Mochi's visor navy, kept near-black */
-  --bg: #0a0813;
-  --bg-card: #151220;
-  --bg-elev: #1a1727;
-  --bg-hover: #272535;
-  --input-bg: #1a1727;
+:root{
+  /* Surfaces — deep navy */
+  --bg: #0b1019;
+  --bg-card: #0d141f;
+  --bg-elev: #121a2b;
+  --bg-hover: #182238;
+  --input-bg: #101826;
+  --surf: #101826;
+  --titlebar: #0c131d;
+  --think-bg: #131b2e;
   --scrim: rgba(0, 0, 0, 0.55);
 
   /* Text */
-  --text: #ffffff;
-  --text-dim: #b4b1c4;
-  --text-faint: #86829b;
+  --text: #eef1f8;
+  --text-dim: #a7b0c5;
+  --text-faint: #6f7890;
 
-  /* Accent — Mochi's sprout orange, reserved for primary actions */
-  --accent: #f79236;
-  --accent-dark: #c56f1f;
-  --on-accent: #2e1a08;
-  --accent-soft: rgba(247, 146, 54, 0.12);
+  /* Primary — indigo */
+  --acc: #4751de;
+  --acc-dark: #3338aa;
+  --acc2: #8d93d3;
+  --on-acc: #ffffff;
+  --acc-soft: rgba(71, 81, 222, 0.18);
 
   /* Status */
-  --green: #10a37f;
+  --green: #34d399;
   --green-soft: #4ade80;
-  --red: #ff5a5a;
+  --red: #f87171;
   --amber: #f5a524;
-  --red-soft: rgba(255, 90, 90, 0.12);
+  --red-soft: rgba(248, 113, 113, 0.12);
   --amber-soft: rgba(245, 165, 36, 0.12);
   --green-tint: rgba(74, 222, 128, 0.12);
 
   /* Borders */
-  --border: rgba(248, 239, 229, 0.11);
-  --border-soft: rgba(248, 239, 229, 0.06);
+  --border: rgba(148, 163, 204, 0.13);
+  --border-soft: rgba(148, 163, 204, 0.07);
 
   /* Messages */
-  --user-bubble: #f6ece1;
-  --user-text: #2b283b;
-  --blush: #fa9b6a;
-  --btn-tint: rgba(248, 239, 229, 0.06);
+  --user-bubble: #141b35;
+  --user-text: #e8ecf8;
+  --blush: #8d93d3;
+  --think-border: rgba(141, 147, 211, 0.3);
+  --btn-tint: rgba(148, 163, 204, 0.06);
+
+  /* Diff */
+  --diff-add: #4ade80;
+  --diff-del: #f87171;
+  --diff-add-bg: rgba(52, 211, 153, 0.09);
+  --diff-del-bg: rgba(248, 113, 113, 0.09);
 
   /* Shell geometry */
   --rail-w: 60px;
   --ctx-w: 264px;
   --stage-w: 420px;
-  --statusbar-h: 32px;
+  --tbar-h: 56px;
+  --tsb-w: 264px;
+  --wb-w: 380px;
+  --statusbar-h: 30px;
 
-  /* Type — desktop density */
-  --font-ui: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, "Cascadia Code", monospace;
+  /* Type */
+  --font-ui: "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
   --text-xs: 11px;
   --text-sm: 12.5px;
   --text-md: 14px;
@@ -62,65 +76,19 @@
   --shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
-* { box-sizing: border-box; }
-
-html, body, #root {
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font-ui);
-  font-size: var(--text-md);
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-  overflow: hidden;
-  user-select: none;
-}
-
-button, input, textarea, select { font: inherit; color: inherit; }
-button { cursor: pointer; background: none; border: none; padding: 0; }
-input, textarea { user-select: text; }
-::selection { background: rgba(247, 146, 54, 0.35); }
-
-/* Scrollbars — thin, navy-hue */
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb {
-  background: rgba(248, 239, 229, 0.12);
-  border-radius: 6px;
-  border: 2.5px solid var(--bg);
-}
-::-webkit-scrollbar-thumb:hover { background: rgba(248, 239, 229, 0.22); }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-corner { background: transparent; }
-
-/* Focus — visible, orange */
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
-
-.text-dim { color: var(--text-dim); }
-.text-faint { color: var(--text-faint); }
-.mono { font-family: var(--font-mono); }
-
-/* Links inside rendered markdown stay orange */
-.md a { color: var(--accent); }
-
-/* ── RTL (Arabic locale) ───────────────────────────────────────────
-   applyDirection() sets [dir="rtl"] on <html> when locale === 'ar'.
-   Most of the shell is flexbox, which `direction: rtl` mirrors for free;
-   these rules fix the physical-direction leftovers (text-align, the active
-   row marker, one-sided paddings/margins). */
-
-[dir="rtl"] { direction: rtl; }
-
-/* Rows read right-to-left; the active marker bar moves to the right edge. */
-[dir="rtl"] .row { direction: rtl; text-align: right; }
-[dir="rtl"] .row.active { box-shadow: inset -2px 0 0 var(--accent); }
-
-/* Section labels sit at the right edge. */
-[dir="rtl"] .row-section { text-align: right; }
-
-/* Composer bar padding mirrors (base: 6px 10px 8px 12px). */
-[dir="rtl"] .composer-bar { padding: 6px 12px 8px 10px; }
-
-/* Status dots lead their label from the right in RTL (base: margin-right). */
-[dir="rtl"] .status-dot { margin-right: 0; margin-left: 5px; }
+*{box-sizing:border-box;margin:0;padding:0}
+html, body, #root{height:100%;}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:var(--text-md);-webkit-font-smoothing:antialiased;overflow:hidden;user-select:none}
+button, input, textarea, select{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:none;padding:0}
+input, textarea{user-select:text}
+::selection{background:rgba(71,81,222,.4)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:rgba(148,163,204,.14);border-radius:6px;border:2.5px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:rgba(148,163,204,.24)}
+::-webkit-scrollbar-track{background:transparent}
+:focus-visible{outline:2px solid var(--acc);outline-offset:1px;border-radius:4px}
+.text-dim{color:var(--text-dim)}
+.text-faint{color:var(--text-faint)}
+.mono{font-family:var(--font-mono)}
+.md a{color:var(--acc2)}

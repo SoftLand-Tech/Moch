@@ -17,6 +17,10 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import { invoke, listen, inTauri } from './tauri'
+import { atom } from 'nanostores'
+
+/** Live terminal sessions (for the titlebar Code card). */
+export const terminalLive = atom(0)
 
 /** UTF-8-safe base64 encode: text → bytes → btoa(binary string). */
 export function encodeBase64Utf8(text: string): string {
@@ -221,6 +225,7 @@ export function mountPty(el: HTMLElement, opts: PtyMountOptions): PtyHandle {
         return
       }
       id = spawned
+      terminalLive.set(terminalLive.get() + 1)
     } catch (err) {
       if (disposed || gen !== generation) return
       terminal.write(`\r\n\x1b[31m[pty spawn failed: ${String(err)}]\x1b[0m `)
@@ -254,6 +259,7 @@ export function mountPty(el: HTMLElement, opts: PtyMountOptions): PtyHandle {
   unlisteners.push(pty.onExit((exitId) => {
     if (exitId !== id || !id) return
     id = null
+    terminalLive.set(Math.max(0, terminalLive.get() - 1))
     terminal.write(ENDED_MESSAGE)
     for (const cb of exitCallbacks) {
       try { cb() } catch { /* subscriber error must not break the stream */ }

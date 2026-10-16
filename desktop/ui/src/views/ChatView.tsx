@@ -2,38 +2,30 @@ import { useStore } from '@nanostores/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUp, Brain, ChevronRight, CircleStop, Copy, GitBranch, ListTodo, LockKeyhole,
-  MessageSquarePlus, Mic, Paperclip, Pin, PinOff, Search, Sparkles, Trash2, Wrench,
-  Check, Volume2, Cpu, GraduationCap,
+  Mic, Paperclip, Sparkles, GitCompare, Wrench, Check, Volume2, Cpu, GraduationCap,
+  SquareTerminal,
 } from 'lucide-react'
 import {
-  activeSession, activeTitle, agentBusy, answerCard, deleteSession,
-  interrupt, messages, newChat, pendingRequest, renameSession, send, sessionMarks,
-  sessionOrder, sessionsById, steer, switchToSession, toggleMark,
+  activeSession, activeSessionAtom, activeTitle, agentBusy, answerCard, deleteSession,
+  interrupt, messages, newChat, pendingRequest, renameSession, send, sessionOrder,
+  sessionsById, steer, switchToSession, toggleMark,
   tools as toolsAtom, todos as todosAtom,
+  phaseForTools,
+  changedFiles,
   type ChatMessage, type ChatSegment, type PendingCard, type ToolItem,
 } from '../lib/chat'
-import { accentFor, activeBotAtom, activeBotName, fleetProfiles, setActiveBot } from '../lib/fleet'
+import { accentFor, activeBotName, setActiveBot } from '../lib/fleet'
 import { isConnected } from '../lib/gateway'
 import { renderMarkdown } from '../lib/markdown'
 import { commandCatalog, completeSlash, dispatchSlash, refreshCommandCatalog } from '../lib/slash'
 import { currentModel, providers, refreshModels } from '../lib/model'
-import { locale, tr } from '../lib/strings'
 import { startRecording, stopRecording } from '../lib/voice'
 import { attachFiles } from '../lib/media'
 import InteractiveCard from '../components/InteractiveCard'
-import MediaBlock from '../components/MediaBlock'
 import Mochi from '../components/Mochi'
 
 export default function ChatView() {
-  const order = useStore(sessionOrder)
-  const marks = useStore(sessionMarks)
-  const active = useStore(activeSession)
-  const byId = useStore(sessionsById)
-  const title = useStore(activeTitle)
-  const busy = useStore(agentBusy)
-  const bot = useStore(activeBotAtom)
   const connected = useStore(isConnected)
-  const [search, setSearch] = useState('')
 
   useEffect(() => {
     if (connected) {
@@ -42,130 +34,12 @@ export default function ChatView() {
     }
   }, [connected])
 
-  const grouped = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    const rows = order.filter((r) => !q || r.title.toLowerCase().includes(q))
-    const pinned = rows.filter((r) => marks.pinned.includes(r.id))
-    const rest = rows.filter((r) => !marks.pinned.includes(r.id) && !marks.archived.includes(r.id))
-    const archived = rows.filter((r) => marks.archived.includes(r.id))
-    return [
-      pinned.length ? { label: 'Pinned', rows: pinned } : null,
-      { label: 'All chats', rows: rest },
-      archived.length ? { label: 'Archived', rows: archived } : null,
-    ].filter(Boolean) as { label: string; rows: typeof order }[]
-  }, [order, search, marks])
-
-  const activeStored = active ? byId[active]?.storedId : undefined
-  const activeRow = activeStored ? order.find((r) => r.id === activeStored) : undefined
-
   return (
-    <>
-      <aside className="ctx">
-        <div className="ctx-head">
-          <span className="ctx-title">Chats</span>
-          <div className="ctx-actions">
-            <button className="btn ghost sm" title="New chat (a fresh session)" onClick={() => void newChat()} disabled={!connected}>
-              <MessageSquarePlus size={15} />
-            </button>
-          </div>
-        </div>
-        <div className="ctx-search">
-          <Search size={13} />
-          <input placeholder="Search chats" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        {bot ? (
-          <div style={{ margin: '0 12px 8px', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 10, background: 'var(--accent-soft)', border: '1px solid var(--accent)' }}>
-            <span className="avatar" style={{ width: 22, height: 22, fontSize: 10, background: accentFor(bot) }}>{bot.slice(0, 2)}</span>
-            <span style={{ fontSize: 12.5, color: 'var(--accent)', fontWeight: 600 }}>New chats go to {bot}</span>
-            <button
-              className="chip"
-              style={{ marginLeft: 'auto', padding: '2px 8px' }}
-              title="Switch back to the default agent"
-              onClick={() => void setActiveBot(null)}
-            >
-              switch back
-            </button>
-          </div>
-        ) : null}
-        <div className="ctx-body">
-          {grouped.map((g) => (
-            <div key={g.label}>
-              <div className="row-section">{g.label}</div>
-              {g.rows.length === 0 && g.label === 'All chats' ? (
-                <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-faint)' }}>
-                  No chats yet — say hi below.
-                </div>
-              ) : g.rows.map((r) => {
-                const liveId = active && byId[active]?.storedId === r.id ? active : undefined
-                const isBotChat = r.profile && r.profile !== 'default'
-                const rowBusy = isRowBusy(r.id, byId)
-                return (
-                  <div key={r.id} className={`row${liveId ? ' active' : ''}`} onClick={() => void switchToSession(r.id)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && void switchToSession(r.id)}>
-                    {isBotChat ? (
-                      <span className="avatar" style={{ width: 20, height: 20, fontSize: 9, background: accentFor(r.profile ?? '') }}>{(r.profile ?? 'b').slice(0, 2)}</span>
-                    ) : null}
-                    <span className="row-title" style={{ color: isBotChat ? accentFor(r.profile ?? '') : undefined }}>{r.title}</span>
-                    {rowBusy ? <span className="row-meta" style={{ color: 'var(--accent)' }}>●</span> : null}
-                    <button
-                      className="msg-action"
-                      title={marks.pinned.includes(r.id) ? 'Unpin' : 'Pin'}
-                      onClick={(e) => { e.stopPropagation(); toggleMark('pinned', r.id) }}
-                    >
-                      {marks.pinned.includes(r.id) ? <PinOff size={12} /> : <Pin size={12} />}
-                    </button>
-                    <button
-                      className="msg-action"
-                      title={marks.archived.includes(r.id) ? 'Unarchive' : 'Archive'}
-                      onClick={(e) => { e.stopPropagation(); toggleMark('archived', r.id) }}
-                    >
-                      <ChevronRight size={12} style={{ transform: marks.archived.includes(r.id) ? 'rotate(-90deg)' : 'rotate(90deg)' }} />
-                    </button>
-                    <button
-                      className="msg-action"
-                      title="Delete chat"
-                      onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${r.title}"?`)) void deleteSession(r.id) }}
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
-          ))}
-        </div>
-      </aside>
-
-      <main className="focus">
-        <div className="focus-head">
-          {activeRow?.profile && activeRow.profile !== 'default' ? (
-            <span className="avatar" style={{ width: 24, height: 24, fontSize: 10, background: accentFor(activeRow.profile) }}>{activeRow.profile.slice(0, 2)}</span>
-          ) : null}
-          <span style={{ fontWeight: 650, fontSize: 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '46%' }}>{title}</span>
-          {busy ? (
-            <span className="chip" style={{ borderColor: 'transparent', color: 'var(--accent)', cursor: 'default' }}>
-              <span className="spinner" style={{ width: 10, height: 10 }} /> working
-            </span>
-          ) : null}
-          <div style={{ flex: 1 }} />
-          {activeStored ? (
-            <button className="btn ghost sm" title="Rename (server-side, sticks)" onClick={() => {
-              const t = prompt('Rename chat', title)
-              if (t && t.trim()) void renameSession(activeStored!, t.trim())
-            }}>Rename</button>
-          ) : null}
-        </div>
-        <Transcript />
-        <Composer />
-      </main>
-    </>
+    <main className="focus">
+      <Transcript />
+      <Composer />
+    </main>
   )
-}
-
-function isRowBusy(storedId: string, byId: Record<string, { busy: boolean; storedId?: string }>): boolean {
-  for (const s of Object.values(byId)) {
-    if (s.storedId === storedId && s.busy) return true
-  }
-  return false
 }
 
 function Transcript() {
@@ -188,7 +62,17 @@ function Transcript() {
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight
   }, [msgs, toolsList, todosList, card])
 
-  const visibleTools = useMemo(() => toolsList.slice(-14), [toolsList])
+  // Turn grouping: a turn starts at each user message; its tools are the
+  // ones recorded after that point (history resumes without tool detail).
+  const turnStart = useMemo(() => {
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === 'user') return i
+    }
+    return -1
+  }, [msgs])
+  const turnTools = useMemo(() => (turnStart >= 0 ? toolsList : []), [toolsList, turnStart])
+  const phase = phaseForTools(turnTools)
+  const editTools = turnTools.filter((t) => t.editPath && (t.add || t.del))
 
   return (
     <div className="transcript" ref={scroller} onScroll={onScroll}>
@@ -206,31 +90,140 @@ function Transcript() {
           ))}
         </div>
       ) : null}
-      {msgs.map((m) => <MessageRow key={m.id} msg={m} />)}
-      {visibleTools.filter(t => t.status === 'running').map((t) => <ToolRow key={t.id} tool={t} />)}
+
+      {msgs.map((m, i) => {
+        const isCurrentTurnStart = i === turnStart
+        return (
+          <div key={m.id}>
+            {isCurrentTurnStart && (turnTools.length > 0 || busy) ? (
+              <TurnHeader phase={busy ? phase : 'Edited'} time={new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} />
+            ) : null}
+            <MessageRow msg={m} />
+            {isCurrentTurnStart && turnTools.length ? <ThinkChecklist tools={turnTools} /> : null}
+            {isCurrentTurnStart && editTools.length ? (
+              editTools.map((t) => <DiffBlock key={`d-${t.id}`} path={t.editPath!} add={t.add ?? 0} del={t.del ?? 0} src={t.output ?? ''} />)
+            ) : null}
+            {m.role === 'assistant' && !m.streaming && i === msgs.length - 1 ? (
+              <div className="msgfoot" style={{ marginTop: -6 }}>
+                <span>⧉ copy</span><span>↻ retry</span><span>♪ listen</span><span>✎ save as skill</span>
+              </div>
+            ) : null}
+          </div>
+        )
+      })}
+
       {card ? <InteractiveCard card={card} /> : null}
       {busy && !msgs.some(m => m.streaming) ? (
-        <div className="busy-strip"><Mochi mood="deep-thinking" size={34} /> thinking…</div>
+        <div className="busy-strip"><div className="spinner" style={{ width: 12, height: 12 }} /> thinking…</div>
       ) : null}
     </div>
   )
 }
 
+function TurnHeader({ phase, time }: { phase: string; time: string }) {
+  return (
+    <div className="turnhead">
+      <span className="tav">MO</span>
+      <b>Mochi</b>
+      <span className="phase"><span className="plamp" /> {phase}</span>
+      <span className="ttime">{time}</span>
+    </div>
+  )
+}
+
+/** Thinking block with the turn's tool checklist inside (the mock's
+    "Planning & analysis" pattern: evidence rows with timings). */
+function ThinkChecklist({ tools }: { tools: ToolItem[] }) {
+  const [open, setOpen] = useState(true)
+  const last = tools[tools.length - 1]
+  const anyRunning = tools.some((t) => t.status === 'running')
+  const totalSec = tools.reduce((n, t) => n + (t.endedAt && t.startedAt ? (t.endedAt - t.startedAt) / 1000 : 0), 0)
+  return (
+    <div className="think">
+      <div className="think-head" onClick={() => setOpen(v => !v)}>
+        <Brain size={13} />
+        <span>{anyRunning ? (last?.name ? `Working — ${last.name}` : 'Thinking') : 'Planning & analysis'}</span>
+        {anyRunning ? <span className="think-dots"><span /><span /><span /></span> : null}
+        <span className="text-faint" style={{ fontSize: 10.5, marginLeft: 4, fontFamily: 'var(--font-mono)' }}>{totalSec.toFixed(1)}s</span>
+        <ChevronRight size={13} style={{ marginLeft: 'auto', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 120ms' }} />
+      </div>
+      {open ? (
+        <div className="think-body" style={{ maxHeight: 260 }}>
+          {tools.map((t) => (
+            <div key={t.id} className="ckrow">
+              <span className="ckgl">{t.status === 'running' ? <span className="spinner" style={{ width: 9, height: 9 }} /> : t.status === 'error' ? <span style={{ color: 'var(--red)' }}>✗</span> : <Check size={12} color="var(--green)" />}</span>
+              <b>{phaseVerb(t.name)}</b>
+              <span className="mono" style={{ color: 'var(--text-faint)', fontSize: 11 }}>{argsShort(t)}</span>
+              {t.endedAt && t.startedAt ? <span style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{((t.endedAt - t.startedAt) / 1000).toFixed(1)}s</span> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function phaseVerb(name: string): string {
+  const n = name.toLowerCase()
+  if (/read/.test(n)) return 'Read'
+  if (/patch|edit|apply/.test(n)) return 'Edited'
+  if (/write_file/.test(n)) return 'Wrote'
+  if (/terminal|bash|exec/.test(n)) return 'Ran'
+  if (/browser/.test(n)) return 'Browsed'
+  if (/search/.test(n)) return 'Searched'
+  return name
+}
+
+function argsShort(t: ToolItem): string {
+  if (!t.args) return ''
+  try {
+    const a = JSON.parse(t.args) as Record<string, unknown>
+    const p = a.path ?? a.file ?? a.command ?? a.url ?? ''
+    return String(p).slice(0, 60)
+  } catch {
+    return t.args.slice(0, 60)
+  }
+}
+
+/** Inline diff block (the mock's docs/index.html +38 −12 card). */
+function DiffBlock({ path, add, del, src }: { path: string; add: number; del: number; src: string }) {
+  const [open, setOpen] = useState(true)
+  const lines = src ? src.split('\n').slice(0, 24) : []
+  return (
+    <div className="diffcard">
+      <div className="diffhead">
+        <span className="mono">{path.split('/').pop()}</span>
+        <span className="dnum"><span className="add">+{add}</span> <span className="del">−{del}</span></span>
+        <span className="viewdiff" onClick={() => setOpen(v => !v)}>View diff <ChevronRight size={10} style={{ transform: open ? 'rotate(90deg)' : 'none' }} /></span>
+      </div>
+      {open ? (
+        <div className="diffln">
+          {lines.map((l, i) => (
+            <span key={i} className={l.startsWith('+') && !l.startsWith('+++') ? 'add' : l.startsWith('-') && !l.startsWith('---') ? 'del' : 'ctx'}>{l}</span>
+          ))}
+          {lines.length === 0 ? <span className="ctx">(diff preview unavailable)</span> : null}
+        </div>
+      ) : null}
+      <div className="difffoot">
+        <span className="mono" style={{ fontSize: 10.5 }}>{path}</span>
+        <span style={{ flex: 1 }} />
+        <span className="dact">Open</span>
+        <span className="dact" onClick={() => navigator.clipboard.writeText(src)}>Copy</span>
+        <span className="dact apply">Apply</span>
+      </div>
+    </div>
+  )
+}
+
 function EmptyChat() {
-  const bot = useStore(activeBotAtom)
-  useStore(locale) // subscribe so the empty state re-renders when the language changes
-  const name = bot ?? null
   return (
     <div className="empty" style={{ padding: '60px 20px' }}>
-      {name ? (
-        <span className="avatar" style={{ width: 54, height: 54, fontSize: 22, borderRadius: 16, background: accentFor(name) }}>
-          {name.slice(0, 2)}
-        </span>
-      ) : (
-        <Mochi mood="greeting" size={88} />
-      )}
-      <div className="empty-title">{name ? tr('chat.empty.title.bot', { name }) : tr('chat.empty.title')}</div>
-      <div className="empty-sub">{tr('chat.empty.sub')}</div>
+      <Mochi mood="greeting" size={88} />
+      <div className="empty-title">What should Mochi do?</div>
+      <div className="empty-sub">
+        Your agents run entirely on this machine — they can use the terminal, browse the web,
+        remember across chats, and work while you're elsewhere. Ask for anything.
+      </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginTop: 6 }}>
         {['What can you do?', 'Look up something in the browser', 'Set up an automation', 'Show me the workspace'].map(s => (
           <button key={s} className="chip" onClick={() => void send(s)}>{s}</button>
@@ -254,31 +247,12 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
   const reasoning = msg.segments.filter((s) => s.kind === 'reasoning' || s.kind === 'thinking')
   const text = msg.segments.filter((s) => s.kind === 'text')
   const streaming = msg.streaming
-
-  /** Teach-a-skill: the agent distills this chat into a SKILL.md it saves itself. */
-  const teachSkill = () => {
-    const name = prompt('Name this skill (a short slug, e.g. release-checklist)')
-    if (!name) return
-    const slug = name.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
-    if (!slug) return
-    void send(
-      `Please distill what you learned in this conversation into a reusable skill named "${slug}". ` +
-      `Use the skill_manage tool to create it: the skill should describe WHEN to use it, the exact steps ` +
-      `as performed here (including any corrections I made), inputs to ask for, and failure notes. ` +
-      `Confirm with the skill's path when saved.`,
-    )
-  }
-
   return (
     <div className="msg assistant">
       {reasoning.map((s, i) => <ThinkBlock key={i} seg={s} streaming={!!streaming && i === reasoning.length - 1 && text.length === 0} />)}
       {text.map((s, i) => (
         <div key={i} className="msg-assistant-body md">
-          {streaming && i === text.length - 1 ? (
-            s.text
-          ) : (
-            <MediaAwareText text={s.text} />
-          )}
+          {streaming && i === text.length - 1 ? s.text : <span dangerouslySetInnerHTML={{ __html: renderMarkdown(s.text) }} />}
         </div>
       ))}
       {!streaming && text.length ? (
@@ -286,7 +260,7 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
           <div className="msg-actions">
             <button className="msg-action" onClick={() => void navigator.clipboard.writeText(text.map(s => s.text).join(''))}><Copy size={11} /> copy</button>
             <button className="msg-action" onClick={() => void speak(text.map(s => s.text).join(''))}><Volume2 size={11} /> listen</button>
-            <button className="msg-action" title="Distill this conversation into a reusable skill the agent saves via skill_manage" onClick={teachSkill}><GraduationCap size={11} /> save as skill</button>
+            <button className="msg-action" onClick={teachSkill}><GraduationCap size={11} /> save as skill</button>
           </div>
         </div>
       ) : null}
@@ -294,10 +268,22 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
   )
 }
 
+function teachSkill(): void {
+  const name = prompt('Name this skill (a short slug, e.g. release-checklist)')
+  if (!name) return
+  const slug = name.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
+  if (!slug) return
+  void send(
+    `Please distill what you learned in this conversation into a reusable skill named "${slug}". ` +
+    `Use the skill_manage tool to create it: the skill should describe WHEN to use it, the exact steps ` +
+    `as performed here (including any corrections I made), inputs to ask for, and failure notes. ` +
+    `Confirm with the skill's path when saved.`,
+  )
+}
+
 async function speak(text: string): Promise<void> {
   try {
     const { gwFetch } = await import('../lib/gateway')
-    // The speak endpoint answers {ok, data_url} (a data:audio/* URL).
     const res = (await gwFetch('/api/audio/speak', {
       method: 'POST',
       body: JSON.stringify({ text }),
@@ -348,7 +334,7 @@ function ToolRow({ tool }: { tool: ToolItem }) {
   return (
     <>
       <div className="toolrow" onClick={() => setOpen(v => !v)}>
-        <Wrench size={13} color="var(--accent)" />
+        <Wrench size={13} color="var(--acc2)" />
         <span className="tool-name">{tool.name}</span>
         <span className="tool-args">{tool.args}</span>
         {tool.endedAt && tool.startedAt ? <span className="row-meta">{((tool.endedAt - tool.startedAt) / 1000).toFixed(1)}s</span> : null}
@@ -364,6 +350,45 @@ function ToolRow({ tool }: { tool: ToolItem }) {
   )
 }
 
+function Card({ card }: { card: PendingCard }) {
+  const [value, setValue] = useState('')
+  const isSudo = card.kind === 'sudo'
+  const isSecret = card.kind === 'secret'
+  const needsText = isSudo || isSecret || card.kind === 'clarify'
+  return (
+    <div className={`card${card.danger ? ' danger' : ''}`}>
+      <div className="card-title">
+        {isSudo || isSecret ? <LockKeyhole size={15} /> : <GitBranch size={15} />}
+        {card.title}
+      </div>
+      {card.body ? <div className="card-body mono">{card.body}</div> : null}
+      {needsText ? (
+        <input
+          className="input card-input"
+          type={isSudo ? 'password' : 'text'}
+          placeholder={isSudo ? 'sudo password' : isSecret ? 'the secret value' : 'your answer'}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+        />
+      ) : null}
+      <div className="card-actions">
+        {card.options?.length ? (
+          card.options.map((o) => (
+            <button key={o.value} className="btn" onClick={() => void answerCard(card, { value: o.value })}>{o.label}</button>
+          ))
+        ) : null}
+        {needsText ? (
+          <button className="btn primary" disabled={!value} onClick={() => void answerCard(card, { value })}>Answer</button>
+        ) : (
+          <>
+            <button className="btn primary" onClick={() => void answerCard(card, { choice: 'once' })}>Approve</button>
+            <button className="btn danger" onClick={() => void answerCard(card, { choice: 'deny' })}>Deny</button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
 
 function Composer() {
   const [text, setText] = useState('')
@@ -373,7 +398,6 @@ function Composer() {
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [sending, setSending] = useState(false)
-  const [dragOver, setDragOver] = useState(false)
   const [slashSel, setSlashSel] = useState(0)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const busy = useStore(agentBusy)
@@ -382,7 +406,6 @@ function Composer() {
   const catalog = useStore(commandCatalog)
   const model = useStore(currentModel)
   const provs = useStore(providers)
-  useStore(locale) // subscribe so placeholders re-render when the language changes
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -416,8 +439,7 @@ function Composer() {
         }
       }
       if (pendingFiles.length) {
-        // Attachments need a live session — create one lazily like send().
-        const sid = activeSession.get() ?? (await newChat().catch(() => null))
+        const sid = activeSessionAtom.get() ?? (await newChat().catch(() => null))
         if (!sid) return
         const ok = await attachFiles(sid, pendingFiles).catch(() => false)
         setPendingFiles([])
@@ -425,7 +447,7 @@ function Composer() {
       }
       setText('')
       if (steerMode) void steer(t)
-      else void send(t) // send() lazily creates the session on first message
+      else void send(t)
     } finally {
       setSending(false)
     }
@@ -446,37 +468,8 @@ function Composer() {
     })
   }
 
-  // Clipboard paste share-in: images/files straight into the attachment set.
-  useEffect(() => {
-    const onPaste = (e: ClipboardEvent) => {
-      const ta = e.target as HTMLElement | null
-      const inComposer = !!ta?.closest?.('.composer-wrap')
-      if (!inComposer) return
-      const files = Array.from(e.clipboardData?.files ?? [])
-      if (files.length) {
-        e.preventDefault()
-        setPendingFiles((prev) => [...prev, ...files].slice(0, 8))
-      }
-    }
-    window.addEventListener('paste', onPaste)
-    return () => window.removeEventListener('paste', onPaste)
-  }, [])
-
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    setDragOver(false)
-    const files = Array.from(e.dataTransfer.files ?? [])
-    if (files.length) setPendingFiles((prev) => [...prev, ...files].slice(0, 8))
-  }
-
   return (
-    <div
-      className="composer-wrap"
-      onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={onDrop}
-      style={dragOver ? { outline: '2px dashed var(--accent)', outlineOffset: -6, borderRadius: 18 } : undefined}
-    >
+    <div className="composer-wrap">
       {completions.length > 0 && text.startsWith('/') && !text.includes('\n') ? (
         <div className="slash-pop">
           {completions.map((c, i) => (
@@ -494,7 +487,7 @@ function Composer() {
                 }
               }}
             >
-              <Sparkles size={13} color="var(--accent)" />
+              <Sparkles size={13} color="var(--acc2)" />
               <span className="row-title mono" style={{ fontSize: 12.5 }}>{c.command.name}</span>
               <span className="row-sub">{c.command.description}</span>
             </div>
@@ -516,7 +509,7 @@ function Composer() {
         <textarea
           ref={taRef}
           rows={1}
-          placeholder={steerMode ? tr('chat.composer.placeholder.steer') : botName ? tr('chat.composer.placeholder.bot', { name: botName }) : tr('chat.composer.placeholder')}
+          placeholder={steerMode ? 'Steer the running turn — delivered at the next boundary…' : botName ? `Ask ${botName} anything…` : 'Ask Mochi anything…'}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
@@ -537,36 +530,23 @@ function Composer() {
             }
           }}
         />
-        <div className="composer-bar">
+        <div className="cbar2">
+          <button className="composer-chip" onClick={() => setModelPickerOpen(true)} title="Model">
+            <Cpu size={12} /> {model.model ?? 'model'} <span style={{ opacity: .6 }}>⌄</span>
+          </button>
+          <button className="composer-chip" title="Active agent" onClick={() => window.dispatchEvent(new CustomEvent('moch-navigate', { detail: 'fleet' }))}>
+            @ {botName ?? 'Mochi'}
+          </button>
+          <button className="composer-chip" title="Slash commands" onClick={() => { setText('/'); taRef.current?.focus() }}>Tools</button>
+          <button className="composer-chip" title="Open the terminal workbench" onClick={() => window.dispatchEvent(new CustomEvent('moch-workbench', { detail: 'terminal' }))}>
+            <SquareTerminal size={12} /> Code
+          </button>
           {busy ? (
             <button className="composer-chip" onClick={() => void interrupt()} title="Stop the running turn">
               <CircleStop size={12} /> stop
             </button>
           ) : null}
-          <button
-            className={`composer-chip${steerMode ? ' accent' : ''}`}
-            onClick={() => setSteerMode(v => !v)}
-            title="Queue a steering message delivered at the next turn boundary"
-          >
-            <GitBranch size={12} /> steer
-          </button>
-          <button
-            className="composer-chip"
-            onClick={() => fileRef.current?.click()}
-            title="Attach files or images"
-          >
-            <Paperclip size={12} />
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              setPendingFiles(Array.from(e.target.files ?? []))
-              e.target.value = ''
-            }}
-          />
+          <div style={{ flex: 1 }} />
           <button
             className={`composer-chip${recording ? ' accent' : ''}`}
             onClick={onVoice}
@@ -576,12 +556,6 @@ function Composer() {
               ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span className="status-dot warn" style={{ margin: 0, transform: `scale(${1 + level * 1.2})`, transition: 'transform 80ms' }} /> {Math.round(level * 100)}%</span>
               : <Mic size={12} />}
           </button>
-          {model.model ? (
-            <button className="composer-chip" onClick={() => setModelPickerOpen(true)} title="Model — click to switch">
-              <Cpu size={12} /> {model.model.length > 18 ? `${model.model.slice(0, 16)}…` : model.model}
-            </button>
-          ) : null}
-          <div style={{ flex: 1 }} />
           <button className="composer-send" onClick={() => void submit()} disabled={(!text.trim() && pendingFiles.length === 0) || sending} aria-label="Send">
             <ArrowUp size={17} strokeWidth={2.4} />
           </button>
@@ -612,13 +586,8 @@ function ModelPicker({ onClose, providers: provs }: { onClose: () => void; provi
     setErr('')
     try {
       const { rpc } = await import('../lib/gateway')
-      // The gateway's own /model grammar — one code path with the CLI.
       const value = `${model} --provider ${provider} --session`
-      await rpc('config.set', {
-        key: 'model',
-        value,
-        session_id: activeSession.get() ?? undefined,
-      }, 20000)
+      await rpc('config.set', { key: 'model', value }, 20000)
       const { refreshModels } = await import('../lib/model')
       await refreshModels()
       onClose()
@@ -651,63 +620,6 @@ function ModelPicker({ onClose, providers: provs }: { onClose: () => void; provi
           <button className="btn" onClick={onClose}>Close</button>
         </div>
       </div>
-    </div>
-  )
-}
-
-/**
- * Split rendered markdown around MEDIA:/abs/path tokens; media gets its block.
- * Links are clickable: plain click opens in the AGENT BROWSER (the local-first
- * surface — the pane shows it live), Ctrl/Cmd+click opens the system browser.
- */
-function MediaAwareText({ text }: { text: string }) {
-  const parts = text.split(/(MEDIA:\/[^\s)\]]+)/g)
-  const onLinkClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const a = (e.target as HTMLElement).closest('a')
-    if (!a) return
-    const href = a.getAttribute('href') ?? ''
-    if (!/^https?:/i.test(href)) return
-    e.preventDefault()
-    if (e.metaKey || e.ctrlKey) {
-      void import('../lib/shell-ops').then((m) => m.openExternal(href))
-    } else {
-      // Open in the agent browser: ensure it's running, then navigate the
-      // active tab; the Browser pane (or view) shows it.
-      void import('../lib/cdp').then(async (m) => {
-        try {
-          let status = m.browserStatus.get()
-          if (!status.running) status = await m.launchBrowser()
-          if (!status.running) throw new Error('browser not running')
-          const cdp = m.getCdp()
-          const tabs = await cdp.listTabs()
-          const target = m.activeTargetId.get() ?? tabs[0]?.id
-          if (target) {
-            const sid = await cdp.attachToPage(target)
-            await cdp.send('Page.navigate', { url: href }, sid)
-          } else {
-            await cdp.newTab(href)
-          }
-          m.refreshTabs()
-        } catch (err) {
-          console.warn('[link] agent browser nav failed, opening externally', err)
-          const ops = await import('../lib/shell-ops')
-          void ops.openExternal(href)
-        }
-      })
-    }
-  }
-  const chunk = (t: string, i: number) => (
-    <span key={i} dangerouslySetInnerHTML={{ __html: renderMarkdown(t) }} />
-  )
-  return (
-    <div onClick={onLinkClick}>
-      {parts.map((part, i) =>
-        part.startsWith('MEDIA:/') ? (
-          <MediaBlock key={i} path={part.slice('MEDIA:'.length)} />
-        ) : part ? (
-          chunk(part, i)
-        ) : null,
-      )}
     </div>
   )
 }
