@@ -294,3 +294,23 @@
   max-height: 280px;
   overflow-y: auto;
 }
+
+/* MEDIA: blocks (inline delivery from the agent) */
+.media-card {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 6px 0;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  max-width: 560px;
+}
+.media-inline {
+  margin: 6px 0;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}

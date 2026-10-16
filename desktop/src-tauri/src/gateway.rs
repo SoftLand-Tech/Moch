@@ -471,3 +471,82 @@ fn base64_encode(data: &[u8]) -> Result<String, String> {
     }
     Ok(out)
 }
+
+/// Read a local file for inline MEDIA: rendering (the agent delivers files
+/// as `MEDIA:/abs/path` in replies). Caps at 24MB; returns base64 + the
+/// inferred mime + size. Anything larger should be revealed, not inlined.
+#[tauri::command]
+pub fn read_media_file(path: String) -> Result<MediaFilePayload, String> {
+    const MAX_INLINE: u64 = 24 * 1024 * 1024;
+    let p = std::path::PathBuf::from(&path);
+    let meta = std::fs::metadata(&p).map_err(|e| format!("cannot stat {path}: {e}"))?;
+    if !meta.is_file() {
+        return Err(format!("{path} is not a file"));
+    }
+    let size = meta.len();
+    if size > MAX_INLINE {
+        return Ok(MediaFilePayload {
+            path,
+            mime: String::new(),
+            size,
+            data_b64: String::new(),
+            too_large: true,
+        });
+    }
+    let bytes = std::fs::read(&p).map_err(|e| format!("cannot read {path}: {e}"))?;
+    let mime = infer_mime(&p, &bytes);
+    let data_b64 = base64_encode(&bytes)?;
+    Ok(MediaFilePayload { path, mime, size, data_b64, too_large: false })
+}
+
+#[derive(serde::Serialize)]
+pub struct MediaFilePayload {
+    pub path: String,
+    pub mime: String,
+    pub size: u64,
+    pub data_b64: String,
+    pub too_large: bool,
+}
+
+fn infer_mime(p: &std::path::Path, bytes: &[u8]) -> String {
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" | "oga" => "audio/ogg",
+        "webm" => "video/webm",
+        "mp4" | "m4v" => "video/mp4",
+        "pdf" => "application/pdf",
+        "txt" | "md" | "log" => "text/plain",
+        "json" => "application/json",
+        "csv" => "text/csv",
+        _ => {
+            if bytes.starts_with(b"\x89PNG") {
+                "image/png"
+            } else if bytes.starts_with(b"\xff\xd8\xff") {
+                "image/jpeg"
+            } else if bytes.starts_with(b"RIFF") && bytes.len() > 11 && &bytes[8..11] == b"WEB" {
+                "image/webp"
+            } else if bytes.starts_with(b"GIF8") {
+                "image/gif"
+            } else if bytes.starts_with(b"%PDF") {
+                "application/pdf"
+            } else if bytes.starts_with(b"ID3") || bytes.starts_with(&[0xff, 0xfb]) {
+                "audio/mpeg"
+            } else {
+                "application/octet-stream"
+            }
+        }
+    }
+    .to_string()
+}

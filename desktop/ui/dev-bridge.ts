@@ -7,6 +7,9 @@ import type { Plugin } from 'vite'
 import { spawn, type Child } from 'node:child_process'
 import fs from 'node:fs'
 import net from 'node:net'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
 
 const STATE_FILE = process.env.MOCH_DESKTOP_STATE_DIR
   ? `${process.env.MOCH_DESKTOP_STATE_DIR}/desktop-runtime.json`
@@ -100,9 +103,115 @@ export function devBridge(): Plugin {
   return {
     name: 'moch-dev-bridge',
     configureServer(server) {
-      // Gateway REST proxy: the page can't fetch the gateway directly (CORS).
-      // Token comes from the runtime state file; the method rides x-dev-method
-      // so the outer request is a plain POST/GET.
+      // PTY host (real terminals in the preview, via node-pty when present).
+      try {
+        const pty = require('node-pty') as {
+          spawn: (file: string, args: string[], opts: Record<string, unknown>) => { write: (d: string) => void; kill: () => void; resize: (c: number, r: number) => void; onData: (cb: (d: string) => void) => void; onExit: (cb: () => void) => void }
+        }
+        const sessions = new Map<string, { write: (d: string) => void; kill: () => void; resize: (c: number, r: number) => void }>()
+        const sseClients = new Set<{ send: (event: string, data: string) => void }>()
+        let nextId = 1
+
+        server.middlewares.use('/dev-bridge/pty/events', (_req, res) => {
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive',
+          })
+          const client = {
+            send: (event: string, data: string) => {
+              try {
+                res.write(`event: ${event}\ndata: ${data}\n\n`)
+              } catch {
+                sseClients.delete(client)
+              }
+            },
+          }
+          sseClients.add(client)
+          _req.on('close', () => sseClients.delete(client))
+          client.send('hello', '1')
+        })
+
+        server.middlewares.use('/dev-bridge/pty/spawn', (req, res) => {
+          const chunks: Buffer[] = []
+          req.on('data', (c: Buffer) => chunks.push(c))
+          req.on('end', () => {
+            try {
+              const body = JSON.parse(Buffer.concat(chunks).toString() || '{}') as {
+                cwd?: string; shell?: string; cols?: number; rows?: number; env?: Record<string, string>
+              }
+              const id = `b${nextId++}`
+              const shell = body.shell || process.env.SHELL || '/bin/bash'
+              const proc = pty.spawn(shell, [], {
+                name: 'xterm-256color',
+                cols: body.cols ?? 80,
+                rows: body.rows ?? 24,
+                cwd: body.cwd || process.env.HOME,
+                env: { ...process.env, ...(body.env ?? {}) },
+              })
+              proc.onData((d) => {
+                for (const c of sseClients) c.send('output', JSON.stringify({ id, data: Buffer.from(d, 'utf-8').toString('base64') }))
+              })
+              proc.onExit(() => {
+                sessions.delete(id)
+                for (const c of sseClients) c.send('exit', id)
+              })
+              sessions.set(id, proc)
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ id }))
+            } catch (err) {
+              res.statusCode = 500
+              res.end(JSON.stringify({ error: String(err) }))
+            }
+          })
+        })
+
+        const jsonBody = (req: import('http').IncomingMessage, cb: (body: Record<string, unknown>) => void): void => {
+          const chunks: Buffer[] = []
+          req.on('data', (c: Buffer) => chunks.push(c))
+          req.on('end', () => {
+            try {
+              cb(JSON.parse(Buffer.concat(chunks).toString() || '{}'))
+            } catch {
+              res500(req, cb)
+            }
+          })
+        }
+        const res500 = (req: import('http').IncomingMessage, cb: (body: Record<string, unknown>) => void) => cb({})
+
+        server.middlewares.use('/dev-bridge/pty/write', (req, res) => {
+          jsonBody(req, (body) => {
+            const s = sessions.get(String(body.id ?? ''))
+            if (s && typeof body.dataB64 === 'string') {
+              s.write(Buffer.from(body.dataB64, 'base64').toString('utf-8'))
+              res.end(JSON.stringify({ ok: true }))
+            } else {
+              res.statusCode = 404
+              res.end(JSON.stringify({ error: 'no session' }))
+            }
+          })
+        })
+        server.middlewares.use('/dev-bridge/pty/resize', (req, res) => {
+          jsonBody(req, (body) => {
+            const s = sessions.get(String(body.id ?? ''))
+            if (s) s.resize(Number(body.cols ?? 80), Number(body.rows ?? 24))
+            res.end(JSON.stringify({ ok: true }))
+          })
+        })
+        server.middlewares.use('/dev-bridge/pty/kill', (req, res) => {
+          jsonBody(req, (body) => {
+            const s = sessions.get(String(body.id ?? ''))
+            if (s) {
+              s.kill()
+              sessions.delete(String(body.id ?? ''))
+            }
+            res.end(JSON.stringify({ ok: true }))
+          })
+        })
+      } catch {
+        // node-pty unavailable — the preview shows the honest spawn error.
+      }
+
       server.middlewares.use('/dev-bridge/gw', (req, res, next) => {
         if (!STATE_FILE) {
           res.statusCode = 503
@@ -141,6 +250,35 @@ export function devBridge(): Plugin {
               res.end(JSON.stringify({ error: String(err) }))
             })
         })
+      })
+      server.middlewares.use('/dev-bridge/read-file', (req, res) => {
+        const url = new URL(req.url ?? '/', 'http://x')
+        const path = url.searchParams.get('path') ?? ''
+        if (!path.startsWith('/')) {
+          res.statusCode = 400
+          res.end(JSON.stringify({ error: 'absolute path required' }))
+          return
+        }
+        try {
+          const data = fs.readFileSync(path)
+          const ext = path.split('.').pop()?.toLowerCase() ?? ''
+          const mimes: Record<string, string> = {
+            png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
+            gif: 'image/gif', svg: 'image/svg+xml', mp3: 'audio/mpeg', wav: 'audio/wav',
+            webm: 'video/webm', mp4: 'video/mp4', pdf: 'application/pdf', txt: 'text/plain',
+          }
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({
+            path,
+            mime: mimes[ext] ?? 'application/octet-stream',
+            size: data.length,
+            dataB64: data.toString('base64'),
+            tooLarge: false,
+          }))
+        } catch (err) {
+          res.statusCode = 404
+          res.end(JSON.stringify({ error: String(err) }))
+        }
       })
       server.middlewares.use('/dev-bridge/cdp', (req, res, next) => {
         const url = new URL(req.url ?? '/', 'http://x')

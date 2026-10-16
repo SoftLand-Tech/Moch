@@ -16,7 +16,7 @@
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import type { UnlistenFn } from '@tauri-apps/api/event'
-import { invoke, listen } from './tauri'
+import { invoke, listen, inTauri } from './tauri'
 
 /** UTF-8-safe base64 encode: text → bytes → btoa(binary string). */
 export function encodeBase64Utf8(text: string): string {
@@ -62,6 +62,112 @@ export interface PtyHandle {
 /** Painted when the child exits — dim grey, spec'd by the terminal brief. */
 const ENDED_MESSAGE = '\r\n\x1b[90m[session ended]\x1b[0m '
 
+
+// ── transport seam ─────────────────────────────────────────────────────
+// Tauri: the Rust pty_* commands + pty:// events. Preview: the dev-bridge's
+// real PTYs (node-pty) over HTTP + SSE — same shapes, same behavior.
+
+interface PtyTransport {
+  spawn(opts: { cwd?: string; shell?: string; cols: number; rows: number; env?: Record<string, string> }): Promise<string>
+  write(id: string, dataB64: string): Promise<unknown>
+  resize(id: string, cols: number, rows: number): Promise<unknown>
+  kill(id: string): Promise<unknown>
+  onOutput(cb: (id: string, dataB64: string) => void): () => void
+  onExit(cb: (id: string) => void): () => void
+}
+
+const tauriPty: PtyTransport = {
+  async spawn(o) {
+    return invoke<string>('pty_spawn', o)
+  },
+  write(id, dataB64) {
+    return invoke('pty_write', { id, dataB64 })
+  },
+  resize(id, cols, rows) {
+    return invoke('pty_resize', { id, cols, rows })
+  },
+  kill(id) {
+    return invoke('pty_kill', { id })
+  },
+  onOutput(cb) {
+    let un: (() => void) | null = null
+    let stopped = false
+    void listen<{ id: string; data: string }>('pty://output', (e) => {
+      if (e.payload) cb(e.payload.id, e.payload.data)
+    }).then((u) => { if (stopped) u(); else un = u })
+    return () => { stopped = true; un?.() }
+  },
+  onExit(cb) {
+    let un: (() => void) | null = null
+    let stopped = false
+    void listen<string>('pty://exit', (e) => {
+      if (typeof e.payload === 'string') cb(e.payload)
+    }).then((u) => { if (stopped) u(); else un = u })
+    return () => { stopped = true; un?.() }
+  },
+}
+
+const bridgePty: PtyTransport = (() => {
+  let es: EventSource | null = null
+  const outputCbs = new Set<(id: string, b64: string) => void>()
+  const exitCbs = new Set<(id: string) => void>()
+  function ensureEvents(): void {
+    if (es) return
+    es = new EventSource('/dev-bridge/pty/events')
+    es.addEventListener('output', (ev) => {
+      try {
+        const p = JSON.parse((ev as MessageEvent).data) as { id: string; data: string }
+        for (const cb of outputCbs) cb(p.id, p.data)
+      } catch { /* malformed frame */ }
+    })
+    es.addEventListener('exit', (ev) => {
+      const raw = (ev as MessageEvent).data
+      for (const cb of exitCbs) cb(String(raw))
+    })
+    es.onerror = () => {
+      es?.close()
+      es = null
+    }
+  }
+  async function post(path: string, body: Record<string, unknown>): Promise<unknown> {
+    const res = await fetch(`/dev-bridge/pty/${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) throw new Error(`pty bridge ${path} -> HTTP ${res.status}`)
+    return res.json()
+  }
+  return {
+    async spawn(o) {
+      ensureEvents()
+      const r = (await post('spawn', o)) as { id: string }
+      return r.id
+    },
+    write(id, dataB64) {
+      return post('write', { id, dataB64 })
+    },
+    resize(id, cols, rows) {
+      return post('resize', { id, cols, rows })
+    },
+    kill(id) {
+      return post('kill', { id })
+    },
+    onOutput(cb) {
+      ensureEvents()
+      outputCbs.add(cb)
+      return () => { outputCbs.delete(cb) }
+    },
+    onExit(cb) {
+      ensureEvents()
+      exitCbs.add(cb)
+      return () => { exitCbs.delete(cb) }
+    },
+  }
+})()
+
+const pty: PtyTransport = inTauri ? tauriPty : bridgePty
+
 export function mountPty(el: HTMLElement, opts: PtyMountOptions): PtyHandle {
   const fit = new FitAddon()
   const terminal = new Terminal({
@@ -102,7 +208,7 @@ export function mountPty(el: HTMLElement, opts: PtyMountOptions): PtyHandle {
     const cols = measurable ? terminal.cols : Math.max(2, opts.cols)
     const rows = measurable ? terminal.rows : Math.max(2, opts.rows)
     try {
-      const spawned = await invoke<string>('pty_spawn', {
+      const spawned = await pty.spawn({
         cwd: opts.cwd ?? undefined,
         shell: opts.shell ?? undefined,
         env: opts.env ?? undefined,
@@ -111,7 +217,7 @@ export function mountPty(el: HTMLElement, opts: PtyMountOptions): PtyHandle {
       })
       // Lost a race with dispose()/restart(): kill the orphan immediately.
       if (disposed || gen !== generation) {
-        void invoke('pty_kill', { id: spawned }).catch(() => {})
+        void pty.kill(spawned).catch(() => {})
         return
       }
       id = spawned
@@ -127,7 +233,7 @@ export function mountPty(el: HTMLElement, opts: PtyMountOptions): PtyHandle {
     const old = id
     id = null
     if (old && kill) {
-      try { await invoke('pty_kill', { id: old }) } catch { /* already gone */ }
+      try { await pty.kill(old) } catch { /* already gone */ }
     }
   }
 
@@ -135,30 +241,24 @@ export function mountPty(el: HTMLElement, opts: PtyMountOptions): PtyHandle {
   const offData = terminal.onData((data) => {
     const current = id
     if (!current) return
-    void invoke('pty_write', { id: current, dataB64: encodeBase64Utf8(data) }).catch(() => {
+    void pty.write(current, encodeBase64Utf8(data)).catch(() => {
       // session died mid-keystroke; the exit event paints the notice
     })
   })
 
   // ── output/exit events, filtered by session id ───────────────────────
-  void listen<{ id: string; data: string }>('pty://output', (e) => {
-    if (e.payload?.id !== id || !id) return
-    terminal.write(decodeBase64Bytes(e.payload.data))
-  }).then((un) => {
-    if (disposed) un()
-    else unlisteners.push(un)
-  })
-  void listen<string>('pty://exit', (e) => {
-    if (e.payload !== id || !id) return
+  unlisteners.push(pty.onOutput((outId, dataB64) => {
+    if (outId !== id || !id) return
+    terminal.write(decodeBase64Bytes(dataB64))
+  }))
+  unlisteners.push(pty.onExit((exitId) => {
+    if (exitId !== id || !id) return
     id = null
     terminal.write(ENDED_MESSAGE)
     for (const cb of exitCallbacks) {
       try { cb() } catch { /* subscriber error must not break the stream */ }
     }
-  }).then((un) => {
-    if (disposed) un()
-    else unlisteners.push(un)
-  })
+  }))
 
   // ── resize: debounced fit → pty_resize ───────────────────────────────
   const observer = new ResizeObserver(() => {
@@ -170,7 +270,7 @@ export function mountPty(el: HTMLElement, opts: PtyMountOptions): PtyHandle {
       try { fit.fit() } catch { /* transient measure failure */ }
       const current = id
       if (!current) return
-      void invoke('pty_resize', { id: current, cols: terminal.cols, rows: terminal.rows }).catch(() => {
+      void pty.resize(current, terminal.cols, terminal.rows).catch(() => {
         // session ended — nothing to resize
       })
     }, 150)
@@ -193,7 +293,7 @@ export function mountPty(el: HTMLElement, opts: PtyMountOptions): PtyHandle {
     send(data: string) {
       const current = id
       if (!current) return
-      void invoke('pty_write', { id: current, dataB64: encodeBase64Utf8(data) }).catch(() => {})
+      void pty.write(current, encodeBase64Utf8(data)).catch(() => {})
     },
     onExit(cb: () => void) {
       exitCallbacks.add(cb)

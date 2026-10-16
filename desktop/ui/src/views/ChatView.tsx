@@ -20,6 +20,7 @@ import { currentModel, providers, refreshModels } from '../lib/model'
 import { startRecording, stopRecording } from '../lib/voice'
 import { attachFiles } from '../lib/media'
 import InteractiveCard from '../components/InteractiveCard'
+import MediaBlock from '../components/MediaBlock'
 
 export default function ChatView() {
   const order = useStore(sessionOrder)
@@ -254,7 +255,11 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
       {reasoning.map((s, i) => <ThinkBlock key={i} seg={s} streaming={!!streaming && i === reasoning.length - 1 && text.length === 0} />)}
       {text.map((s, i) => (
         <div key={i} className="msg-assistant-body md">
-          {streaming && i === text.length - 1 ? s.text : <span dangerouslySetInnerHTML={{ __html: renderMarkdown(s.text) }} />}
+          {streaming && i === text.length - 1 ? (
+            s.text
+          ) : (
+            <MediaAwareText text={s.text} />
+          )}
         </div>
       ))}
       {!streaming && text.length ? (
@@ -272,16 +277,15 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
 async function speak(text: string): Promise<void> {
   try {
     const { gwFetch } = await import('../lib/gateway')
-    const bytes = (await gwFetch('/api/audio/speak', {
+    // The speak endpoint answers {ok, data_url} (a data:audio/* URL).
+    const res = (await gwFetch('/api/audio/speak', {
       method: 'POST',
       body: JSON.stringify({ text }),
       contentType: 'application/json',
-      binary: true,
-    })) as Uint8Array
-    const blob = new Blob([bytes.buffer as ArrayBuffer], { type: 'audio/mpeg' })
-    const url = URL.createObjectURL(blob)
-    const audio = new Audio(url)
-    audio.onended = () => URL.revokeObjectURL(url)
+    })) as string
+    const payload = JSON.parse(res || '{}') as { ok?: boolean; data_url?: string }
+    if (!payload.data_url) throw new Error('tts returned no audio')
+    const audio = new Audio(payload.data_url)
     await audio.play()
   } catch (err) {
     console.warn('[tts]', err)
@@ -611,5 +615,24 @@ function ModelPicker({ onClose, providers: provs }: { onClose: () => void; provi
         </div>
       </div>
     </div>
+  )
+}
+
+/** Split rendered markdown around MEDIA:/abs/path tokens; media gets its block. */
+function MediaAwareText({ text }: { text: string }) {
+  const parts = text.split(/(MEDIA:\/[^\s)\]]+)/g)
+  if (parts.length === 1) {
+    return <span dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />
+  }
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.startsWith('MEDIA:/') ? (
+          <MediaBlock key={i} path={part.slice('MEDIA:'.length)} />
+        ) : part ? (
+          <span key={i} dangerouslySetInnerHTML={{ __html: renderMarkdown(part) }} />
+        ) : null,
+      )}
+    </>
   )
 }
