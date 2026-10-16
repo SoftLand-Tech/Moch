@@ -29,6 +29,7 @@ export default function SettingsView({ onOpenView }: { onOpenView?: (v: ViewId) 
   const [statusError, setStatusError] = useState('')
   const [restarting, setRestarting] = useState(false)
   const [logsOpen, setLogsOpen] = useState(false)
+  const [notifState, setNotifState] = useState<'idle' | 'granted' | 'denied' | 'unavailable'>('idle')
 
   useEffect(() => {
     if (!connected) return
@@ -120,7 +121,29 @@ export default function SettingsView({ onOpenView }: { onOpenView?: (v: ViewId) 
             </div>
           </section>
 
-          {/* ── Language ── */}
+          {/* ── Notifications ── */}
+        <section style={{ marginBottom: 26 }}>
+          <div style={{ ...labelStyle }}>Notifications</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 220, fontSize: 12.5, color: 'var(--text-dim)' }}>
+              Approvals waiting on you and finished automations knock while the app is open.
+            </div>
+            <button
+              className="btn"
+              onClick={() => {
+                void import('@tauri-apps/plugin-notification').then(async (mod) => {
+                  let granted = await mod.isPermissionGranted()
+                  if (!granted) granted = (await mod.requestPermission()) === 'granted'
+                  setNotifState(granted ? 'granted' : 'denied')
+                }).catch(() => setNotifState('unavailable'))
+              }}
+            >
+              {notifState === 'granted' ? 'Enabled' : notifState === 'denied' ? 'Denied — retry' : 'Enable notifications'}
+            </button>
+          </div>
+        </section>
+
+        {/* ── Language ── */}
           <section>
             <div style={{ ...labelStyle, borderBottom: '1px solid var(--border-soft)', paddingBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
               <Languages size={13} /> Language / اللغة
