@@ -1223,19 +1223,25 @@ pub fn run() {
         "wsUrl": ws_url, "token": token, "mode": mode,
         "home": home, "logTail": log_tail,
     });
-    let mut ctx = tauri::generate_context!();
-    // The shell serves the UI itself (loopback origin for hermes' guard),
-    // so tauri's own asset serving is never used — swap in a null provider
-    // and move the embedded assets into our static server.
+    // The shell serves the UI itself from DISK (ui_dir, no-store) — the
+    // compile-time embed is deliberately replaced with an empty provider.
+    // A stale embedded bundle is how a frozen onboarding screen once
+    // painted over a fresh build; disk + no-store makes that impossible.
     struct NullAssets;
     impl tauri::Assets<tauri::Wry> for NullAssets {
       fn get(&self, _k: &tauri::utils::assets::AssetKey) -> Option<std::borrow::Cow<'_, [u8]>> { None }
       fn iter(&self) -> Box<tauri::utils::assets::AssetsIter<'_>> { Box::new(std::iter::empty()) }
       fn csp_hashes(&self, _p: &tauri::utils::assets::AssetKey) -> Box<dyn std::iter::Iterator<Item = tauri::utils::assets::CspHash<'_>> + '_> { Box::new(std::iter::empty()) }
     }
-    let assets = std::mem::replace(&mut ctx.assets, Box::new(NullAssets));
-    let port = start_static_server(cfg, assets);
-    eprintln!("moch: static server on {port} (embedded UI)");
+    // Dev hygiene: the WebKit page cache for this app id is purged at
+    // every boot. Loopback-only UI, nothing worth caching.
+    let _ = std::fs::remove_dir_all(format!(
+        "{}/.cache/tech.softland.moch.desktop",
+        std::env::var("XDG_CACHE_HOME")
+            .unwrap_or_else(|_| format!("{}/.cache", std::env::var("HOME").unwrap_or_default()))
+    ));
+    let port = start_static_server(cfg, Box::new(NullAssets));
+    eprintln!("moch: static server on {port} (disk UI)");
     let ws_port = spawn_cdp_ws_proxy(|| BROWSER_PORT.get().copied(), port);
     eprintln!("moch: cdp ws proxy on {ws_port}");
 
@@ -1246,6 +1252,7 @@ pub fn run() {
     ))
     .expect("window url");
 
+    let ctx = tauri::generate_context!();
     let app = tauri::Builder::default()
         .setup(move |app| {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
