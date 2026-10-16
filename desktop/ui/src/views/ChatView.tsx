@@ -425,6 +425,22 @@ function Composer() {
     })
   }
 
+  // Clipboard paste share-in: images/files straight into the attachment set.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const ta = e.target as HTMLElement | null
+      const inComposer = !!ta?.closest?.('.composer-wrap')
+      if (!inComposer) return
+      const files = Array.from(e.clipboardData?.files ?? [])
+      if (files.length) {
+        e.preventDefault()
+        setPendingFiles((prev) => [...prev, ...files].slice(0, 8))
+      }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [])
+
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setDragOver(false)
@@ -618,21 +634,59 @@ function ModelPicker({ onClose, providers: provs }: { onClose: () => void; provi
   )
 }
 
-/** Split rendered markdown around MEDIA:/abs/path tokens; media gets its block. */
+/**
+ * Split rendered markdown around MEDIA:/abs/path tokens; media gets its block.
+ * Links are clickable: plain click opens in the AGENT BROWSER (the local-first
+ * surface — the pane shows it live), Ctrl/Cmd+click opens the system browser.
+ */
 function MediaAwareText({ text }: { text: string }) {
   const parts = text.split(/(MEDIA:\/[^\s)\]]+)/g)
-  if (parts.length === 1) {
-    return <span dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />
+  const onLinkClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const a = (e.target as HTMLElement).closest('a')
+    if (!a) return
+    const href = a.getAttribute('href') ?? ''
+    if (!/^https?:/i.test(href)) return
+    e.preventDefault()
+    if (e.metaKey || e.ctrlKey) {
+      void import('../lib/shell-ops').then((m) => m.openExternal(href))
+    } else {
+      // Open in the agent browser: ensure it's running, then navigate the
+      // active tab; the Browser pane (or view) shows it.
+      void import('../lib/cdp').then(async (m) => {
+        try {
+          let status = m.browserStatus.get()
+          if (!status.running) status = await m.launchBrowser()
+          if (!status.running) throw new Error('browser not running')
+          const cdp = m.getCdp()
+          const tabs = await cdp.listTabs()
+          const target = m.activeTargetId.get() ?? tabs[0]?.id
+          if (target) {
+            const sid = await cdp.attachToPage(target)
+            await cdp.send('Page.navigate', { url: href }, sid)
+          } else {
+            await cdp.newTab(href)
+          }
+          m.refreshTabs()
+        } catch (err) {
+          console.warn('[link] agent browser nav failed, opening externally', err)
+          const ops = await import('../lib/shell-ops')
+          void ops.openExternal(href)
+        }
+      })
+    }
   }
+  const chunk = (t: string, i: number) => (
+    <span key={i} dangerouslySetInnerHTML={{ __html: renderMarkdown(t) }} />
+  )
   return (
-    <>
+    <div onClick={onLinkClick}>
       {parts.map((part, i) =>
         part.startsWith('MEDIA:/') ? (
           <MediaBlock key={i} path={part.slice('MEDIA:'.length)} />
         ) : part ? (
-          <span key={i} dangerouslySetInnerHTML={{ __html: renderMarkdown(part) }} />
+          chunk(part, i)
         ) : null,
       )}
-    </>
+    </div>
   )
 }
