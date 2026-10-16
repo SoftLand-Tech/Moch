@@ -109,6 +109,10 @@ def prepare_home(home: Path) -> dict:
     optional_mcps.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("HERMES_OPTIONAL_MCPS", str(optional_mcps))
 
+    # The in-app browser is the product: pin the built-in backend (see
+    # _pin_builtin_browser) unless the user chose otherwise.
+    _pin_builtin_browser(home)
+
     scratch = state_dir() / "cache" / "scratch"
     scratch.mkdir(parents=True, exist_ok=True)
     os.environ["TMPDIR"] = str(scratch)
@@ -169,6 +173,38 @@ def import_home(source: Path, target: Path) -> dict:
         except OSError:
             skipped.append(name)
     return {"copied": copied, "skipped": skipped, "source": str(source), "target": str(target)}
+
+
+def _pin_builtin_browser(home: Path) -> None:
+    """Pin `browser.backend: off` in the DESKTOP home's config (if unset).
+
+    With the Browser Use CLI installed (common on a dev machine) and the
+    backend unset, hermes defaults to browser-use CLI mode: `browser_exec`
+    replaces the built-in browser_* tools and the CLI drives ITS OWN browser
+    (or the user's daily one) — ignoring the app's armed CDP Chromium. The
+    desktop's product is the built-in tools pointed at the in-app browser,
+    so pin them here. An explicit user choice is never overridden.
+    """
+    cfg = home / "config.yaml"
+    try:
+        import yaml
+
+        data: dict = {}
+        if cfg.exists():
+            data = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
+        if not isinstance(data, dict):
+            return
+        browser = data.get("browser")
+        if not isinstance(browser, dict):
+            browser = {}
+        if str(browser.get("backend") or "").strip():
+            return  # explicit choice — leave it
+        browser["backend"] = "off"
+        data["browser"] = browser
+        cfg.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    except Exception:
+        # Never break boot over config pinning.
+        pass
 
 
 def write_runtime_state(port: int, token: str) -> None:

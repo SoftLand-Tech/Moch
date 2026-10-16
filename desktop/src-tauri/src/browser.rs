@@ -102,8 +102,61 @@ fn state_dir(app: &AppHandle) -> PathBuf {
         .unwrap_or_else(|_| dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("moch-desktop"))
 }
 
+
+/// The port of a previously launched agent Chromium (`<state>/browser-port`),
+/// so a new app run ADOPTS the still-alive browser instead of spawning a
+/// second instance against the same profile (which would delegate to the
+/// singleton and silently never come up).
+fn persisted_port(app: &AppHandle) -> Option<u16> {
+    let file = state_dir(app).join("browser-port");
+    let text = std::fs::read_to_string(file).ok()?;
+    text.trim().parse::<u16>().ok().filter(|p| *p > 0)
+}
+
+fn persist_port(app: &AppHandle, port: u16) {
+    let _ = std::fs::write(state_dir(app).join("browser-port"), port.to_string());
+}
+
+fn clear_persisted_port(app: &AppHandle) {
+    let _ = std::fs::remove_file(state_dir(app).join("browser-port"));
+}
+
+/// A live CDP endpoint answers /json/version on loopback.
+fn cdp_alive(port: u16) -> bool {
+    use std::io::{Read, Write};
+    let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", port)) else { return false };
+    stream.set_read_timeout(Some(std::time::Duration::from_millis(600))).ok();
+    let req = format!("GET /json/version HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    if stream.write_all(req.as_bytes()).is_err() {
+        return false;
+    }
+    let mut buf = [0u8; 256];
+    match stream.read(&mut buf) {
+        Ok(n) => String::from_utf8_lossy(&buf[..n]).contains("200"),
+        Err(_) => false,
+    }
+}
+
+/// Adopt a previously launched, still-alive agent browser (if any).
+fn adopt_alive(app: &AppHandle) -> Option<u16> {
+    let port = persisted_port(app)?;
+    if port_accepts(port) && cdp_alive(port) {
+        Some(port)
+    } else {
+        None
+    }
+}
+
 #[tauri::command]
-pub fn browser_status() -> BrowserStatus {
+pub fn browser_status(app: AppHandle) -> BrowserStatus {
+    {
+        let mut info = state().info.lock().unwrap();
+        if info.is_none() {
+            if let Some(port) = adopt_alive(&app) {
+                *info = Some(BrowserInfo { port });
+            }
+        }
+    }
     let info = state().info.lock().unwrap();
     match info.as_ref() {
         Some(i) if port_accepts(i.port) => BrowserStatus {
@@ -127,11 +180,19 @@ pub fn browser_launch(app: AppHandle) -> Result<BrowserStatus, String> {
         let guard = state().info.lock().unwrap();
         if let Some(info) = guard.as_ref() {
             if port_accepts(info.port) {
-                let status = browser_status();
+                let status = browser_status(app.clone());
                 let _ = app.emit("browser://status", &status);
                 return Ok(status);
             }
         }
+    }
+    // A previous run's browser may still be alive — adopt it (spawning a
+    // second instance on the same profile silently delegates and dies).
+    if let Some(port) = adopt_alive(&app) {
+        *state().info.lock().unwrap() = Some(BrowserInfo { port });
+        let status = browser_status(app.clone());
+        let _ = app.emit("browser://status", &status);
+        return Ok(status);
     }
 
     let bin = chromium_binary().ok_or("no Chromium/Chrome browser found on this machine")?;
@@ -171,7 +232,8 @@ pub fn browser_launch(app: AppHandle) -> Result<BrowserStatus, String> {
     for _ in 0..100 {
         std::thread::sleep(std::time::Duration::from_millis(100));
         if port_accepts(port) {
-            let status = browser_status();
+            persist_port(&app, port);
+            let status = browser_status(app.clone());
             let _ = app.emit("browser://status", &status);
             return Ok(status);
         }
@@ -180,7 +242,8 @@ pub fn browser_launch(app: AppHandle) -> Result<BrowserStatus, String> {
 }
 
 #[tauri::command]
-pub fn browser_stop() -> Result<bool, String> {
+pub fn browser_stop(app: AppHandle) -> Result<bool, String> {
+    clear_persisted_port(&app);
     let mut child_guard = state().child.lock().unwrap();
     *state().info.lock().unwrap() = None;
     if let Some(mut child) = child_guard.take() {

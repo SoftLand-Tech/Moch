@@ -6,3 +6,5 @@ src-tauri/target/
 src-tauri/gen/schemas/
 .devtest/
 *.log
+desktop/runtime/*.json
+!desktop/runtime/requirements.txt

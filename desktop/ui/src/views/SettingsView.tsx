@@ -4,6 +4,7 @@ import { BotMessageSquare, ChevronDown, ChevronRight, FolderOpen, Info, Language
 import { gatewayInfo, gatewayLogs, hermesHome, isConnected, restartGateway, rpc, workspaceDir } from '../lib/gateway'
 import { locale, setLocale } from '../lib/strings'
 import { revealPath } from '../lib/shell-ops'
+import { browserReadyPref, setBrowserReadyPref } from '../lib/cdp'
 import type { ViewId } from '../app'
 
 const labelStyle: React.CSSProperties = {
@@ -30,6 +31,7 @@ export default function SettingsView({ onOpenView }: { onOpenView?: (v: ViewId) 
   const [restarting, setRestarting] = useState(false)
   const [logsOpen, setLogsOpen] = useState(false)
   const [notifState, setNotifState] = useState<'idle' | 'granted' | 'denied' | 'unavailable'>('idle')
+  const [browserReady, setBrowserReady] = useState(() => browserReadyPref())
 
   useEffect(() => {
     if (!connected) return
@@ -139,6 +141,26 @@ export default function SettingsView({ onOpenView }: { onOpenView?: (v: ViewId) 
               }}
             >
               {notifState === 'granted' ? 'Enabled' : notifState === 'denied' ? 'Denied — retry' : 'Enable notifications'}
+            </button>
+          </div>
+        </section>
+
+        {/* ── Agent browser ── */}
+        <section style={{ marginBottom: 26 }}>
+          <div style={{ ...labelStyle }}>Agent browser</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 220, fontSize: 12.5, color: 'var(--text-dim)' }}>
+              Keep the built-in browser ready at launch, so agents always browse in-app instead of
+              opening your system browser.
+            </div>
+            <button
+              className={`chip${browserReady ? ' active' : ''}`}
+              onClick={() => {
+                setBrowserReady(!browserReady)
+                setBrowserReadyPref(!browserReady)
+              }}
+            >
+              {browserReady ? 'Ready at launch' : 'Manual only'}
             </button>
           </div>
         </section>

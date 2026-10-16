@@ -8,6 +8,7 @@ import { connectionState, gatewayInfo, isConnected, runtimeBoot, startGateway, w
 import { hookChatEvents, pendingCount, loadMarks, refreshSessionOrder } from './lib/chat'
 import { activeBotAtom, fleetProfiles, loadActiveBot, refreshFleet } from './lib/fleet'
 import { useKnocks } from './lib/knocks'
+import { ensureBrowserReady, ensureBrowserWatch } from './lib/cdp'
 import { locale, tr } from './lib/strings'
 import ChatView from './views/ChatView'
 import FleetView from './views/FleetView'
@@ -56,11 +57,15 @@ export function App() {
     return () => { stopEvents(); stopChat() }
   }, [])
 
-  // Once connected: load roster + sessions.
+  // Once connected: load roster + sessions, and make sure the AGENT
+  // browser is running + armed BEFORE anyone asks the agent to browse
+  // (otherwise the model falls back to xdg-open — the user's real browser).
   useEffect(() => {
     if (connected) {
       void refreshFleet()
       void refreshSessionOrder()
+      ensureBrowserWatch()
+      void ensureBrowserReady()
     }
   }, [connected])
 

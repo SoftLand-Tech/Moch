@@ -68,9 +68,25 @@ function which(name: string): string | null {
 let browserProc: Child | null = null
 let browserPort: number | null = null
 
+function portFile(): string | null {
+  return STATE_FILE ? STATE_FILE.replace('desktop-runtime.json', 'browser-port') : null
+}
+
 async function launchBrowser(): Promise<{ running: boolean; port: number | null }> {
   if (browserPort && (await checkPort(browserPort))) {
     return { running: true, port: browserPort }
+  }
+  // Adopt a still-alive browser from a previous run (spawning a second
+  // instance on the same profile delegates to the singleton and dies).
+  const pf = portFile()
+  if (pf) {
+    try {
+      const persisted = parseInt(fs.readFileSync(pf, 'utf-8').trim(), 10)
+      if (Number.isFinite(persisted) && persisted > 0 && (await checkPort(persisted))) {
+        browserPort = persisted
+        return { running: true, port: persisted }
+      }
+    } catch { /* no file */ }
   }
   const bin = which('chromium') ?? which('chromium-browser') ?? which('google-chrome-stable')
   if (!bin) throw new Error('no chromium found')
@@ -93,6 +109,7 @@ async function launchBrowser(): Promise<{ running: boolean; port: number | null 
     await new Promise((r) => setTimeout(r, 100))
     if (await checkPort(port)) {
       browserPort = port
+    if (portFile()) { try { fs.writeFileSync(portFile()!, String(port)) } catch { /* best-effort */ } }
       return { running: true, port }
     }
   }
@@ -312,6 +329,15 @@ export function devBridge(): Plugin {
         res.end(JSON.stringify(state))
       })
       server.middlewares.use('/dev-bridge/browser-status', async (_req, res) => {
+        if (!browserPort) {
+          const pf = portFile()
+          if (pf) {
+            try {
+              const persisted = parseInt(fs.readFileSync(pf, 'utf-8').trim(), 10)
+              if (Number.isFinite(persisted) && persisted > 0 && (await checkPort(persisted))) browserPort = persisted
+            } catch { /* no file */ }
+          }
+        }
         if (browserPort && (await checkPort(browserPort))) {
           res.setHeader('Content-Type', 'application/json')
           res.end(JSON.stringify({ running: true, port: browserPort }))

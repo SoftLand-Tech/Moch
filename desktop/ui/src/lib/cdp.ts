@@ -427,6 +427,50 @@ export function ensureBrowserWatch(): void {
   })
 }
 
+// ── eager readiness ───────────────────────────────────────────────────
+// The agent browser must exist BEFORE anyone asks the agent to browse —
+// otherwise the gateway has no browser tools armed and the model improvises
+// with xdg-open (the user's real browser). Default ON; one attempt per run
+// so an explicit Stop stays stopped until the app restarts.
+
+const BROWSER_READY_KEY = 'moch.desktop.browserReady.v1'
+let eagerAttempted = false
+
+export function browserReadyPref(): boolean {
+  try {
+    return localStorage.getItem(BROWSER_READY_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
+export function setBrowserReadyPref(on: boolean): void {
+  try {
+    localStorage.setItem(BROWSER_READY_KEY, on ? '1' : '0')
+  } catch { /* best-effort */ }
+}
+
+/**
+ * Called once the gateway is connected: if the agent browser isn't running
+ * and the preference allows it, launch it now so hermes' browser tools are
+ * armed before the user ever says "open this page".
+ */
+export async function ensureBrowserReady(): Promise<void> {
+  if (eagerAttempted) return
+  eagerAttempted = true
+  if (!browserReadyPref()) return
+  try {
+    const st = await refreshBrowserStatus()
+    if (!st.running) {
+      await launchBrowser()
+    }
+  } catch (err) {
+    // No Chromium on this machine / launch failed — the Browser view's
+    // honest empty state remains the fallback; never block boot.
+    console.warn('[browser] eager ready failed:', err)
+  }
+}
+
 export async function refreshBrowserStatus(): Promise<BrowserStatus> {
   let st: BrowserStatus
   try {
