@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Moch Desktop — 5 designs, pick the winner</title>
+<style>
+  :root{ --bg:#0a0813; --fg:#f4f2fa; --fg2:#b4b1c4; --fg3:#86829b; --acc:#f79236; --line:rgba(248,239,229,.1) }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--fg);font-family:Inter,"Segoe UI",system-ui,sans-serif;padding:40px;max-width:1180px;margin:0 auto}
+  h1{font-size:26px;font-weight:700;margin-bottom:6px}
+  .sub{color:var(--fg3);font-size:14px;margin-bottom:30px;line-height:1.6}
+  .card{display:flex;gap:18px;border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:16px;background:rgba(255,255,255,.02)}
+  .num{width:44px;height:44px;border-radius:12px;background:var(--acc);color:#2e1a08;display:grid;place-items:center;font-weight:800;font-size:19px;flex-shrink:0}
+  .card h2{font-size:17px;margin-bottom:2px}
+  .card .tag{font-size:11px;color:var(--acc);font-family:monospace;margin-bottom:8px}
+  .card p{font-size:13px;color:var(--fg2);line-height:1.65;max-width:640px}
+  .card p b{color:var(--fg)}
+  .open{margin-left:auto;align-self:center;flex-shrink:0}
+  .open a{display:block;background:var(--acc);color:#2e1a08;font-weight:600;font-size:13px;padding:10px 18px;border-radius:10px;text-decoration:none}
+  .open span{display:block;font-size:10px;color:var(--fg3);text-align:center;margin-top:6px;font-family:monospace}
+  .note{border:1px dashed var(--line);border-radius:12px;padding:14px 18px;font-size:12.5px;color:var(--fg2);line-height:1.7;margin-top:26px}
+  .note b{color:var(--fg)}
+</style>
+</head>
+<body>
+  <h1>Moch Desktop — five directions. One wins.</h1>
+  <div class="sub">Each mockup is a full static page of the whole app — open all five, look at them at full size, and tell me the winner (or "2 but with 4's statusbar", etc). Research behind them: <code>research/desktop-ui-apps/</code> — six deep studies of DSH, Codex, Claude desktop, hermes desktop, opencode, ZCode.</div>
+
+  <div class="card">
+    <div class="num">1</div>
+    <div>
+      <h2>Atelier</h2>
+      <div class="tag">warm editorial · cream + coral · slab-serif · artifacts panel</div>
+      <p>The Claude-inspired direction: <b>warm paper instead of dark</b>, serif display type, and the killer pattern — an <b>Artifacts side panel</b> that opens beside the chat for self-contained output (live page preview, "Edit with Mochi" in place). Calm, literary, completely unlike any agent app on the market. Mochi's warmth, on the screen.</p>
+    </div>
+    <div class="open"><a href="01-atelier.html">Open →</a><span>01-atelier.html</span></div>
+  </div>
+
+  <div class="card">
+    <div class="num">2</div>
+    <div>
+      <h2>Ledger</h2>
+      <div class="tag">typographic discipline · no boxes · live status row · sentence-scoped approvals</div>
+      <p>The Codex-inspired direction: <b>hierarchy built from type alone</b> — bullets, indents, fills, no cards. The signature is the <b>live status row</b> (the model's own reasoning as an animated headline + clock + esc-to-interrupt), tool rows with <b>└ output tails and "+N lines" disclosure</b>, "Worked for 5m 12s" turn separators, and an approval card whose options are <b>full sentences</b>. Dense, honest, keyboard-first. Keeps Moch orange as the single accent on near-black.</p>
+    </div>
+    <div class="open"><a href="02-ledger.html">Open →</a><span>02-ledger.html</span></div>
+  </div>
+
+  <div class="card">
+    <div class="num">3</div>
+    <div>
+      <h2>Deck</h2>
+      <div class="tag">cards on deep canvas · session tabs · shimmering tool ledger · tri-region</div>
+      <p>The opencode-inspired direction: floating <b>elevated cards on a near-black canvas</b>, browser-style <b>draggable session tabs</b> in the titlebar, and the signature <b>shimmering tool ledger</b> — rows that glow while running and auto-group ("4 tools · 2 merged reads"). Permissions are a <b>non-modal dock fused above the composer</b>. Right side: file tree + diff card; far right: fleet strip + terminal card. Feels like a cockpit.</p>
+    </div>
+    <div class="open"><a href="03-deck.html">Open →</a><span>03-deck.html</span></div>
+  </div>
+
+  <div class="card">
+    <div class="num">4</div>
+    <div>
+      <h2>Mission</h2>
+      <div class="tag">goal-loop ADE · workbench tabs · iteration checklists · tachometer statusbar</div>
+      <p>The ZCode-inspired direction: the app as a <b>mission console</b>. Titlebar carries live status chips (agents, needs-you, jobs, goal timer). The chat shows <b>goal-loop iteration dividers</b> and a checklist with <b>amber "holes" waiting for a human</b>. Right side is a tabbed workbench (Goal evidence / live Browser / Terminal / Diff) with a <b>workflow mini-map of who's on what</b>. Bottom is a full <b>tachometer</b>: turns · steps · tok/s · cache · context bar. Violet reasoning accents, black/white CTAs.</p>
+    </div>
+    <div class="open"><a href="04-mission.html">Open →</a><span>04-mission.html</span></div>
+  </div>
+
+  <div class="card">
+    <div class="num">5</div>
+    <div>
+      <h2>Bridge</h2>
+      <div class="tag">bot-first command bridge · fleet rail · arc borders · status stack · Mocheme evolved</div>
+      <p>The hermes/opencode hybrid in <b>Moch's own colors</b>: the fleet is a <b>left rail of bot squares with 7-state dots</b> (working/needs-you/idle…), sessions beside it. Quiet <b>scaffold-style tool rows</b> that collapse into "4 tool calls · thought for a while" with a live ticker, a <b>composer status stack</b> (todos + livestreaming subagents fused above the input, arc-border ring while running), an inline <b>::preview live widget</b> the agent rendered, and a <b>[██████░░░░] context meter</b> in the statusbar. The most "Moch" of the five.</p>
+    </div>
+    <div class="open"><a href="05-bridge.html">Open →</a><span>05-bridge.html</span></div>
+  </div>
+
+  <div class="note">
+    <b>Mixing is allowed</b> — say things like "5's fleet rail + 3's session tabs + 2's status row" and I'll fuse them. Every mockup is a whole single .html file with zero dependencies — open any of them directly in a browser. The research reports behind each idea live in <code>research/desktop-ui-apps/</code> (six apps, code-verified, with the exact hex/type/motion tokens).
+  </div>
+</body>
+</html>
