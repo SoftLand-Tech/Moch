@@ -1,0 +1,68 @@
+# Moch Desktop runtime — dependency set.
+#
+# Mirrors app/python-runtime/requirements-embedded.txt (the exact import
+# closure of the vendored hermes-agent 0.21.3 + gateway serve path + lazy
+# runtime imports), minus the Android-only substitutions (psutil/ruamel/
+# uvicorn notes there were Chaquopy workarounds; on desktop x86_64 Linux the
+# plain pins install cleanly). Anything added here must boot the gateway:
+# `moch_desktop.check` exercises the full import closure.
+#
+# ---- import closure of run_agent ----
+PyYAML==6.0.3
+Pygments==2.20.0
+anyio==4.12.1
+attrs==25.4.0
+certifi==2026.5.20
+charset-normalizer==3.4.4
+click==8.4.2
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.18
+markdown-it-py==4.0.0
+mdurl==0.1.2
+psutil==7.2.2
+python-dotenv==1.2.2
+requests==2.33.0
+rich==14.3.3
+sniffio==1.3.1
+socksio==1.0.0
+urllib3==2.7.0
+websockets==15.0.1
+
+# ---- serve path + first model call ----
+distro==1.9.0
+fastapi==0.133.1
+jiter==0.13.0
+openai==2.24.0
+pydantic==2.13.4
+python-multipart==0.0.32
+starlette==1.3.1
+tqdm==4.67.3
+typing_extensions==4.15.0
+uvicorn==0.41.0
+
+# ---- lazily imported by config/chat code ----
+Jinja2==3.1.6
+packaging==26.0
+ruamel.yaml==0.19.1
+snowballstemmer==3.1.1
+tenacity==9.1.4
+
+# ---- tool / cron / skills runtime paths ----
+PyJWT==2.13.0
+Markdown==3.10.2
+croniter==6.0.0
+jsonschema==4.26.0
+pathspec==1.1.1
+ptyprocess==0.7.0
+rpds-py==0.30.0
+prompt_toolkit==3.0.52
+
+# ---- desktop additions ----
+# edge-tts: hermes' TTS path (the app's Listen button rides /api/audio/speak).
+# Pillow: image tooling (attach path resizes); aiohttp: assorted lazy imports.
+# These were Android "Tier A" prewarms; on desktop they are cheap and used.
+edge-tts==7.2.2
+Pillow==11.3.0
+aiohttp==3.13.2
