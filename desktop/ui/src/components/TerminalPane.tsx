@@ -13,6 +13,7 @@ import '@xterm/xterm/css/xterm.css'
 import '../styles/terminal.css'
 import { mountPty, type PtyHandle } from '../lib/ptyClient'
 import { workspaceDir } from '../lib/gateway'
+import { locale, tr } from '../lib/strings'
 
 /** A sane TERM for color + keybinding support even in the Stage dock. */
 const DEFAULT_ENV: Record<string, string> = { TERM: 'xterm-256color' }
@@ -36,6 +37,7 @@ export default function TerminalPane({ compact, cwd, shell, env, active = true, 
   const spawnedCwdRef = useRef<string | null>(null)
   const lastNonceRef = useRef<number | null>(null)
   const workspace = useStore(workspaceDir)
+  useStore(locale) // subscribe so the pane's strings re-render on locale change
   const effectiveCwd = cwd ?? workspace
   const envWithDefaults = env ? { ...DEFAULT_ENV, ...env } : DEFAULT_ENV
 
@@ -88,15 +90,15 @@ export default function TerminalPane({ compact, cwd, shell, env, active = true, 
       {!effectiveCwd && (
         <div className="term-waiting">
           <div className="spinner" />
-          <span>waiting for the workspace…</span>
+          <span>{tr('files.waiting')}</span>
         </div>
       )}
       <div className="term-actions">
-        <button className="term-btn" onClick={() => void handleRef.current?.restart()} title="Kill and respawn this shell">
-          <RotateCcw size={12} /> restart
+        <button className="term-btn" onClick={() => void handleRef.current?.restart()} title={tr('ctx.term.restartTitle')}>
+          <RotateCcw size={12} /> {tr('ctx.term.restart')}
         </button>
-        <button className="term-btn" onClick={() => handleRef.current?.clear()} title="Clear the viewport">
-          <Eraser size={12} /> clear
+        <button className="term-btn" onClick={() => handleRef.current?.clear()} title={tr('ctx.term.clearTitle')}>
+          <Eraser size={12} /> {tr('ctx.term.clear')}
         </button>
       </div>
     </div>

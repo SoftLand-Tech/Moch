@@ -295,6 +295,86 @@
     "No runs recorded yet.",
     "لا أدوار مسجلة بعد."
   ],
+  "ctx.diff.changed": [
+    "Changed files",
+    "الملفات المتغيّرة"
+  ],
+  "ctx.diff.empty": [
+    "Files your agents edit land here.",
+    "الملفات التي يعدّلها وكلاؤك تظهر هنا."
+  ],
+  "ctx.diff.hint": [
+    "Select one to view the diff.",
+    "اختر ملفًا لعرض الفرق."
+  ],
+  "ctx.diff.nopatch": [
+    "No patch text captured",
+    "لم يُلتقط نص الفرق"
+  ],
+  "ctx.files.changes": [
+    "Changes",
+    "التغييرات"
+  ],
+  "ctx.files.preview.close": [
+    "Close preview",
+    "إغلاق المعاينة"
+  ],
+  "ctx.files.preview.loading": [
+    "reading…",
+    "جارٍ القراءة…"
+  ],
+  "ctx.files.preview.readError": [
+    "Could not read the file",
+    "تعذّرت قراءة الملف"
+  ],
+  "ctx.files.preview.tooLarge": [
+    "File too large to preview",
+    "الملف كبير جدًا للمعاينة"
+  ],
+  "ctx.files.preview.truncated": [
+    "Preview truncated after {n} KB",
+    "تم اقتطاع المعاينة بعد {n} كيلوبايت"
+  ],
+  "ctx.files.preview.unsupported": [
+    "No text preview for this file type",
+    "لا توجد معاينة نصية لهذا النوع من الملفات"
+  ],
+  "ctx.files.refresh": [
+    "Refresh",
+    "تحديث"
+  ],
+  "ctx.files.root": [
+    "Back to workspace root",
+    "العودة إلى جذر مساحة العمل"
+  ],
+  "ctx.files.view.aria": [
+    "Files view",
+    "عرض الملفات"
+  ],
+  "ctx.files.workspace": [
+    "Workspace",
+    "مساحة العمل"
+  ],
+  "ctx.panel.aria": [
+    "Computer",
+    "الحاسوب"
+  ],
+  "ctx.term.clear": [
+    "clear",
+    "تفريغ"
+  ],
+  "ctx.term.clearTitle": [
+    "Clear the viewport",
+    "تفريغ الشاشة"
+  ],
+  "ctx.term.restart": [
+    "restart",
+    "إعادة تشغيل"
+  ],
+  "ctx.term.restartTitle": [
+    "Kill and respawn this shell",
+    "إنهاء الجلسة وإعادة تشغيل الطرفية"
+  ],
   "files.empty": [
     "empty folder",
     "مجلد فارغ"
