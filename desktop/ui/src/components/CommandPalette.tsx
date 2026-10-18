@@ -4,10 +4,11 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '@nanostores/react'
-import { ArrowRight, Bot, CalendarClock, Globe, Inbox, MessageSquareText, Plug, Settings, Sparkles, SquareTerminal, UsersRound } from 'lucide-react'
+import { ArrowRight, Bot, CalendarClock, Globe, Inbox, MessageSquareText, Settings, SquareTerminal, UsersRound } from 'lucide-react'
 import type { ViewId } from '../app'
 import { fleetProfiles, setActiveBot } from '../lib/fleet'
 import { newChat } from '../lib/chat'
+import { locale, tr } from '../lib/strings'
 
 interface Item {
   id: string
@@ -17,10 +18,15 @@ interface Item {
   run: () => void
 }
 
-export default function CommandPalette({ onClose, onNavigate }: { onClose: () => void; onNavigate: (v: ViewId) => void }) {
+export default function CommandPalette({ onClose, onNavigate, onOpenSettings }: {
+  onClose: () => void
+  onNavigate: (v: ViewId) => void
+  onOpenSettings: () => void
+}) {
   const [q, setQ] = useState('')
   const [sel, setSel] = useState(0)
   const bots = useStore(fleetProfiles)
+  const loc = useStore(locale)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { inputRef.current?.focus() }, [])
@@ -34,12 +40,10 @@ export default function CommandPalette({ onClose, onNavigate }: { onClose: () =>
       { id: 'v-browser', label: 'Browser — the agent browser', icon: Globe, run: () => onNavigate('browser') },
       { id: 'v-terminal', label: 'Terminal', icon: SquareTerminal, run: () => onNavigate('terminal') },
       { id: 'v-automations', label: 'Automations', icon: CalendarClock, run: () => onNavigate('automations') },
-      { id: 'v-skills', label: 'Skills', icon: Sparkles, run: () => onNavigate('skills') },
-      { id: 'v-connectors', label: 'Connectors', icon: Plug, run: () => onNavigate('connectors') },
-      { id: 'v-settings', label: 'Settings', icon: Settings, run: () => onNavigate('settings') },
     ]
     const actions: Item[] = [
       { id: 'a-newchat', label: 'New chat', hint: 'fresh session', icon: MessageSquareText, run: () => { onNavigate('chat'); void newChat() } },
+      { id: 'a-settings', label: tr('nav.settings'), icon: Settings, run: onOpenSettings },
       ...bots.filter(b => b.name !== 'default').map((b): Item => ({
         id: `b-${b.name}`,
         label: `Chat with @${b.name}`,
@@ -52,7 +56,7 @@ export default function CommandPalette({ onClose, onNavigate }: { onClose: () =>
     if (!q.trim()) return all
     const needle = q.trim().toLowerCase()
     return all.filter((i) => i.label.toLowerCase().includes(needle) || i.hint?.toLowerCase().includes(needle))
-  }, [q, bots, onNavigate])
+  }, [q, bots, onNavigate, onOpenSettings, loc])
 
   useEffect(() => setSel(0), [q])
 

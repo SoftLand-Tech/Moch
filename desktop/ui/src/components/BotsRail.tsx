@@ -5,7 +5,7 @@
  */
 import { useStore } from '@nanostores/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, MessageSquare, MessagesSquare, MoreHorizontal, Plus, Search, Settings } from 'lucide-react'
+import { ChevronLeft, CircleUserRound, MessageSquare, MessagesSquare, MoreHorizontal, Plus, Search, Settings } from 'lucide-react'
 import type { ViewId } from '../app'
 import CreateBotOverlay from './CreateBotOverlay'
 import {
@@ -62,6 +62,7 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
   const menuRef = useRef<HTMLDivElement | null>(null)
   const [chatsFor, setChatsFor] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const accountRef = useRef<HTMLButtonElement>(null)
   const bots = useStore(fleetProfiles)
   const fleet = useStore(fleetStatusAtom)
   const active = useStore(activeBotAtom)
@@ -69,7 +70,7 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
   const pending = useStore(pendingBySession)
   const byId = useStore(sessionsById)
   const orderRows = useStore(sessionOrder)
-  useStore(locale) // subscribe so roster labels re-render when the language changes
+  const loc = useStore(locale) // re-render (and recompute the rows memo) when the language changes
 
   /** Which bots hold an unanswered ask, keyed like rail rows ('' = Mochi). */
   const askingBots = useMemo(() => {
@@ -119,7 +120,7 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
     if (!needle) return all
     return all.filter((r) =>
       `${r.name ?? tr('rail.mochi')}\n${r.description}`.toLowerCase().includes(needle))
-  }, [bots, fleet, q, askingBots])
+  }, [bots, fleet, q, askingBots, loc])
 
   // Focus the bot's home thread: the bound session, or a fresh one when the
   // bot has none yet. openHomeThread owns the resolution and the binding.
@@ -146,6 +147,14 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
   }
 
   const openCreate = () => setCreateOpen(true)
+
+  // The account row is the one door to app settings; the opener rides the
+  // event so the overlay can hand focus back to this exact button.
+  const openAccountSettings = () => {
+    window.dispatchEvent(new CustomEvent('moch-settings-open', {
+      detail: { section: 'general', opener: accountRef.current },
+    }))
+  }
 
   const toggleMenu = (e: React.MouseEvent<HTMLButtonElement>, key: string) => {
     e.stopPropagation()
@@ -183,14 +192,6 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
       <div className="rk-brand">
         <img src="/mochi/mochi-greeting.svg" alt="" width={28} height={28} />
         <b>Moch</b>
-        <button
-          className="rk-iconbtn"
-          onClick={() => onNav('settings')}
-          title={tr('nav.settings')}
-          aria-label={tr('nav.settings')}
-        >
-          <Settings size={15} />
-        </button>
       </div>
 
       <div className="rk-search">
@@ -271,6 +272,18 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
 
       <button className="rk-newbot" onClick={openCreate} disabled={!connected}>
         <Plus size={14} /> {tr('fleet.create')}
+      </button>
+
+      <button
+        ref={accountRef}
+        className="rk-account"
+        onClick={openAccountSettings}
+        aria-haspopup="dialog"
+        title={tr('nav.settings')}
+      >
+        <span className="rk-account-av"><CircleUserRound size={16} /></span>
+        <b>{tr('settings.account')}</b>
+        <Settings size={13} />
       </button>
 
       {createOpen ? (
