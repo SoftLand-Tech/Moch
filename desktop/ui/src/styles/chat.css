@@ -272,16 +272,6 @@
 .composer-send:hover { transform: scale(1.06); background: #ffa04f; }
 .composer-send:disabled { opacity: 0.4; transform: none; }
 
-/* typing indicator */
-.busy-strip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-faint);
-  font-size: var(--text-xs);
-  padding: 0 4px 6px;
-}
-
 /* slash command popup */
 .slash-pop {
   max-width: 860px;
@@ -324,10 +314,6 @@
 .turnhead .plamp{width:6px;height:6px;border-radius:50%;background:var(--acc);box-shadow:0 0 6px var(--acc)}
 .turnhead .ttime{font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint)}
 
-.think .ckrow{display:flex;align-items:baseline;gap:9px;font-size:12.5px;color:var(--text-dim);padding:3px 0}
-.think .ckrow b{color:var(--text);font-weight:550}
-.think .ckgl{width:14px;display:inline-flex;justify-content:center}
-
 .diffcard{border:1px solid var(--border);border-radius:12px;overflow:hidden;margin:10px 0 6px;background:var(--bg-card);max-width:640px}
 .diffhead{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--bg-elev);font-size:12px;color:var(--text-dim)}
 .diffhead .dnum{font-family:var(--font-mono);font-size:11px;margin-right:auto}
@@ -340,9 +326,64 @@
 .difffoot{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px solid var(--border);color:var(--text-faint)}
 .dact{font-size:11px;padding:3px 9px;border-radius:6px;cursor:default}
 .dact:hover{background:var(--bg-hover);color:var(--text)}
-.dact.apply{background:var(--acc);color:var(--on-acc);font-weight:600}
-.dact.apply:hover{background:var(--acc-dark)}
 
 .cbar2{display:flex;align-items:center;gap:8px;padding:4px 10px 2px;font-size:11.5px;color:var(--text-faint)}
 .composer{max-width:860px;margin:0 auto;border:1.5px solid var(--border);border-radius:16px;background:var(--input-bg)}
 .composer:focus-within{border-color:var(--acc)}
+
+/* ── U5: runs + the one tool-activity disclosure per run ── */
+
+.run{max-width:860px;display:flex;flex-direction:column;gap:8px}
+
+.rk-disc{font-size:var(--text-xs)}
+.rk-disc>summary{
+  display:inline-flex;align-items:center;gap:6px;
+  cursor:pointer;list-style:none;user-select:none;
+  padding:2px 7px;margin-inline-start:-7px;border-radius:6px;
+  color:var(--text-dim);font-weight:550;
+}
+.rk-disc>summary::-webkit-details-marker{display:none}
+.rk-disc>summary:hover{color:var(--text);background:var(--bg-hover)}
+.rk-disc>summary:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.rk-disc .rk-chev{flex-shrink:0;transition:transform 120ms;color:var(--text-faint)}
+.rk-disc[open] .rk-chev{transform:rotate(90deg)}
+.rk-disc-body{
+  margin-inline-start:7px;margin-top:3px;
+  border-inline-start:1px solid var(--border);
+  padding-inline-start:10px;
+  display:flex;flex-direction:column;gap:1px;
+}
+.rk-step{display:flex;align-items:baseline;gap:8px;font-size:12.5px;color:var(--text-dim);min-width:0;padding:2px 0}
+.rk-step .gl{width:14px;display:inline-flex;justify-content:center;flex-shrink:0;align-self:center}
+.rk-step b{color:var(--text);font-weight:550;flex-shrink:0}
+.rk-step .arg{
+  font-family:var(--font-mono);font-size:11px;color:var(--text-faint);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;
+}
+.rk-step .dur{font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);flex-shrink:0}
+.rk-earlier{font-size:12px;color:var(--text-faint)}
+
+/* the active run's streaming bubble: one growing bubble, plain text */
+.msg-assistant-body.streaming{white-space:pre-wrap}
+
+/* the reply foot (copy · listen · save as skill · retry) */
+.msgfoot{display:flex;gap:2px;font-size:11px;color:var(--text-faint)}
+.msgfoot span{padding:3px 7px;border-radius:6px;cursor:pointer}
+.msgfoot span:hover{background:var(--bg-hover);color:var(--text-dim)}
+
+/* clear conversation */
+.clearbar{display:flex;align-items:center;gap:8px;max-width:860px;min-height:22px}
+.clear-btn{
+  font-size:var(--text-xs);color:var(--text-faint);cursor:pointer;
+  padding:2px 8px;border-radius:6px;background:none;border:none;
+}
+.clear-btn:hover{color:var(--text-dim);background:var(--bg-hover)}
+.clear-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.clear-confirm{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  font-size:var(--text-xs);color:var(--text-dim);
+  border:1px solid var(--border);border-radius:var(--radius);
+  padding:8px 12px;background:var(--bg-card);
+}
+.clear-confirm .clear-sub{color:var(--text-faint)}
+.clear-fail{font-size:var(--text-xs);color:var(--red)}
