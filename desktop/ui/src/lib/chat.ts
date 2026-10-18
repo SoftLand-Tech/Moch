@@ -9,7 +9,7 @@
 
 import { atom, computed } from 'nanostores'
 import { rpc, onEvent, onServerRequest, workspaceDir } from './gateway'
-import { activeBotAtom } from './fleet'
+import { activeBotAtom, homeThreadFor, setActiveBot, setHomeThread } from './fleet'
 import type { ServerRequest } from '../protocol/json-rpc-gateway'
 
 // ── model ───────────────────────────────────────────────────────────────────
@@ -587,13 +587,13 @@ export async function newChat(title?: string): Promise<string> {
 
 export async function send(text: string, opts: { steer?: boolean } = {}): Promise<void> {
   let sid = activeSession.get()
-  // Lazy session creation on first send (the phone's contract: unsent new
-  // chats are local-only until the first message goes out).
+  // No open thread: the message lands in the active bot's home thread, the
+  // same place a rail pick would go (unsent new chats are local-only).
   if (!sid && !opts.steer) {
     try {
-      sid = await newChat()
+      sid = await openHomeThread(activeBot.get())
     } catch (err) {
-      console.warn('[chat] could not create session for send', err)
+      console.warn('[chat] could not open the home thread for send', err)
       return
     }
   }
@@ -609,7 +609,10 @@ export async function send(text: string, opts: { steer?: boolean } = {}): Promis
   await rpc('prompt.submit', {
     session_id: sid,
     text,
-    ...(opts.steer ? { steer: true } : {}),
+    // queued: a message sent while the bot's intro, routine, or live turn is
+    // running waits and is answered after it — the gateway's default mid-turn
+    // path redirects the text into the live turn instead.
+    ...(opts.steer ? { steer: true } : { queued: true }),
   })
 }
 
@@ -626,22 +629,106 @@ export async function steer(text: string): Promise<void> {
   await rpc('session.steer', { session_id: sid, text })
 }
 
-/** Open (and resume) a stored session id from the sidebar list. */
-export async function switchToSession(storedId: string): Promise<void> {
+/**
+ * Open (and resume) a stored session id. `profile` scopes the resume to the
+ * bot's own store — a bot's stored ids only resolve under its profile — and
+ * keeps the session tagged; without it the launch store is used (the default
+ * agent). Wherever a session becomes active, the active bot follows it, so
+ * the rail and the thread header always name the thread that is open.
+ */
+export async function switchToSession(storedId: string, opts: { profile?: string | null } = {}): Promise<string> {
   const live = liveIdForStored(storedId)
   if (live && sessionsById.get()[live]) {
     activeSession.set(live)
-    return
+    return live
   }
-  const res = await rpc<{ session_id?: string; messages?: unknown[]; history?: unknown[]; info?: Record<string, unknown> }>('session.resume', { session_id: storedId })
+  const res = await rpc<{ session_id?: string; messages?: unknown[]; history?: unknown[]; info?: Record<string, unknown> }>('session.resume', {
+    session_id: storedId,
+    ...(opts.profile ? { profile: opts.profile } : {}),
+  })
   const liveId = String(res.session_id ?? storedId)
   ensureSession(liveId)
   bindIds(liveId, storedId)
   applyHistory(liveId, res.messages ?? res.history)
   const info = res.info ?? {}
-  const profile = typeof info.profile === 'string' ? info.profile : undefined
+  const wireName = typeof info.profile_name === 'string' ? info.profile_name : ''
+  const profile = opts.profile !== undefined
+    ? opts.profile
+    : wireName && wireName !== 'default' ? wireName : null
   if (profile) patchSession(liveId, { profile })
   activeSession.set(liveId)
+  const want = profile ?? null
+  if (activeBotAtom.get() !== want) await setActiveBot(want)
+  return liveId
+}
+
+/** One of a bot's stored sessions, newest first (session.list is profile-scoped). */
+export interface BotSessionRow {
+  id: string
+  title: string
+  startedAt: number
+  messageCount: number
+}
+
+export async function listBotSessions(profile: string | null): Promise<BotSessionRow[]> {
+  const res = await rpc<{ sessions?: Record<string, unknown>[] }>('session.list', {
+    limit: 30,
+    ...(profile ? { profile } : {}),
+  })
+  const rows = (res.sessions ?? [])
+    .map((r) => ({
+      id: String(r.id ?? r.session_id ?? ''),
+      title: typeof r.title === 'string' ? r.title : '',
+      startedAt: numOrUndef(r.started_at) ?? 0,
+      messageCount: numOrUndef(r.message_count) ?? 0,
+    }))
+    .filter((r) => r.id)
+  rows.sort((a, b) => b.startedAt - a.startedAt)
+  return rows
+}
+
+/**
+ * Open the bot's one home thread: the bound stored id when it resumes, the
+ * profile's most recent stored session when no binding exists yet (bots from
+ * before the binding), or a fresh session on first selection. Keyed per
+ * profile, so it can never land in another bot's session.
+ */
+export async function openHomeThread(profile: string | null): Promise<string | null> {
+  if (activeBotAtom.get() !== profile) await setActiveBot(profile)
+  const bound = homeThreadFor(profile)
+  if (bound) {
+    const live = liveIdForStored(bound)
+    if (live && sessionsById.get()[live]) {
+      activeSession.set(live)
+      return live
+    }
+    try {
+      await switchToSession(bound, { profile })
+      return activeSession.get()
+    } catch {
+      // the bound id no longer resumes (deleted, or a draft that never
+      // persisted): fall through and rebind
+    }
+  }
+  const others = await listBotSessions(profile).catch(() => [])
+  const latest = others.find((r) => r.id !== bound)
+  if (latest) {
+    try {
+      await switchToSession(latest.id, { profile })
+      setHomeThread(profile, latest.id)
+      return activeSession.get()
+    } catch { /* fall through to a fresh home */ }
+  }
+  const liveId = await newChat()
+  const stored = storedIdFor(liveId)
+  if (stored) setHomeThread(profile, stored)
+  return liveId
+}
+
+/** A new session beside the bot's home thread. The home binding is untouched. */
+export async function startSideChat(profile: string | null): Promise<string> {
+  if (activeBotAtom.get() !== profile) await setActiveBot(profile)
+  return newChat()
 }
 
 function applyHistory(liveId: string, history: unknown | undefined): void {
