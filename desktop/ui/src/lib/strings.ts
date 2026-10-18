@@ -8,6 +8,7 @@
 import { atom } from 'nanostores'
 import * as bot from './strings/bot'
 import * as chat from './strings/chat'
+import * as context from './strings/context'
 import * as crew from './strings/crew'
 import * as fleet from './strings/fleet'
 import * as shell from './strings/shell'
@@ -61,6 +62,7 @@ const EN: Catalog = {
   ...crew.en,
   ...bot.en,
   ...chat.en,
+  ...context.en,
   ...shell.en,
 }
 
@@ -69,6 +71,7 @@ const AR: Catalog = {
   ...crew.ar,
   ...bot.ar,
   ...chat.ar,
+  ...context.ar,
   ...shell.ar,
 }
 
