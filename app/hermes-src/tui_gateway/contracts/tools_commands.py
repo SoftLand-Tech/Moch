@@ -417,6 +417,7 @@ class CronAction(WireEnum):
     remove = "remove"
     pause = "pause"
     resume = "resume"
+    run = "run"
 
 
 class CronManageParams(Params):
