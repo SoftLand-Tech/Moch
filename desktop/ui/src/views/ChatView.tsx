@@ -6,13 +6,13 @@ import {
   SquareTerminal,
 } from 'lucide-react'
 import {
-  activeSession, agentBusy,
-  interrupt, messages, newChat, pendingRequest, patchSession, send, steer,
+  activeSession, agentBusy, interrupt, liveRunOrigin, messages, newChat,
+  openHomeThread, pendingRequest, patchSession, send, steer,
   tools as toolsAtom, todos as todosAtom, view,
   phaseForTools,
   type ChatMessage, type ChatSegment, type PendingCard, type ToolItem,
 } from '../lib/chat'
-import { activeBotName } from '../lib/fleet'
+import { accentFor, activeBotName, fleetProfiles } from '../lib/fleet'
 import { isConnected, rpc } from '../lib/gateway'
 import { renderMarkdown } from '../lib/markdown'
 import { commandCatalog, completeSlash, dispatchSlash, refreshCommandCatalog } from '../lib/slash'
@@ -528,9 +528,23 @@ function ClearConversation({ sid }: { sid: string }) {
 
 // ── composer ─────────────────────────────────────────────────────────────────
 
+/** What a send into the open thread will do right now. Derived, never stored:
+ *  the gateway's rule decides it (a run this client started absorbs sends as
+ *  steering, any other live run holds them), so the chip can only name the
+ *  state, never choose it. A pending ask pauses the run — sends are held. */
+type Posture = 'idle' | 'steer' | 'held'
+
+/** One roster row for the @bot picker; key '' is the default agent (Mochi). */
+interface AtBot { key: string; name: string | null; description: string }
+
+/** The @token being typed at the caret, or null when the caret sits outside one. */
+function atToken(value: string, caret: number): string | null {
+  const m = value.slice(0, caret).match(/(?:^|\s)@([^\s@]*)$/)
+  return m ? m[1] : null
+}
+
 function Composer() {
   const [text, setText] = useState('')
-  const [steerMode, setSteerMode] = useState(false)
   const [recording, setRecording] = useState(false)
   const [level, setLevel] = useState(0)
   const [voiceError, setVoiceError] = useState<string | null>(null)
@@ -538,15 +552,63 @@ function Composer() {
   const [sending, setSending] = useState(false)
   const [slashSel, setSlashSel] = useState(0)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
+  const [atOpen, setAtOpen] = useState(false)
+  const [atQuery, setAtQuery] = useState('')
+  const [atSel, setAtSel] = useState(0)
+  /** The @ override: undefined sends to the open thread, a roster key sends to
+   *  that bot's home thread (the session there carries the profile). */
+  const [atKey, setAtKey] = useState<string | undefined>(undefined)
+  const [notice, setNotice] = useState<string | null>(null)
   const busy = useStore(agentBusy)
+  const origin = useStore(liveRunOrigin)
+  const card = useStore(pendingRequest)
+  const session = useStore(view)
+  const sid = useStore(activeSession)
   const botName = useStore(activeBotName)
+  const profiles = useStore(fleetProfiles)
   const catalog = useStore(commandCatalog)
   const model = useStore(currentModel)
   const provs = useStore(providers)
+  const lang = useStore(locale) // order 15: every tr() here re-renders on a locale switch
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  const posture: Posture = card ? 'held' : origin === 'chat' ? 'steer' : origin ? 'held' : 'idle'
+  const ownerKey = session?.profile ?? ''
+
   const completions = useMemo(() => completeSlash(text, catalog), [text, catalog])
+
+  const roster = useMemo<AtBot[]>(() => [
+    { key: '', name: null, description: tr('rail.mochi.job') },
+    ...profiles.filter((b) => b.name !== 'default').map((b) => ({
+      key: b.name,
+      name: b.name,
+      description: b.description || tr('rail.nodesc'),
+    })),
+  ], [profiles, lang])
+
+  const atMatches = useMemo(() => {
+    if (!atOpen) return []
+    const needle = atQuery.trim().toLowerCase()
+    if (!needle) return roster
+    return roster.filter((r) =>
+      `${r.name ?? tr('rail.mochi')}\n${r.description}`.toLowerCase().includes(needle))
+  }, [atOpen, atQuery, roster, lang])
+
+  const atName = (key: string): string =>
+    key === '' ? tr('rail.mochi') : (roster.find((r) => r.key === key)?.name ?? key)
+
+  /** Picker follows the caret: any @token opens it, leaving the token closes it. */
+  const syncAt = (value: string, caret: number) => {
+    const q = atToken(value, caret)
+    setAtOpen(q !== null)
+    setAtQuery(q ?? '')
+    setAtSel(0)
+  }
+
+  // The address names a redirect away from the open thread; navigating away
+  // cancels it so a later send can never land somewhere silently.
+  useEffect(() => { setAtKey(undefined); setAtOpen(false) }, [sid])
 
   useEffect(() => {
     const ta = taRef.current
@@ -557,11 +619,24 @@ function Composer() {
 
   useEffect(() => setSlashSel(0), [text])
 
+  const pickAt = (b: AtBot) => {
+    const ta = taRef.current
+    const caret = ta?.selectionStart ?? text.length
+    const before = text.slice(0, caret)
+    const after = text.slice(caret)
+    const m = before.match(/(?:^|\s)@([^\s@]*)$/)
+    const kept = m ? before.slice(0, before.length - m[0].length) : before
+    setText(kept + after.replace(/^ /, ''))
+    setAtKey(b.key)
+    setAtOpen(false)
+    taRef.current?.focus()
+  }
+
   const submit = async () => {
     const t = text.trim()
-    if (!t && pendingFiles.length === 0) return
-    if (sending) return
+    if ((!t && pendingFiles.length === 0) || sending) return
     setSending(true)
+    setNotice(null)
     try {
       if (t.startsWith('/')) {
         const handled = await dispatchSlash(t).catch(() => false)
@@ -575,16 +650,38 @@ function Composer() {
           return
         }
       }
+      if (atKey !== undefined && atKey !== ownerKey) {
+        // Addressing rides the profile tagging that already exists: the send
+        // lands in that bot's home thread, whose session carries the profile.
+        try {
+          const target = await openHomeThread(atKey === '' ? null : atKey)
+          if (!target) throw new Error('home thread did not open')
+        } catch {
+          setNotice(tr('chat.composer.at.fail', { name: atName(atKey) }))
+          return
+        }
+      }
+      setAtKey(undefined)
       if (pendingFiles.length) {
-        const sid = activeSession.get() ?? (await newChat().catch(() => null))
-        if (!sid) return
-        const ok = await attachFiles(sid, pendingFiles).catch(() => false)
+        const fsid = activeSession.get() ?? (await newChat().catch(() => null))
+        if (!fsid) return
+        const ok = await attachFiles(fsid, pendingFiles).catch(() => false)
         setPendingFiles([])
         if (!ok) return
       }
       setText('')
-      if (steerMode) void steer(t)
-      else void send(t)
+      // Derived again after any thread switch: the posture names the thread
+      // the send actually lands in.
+      if (!pendingRequest.get() && liveRunOrigin.get() === 'chat') {
+        try {
+          await steer(t)
+        } catch {
+          setText(t)
+          setNotice(tr('chat.composer.steer.fail'))
+        }
+      } else {
+        void send(t)
+      }
     } finally {
       setSending(false)
     }
@@ -631,6 +728,30 @@ function Composer() {
           ))}
         </div>
       ) : null}
+      {atOpen ? (
+        <div className="slash-pop at-pop">
+          {atMatches.length ? atMatches.map((b, i) => (
+            <div
+              key={b.key}
+              className={`row${i === atSel ? ' active' : ''}`}
+              onMouseEnter={() => setAtSel(i)}
+              onClick={() => pickAt(b)}
+            >
+              <span className="at-dot" style={{ background: b.key === '' ? 'var(--text-faint)' : accentFor(b.key) }} />
+              <span className="row-title" style={{ fontSize: 12.5 }}>{b.name ?? tr('rail.mochi')}</span>
+              <span className="row-sub">{b.description}</span>
+            </div>
+          )) : <div className="row"><span className="row-sub">{tr('chat.at.empty')}</span></div>}
+        </div>
+      ) : null}
+      {atKey !== undefined && atKey !== ownerKey ? (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap', maxWidth: 860 }}>
+          <span className="chip" title={tr('chat.composer.at')}>
+            {tr('chat.at.label')}: <b>{atName(atKey)}</b>
+            <button aria-label={tr('chat.at.clear')} onClick={() => setAtKey(undefined)} style={{ marginLeft: 2, color: 'var(--text-faint)' }}>×</button>
+          </span>
+        </div>
+      ) : null}
       {pendingFiles.length > 0 ? (
         <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap', maxWidth: 860 }}>
           {pendingFiles.map((f, i) => (
@@ -642,14 +763,46 @@ function Composer() {
         </div>
       ) : null}
       {voiceError ? <div style={{ color: 'var(--red)', fontSize: 11, marginBottom: 4 }}>{voiceError}</div> : null}
+      {notice ? <div style={{ color: 'var(--red)', fontSize: 11, marginBottom: 4, maxWidth: 860 }}>{notice}</div> : null}
       <div className="composer">
         <textarea
           ref={taRef}
           rows={1}
-          placeholder={steerMode ? 'Steer the running turn — delivered at the next boundary…' : botName ? `Ask ${botName} anything…` : 'Ask Mochi anything…'}
+          placeholder={
+            posture === 'steer' ? tr('chat.composer.placeholder.steer')
+              : posture === 'held' ? tr('chat.composer.placeholder.held')
+                : botName ? tr('chat.composer.placeholder.bot', { name: botName })
+                  : tr('chat.composer.placeholder')
+          }
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value)
+            syncAt(e.target.value, e.target.selectionStart ?? e.target.value.length)
+          }}
+          onSelect={(e) => {
+            const ta = e.currentTarget
+            syncAt(ta.value, ta.selectionStart ?? ta.value.length)
+          }}
           onKeyDown={(e) => {
+            if (atOpen) {
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                setAtOpen(false)
+                return
+              }
+              if (['ArrowDown', 'ArrowUp', 'Tab', 'Enter'].includes(e.key)) {
+                if (atMatches.length === 0) {
+                  if (e.key !== 'Enter') { e.preventDefault(); return }
+                  setAtOpen(false) // nothing to pick — let Enter fall through to send
+                } else {
+                  e.preventDefault()
+                  if (e.key === 'ArrowDown') setAtSel(s => Math.min(s + 1, atMatches.length - 1))
+                  else if (e.key === 'ArrowUp') setAtSel(s => Math.max(s - 1, 0))
+                  else pickAt(atMatches[Math.min(atSel, atMatches.length - 1)])
+                  return
+                }
+              }
+            }
             if (completions.length > 0 && ['ArrowDown', 'ArrowUp', 'Tab'].includes(e.key)) {
               e.preventDefault()
               if (e.key === 'ArrowDown') setSlashSel(s => Math.min(s + 1, completions.length - 1))
@@ -668,32 +821,41 @@ function Composer() {
           }}
         />
         <div className="cbar2">
-          <button className="composer-chip" onClick={() => setModelPickerOpen(true)} title="Model">
-            <Cpu size={12} /> {model.model ?? 'model'} <span style={{ opacity: .6 }}>⌄</span>
+          {posture !== 'idle' ? (
+            <span
+              className={`posture-chip${posture === 'steer' ? ' steer' : ' held'}`}
+              title={card ? tr('chat.steer.title.paused') : posture === 'steer' ? tr('chat.steer.title.steering') : tr('chat.steer.title.waiting')}
+            >
+              <span className="dot" />
+              {posture === 'steer' ? tr('chat.steer.chip.steering') : tr('chat.steer.chip.waiting')}
+            </span>
+          ) : null}
+          <button className="composer-chip" onClick={() => setModelPickerOpen(true)} title={tr('chat.composer.model')}>
+            <Cpu size={12} /> {model.model ?? tr('chat.composer.model')} <span style={{ opacity: .6 }}>⌄</span>
           </button>
-          <button className="composer-chip" title="Active agent" onClick={() => window.dispatchEvent(new CustomEvent('moch-navigate', { detail: 'fleet' }))}>
-            @ {botName ?? 'Mochi'}
+          <button className="composer-chip" title={tr('chat.composer.at')} onClick={() => { setAtOpen(true); setAtQuery(''); setAtSel(0); taRef.current?.focus() }}>
+            @ {atKey !== undefined && atKey !== ownerKey ? atName(atKey) : (botName ?? tr('rail.mochi'))}
           </button>
-          <button className="composer-chip" title="Slash commands" onClick={() => { setText('/'); taRef.current?.focus() }}>Tools</button>
-          <button className="composer-chip" title="Open the terminal workbench" onClick={() => window.dispatchEvent(new CustomEvent('moch-workbench', { detail: 'terminal' }))}>
-            <SquareTerminal size={12} /> Code
+          <button className="composer-chip" title={tr('chat.composer.tools.title')} onClick={() => { setText('/'); taRef.current?.focus() }}>{tr('chat.composer.tools.label')}</button>
+          <button className="composer-chip" title={tr('chat.composer.code.title')} onClick={() => window.dispatchEvent(new CustomEvent('moch-workbench', { detail: 'terminal' }))}>
+            <SquareTerminal size={12} /> {tr('chat.composer.code.label')}
           </button>
           {busy ? (
-            <button className="composer-chip" onClick={() => void interrupt()} title="Stop the running turn">
-              <CircleStop size={12} /> stop
+            <button className="composer-chip" onClick={() => void interrupt()} title={tr('chat.composer.stop.title')}>
+              <CircleStop size={12} /> {tr('chat.composer.stop.label')}
             </button>
           ) : null}
           <div style={{ flex: 1 }} />
           <button
             className={`composer-chip${recording ? ' accent' : ''}`}
             onClick={onVoice}
-            title={recording ? 'Stop and transcribe' : 'Dictate — transcribed through your gateway'}
+            title={recording ? tr('chat.composer.voice.stop') : tr('chat.composer.voice.go')}
           >
             {recording
               ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span className="status-dot warn" style={{ margin: 0, transform: `scale(${1 + level * 1.2})`, transition: 'transform 80ms' }} /> {Math.round(level * 100)}%</span>
               : <Mic size={12} />}
           </button>
-          <button className="composer-send" onClick={() => void submit()} disabled={(!text.trim() && pendingFiles.length === 0) || sending} aria-label="Send">
+          <button className="composer-send" onClick={() => void submit()} disabled={(!text.trim() && pendingFiles.length === 0) || sending} aria-label={tr('chat.composer.send')}>
             <ArrowUp size={17} strokeWidth={2.4} />
           </button>
         </div>
@@ -709,6 +871,7 @@ function ModelPicker({ onClose, providers: provs }: { onClose: () => void; provi
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState('')
+  useStore(locale)
   const flat = useMemo(() => {
     const rows: { provider: string; providerName?: string; model: string; authenticated?: boolean }[] = []
     for (const p of provs) {
@@ -738,23 +901,23 @@ function ModelPicker({ onClose, providers: provs }: { onClose: () => void; provi
   return (
     <div className="scrim" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">Switch model</div>
+        <div className="modal-head">{tr('chat.model.title')}</div>
         <div className="modal-body" style={{ paddingTop: 10 }}>
-          <input className="input" placeholder="Search models…" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
+          <input className="input" placeholder={tr('chat.model.search')} value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
           <div style={{ maxHeight: 360, overflowY: 'auto', marginTop: 8 }}>
             {flat.slice(0, 60).map((r) => (
               <button key={`${r.provider}/${r.model}`} className="row" onClick={() => void pick(r.provider, r.model)} disabled={!!busy}>
                 <span className="row-title">{r.model}</span>
-                <span className="row-sub">{r.providerName ?? r.provider}{r.authenticated === false ? ' · needs key' : ''}</span>
+                <span className="row-sub">{r.providerName ?? r.provider}{r.authenticated === false ? ` · ${tr('chat.model.needskey')}` : ''}</span>
                 {busy === `${r.provider}/${r.model}` ? <span className="spinner" style={{ width: 11, height: 11 }} /> : null}
               </button>
             ))}
-            {flat.length === 0 ? <div style={{ padding: 14, color: 'var(--text-faint)', fontSize: 13 }}>No models — connect a provider in Connectors.</div> : null}
+            {flat.length === 0 ? <div style={{ padding: 14, color: 'var(--text-faint)', fontSize: 13 }}>{tr('chat.model.none')}</div> : null}
           </div>
           {err ? <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}>{err}</div> : null}
         </div>
         <div className="modal-foot">
-          <button className="btn" onClick={onClose}>Close</button>
+          <button className="btn" onClick={onClose}>{tr('chat.model.close')}</button>
         </div>
       </div>
     </div>

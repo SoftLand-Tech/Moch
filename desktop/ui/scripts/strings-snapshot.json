@@ -103,6 +103,38 @@
     "sudo password",
     "كلمة سر sudo"
   ],
+  "card.title.approval": [
+    "Needs your approval",
+    "يحتاج موافقتك"
+  ],
+  "card.title.clarify": [
+    "Agent asks",
+    "الوكيل يسأل"
+  ],
+  "card.title.secret": [
+    "A secret is needed",
+    "قيمة سرية مطلوبة"
+  ],
+  "card.title.sudo": [
+    "Sudo password needed",
+    "كلمة سر sudo مطلوبة"
+  ],
+  "card.title.vault": [
+    "Vault",
+    "الخزنة"
+  ],
+  "chat.at.clear": [
+    "Clear address",
+    "إزالة التوجيه"
+  ],
+  "chat.at.empty": [
+    "No bots match",
+    "لا روبوتات مطابقة"
+  ],
+  "chat.at.label": [
+    "To",
+    "إلى"
+  ],
   "chat.clarify.pending.many": [
     "{n} questions still need answers before sending.",
     "{n} أسئلة لا تزال بحاجة إلى إجابات قبل الإرسال."
@@ -135,6 +167,26 @@
     "Keep",
     "إبقاء"
   ],
+  "chat.composer.at": [
+    "Address a bot",
+    "توجيه إلى روبوت"
+  ],
+  "chat.composer.at.fail": [
+    "Could not open {name}'s thread — try again.",
+    "تعذّر فتح محادثة {name} — حاول مجددًا."
+  ],
+  "chat.composer.code.label": [
+    "Code",
+    "طرفية"
+  ],
+  "chat.composer.code.title": [
+    "Open the terminal workbench",
+    "افتح منصة الطرفية"
+  ],
+  "chat.composer.model": [
+    "Model",
+    "النموذج"
+  ],
   "chat.composer.placeholder": [
     "Ask Mochi anything — / for commands",
     "اسأل موتشي أي شيء — اكتب / للأوامر"
@@ -143,9 +195,45 @@
     "Message {name}…",
     "راسل {name}…"
   ],
+  "chat.composer.placeholder.held": [
+    "Held until the current run finishes…",
+    "يبقى محفوظًا حتى ينتهي الدور الجاري…"
+  ],
   "chat.composer.placeholder.steer": [
     "Steer the running turn — delivered at the next boundary…",
     "وجّه الدور الجاري — يُسلَّم عند الحد التالي…"
+  ],
+  "chat.composer.send": [
+    "Send",
+    "إرسال"
+  ],
+  "chat.composer.steer.fail": [
+    "Could not steer — your message is back in the composer.",
+    "تعذّر التوجيه — عادت رسالتك إلى المحرر."
+  ],
+  "chat.composer.stop.label": [
+    "Stop",
+    "إيقاف"
+  ],
+  "chat.composer.stop.title": [
+    "Stop the running turn",
+    "أوقف الدور الجاري"
+  ],
+  "chat.composer.tools.label": [
+    "Tools",
+    "أدوات"
+  ],
+  "chat.composer.tools.title": [
+    "Slash commands",
+    "أوامر الشرطة المائلة"
+  ],
+  "chat.composer.voice.go": [
+    "Dictate — transcribed through your gateway",
+    "إملاء — يُتفريغ عبر بوابتك"
+  ],
+  "chat.composer.voice.stop": [
+    "Stop and transcribe",
+    "أوقف وفرّج النص"
   ],
   "chat.diff.copy": [
     "Copy",
@@ -199,6 +287,26 @@
     "No chats yet — say hi below.",
     "لا محادثات بعد — قل مرحبًا بالأسفل."
   ],
+  "chat.model.close": [
+    "Close",
+    "إغلاق"
+  ],
+  "chat.model.needskey": [
+    "needs key",
+    "يحتاج مفتاحًا"
+  ],
+  "chat.model.none": [
+    "No models — connect a provider in Connectors.",
+    "لا نماذج — اربط مزوّدًا في «الموصلات»."
+  ],
+  "chat.model.search": [
+    "Search models…",
+    "ابحث في النماذج…"
+  ],
+  "chat.model.title": [
+    "Switch model",
+    "تبديل النموذج"
+  ],
   "chat.phase.browsing": [
     "Browsing",
     "يتصفح"
@@ -230,6 +338,26 @@
   "chat.phase.working": [
     "Working",
     "يعمل"
+  ],
+  "chat.steer.chip.steering": [
+    "Steering",
+    "توجيه"
+  ],
+  "chat.steer.chip.waiting": [
+    "Waiting",
+    "انتظار"
+  ],
+  "chat.steer.title.paused": [
+    "The run is paused on your answer, sends are held",
+    "الدور متوقف على إجابتك، والإرسال يُحفظ"
+  ],
+  "chat.steer.title.steering": [
+    "Sends join the live run at its next step",
+    "الإرسال ينضم إلى الدور الجاري عند خطوته التالية"
+  ],
+  "chat.steer.title.waiting": [
+    "Sends are held and answered after this run",
+    "الإرسال يُحفظ ويُجاب بعد هذا الدور"
   ],
   "chat.think.chars": [
     "{n} chars",
