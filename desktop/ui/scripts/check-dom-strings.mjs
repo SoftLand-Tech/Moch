@@ -47,11 +47,50 @@ async function loadCatalogs() {
 const { en: EN, ar: AR } = await loadCatalogs()
 
 // ── allowlist ───────────────────────────────────────────────────────────────
-// Regex patterns matched against a whole collected string.
+// Category predicates, each deciding its language in one pass. The regex
+// forms of these nested quantifiers, (^word+ whitespace*)*$, and
+// backtracked catastrophically on long prose that fails them: one
+// hundred-char view description burned a core for twelve seconds inside a
+// single leaf, starving the event loop so no per-call or per-view deadline
+// could ever fire, which is what wedged the tour mid-run.
+const isDigit = (ch) => ch >= '0' && ch <= '9'
+const isArabicDigit = (ch) => ch >= '\u0660' && ch <= '\u0669'
+const isSpace = (ch) => ' \t\n\v\f\r\u00a0'.includes(ch)
+const isWordChar = (ch) => (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || isDigit(ch) || ch === '_' || ch === '.' || ch === '-' || ch === '/' || ch === '@' || ch === ':'
+const isSeparatorDot = (ch) => ch === '·' || ch === '…'
 const PATTERN_ALLOWLIST = [
-  { re: /^[\d\u0660-\u0669\s:.,%·+×÷—–\/-]*$/, why: 'data: pure numbers, times, symbols' },
-  { re: /^[\w.\-\/@:]+([·…]?[\w.\-\/@:,]+)*$/, why: 'data/code: paths, urls, identifiers, versions (no prose)' },
-  { re: /^(?:[\w.\-\/@:]+\s*)*[·…]?$/, why: 'data/code: dotted fragments' },
+  {
+    why: 'data: pure numbers, times, symbols',
+    test: (s) => [...s].every((ch) => isDigit(ch) || isArabicDigit(ch) || isSpace(ch) || ':.,%·+×÷—–-/'.includes(ch)),
+  },
+  {
+    why: 'data/code: paths, urls, identifiers, versions (no prose)',
+    test: (s) => {
+      if (!s || !isWordChar(s[0])) return false
+      for (let i = 0; i < s.length; i++) {
+        const ch = s[i]
+        if (isSeparatorDot(ch)) {
+          if (i === s.length - 1 || isSeparatorDot(s[i + 1])) return false
+        } else if (!isWordChar(ch) && ch !== ',') return false
+      }
+      return true
+    },
+  },
+  {
+    why: 'data/code: dotted fragments',
+    test: (s) => {
+      let i = 0
+      while (i < s.length) {
+        let j = i
+        while (j < s.length && isWordChar(s[j])) j++
+        if (j === i) break
+        i = j
+        while (i < s.length && isSpace(s[i])) i++
+      }
+      const rest = s.slice(i)
+      return rest === '' || (rest.length === 1 && isSeparatorDot(rest))
+    },
+  },
 ]
 // Exact strings, matched after entity/whitespace normalization.
 const EXACT_ALLOWLIST = [
@@ -62,34 +101,59 @@ const EXACT_ALLOWLIST = [
   { s: 'SOUL.md', why: 'code: a file name' },
   { s: 'about:blank', why: 'code: the blank page url' },
   { s: '?', why: 'code: the unknown-marker' },
+  { s: '⌄', why: 'code: the model picker dropdown chevron' },
   { s: '…', why: 'code: the pending breadcrumb' },
   { s: 'unknown', why: 'data: fallback while the runtime has not answered yet' },
   { s: 'Moch Desktop 0.1.0', why: 'proper-noun: product name + version' },
 ]
-// DOM subtrees whose text is runtime data (PTY output), never UI copy.
-const DATA_SURFACES = ['.term-stack', '.bp-canvas', 'script', 'style', 'pre']
+// DOM subtrees whose text is runtime data, never UI copy: PTY output (the
+// compact context-panel terminal hosts xterm under .term-host; the full
+// terminal view wraps the same host in .term-stack) and the roster avatar
+// monogram, which is the bot's own name sliced to two characters.
+const DATA_SURFACES = ['.term-host', '.term-stack', '.rk-avatar', '.bp-canvas', 'script', 'style', 'pre']
 
 // ── matcher ─────────────────────────────────────────────────────────────────
 const norm = (s) => s.replace(/\s+/g, ' ').replace(/&amp;/g, '&').replace(/&mdash;/g, '—').replace(/&hellip;/g, '…').replace(/&apos;/g, "'").trim()
-const wordGuard = (body) => new RegExp(`(?<![A-Za-z\\u0600-\\u06FF])${body}(?![A-Za-z\\u0600-\\u06FF])`)
-const compilers = []
+// A leaf resolves through the catalog when some value's static parts appear
+// in it in order, each placeholder filling up to GAP characters in between,
+// bounded by non-letter edges. The regex form of this question, unanchored
+// patterns with lazy gaps, shares the allowlist's backtracking hazard on
+// adversarial leaves, so this is also a scan: greedy earliest occurrence of
+// each part inside its window, which is complete for ordered window
+// matching because each first occurrence leaves the most room for every
+// part that follows.
+const GAP = 40
+const isLetter = (ch) => (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '\u0600' && ch <= '\u06FF')
+const CATALOG_ENTRIES = []
 for (const catalog of [EN, AR]) {
   for (const value of Object.values(catalog)) {
-    const parts = String(value).split(/\{[^}]+\}/).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-    let body = parts.length > 1 ? parts.map((p, i) => (i === 0 ? p : `${p}${i === parts.length - 1 ? '' : '[\\s\\S]{0,40}?'}`)).join('') : parts[0]
-    if (parts.length > 1) body = parts.join('[\\s\\S]{0,40}?')
-    try { compilers.push(wordGuard(body)) } catch { compilers.push(new RegExp(`^${body}$`)) }
+    const parts = String(value).split(/\{[^}]+\}/).filter((p) => p !== '')
+    if (!parts.length) continue
+    CATALOG_ENTRIES.push({ parts, longest: parts.reduce((a, b) => (b.length > a.length ? b : a)) })
   }
 }
 const allowedExact = new Set(EXACT_ALLOWLIST.map((e) => norm(e.s)))
 function isAllowed(s) {
   const t = norm(s)
   if (!t || allowedExact.has(t)) return true
-  return PATTERN_ALLOWLIST.some((p) => p.re.test(t))
+  return PATTERN_ALLOWLIST.some((p) => p.test(t))
 }
 function inCatalog(s) {
   const t = norm(s)
-  return compilers.some((re) => re.test(t))
+  return CATALOG_ENTRIES.some((e) => {
+    if (!t.includes(e.longest)) return false
+    let start = -1
+    let end = -1
+    let maxGap = 0
+    for (const p of e.parts) {
+      const idx = t.indexOf(p, end < 0 ? 0 : end)
+      if (idx < 0 || (end >= 0 && idx - end > maxGap)) return false
+      if (start < 0) start = idx
+      end = idx + p.length
+      maxGap = GAP
+    }
+    return !isLetter(start > 0 ? t[start - 1] : '') && !isLetter(end < t.length ? t[end] : '')
+  })
 }
 
 // ── CDP plumbing (same contract as render-cdp.mjs) ─────────────────────────
@@ -238,19 +302,28 @@ for (const locale of ['en', 'ar']) {
     }
   }
   // command palette over the shell
-  await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }))`)
-  await collect(`${locale}:palette`, violations)
-  await evaluate(`document.querySelector('.scrim')?.click()`)
-  // settings overlay + its three tabs
-  await evaluate(`window.dispatchEvent(new CustomEvent('moch-settings-open', { detail: { section: 'general' } }))`)
-  await sleep(400)
-  await collect(`${locale}:settings-general`, violations)
-  for (const tab of ['models', 'connectors', 'skills']) {
-    await evaluate(`([...document.querySelectorAll('.rk-set-nav button')].find(b => b.textContent.includes(${'`'}${tab}${'`'}))?.click()`)
-    await sleep(400)
-    await collect(`${locale}:settings-${tab}`, violations)
+  try {
+    await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }))`)
+    await collect(`${locale}:palette`, violations)
+    await evaluate(`document.querySelector('.scrim')?.click()`)
+  } catch (err) {
+    violations.push({ surface: `${locale}:palette`, where: 'audit', text: `COLLECTION FAILED: ${err.message}` })
   }
-  await evaluate(`document.querySelector('.rk-set-head button, [aria-label]')?.click(); document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`)
+  // settings overlay + its three tabs
+  try {
+    await evaluate(`window.dispatchEvent(new CustomEvent('moch-settings-open', { detail: { section: 'general' } }))`)
+    await sleep(400)
+    await collect(`${locale}:settings-general`, violations)
+    // nav labels are translated, so click by tab position, not by label text
+    for (const [i, tab] of ['models', 'connectors', 'skills'].entries()) {
+      await evaluate(`document.querySelectorAll('.rk-set-nav button[role="tab"]')[${i + 1}]?.click()`)
+      await sleep(400)
+      await collect(`${locale}:settings-${tab}`, violations)
+    }
+    await evaluate(`document.querySelector('.rk-set-me button')?.click(); document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`)
+  } catch (err) {
+    violations.push({ surface: `${locale}:settings`, where: 'audit', text: `COLLECTION FAILED: ${err.message}` })
+  }
 }
 
 await call(browser, 'Target.closeTarget', { targetId })
