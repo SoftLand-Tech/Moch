@@ -94,6 +94,11 @@ export interface SessionState {
   busy: boolean
   profile?: string
   createdAt: number
+  /** How the live run started. Written only when busy rises, so the value
+   *  names the run that is actually running (never the sends queued behind
+   *  it). 'chat' = this client's prompt, 'auto' = intro, routine, or another
+   *  surface. Meaningless while idle. */
+  liveRunFrom?: 'chat' | 'auto'
 }
 
 export const sessionsById = atom<Record<string, SessionState>>({})
@@ -146,6 +151,11 @@ export const tools = computed(view, (s) => s?.tools ?? [])
 export const todos = computed(view, (s) => s?.todos ?? [])
 export const usage = computed(view, (s) => s?.usage ?? {})
 export const agentBusy = computed(view, (s) => s?.busy ?? false)
+/** Origin of the open thread's live run; null while idle. The composer reads
+ *  it to name its posture: a run this client started absorbs sends (steering,
+ *  session.steer), an intro, routine, or another surface's run holds them
+ *  (prompt.submit queued, answered after). */
+export const liveRunOrigin = computed(view, (s) => (s?.busy ? s.liveRunFrom ?? 'auto' : null))
 export const activeTitle = computed(view, (s) => s?.title ?? '')
 export const pendingRequest = computed(
   [pendingBySession, activeSession],
@@ -159,6 +169,14 @@ export function patchSession(id: string, patch: Partial<SessionState>): void {
   const cur = map[id]
   if (!cur) return
   sessionsById.set({ ...map, [id]: { ...cur, ...patch } })
+}
+
+/** busy false→true, stamping the run's origin. An already-busy session keeps
+ *  its origin: the sends queued behind a live run must not relabel it. */
+function markRunLive(sid: string, fromUser: boolean): void {
+  const s = sessionsById.get()[sid]
+  if (!s || s.busy) return
+  patchSession(sid, { busy: true, liveRunFrom: fromUser ? 'chat' : 'auto' })
 }
 
 function ensureSession(liveId: string): SessionState {
@@ -328,12 +346,17 @@ export function hookChatEvents(): () => void {
     const p = (e.payload ?? {}) as Record<string, unknown>
     switch (e.type) {
       case 'session.info': {
-        // session metadata refresh (title, model, busy)
+        // session metadata refresh (title, model, busy). Title and busy are
+        // independent fields on the wire — one carrying both must apply both.
         const title = typeof p.title === 'string' ? p.title : undefined
         const busy = typeof p.busy === 'boolean' ? p.busy : undefined
         if (sid) {
           const s = ensureSession(sid)
-          patchSession(sid, { ...(title && title !== s.title ? { title } : {}), ...(busy !== undefined ? { busy: busy as boolean } : {}) })
+          if (title !== undefined && title !== s.title) patchSession(sid, { title })
+          if (busy !== undefined && busy !== s.busy) {
+            if (busy) markRunLive(sid, false)
+            else patchSession(sid, { busy: false })
+          }
         }
         break
       }
@@ -433,7 +456,7 @@ export function hookChatEvents(): () => void {
         break
       }
       case 'status.update':
-        if (sid && typeof p.text === 'string') patchSession(sid, { busy: true })
+        if (sid && typeof p.text === 'string') markRunLive(sid, false)
         break
       case 'request.cancel': {
         // The backend withdrew an interactive request (e.g. approval timeout).
@@ -585,11 +608,11 @@ export async function newChat(title?: string): Promise<string> {
   return liveId
 }
 
-export async function send(text: string, opts: { steer?: boolean } = {}): Promise<void> {
+export async function send(text: string): Promise<void> {
   let sid = activeSession.get()
   // No open thread: the message lands in the active bot's home thread, the
   // same place a rail pick would go (unsent new chats are local-only).
-  if (!sid && !opts.steer) {
+  if (!sid) {
     try {
       sid = await openHomeThread(activeBot.get())
     } catch (err) {
@@ -600,19 +623,19 @@ export async function send(text: string, opts: { steer?: boolean } = {}): Promis
   if (!sid) return
   // Local echo (the gateway does not echo the user's own message back).
   const s = sessionsById.get()[sid]
-  if (s && !opts.steer) {
+  if (s) {
     const messages = s.messages.slice()
     messages.push({ id: `u${Date.now()}`, role: 'user', segments: [{ kind: 'text', text }], createdAt: Date.now() })
     patchSession(sid, { messages })
   }
-  patchSession(sid, { busy: true })
+  markRunLive(sid, true)
   await rpc('prompt.submit', {
     session_id: sid,
     text,
     // queued: a message sent while the bot's intro, routine, or live turn is
-    // running waits and is answered after it — the gateway's default mid-turn
-    // path redirects the text into the live turn instead.
-    ...(opts.steer ? { steer: true } : { queued: true }),
+    // running waits and is answered after it — steering into the live run is
+    // the composer's explicit posture through session.steer.
+    queued: true,
   })
 }
 
@@ -627,6 +650,14 @@ export async function steer(text: string): Promise<void> {
   const sid = activeSession.get()
   if (!sid) return
   await rpc('session.steer', { session_id: sid, text })
+  // Echo only after the gateway accepts the steer — a rejected one throws,
+  // leaving the text in the composer instead of stranded in the transcript.
+  const s = sessionsById.get()[sid]
+  if (s) {
+    const messages = s.messages.slice()
+    messages.push({ id: `u${Date.now()}`, role: 'user', segments: [{ kind: 'text', text }], createdAt: Date.now() })
+    patchSession(sid, { messages })
+  }
 }
 
 /**
