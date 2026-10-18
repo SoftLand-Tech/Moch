@@ -71,6 +71,30 @@
     "1 question still needs an answer before sending.",
     "سؤال واحد لا يزال بحاجة إلى إجابة قبل الإرسال."
   ],
+  "chat.clear": [
+    "Clear",
+    "تفريغ"
+  ],
+  "chat.clear.confirm.body": [
+    "The thread stays with its bot. The history so far is removed.",
+    "تبقى المحادثة مع روبوتها. يُحذف السجل حتى الآن."
+  ],
+  "chat.clear.confirm.title": [
+    "Clear this conversation?",
+    "تفريغ هذه المحادثة؟"
+  ],
+  "chat.clear.fail": [
+    "Could not clear the conversation — try again.",
+    "تعذر تفريغ المحادثة — حاول مجددًا."
+  ],
+  "chat.clear.go": [
+    "Clear",
+    "تفريغ"
+  ],
+  "chat.clear.keep": [
+    "Keep",
+    "إبقاء"
+  ],
   "chat.composer.placeholder": [
     "Ask Mochi anything — / for commands",
     "اسأل موتشي أي شيء — اكتب / للأوامر"
@@ -82,6 +106,34 @@
   "chat.composer.placeholder.steer": [
     "Steer the running turn — delivered at the next boundary…",
     "وجّه الدور الجاري — يُسلَّم عند الحد التالي…"
+  ],
+  "chat.diff.copy": [
+    "Copy",
+    "نسخ"
+  ],
+  "chat.diff.unavailable": [
+    "(diff preview unavailable)",
+    "(معاينة الفرق غير متوفرة)"
+  ],
+  "chat.diff.view": [
+    "View diff",
+    "عرض الفرق"
+  ],
+  "chat.empty.chip.automation": [
+    "Set up an automation",
+    "أنشئ أتمتة"
+  ],
+  "chat.empty.chip.browser": [
+    "Look up something in the browser",
+    "ابحث عن شيء في المتصفح"
+  ],
+  "chat.empty.chip.capabilities": [
+    "What can you do?",
+    "ما الذي تستطيع فعله؟"
+  ],
+  "chat.empty.chip.workspace": [
+    "Show me the workspace",
+    "أرني مساحة العمل"
   ],
   "chat.empty.sub": [
     "Your agents run entirely on this machine — they can use the terminal, browse the web, remember across chats, and work while you're elsewhere. Ask for anything.",
@@ -106,6 +158,66 @@
   "chat.list.empty": [
     "No chats yet — say hi below.",
     "لا محادثات بعد — قل مرحبًا بالأسفل."
+  ],
+  "chat.phase.browsing": [
+    "Browsing",
+    "يتصفح"
+  ],
+  "chat.phase.editing": [
+    "Editing",
+    "يحرر"
+  ],
+  "chat.phase.recovering": [
+    "Recovering",
+    "يتعافى"
+  ],
+  "chat.phase.researching": [
+    "Researching",
+    "يبحث"
+  ],
+  "chat.phase.running": [
+    "Running commands",
+    "ينفذ أوامر"
+  ],
+  "chat.phase.skills": [
+    "Loading skills",
+    "يحمّل المهارات"
+  ],
+  "chat.phase.thinking": [
+    "Thinking",
+    "يفكر"
+  ],
+  "chat.phase.working": [
+    "Working",
+    "يعمل"
+  ],
+  "chat.think.chars": [
+    "{n} chars",
+    "{n} حرفًا"
+  ],
+  "chat.think.reasoning": [
+    "Reasoning",
+    "استدلال"
+  ],
+  "chat.think.thinking": [
+    "Thinking",
+    "يفكر"
+  ],
+  "chat.tools.count": [
+    "{n} tools",
+    "{n} أدوات"
+  ],
+  "chat.tools.done": [
+    "{n} tools · {d}",
+    "{n} أدوات · {d}"
+  ],
+  "chat.tools.earlier": [
+    "+{n} earlier steps",
+    "+{n} خطوات سابقة"
+  ],
+  "chat.tools.working": [
+    "Working · {n} tools",
+    "يعمل · {n} أدوات"
   ],
   "create.cancel": [
     "Cancel",
