@@ -6,7 +6,13 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO="$(cd "$HERE/../../.." && pwd)"
+# In a git worktree the old ../../../ climb landed one level above the root,
+# so trust git's own answer; ../.. covers a plain checkout without git.
+if REPO="$(git -C "$HERE" rev-parse --show-toplevel 2>/dev/null)" && [ -n "$REPO" ]; then
+  :
+else
+  REPO="$(cd "$HERE/../.." && pwd)"
+fi
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$REPO/.uv-cache}"
 
 if ! [ -d "$REPO/app/hermes-src" ]; then
