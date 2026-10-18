@@ -1,18 +1,18 @@
 import { useStore } from '@nanostores/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ArrowUp, Brain, ChevronRight, CircleStop, Copy, GitBranch, ListTodo, LockKeyhole,
+  ArrowUp, Brain, ChevronRight, CircleStop, Copy, ListTodo,
   Mic, Paperclip, Sparkles, GitCompare, Wrench, Check, Volume2, Cpu, GraduationCap,
   SquareTerminal,
 } from 'lucide-react'
 import {
-  activeSession, activeSessionAtom, activeTitle, agentBusy, answerCard, deleteSession,
+  activeSession, activeSessionAtom, activeTitle, agentBusy, deleteSession,
   interrupt, messages, newChat, pendingRequest, renameSession, send, sessionOrder,
   sessionsById, steer, switchToSession, toggleMark,
   tools as toolsAtom, todos as todosAtom,
   phaseForTools,
   changedFiles,
-  type ChatMessage, type ChatSegment, type PendingCard, type ToolItem,
+  type ChatMessage, type ChatSegment, type ToolItem,
 } from '../lib/chat'
 import { accentFor, activeBotName, setActiveBot } from '../lib/fleet'
 import { isConnected } from '../lib/gateway'
@@ -342,46 +342,6 @@ function ToolRow({ tool }: { tool: ToolItem }) {
         </div>
       ) : null}
     </>
-  )
-}
-
-function Card({ card }: { card: PendingCard }) {
-  const [value, setValue] = useState('')
-  const isSudo = card.kind === 'sudo'
-  const isSecret = card.kind === 'secret'
-  const needsText = isSudo || isSecret || card.kind === 'clarify'
-  return (
-    <div className={`card${card.danger ? ' danger' : ''}`}>
-      <div className="card-title">
-        {isSudo || isSecret ? <LockKeyhole size={15} /> : <GitBranch size={15} />}
-        {card.title}
-      </div>
-      {card.body ? <div className="card-body mono">{card.body}</div> : null}
-      {needsText ? (
-        <input
-          className="input card-input"
-          type={isSudo ? 'password' : 'text'}
-          placeholder={isSudo ? 'sudo password' : isSecret ? 'the secret value' : 'your answer'}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-        />
-      ) : null}
-      <div className="card-actions">
-        {card.options?.length ? (
-          card.options.map((o) => (
-            <button key={o.value} className="btn" onClick={() => void answerCard(card, { value: o.value })}>{o.label}</button>
-          ))
-        ) : null}
-        {needsText ? (
-          <button className="btn primary" disabled={!value} onClick={() => void answerCard(card, { value })}>Answer</button>
-        ) : (
-          <>
-            <button className="btn primary" onClick={() => void answerCard(card, { choice: 'once' })}>Approve</button>
-            <button className="btn danger" onClick={() => void answerCard(card, { choice: 'deny' })}>Deny</button>
-          </>
-        )}
-      </div>
-    </div>
   )
 }
 
