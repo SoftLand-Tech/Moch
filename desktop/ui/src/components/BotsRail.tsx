@@ -12,14 +12,14 @@ import {
   accentFor, activeBotAtom, botAvatar, botColor, fleetProfiles, fleetStatusAtom, homeThreadFor,
   type FleetQueueEntry,
 } from '../lib/fleet'
-import { listBotSessions, openHomeThread, startSideChat, switchToSession, type BotSessionRow } from '../lib/chat'
+import { listBotSessions, openHomeThread, startSideChat, switchToSession, pendingBySession, sessionsById, sessionOrder, type BotSessionRow } from '../lib/chat'
 import { isConnected } from '../lib/gateway'
 import { locale, tr } from '../lib/strings'
 import { requestFleetFocus } from '../views/FleetView'
 import './BotsRail.css'
 
 /** One roster row's status: the dot kind plus the queued-turn count. */
-type DotKind = 'run' | 'wait' | 'idle' | 'frozen'
+type DotKind = 'run' | 'wait' | 'ask' | 'idle' | 'frozen'
 
 /** key '' is the default agent (Mochi); named bots key by profile name. */
 interface RailBot {
@@ -49,6 +49,7 @@ function waitingByBot(waiting: FleetQueueEntry[]): Map<string, number> {
 
 function dotLabel(kind: DotKind, waiting: number): string {
   if (kind === 'frozen') return tr('shell.thread.frozen')
+  if (kind === 'ask') return tr('shell.thread.waitingInput')
   if (kind === 'run') return tr('shell.thread.working')
   if (kind === 'wait') return waiting > 1 ? tr('rail.waiting.n', { n: waiting }) : tr('shell.thread.waiting')
   return tr('shell.thread.idle')
@@ -65,7 +66,24 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
   const fleet = useStore(fleetStatusAtom)
   const active = useStore(activeBotAtom)
   const connected = useStore(isConnected)
+  const pending = useStore(pendingBySession)
+  const byId = useStore(sessionsById)
+  const orderRows = useStore(sessionOrder)
   useStore(locale) // subscribe so roster labels re-render when the language changes
+
+  /** Which bots hold an unanswered ask, keyed like rail rows ('' = Mochi). */
+  const askingBots = useMemo(() => {
+    const keys = new Set<string>()
+    for (const c of Object.values(pending)) {
+      if (c.cancelled) continue
+      const live = byId[c.sessionId ?? '']
+      const stored = live?.storedId
+        ? orderRows.find((r) => r.id === live.storedId)
+        : orderRows.find((r) => r.id === c.sessionId)
+      keys.add(live?.profile ?? stored?.profile ?? '')
+    }
+    return keys
+  }, [pending, byId, orderRows])
 
   const rows = useMemo<RailBot[]>(() => {
     const waiting = waitingByBot(fleet?.queue.waiting ?? [])
@@ -75,7 +93,8 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
         name: null,
         description: tr('rail.mochi.job'),
         accent: 'var(--text-faint)',
-        dot: (waiting.get('') ?? 0) > 0 ? 'wait' : 'idle',
+        // An ask is the bot paused on you; it outranks the queue's waiting.
+        dot: askingBots.has('') ? 'ask' : (waiting.get('') ?? 0) > 0 ? 'wait' : 'idle',
         waiting: waiting.get('') ?? 0,
       },
       ...bots
@@ -89,7 +108,7 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
             name: b.name,
             description: b.description || tr('rail.nodesc'),
             accent: b.avatarAccent ?? accentFor(b.name),
-            dot: frozen ? 'frozen' : st?.gateHeld ? 'run' : w > 0 ? 'wait' : 'idle',
+            dot: frozen ? 'frozen' : askingBots.has(b.name) ? 'ask' : st?.gateHeld ? 'run' : w > 0 ? 'wait' : 'idle',
             waiting: w,
             color: botColor(b),
             avatar: botAvatar(b),
@@ -100,7 +119,7 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
     if (!needle) return all
     return all.filter((r) =>
       `${r.name ?? tr('rail.mochi')}\n${r.description}`.toLowerCase().includes(needle))
-  }, [bots, fleet, q])
+  }, [bots, fleet, q, askingBots])
 
   // Focus the bot's home thread: the bound session, or a fresh one when the
   // bot has none yet. openHomeThread owns the resolution and the binding.

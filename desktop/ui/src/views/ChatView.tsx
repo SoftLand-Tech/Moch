@@ -51,6 +51,17 @@ function Transcript() {
   const scroller = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
 
+  // An ask anchors where it landed in the flow: a message sent after it (a
+  // queued send) appends below the card instead of pushing it down. The
+  // anchor is captured once per card id, during render, from the transcript
+  // length at arrival.
+  const cardAnchor = useRef<{ id: string; at: number } | null>(null)
+  if (!card) cardAnchor.current = null
+  else if (cardAnchor.current?.id !== card.id) cardAnchor.current = { id: card.id, at: msgs.length - 1 }
+  const cardAt = card && cardAnchor.current?.id === card.id
+    ? Math.min(cardAnchor.current.at, msgs.length - 1)
+    : -1
+
   const onScroll = () => {
     const el = scroller.current
     if (!el) return
@@ -76,7 +87,8 @@ function Transcript() {
 
   return (
     <div className="transcript" ref={scroller} onScroll={onScroll}>
-      {msgs.length === 0 && !busy ? <EmptyChat /> : null}
+      {msgs.length === 0 && !busy && !card ? <EmptyChat /> : null}
+      {card && cardAt < 0 ? <InteractiveCard card={card} /> : null}
       {todosList.length ? (
         <div className="todos">
           <div className="todo-row" style={{ fontWeight: 650, color: 'var(--text-dim)', fontSize: 12 }}>
@@ -111,12 +123,14 @@ function Transcript() {
                 <span onClick={() => { const lastU = findLastIdxLocal(msgs, (x: ChatMessage) => x.role === 'user'); if (lastU >= 0) void send(msgs[lastU].segments.map((sg) => sg.text).join('')) }}>↻ retry</span>
               </div>
             ) : null}
+            {i === cardAt && card ? <InteractiveCard card={card} /> : null}
           </div>
         )
       })}
 
-      {card ? <InteractiveCard card={card} /> : null}
-      {busy && !msgs.some(m => m.streaming) ? (
+      {/* An ask pauses the run (Rakazo waiting_input), so the busy strip
+          yields to the card instead of thinking under it. */}
+      {busy && !card && !msgs.some(m => m.streaming) ? (
         <div className="busy-strip"><div className="spinner" style={{ width: 12, height: 12 }} /> thinking…</div>
       ) : null}
     </div>

@@ -11,6 +11,16 @@ export const en = {
   'chat.composer.placeholder': 'Ask Mochi anything — / for commands',
   'chat.composer.placeholder.bot': 'Message {name}…',
   'chat.composer.placeholder.steer': 'Steer the running turn — delivered at the next boundary…',
+  'card.answer.placeholder': 'your answer',
+  'card.sudo.placeholder': 'sudo password',
+  'card.secret.placeholder': 'the secret value',
+  'card.answer': 'Answer',
+  'card.answer.all': 'Answer all',
+  'card.allow': 'Allow',
+  'card.deny': 'Deny',
+  'card.approve': 'Approve',
+  'card.approve.session': 'Approve for this chat',
+  'card.approve.always': 'Always allow',
 } as const
 
 export const ar: Record<keyof typeof en, string> = {
@@ -25,4 +35,14 @@ export const ar: Record<keyof typeof en, string> = {
   'chat.composer.placeholder': 'اسأل موتشي أي شيء — اكتب / للأوامر',
   'chat.composer.placeholder.bot': 'راسل {name}…',
   'chat.composer.placeholder.steer': 'وجّه الدور الجاري — يُسلَّم عند الحد التالي…',
+  'card.answer.placeholder': 'إجابتك',
+  'card.sudo.placeholder': 'كلمة سر sudo',
+  'card.secret.placeholder': 'القيمة السرية',
+  'card.answer': 'أجب',
+  'card.answer.all': 'أجب عن الكل',
+  'card.allow': 'اسمح',
+  'card.deny': 'ارفض',
+  'card.approve': 'وافق',
+  'card.approve.session': 'وافق لهذه المحادثة',
+  'card.approve.always': 'اسمح دائمًا',
 }

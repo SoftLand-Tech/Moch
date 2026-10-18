@@ -63,6 +63,46 @@
     "SOUL.md — the job description",
     "SOUL.md — وصف المهمة"
   ],
+  "card.allow": [
+    "Allow",
+    "اسمح"
+  ],
+  "card.answer": [
+    "Answer",
+    "أجب"
+  ],
+  "card.answer.all": [
+    "Answer all",
+    "أجب عن الكل"
+  ],
+  "card.answer.placeholder": [
+    "your answer",
+    "إجابتك"
+  ],
+  "card.approve": [
+    "Approve",
+    "وافق"
+  ],
+  "card.approve.always": [
+    "Always allow",
+    "اسمح دائمًا"
+  ],
+  "card.approve.session": [
+    "Approve for this chat",
+    "وافق لهذه المحادثة"
+  ],
+  "card.deny": [
+    "Deny",
+    "ارفض"
+  ],
+  "card.secret.placeholder": [
+    "the secret value",
+    "القيمة السرية"
+  ],
+  "card.sudo.placeholder": [
+    "sudo password",
+    "كلمة سر sudo"
+  ],
   "chat.clarify.pending.many": [
     "{n} questions still need answers before sending.",
     "{n} أسئلة لا تزال بحاجة إلى إجابات قبل الإرسال."
@@ -598,6 +638,10 @@
   "shell.thread.waiting": [
     "Waiting",
     "في الانتظار"
+  ],
+  "shell.thread.waitingInput": [
+    "Waiting on you",
+    "ينتظرك"
   ],
   "shell.thread.working": [
     "Working",

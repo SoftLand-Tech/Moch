@@ -7,12 +7,15 @@
  *   sudo/secret → {value} | {} (deny)
  */
 import { useState } from 'react'
+import { useStore } from '@nanostores/react'
 import { GitBranch, LockKeyhole } from 'lucide-react'
 import { answerCard, type PendingCard } from '../lib/chat'
+import { locale, tr } from '../lib/strings'
 
 export default function InteractiveCard({ card }: { card: PendingCard }) {
   const [value, setValue] = useState('')
   const [batch, setBatch] = useState<Record<string, string>>({})
+  useStore(locale) // subscribe so every card string re-renders when the language changes
   const isPrivileged = card.kind === 'sudo' || card.kind === 'secret' || card.kind === 'vault'
   const singleQuestion = card.questions?.length === 1 ? card.questions[0] : null
   const choices = card.options ?? (singleQuestion?.choices?.map((c) => ({ label: c, value: c })) ?? undefined)
@@ -75,7 +78,7 @@ export default function InteractiveCard({ card }: { card: PendingCard }) {
                   <input
                     className="input card-input"
                     style={{ marginBottom: 0 }}
-                    placeholder="your answer"
+                    placeholder={tr('card.answer.placeholder')}
                     value={batch[q.qid] ?? ''}
                     onChange={(e) => setBatch((b) => ({ ...b, [q.qid]: e.target.value }))}
                   />
@@ -87,7 +90,7 @@ export default function InteractiveCard({ card }: { card: PendingCard }) {
             className="btn primary"
             disabled={card.questions.some((q) => !batch[q.qid])}
             onClick={() => void answerCard(card, { batch })}
-          >Answer all</button>
+          >{tr('card.answer.all')}</button>
         </div>
       ) : null}
 
@@ -98,14 +101,14 @@ export default function InteractiveCard({ card }: { card: PendingCard }) {
             <input
               className="input card-input"
               type={card.kind === 'sudo' ? 'password' : 'text'}
-              placeholder={card.kind === 'sudo' ? 'sudo password' : 'the secret value'}
+              placeholder={card.kind === 'sudo' ? tr('card.sudo.placeholder') : tr('card.secret.placeholder')}
               value={value}
               onChange={(e) => setValue(e.target.value)}
             />
           ) : !choices?.length ? (
             <input
               className="input card-input"
-              placeholder="your answer"
+              placeholder={tr('card.answer.placeholder')}
               value={value}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && submitText()}
@@ -117,19 +120,19 @@ export default function InteractiveCard({ card }: { card: PendingCard }) {
             )) : null}
             {isPrivileged ? (
               <>
-                <button className="btn primary" disabled={!value} onClick={() => void answerCard(card, { value })}>Allow</button>
-                <button className="btn danger" onClick={() => void answerCard(card, {})}>Deny</button>
+                <button className="btn primary" disabled={!value} onClick={() => void answerCard(card, { value })}>{tr('card.allow')}</button>
+                <button className="btn danger" onClick={() => void answerCard(card, {})}>{tr('card.deny')}</button>
               </>
             ) : !choices?.length ? (
-              <button className="btn primary" disabled={!value.trim()} onClick={submitText}>Answer</button>
+              <button className="btn primary" disabled={!value.trim()} onClick={submitText}>{tr('card.answer')}</button>
             ) : null}
             {/* Approval without offered choices: the canonical verbs. */}
             {card.kind === 'approval' && !choices?.length ? (
               <>
-                <button className="btn primary" onClick={() => void answerCard(card, { choice: 'once' })}>Approve</button>
-                {card.allowSession ? <button className="btn" onClick={() => void answerCard(card, { choice: 'session' })}>Approve for this chat</button> : null}
-                {card.allowPermanent ? <button className="btn" onClick={() => void answerCard(card, { choice: 'always' })}>Always allow</button> : null}
-                <button className="btn danger" onClick={() => void answerCard(card, { choice: 'deny' })}>Deny</button>
+                <button className="btn primary" onClick={() => void answerCard(card, { choice: 'once' })}>{tr('card.approve')}</button>
+                {card.allowSession ? <button className="btn" onClick={() => void answerCard(card, { choice: 'session' })}>{tr('card.approve.session')}</button> : null}
+                {card.allowPermanent ? <button className="btn" onClick={() => void answerCard(card, { choice: 'always' })}>{tr('card.approve.always')}</button> : null}
+                <button className="btn danger" onClick={() => void answerCard(card, { choice: 'deny' })}>{tr('card.deny')}</button>
               </>
             ) : null}
           </div>
