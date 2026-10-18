@@ -4,7 +4,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '@nanostores/react'
-import { ArrowRight, Activity, Bot, CalendarClock, Globe, Inbox, MessageSquareText, Settings, SquareTerminal, UsersRound } from 'lucide-react'
+import { ArrowRight, ArrowLeft, Activity, Bot, CalendarClock, Globe, Inbox, MessageSquareText, Settings, SquareTerminal, UsersRound } from 'lucide-react'
 import type { ViewId } from '../app'
 import { fleetProfiles, setActiveBot } from '../lib/fleet'
 import { newChat } from '../lib/chat'
@@ -33,21 +33,21 @@ export default function CommandPalette({ onClose, onNavigate, onOpenSettings }: 
 
   const items = useMemo<Item[]>(() => {
     const views: Item[] = [
-      { id: 'v-chat', label: 'Chats', icon: MessageSquareText, run: () => onNavigate('chat') },
-      { id: 'v-fleet', label: 'Fleet — your bots', icon: Bot, run: () => onNavigate('fleet') },
-      { id: 'v-crew', label: 'Crew — task board', icon: UsersRound, run: () => onNavigate('crew') },
+      { id: 'v-chat', label: tr('nav.chats'), icon: MessageSquareText, run: () => onNavigate('chat') },
+      { id: 'v-fleet', label: tr('palette.fleet'), icon: Bot, run: () => onNavigate('fleet') },
+      { id: 'v-crew', label: tr('palette.crew'), icon: UsersRound, run: () => onNavigate('crew') },
       { id: 'v-activity', label: tr('activity.palette'), icon: Activity, run: () => onNavigate('history') },
-      { id: 'v-inbox', label: 'Inbox — waiting on you', icon: Inbox, run: () => onNavigate('inbox') },
-      { id: 'v-browser', label: 'Browser — the agent browser', icon: Globe, run: () => onNavigate('browser') },
-      { id: 'v-terminal', label: 'Terminal', icon: SquareTerminal, run: () => onNavigate('terminal') },
-      { id: 'v-automations', label: 'Automations', icon: CalendarClock, run: () => onNavigate('automations') },
+      { id: 'v-inbox', label: tr('palette.inbox'), icon: Inbox, run: () => onNavigate('inbox') },
+      { id: 'v-browser', label: tr('palette.browser'), icon: Globe, run: () => onNavigate('browser') },
+      { id: 'v-terminal', label: tr('nav.terminal'), icon: SquareTerminal, run: () => onNavigate('terminal') },
+      { id: 'v-automations', label: tr('nav.automations'), icon: CalendarClock, run: () => onNavigate('automations') },
     ]
     const actions: Item[] = [
-      { id: 'a-newchat', label: 'New chat', hint: 'fresh session', icon: MessageSquareText, run: () => { onNavigate('chat'); void newChat() } },
+      { id: 'a-newchat', label: tr('palette.newchat'), hint: tr('palette.newchat.hint'), icon: MessageSquareText, run: () => { onNavigate('chat'); void newChat() } },
       { id: 'a-settings', label: tr('nav.settings'), icon: Settings, run: onOpenSettings },
       ...bots.filter(b => b.name !== 'default').map((b): Item => ({
         id: `b-${b.name}`,
-        label: `Chat with @${b.name}`,
+        label: tr('palette.chatwith', { name: `@${b.name}` }),
         hint: b.description.slice(0, 60),
         icon: Bot,
         run: () => { void setActiveBot(b.name); onNavigate('chat'); void newChat() },
@@ -73,7 +73,7 @@ export default function CommandPalette({ onClose, onNavigate, onOpenSettings }: 
           <div className="ctx-search" style={{ margin: 0, border: 'none', background: 'transparent', padding: '10px 8px' }}>
             <input
               ref={inputRef}
-              placeholder="Jump to anything — views, bots, actions…"
+              placeholder={tr('palette.placeholder')}
               value={q}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={(e) => {
@@ -94,16 +94,16 @@ export default function CommandPalette({ onClose, onNavigate, onOpenSettings }: 
                 key={item.id}
                 className={`row${i === sel ? ' active' : ''}`}
                 onMouseEnter={() => setSel(i)}
-                onClick={runSel}
+                onClick={() => { item.run(); onClose() }}
               >
                 <Icon size={15} />
                 <span className="row-title">{item.label}</span>
                 {item.hint ? <span className="row-sub">{item.hint}</span> : null}
-                {i === sel ? <ArrowRight size={12} /> : null}
+                {i === sel ? (loc === 'ar' ? <ArrowLeft size={12} /> : <ArrowRight size={12} />) : null}
               </button>
             )
           })}
-          {items.length === 0 ? <div style={{ padding: 16, color: 'var(--text-faint)', fontSize: 13 }}>Nothing matches.</div> : null}
+          {items.length === 0 ? <div style={{ padding: 16, color: 'var(--text-faint)', fontSize: 13 }}>{tr('palette.nomatch')}</div> : null}
         </div>
       </div>
     </div>

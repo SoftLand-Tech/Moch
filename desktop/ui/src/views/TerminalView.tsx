@@ -11,6 +11,7 @@ import { useCallback, useRef, useState } from 'react'
 import { ChevronRight, House, Plus, RotateCcw, SquareTerminal, X } from 'lucide-react'
 import TerminalPane from '../components/TerminalPane'
 import { workspaceDir } from '../lib/gateway'
+import { locale, tr } from '../lib/strings'
 
 /** The view's shells greet: MOCH marks our spawn, TERM enables 256-color. */
 const TERM_ENV: Record<string, string> = { MOCH: '1', TERM: 'xterm-256color' }
@@ -22,14 +23,15 @@ interface TermSession {
 
 export default function TerminalView() {
   const workspace = useStore(workspaceDir)
-  const [sessions, setSessions] = useState<TermSession[]>(() => [{ key: 1, label: 'shell 1' }])
+  useStore(locale)
+  const [sessions, setSessions] = useState<TermSession[]>(() => [{ key: 1, label: tr('term.session.label', { n: 1 }) }])
   const [activeKey, setActiveKey] = useState(1)
   const [restartNonces, setRestartNonces] = useState<Record<number, number>>({})
   const nextKey = useRef(2)
 
   const newSession = useCallback(() => {
     const key = nextKey.current++
-    setSessions((prev) => [...prev, { key, label: `shell ${key}` }])
+    setSessions((prev) => [...prev, { key, label: tr('term.session.label', { n: key }) }])
     setActiveKey(key)
   }, [])
 
@@ -60,10 +62,10 @@ export default function TerminalView() {
 
   return (
     <>
-      <aside className="ctx" aria-label="Terminal sessions">
+      <aside className="ctx" aria-label={tr('term.sessions.aria')}>
         <div className="ctx-head">
-          <span className="ctx-title">Sessions</span>
-          <span className="ctx-actions row-meta">{sessions.length} live</span>
+          <span className="ctx-title">{tr('term.sessions')}</span>
+          <span className="ctx-actions row-meta">{tr('term.sessions.live', { n: sessions.length })}</span>
         </div>
         <div className="ctx-body">
           {sessions.map((s) => (
@@ -71,15 +73,15 @@ export default function TerminalView() {
               key={s.key}
               className={`row${s.key === activeKey ? ' active' : ''}`}
               onClick={() => setActiveKey(s.key)}
-              title="Show this terminal"
+              title={tr('term.show')}
             >
               <SquareTerminal size={14} />
               <span className="row-title">{s.label}</span>
               <span
                 className="term-tab-close"
                 role="button"
-                aria-label={`Close ${s.label}`}
-                title="Close this terminal"
+                aria-label={tr('term.closeNamed', { label: s.label })}
+                title={tr('term.close')}
                 onClick={(e) => {
                   e.stopPropagation()
                   closeSession(s.key)
@@ -91,11 +93,11 @@ export default function TerminalView() {
           ))}
           {sessions.length === 0 && (
             <div className="text-faint" style={{ fontSize: 12, padding: '10px 12px', lineHeight: 1.5 }}>
-              No live terminals — spawn one below.
+              {tr('term.none')}
             </div>
           )}
           <button className="ctx-new" onClick={newSession}>
-            <Plus size={14} /> New terminal
+            <Plus size={14} /> {tr('term.new')}
           </button>
         </div>
       </aside>
@@ -104,9 +106,9 @@ export default function TerminalView() {
         <div className="focus-head">
           <span className="mono" style={{ fontSize: 13, fontWeight: 650, display: 'flex', alignItems: 'center', gap: 8 }}>
             <SquareTerminal size={15} color="var(--accent)" />
-            {activeLabel ?? 'Terminal'}
+            {activeLabel ?? tr('nav.terminal')}
           </span>
-          <span className="chip" title={workspace ?? 'waiting for the workspace…'}>
+          <span className="chip" title={workspace ?? tr('files.waiting')}>
             <House size={11} />
             <span style={{
               maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -122,15 +124,15 @@ export default function TerminalView() {
                   ))}
             </span>
           </span>
-          <span className="chip" title="The PTY launches your default login shell ($SHELL)">
-            default shell
+          <span className="chip" title={tr('term.defaultShell.title')}>
+            {tr('term.defaultShell')}
           </span>
           <div style={{ flex: 1 }} />
           <button className="btn sm" onClick={newSession}>
-            <Plus size={13} /> New terminal
+            <Plus size={13} /> {tr('term.new')}
           </button>
           <button className="btn sm" onClick={restartActive} disabled={!activeKey}>
-            <RotateCcw size={13} /> Restart
+            <RotateCcw size={13} /> {tr('term.restart')}
           </button>
         </div>
         <div className="term-stack">
@@ -141,10 +143,10 @@ export default function TerminalView() {
           ))}
           {sessions.length === 0 && (
             <div className="empty">
-              <div className="empty-title">No terminals</div>
-              <div className="empty-sub">Spawn a shell in the agent workspace to run commands alongside your bots.</div>
+              <div className="empty-title">{tr('term.empty.title')}</div>
+              <div className="empty-sub">{tr('term.empty.sub')}</div>
               <button className="btn primary" onClick={newSession}>
-                <Plus size={14} /> New terminal
+                <Plus size={14} /> {tr('term.new')}
               </button>
             </div>
           )}

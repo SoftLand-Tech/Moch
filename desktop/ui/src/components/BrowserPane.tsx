@@ -17,6 +17,7 @@ import {
   type CdpConnectionState,
 } from '../lib/cdp'
 import { openExternal } from '../lib/shell-ops'
+import { locale, tr } from '../lib/strings'
 import '../styles/browser.css'
 
 interface SurfaceState {
@@ -38,6 +39,7 @@ export default function BrowserPane({ compact = false }: { compact?: boolean }) 
   const tabs = useStore(browserTabs)
   const conn = useStore(cdpConnection)
   const targetId = useStore(activeTargetId)
+  useStore(locale)
 
   const [urlInput, setUrlInput] = useState('')
   const [surface, setSurface] = useState<SurfaceState>({ url: null, loading: false, canBack: false, canForward: false })
@@ -74,12 +76,12 @@ export default function BrowserPane({ compact = false }: { compact?: boolean }) 
     return (
       <div className="browser-pane bp-idle">
         <Globe size={22} />
-        <div>The agent browser isn&apos;t running.</div>
+        <div>{tr('ctx.browser.idle')}</div>
         <button
           className="btn primary sm"
           onClick={() => void launchBrowser().catch((err) => console.warn('[browser] launch failed', err))}
         >
-          Launch Chromium
+          {tr('ctx.browser.launch')}
         </button>
       </div>
     )
@@ -89,18 +91,18 @@ export default function BrowserPane({ compact = false }: { compact?: boolean }) 
     <div className={`browser-pane${compact ? ' compact' : ''}`}>
       <div className="bp-chrome">
         <div className="bp-nav">
-          <button className="bp-icon-btn" title="Back" aria-label="Back" disabled={!surface.canBack} onClick={() => apiRef.current?.back()}>
+          <button className="bp-icon-btn" title={tr('ctx.browser.back')} aria-label={tr('ctx.browser.back')} disabled={!surface.canBack} onClick={() => apiRef.current?.back()}>
             <ArrowLeft size={14} />
           </button>
-          <button className="bp-icon-btn" title="Forward" aria-label="Forward" disabled={!surface.canForward} onClick={() => apiRef.current?.forward()}>
+          <button className="bp-icon-btn" title={tr('ctx.browser.forward')} aria-label={tr('ctx.browser.forward')} disabled={!surface.canForward} onClick={() => apiRef.current?.forward()}>
             <ArrowRight size={14} />
           </button>
-          <button className="bp-icon-btn" title="Reload" aria-label="Reload" onClick={() => apiRef.current?.reload()}>
+          <button className="bp-icon-btn" title={tr('ctx.browser.reload')} aria-label={tr('ctx.browser.reload')} onClick={() => apiRef.current?.reload()}>
             <RotateCw size={13} />
           </button>
         </div>
         <form className="bp-url" onSubmit={submitUrl}>
-          <span className="bp-url-scheme" title={secure ? 'Encrypted connection (https)' : 'Not encrypted'}>
+          <span className="bp-url-scheme" title={secure ? tr('ctx.browser.secure') : tr('ctx.browser.insecure')}>
             {surface.loading
               ? <span className="spinner" style={{ width: 11, height: 11, borderWidth: 2 }} />
               : secure ? <Lock size={11} /> : <Globe size={11} />}
@@ -110,8 +112,8 @@ export default function BrowserPane({ compact = false }: { compact?: boolean }) 
             value={urlInput}
             spellCheck={false}
             autoComplete="off"
-            placeholder="Search or enter address"
-            aria-label="Address"
+            placeholder={tr('ctx.browser.address.ph')}
+            aria-label={tr('ctx.browser.address.aria')}
             onChange={(e) => setUrlInput(e.target.value)}
             onFocus={() => { urlEditing.current = true }}
             onBlur={() => {
@@ -122,14 +124,14 @@ export default function BrowserPane({ compact = false }: { compact?: boolean }) 
         </form>
         <div className="bp-actions">
           {!compact && tabs.length > 0 ? (
-            <span className="bp-tabcount" title={`${tabs.length} open tab${tabs.length === 1 ? '' : 's'}`}>
+            <span className="bp-tabcount" title={tr(tabs.length === 1 ? 'ctx.browser.tabs.one' : 'ctx.browser.tabs.many', { n: tabs.length })}>
               <Globe size={10} />{tabs.length}
             </span>
           ) : null}
           <button
             className="bp-icon-btn"
-            title="Open in system browser"
-            aria-label="Open in system browser"
+            title={tr('ctx.browser.openExternal')}
+            aria-label={tr('ctx.browser.openExternal')}
             disabled={!surface.url}
             onClick={() => surface.url && void openExternal(surface.url)}
           >
@@ -144,9 +146,9 @@ export default function BrowserPane({ compact = false }: { compact?: boolean }) 
 
       <div className="bp-foot">
         <span className={`bp-live${conn === 'connected' && targetId ? ' on' : ''}`}>
-          <span className="bp-live-dot" /> live
+          <span className="bp-live-dot" /> {tr('ctx.browser.live')}
         </span>
-        <span className="bp-caption" title="Driven by you and your agents">Driven by you and your agents — hermes sees this same browser.</span>
+        <span className="bp-caption" title={tr('ctx.browser.captionTitle')}>{tr('ctx.browser.caption')}</span>
       </div>
     </div>
   )
@@ -190,6 +192,7 @@ function ScreencastSurface({
   apiRef: RefObject<ScreencastApi | null>
   onState: (patch: Partial<SurfaceState>) => void
 }) {
+  useStore(locale)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sessionRef = useRef<string | null>(null)
   const metaRef = useRef({ offsetTop: 0, pageScaleFactor: 1 })
@@ -475,7 +478,7 @@ function ScreencastSurface({
         ref={canvasRef}
         className="bp-canvas"
         tabIndex={0}
-        aria-label="Browser viewport — click to type into the page"
+        aria-label={tr('ctx.browser.viewport.aria')}
         onMouseDown={onMouseDown}
         onMouseUp={(e) => sendMouse('mouseReleased', e, canvasOffset(e), buttonName(e.button), Math.max(clickStateRef.current.count, 1))}
         onMouseMove={(e) => {
@@ -491,17 +494,17 @@ function ScreencastSurface({
       {conn !== 'connected' ? (
         <div className="bp-overlay">
           <div className="spinner" style={{ width: 16, height: 16 }} />
-          <div>Connecting to Chromium…</div>
+          <div>{tr('ctx.browser.connecting')}</div>
         </div>
       ) : !targetId ? (
         <div className="bp-overlay">
           <Globe size={18} />
-          <div>No tab attached — open one from the tab list.</div>
+          <div>{tr('ctx.browser.notab')}</div>
         </div>
       ) : !frameSeen ? (
         <div className="bp-overlay">
           <div className="spinner" style={{ width: 16, height: 16 }} />
-          <div>Starting the screencast…</div>
+          <div>{tr('ctx.browser.starting')}</div>
         </div>
       ) : null}
     </>

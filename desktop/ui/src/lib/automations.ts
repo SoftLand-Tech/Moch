@@ -9,6 +9,7 @@
  * gateway's strict params reject `id`/`job_id` extras.
  */
 import { rpc } from './gateway'
+import { locale } from './strings'
 
 export interface CronJob {
   id: string
@@ -286,7 +287,7 @@ export function fmtWhen(v: string | null): string {
   const t = Date.parse(v)
   if (!Number.isNaN(t)) {
     const d = new Date(t)
-    if (d.getFullYear() > 1971) return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    if (d.getFullYear() > 1971) return d.toLocaleString(locale.get() === 'ar' ? 'ar' : undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
   }
   return v
 }

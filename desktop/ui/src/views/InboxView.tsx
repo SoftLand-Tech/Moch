@@ -5,17 +5,17 @@ import {
   cardTitleKey, pendingBySession, pendingCount, sessionsById, sessionOrder,
   type PendingCard,
 } from '../lib/chat'
-import { tr } from '../lib/strings'
+import { locale, tr } from '../lib/strings'
 import { accentFor } from '../lib/fleet'
 import { displayBotName } from '../lib/crew'
 import InteractiveCard from '../components/InteractiveCard'
 
-const KIND_LABEL: Record<PendingCard['kind'], string> = {
-  approval: 'Approval',
-  clarify: 'Question',
-  sudo: 'Sudo',
-  secret: 'Secret',
-  vault: 'Vault',
+const KIND_KEYS: Record<PendingCard['kind'], string> = {
+  approval: 'inbox.kind.approval',
+  clarify: 'inbox.kind.clarify',
+  sudo: 'inbox.kind.sudo',
+  secret: 'inbox.kind.secret',
+  vault: 'inbox.kind.vault',
 }
 
 /** Which bot + session a pending card belongs to. */
@@ -29,7 +29,7 @@ function cardMeta(
   const storedId = live?.storedId
   const stored = storedId ? order.find((r) => r.id === storedId) : order.find((r) => r.id === sid)
   const profile = live?.profile ?? stored?.profile ?? 'default'
-  const sessionTitle = live?.title ?? stored?.title ?? 'Session'
+  const sessionTitle = live?.title ?? stored?.title ?? tr('inbox.session')
   return { bot: profile, sessionTitle }
 }
 
@@ -38,6 +38,7 @@ export default function InboxView() {
   const count = useStore(pendingCount)
   const byId = useStore(sessionsById)
   const order = useStore(sessionOrder)
+  useStore(locale)
 
   const cards = useMemo(
     () => Object.values(pending).filter((c) => !c.cancelled),
@@ -57,8 +58,8 @@ export default function InboxView() {
         if (!(await isPermissionGranted())) return
         const first = Object.values(pendingBySession.get()).find((c) => !c.cancelled)
         sendNotification({
-          title: 'A bot is waiting on you',
-          body: first ? tr(cardTitleKey(first.kind)) : 'Open Moch to respond.',
+          title: tr('inbox.notify.title'),
+          body: first ? tr(cardTitleKey(first.kind)) : tr('inbox.notify.body'),
         })
       } catch {
         /* notifications unavailable in this shell — the badge still shows */
@@ -69,10 +70,10 @@ export default function InboxView() {
   return (
     <main className="focus">
       <div className="focus-head">
-        <span style={{ fontWeight: 650, fontSize: 15 }}>Waiting on you</span>
+        <span style={{ fontWeight: 650, fontSize: 15 }}>{tr('inbox.title')}</span>
         {count > 0 ? (
           <span className="chip active" style={{ cursor: 'default', padding: '2px 10px' }}>
-            {count} open
+            {tr('inbox.open.n', { n: count })}
           </span>
         ) : null}
       </div>
@@ -81,10 +82,9 @@ export default function InboxView() {
           {cards.length === 0 ? (
             <div className="empty" style={{ padding: '90px 20px' }}>
               <Inbox size={30} color="var(--text-faint)" />
-              <div className="empty-title">Nothing needs you</div>
+              <div className="empty-title">{tr('inbox.empty.title')}</div>
               <div className="empty-sub" style={{ maxWidth: 420 }}>
-                Approvals, questions and sudo requests from any bot land here
-                the moment they ask. Mochi keeps working until one shows up.
+                {tr('inbox.empty.sub')}
               </div>
             </div>
           ) : (
@@ -113,7 +113,7 @@ function InboxCard({ card, bot, sessionTitle }: { card: PendingCard; bot: string
         <span style={{ fontSize: 11.5, color: 'var(--text-faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
           {sessionTitle}
         </span>
-        <span className="chip" style={{ cursor: 'default', padding: '2px 9px', flexShrink: 0 }}>{KIND_LABEL[card.kind]}</span>
+        <span className="chip" style={{ cursor: 'default', padding: '2px 9px', flexShrink: 0 }}>{tr(KIND_KEYS[card.kind])}</span>
       </div>
       <InteractiveCard card={card} />
     </div>

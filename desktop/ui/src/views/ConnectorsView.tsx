@@ -7,6 +7,7 @@ import {
   type ProviderInfo,
 } from '../lib/connectors'
 import { isConnected } from '../lib/gateway'
+import { locale, tr } from '../lib/strings'
 
 const labelStyle: React.CSSProperties = {
   fontSize: 'var(--text-xs)',
@@ -26,6 +27,7 @@ function Banner({ children }: { children: React.ReactNode }) {
 }
 
 export default function ConnectorsView() {
+  useStore(locale)
   const connected = useStore(isConnected)
   // ── providers ──
   const [providers, setProviders] = useState<ProviderInfo[]>([])
@@ -163,7 +165,7 @@ export default function ConnectorsView() {
       try {
         const parsed: unknown = JSON.parse(addModal.config)
         if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          throw new Error('config must be a JSON object, e.g. {"url": "https://…"} or {"command": "npx", "args": […]}')
+          throw new Error(tr('conn.err.obj'))
         }
         config = parsed as Record<string, unknown>
       } catch (e) {
@@ -171,7 +173,7 @@ export default function ConnectorsView() {
         return
       }
     } else if (!addModal.preset) {
-      setAddError('provide a config JSON or pick a catalog preset')
+      setAddError(tr('conn.err.config'))
       return
     }
     setAddBusy(true)
@@ -194,18 +196,18 @@ export default function ConnectorsView() {
     <main className="focus">
       <div className="focus-head">
         <Plug size={16} color="var(--accent)" />
-        <span style={{ fontWeight: 650, fontSize: 15 }}>Connectors</span>
+        <span style={{ fontWeight: 650, fontSize: 15 }}>{tr('nav.connectors')}</span>
         <div style={{ flex: 1 }} />
         <button
           className="btn sm"
-          title="Rescan"
+          title={tr('conn.rescan')}
           disabled={!connected}
           onClick={() => {
             void refreshProviders()
             void refreshMcp()
           }}
         >
-          <RefreshCw size={13} /> Refresh
+          <RefreshCw size={13} /> {tr('conn.refresh')}
         </button>
       </div>
       <div className="focus-body">
@@ -214,21 +216,21 @@ export default function ConnectorsView() {
           {/* ── (a) Model providers ── */}
           <section>
             <div style={{ ...labelStyle, borderBottom: '1px solid var(--border-soft)', paddingBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <KeyRound size={13} /> Model providers
+              <KeyRound size={13} /> {tr('conn.providers')}
             </div>
             {providersError ? <Banner>{providersError}</Banner> : null}
             {providersLoading ? (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--text-faint)', padding: '12px 0', fontSize: 'var(--text-sm)' }}>
-                <span className="spinner" style={{ width: 12, height: 12 }} /> loading providers…
+                <span className="spinner" style={{ width: 12, height: 12 }} /> {tr('conn.providers.loading')}
               </div>
             ) : providersUnusable ? (
               <div style={{ padding: '14px 0', display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <span className="text-faint" style={{ fontSize: 'var(--text-sm)' }}>
-                  The provider list isn't available — connect one directly by slug:
+                  {tr('conn.unavailable')}
                 </span>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <input className="input" style={{ width: 160 }} placeholder="provider slug e.g. openai" value={fallbackSlug} onChange={(e) => setFallbackSlug(e.target.value)} />
-                  <input className="input" type="password" style={{ flex: 1 }} placeholder="API key" value={fallbackKey} onChange={(e) => setFallbackKey(e.target.value)} />
+                  <input className="input" style={{ width: 160 }} placeholder={tr('conn.slug.ph')} value={fallbackSlug} onChange={(e) => setFallbackSlug(e.target.value)} />
+                  <input className="input" type="password" style={{ flex: 1 }} placeholder={tr('conn.apikey')} value={fallbackKey} onChange={(e) => setFallbackKey(e.target.value)} />
                   <button
                     className="btn primary"
                     disabled={!fallbackSlug.trim() || !fallbackKey.trim() || fallbackBusy}
@@ -241,7 +243,7 @@ export default function ConnectorsView() {
                         .finally(() => setFallbackBusy(false))
                     }}
                   >
-                    {fallbackBusy ? <span className="spinner" style={{ width: 11, height: 11 }} /> : <KeyRound size={13} />} Add provider key
+                    {fallbackBusy ? <span className="spinner" style={{ width: 11, height: 11 }} /> : <KeyRound size={13} />} {tr('conn.addkey')}
                   </button>
                 </div>
                 {fallbackError ? <Banner>{fallbackError}</Banner> : null}
@@ -251,23 +253,23 @@ export default function ConnectorsView() {
                 <div key={p.slug} className="row" style={{ padding: '10px 6px', borderBottom: '1px solid var(--border-soft)', cursor: 'default' }}>
                   <span
                     className={`status-dot ${p.authenticated === true ? 'ok' : p.authenticated === false ? 'idle' : 'warn'}`}
-                    title={p.authenticated === true ? 'connected' : p.authenticated === false ? 'no key' : 'unknown'}
+                    title={p.authenticated === true ? tr('conn.status.connected') : p.authenticated === false ? tr('conn.status.nokey') : tr('conn.status.unknown')}
                   />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                       {p.name}
-                      {p.isCurrent ? <span className="chip active" style={{ padding: '1px 8px', fontSize: 10, cursor: 'default' }}>current</span> : null}
-                      {p.freeTier ? <span className="chip" style={{ padding: '1px 8px', fontSize: 10, cursor: 'default' }}>free tier</span> : null}
+                      {p.isCurrent ? <span className="chip active" style={{ padding: '1px 8px', fontSize: 10, cursor: 'default' }}>{tr('conn.current')}</span> : null}
+                      {p.freeTier ? <span className="chip" style={{ padding: '1px 8px', fontSize: 10, cursor: 'default' }}>{tr('conn.freetier')}</span> : null}
                     </div>
                     <div className="text-faint" style={{ fontSize: 'var(--text-xs)' }}>
                       <span className="mono">{p.slug}</span>
-                      {p.models.length ? ` · ${p.models.length} models` : ''}
+                      {p.models.length ? ` · ${tr('conn.models.n', { n: p.models.length })}` : ''}
                       {p.warning ? ` · ${p.warning}` : ''}
                     </div>
                   </div>
                   {p.authenticated === true ? (
                     <button className="btn sm" disabled={keyBusy} onClick={() => void disconnect(p.slug)}>
-                      <Unplug size={13} /> Disconnect
+                      <Unplug size={13} /> {tr('conn.disconnect')}
                     </button>
                   ) : (
                     <button
@@ -279,7 +281,7 @@ export default function ConnectorsView() {
                         setKeyModal({ slug: p.slug, name: p.name })
                       }}
                     >
-                      <KeyRound size={13} /> Connect
+                      <KeyRound size={13} /> {tr('conn.connect')}
                     </button>
                   )}
                 </div>
@@ -290,53 +292,53 @@ export default function ConnectorsView() {
           {/* ── (b) MCP servers ── */}
           <section>
             <div style={{ ...labelStyle, borderBottom: '1px solid var(--border-soft)', paddingBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Server size={13} /> MCP servers
+              <Server size={13} /> {tr('conn.mcp')}
               <span style={{ flex: 1 }} />
-              <button className="btn ghost sm" onClick={openAdd} title="Add MCP server">
-                <Plus size={13} /> Add
+              <button className="btn ghost sm" onClick={openAdd} title={tr('conn.mcp.add')}>
+                <Plus size={13} /> {tr('conn.mcp.addBtn')}
               </button>
             </div>
             {mcpError ? <Banner>{mcpError}</Banner> : null}
             {mcpLoading ? (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--text-faint)', padding: '12px 0', fontSize: 'var(--text-sm)' }}>
-                <span className="spinner" style={{ width: 12, height: 12 }} /> loading servers…
+                <span className="spinner" style={{ width: 12, height: 12 }} /> {tr('conn.mcp.loading')}
               </div>
             ) : servers.length === 0 ? (
               <div style={{ padding: '12px 0', color: 'var(--text-faint)', fontSize: 'var(--text-sm)', lineHeight: 1.5 }}>
-                No MCP servers configured. Add one from the catalog or with a JSON config.
+                {tr('conn.mcp.none')}
               </div>
             ) : (
               servers.map((s) => {
                 const p = probe[s.name]
                 return (
                   <div key={s.name} className="row" style={{ padding: '10px 6px', borderBottom: '1px solid var(--border-soft)', cursor: 'default' }}>
-                    <span className={`status-dot ${mcpDotClass(s)}`} title={s.status ?? (s.connected === true ? 'connected' : s.connected === false ? 'not connected' : 'unknown')} />
+                    <span className={`status-dot ${mcpDotClass(s)}`} title={s.status ?? (s.connected === true ? tr('conn.status.connected') : s.connected === false ? tr('conn.mcp.notconnected') : tr('conn.status.unknown'))} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text)' }}>{s.name}</div>
                       <div className="text-faint" style={{ fontSize: 'var(--text-xs)', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         <span className="mono">{s.transport ?? (s.url ? 'http' : s.command ? 'stdio' : '?')}</span>
-                        {s.tools.length ? <span>{s.tools.length} tools</span> : null}
-                        {s.enabled === false ? <span>disabled</span> : null}
+                        {s.tools.length ? <span>{tr('conn.mcp.tools.n', { n: s.tools.length })}</span> : null}
+                        {s.enabled === false ? <span>{tr('conn.mcp.disabled')}</span> : null}
                         {s.status ? <span>{s.status}</span> : null}
                       </div>
                       {p ? (
                         <div style={{ fontSize: 'var(--text-xs)', color: p.ok ? 'var(--green-soft)' : 'var(--red)', marginTop: 3 }}>
-                          {p.ok ? 'test ok' : 'test failed'} — {p.detail}
+                          {p.ok ? tr('conn.test.ok') : tr('conn.test.failed')} — {p.detail}
                         </div>
                       ) : null}
                     </div>
                     <button className="btn sm" disabled={probing !== null} onClick={() => void test(s.name)}>
-                      {probing === s.name ? <span className="spinner" style={{ width: 11, height: 11 }} /> : null} Test
+                      {probing === s.name ? <span className="spinner" style={{ width: 11, height: 11 }} /> : null} {tr('conn.test')}
                     </button>
                     <button
                       className={`btn sm${confirmRemove === s.name ? ' danger' : ''}`}
-                      title={confirmRemove === s.name ? 'Click again to remove' : 'Remove'}
+                      title={confirmRemove === s.name ? tr('conn.remove.again') : tr('conn.remove')}
                       onClick={() => {
                         if (confirmRemove === s.name) void remove(s.name)
                         else setConfirmRemove(s.name)
                       }}
                     >
-                      {confirmRemove === s.name ? 'Confirm' : <Trash size={13} />}
+                      {confirmRemove === s.name ? tr('conn.confirm') : <Trash size={13} />}
                     </button>
                   </div>
                 )
@@ -351,11 +353,11 @@ export default function ConnectorsView() {
         <div className="scrim" onClick={(e) => e.target === e.currentTarget && setKeyModal(null)}>
           <div className="modal" style={{ minWidth: 380 }}>
             <div className="modal-head">
-              <span>Connect {keyModal.name}</span>
+              <span>{tr('conn.connect.named', { name: keyModal.name })}</span>
               <button className="btn ghost sm" onClick={() => setKeyModal(null)} aria-label="Close"><X size={14} /></button>
             </div>
             <div className="modal-body">
-              <div style={labelStyle}>API key</div>
+              <div style={labelStyle}>{tr('conn.apikey')}</div>
               <input
                 className="input"
                 type="password"
@@ -366,14 +368,14 @@ export default function ConnectorsView() {
                 autoFocus
               />
               <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-faint)', marginTop: 8 }}>
-                Stored locally in the hermes home .env — never leaves this machine.
+                {tr('conn.key.stored')}
               </div>
               {keyError ? <div style={{ marginTop: 8 }}><Banner>{keyError}</Banner></div> : null}
             </div>
             <div className="modal-foot">
-              <button className="btn ghost" onClick={() => setKeyModal(null)}>Cancel</button>
+              <button className="btn ghost" onClick={() => setKeyModal(null)}>{tr('conn.cancel')}</button>
               <button className="btn primary" disabled={!keyValue.trim() || keyBusy} onClick={() => void connect(keyModal.slug)}>
-                {keyBusy ? <span className="spinner" style={{ width: 11, height: 11 }} /> : <KeyRound size={13} />} Save key
+                {keyBusy ? <span className="spinner" style={{ width: 11, height: 11 }} /> : <KeyRound size={13} />} {tr('conn.key.save')}
               </button>
             </div>
           </div>
@@ -385,15 +387,15 @@ export default function ConnectorsView() {
         <div className="scrim" onClick={(e) => e.target === e.currentTarget && setAddModal(null)}>
           <div className="modal">
             <div className="modal-head">
-              <span>Add MCP server</span>
+              <span>{tr('conn.mcp.add')}</span>
               <button className="btn ghost sm" onClick={() => setAddModal(null)} aria-label="Close"><X size={14} /></button>
             </div>
             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
-                <div style={labelStyle}>Name</div>
+                <div style={labelStyle}>{tr('conn.name')}</div>
                 <input
                   className="input"
-                  placeholder="e.g. github"
+                  placeholder={tr('conn.name.ph')}
                   value={addModal.name}
                   onChange={(e) => setAddModal({ ...addModal, name: e.target.value, preset: addModal.preset && !e.target.value.startsWith(addModal.preset) ? null : addModal.preset })}
                   autoFocus
@@ -401,7 +403,7 @@ export default function ConnectorsView() {
               </div>
               {catalog && catalog.length > 0 ? (
                 <div>
-                  <div style={labelStyle}>From catalog {catalog.length}</div>
+                  <div style={labelStyle}>{tr('conn.catalog', { n: catalog.length })}</div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', maxHeight: 108, overflowY: 'auto' }}>
                     {catalog.map((c) => (
                       <button
@@ -415,12 +417,12 @@ export default function ConnectorsView() {
                     ))}
                   </div>
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-faint)', marginTop: 5 }}>
-                    A preset fills its own config — leave the JSON empty.
+                    {tr('conn.catalog.hint')}
                   </div>
                 </div>
               ) : null}
               <div>
-                <div style={labelStyle}>Config JSON</div>
+                <div style={labelStyle}>{tr('conn.config')}</div>
                 <textarea
                   className="input mono"
                   rows={6}
@@ -429,15 +431,15 @@ export default function ConnectorsView() {
                   onChange={(e) => setAddModal({ ...addModal, config: e.target.value })}
                 />
                 <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-faint)', marginTop: 5 }}>
-                  A “url” makes it an http server; a “command” (+ args, env) makes it stdio.
+                  {tr('conn.config.hint')}
                 </div>
               </div>
               {addError ? <Banner>{addError}</Banner> : null}
             </div>
             <div className="modal-foot">
-              <button className="btn ghost" onClick={() => setAddModal(null)}>Cancel</button>
+              <button className="btn ghost" onClick={() => setAddModal(null)}>{tr('conn.cancel')}</button>
               <button className="btn primary" disabled={!addModal.name.trim() || addBusy} onClick={() => void submitAdd()}>
-                {addBusy ? <span className="spinner" style={{ width: 11, height: 11 }} /> : <Plus size={13} />} Add server
+                {addBusy ? <span className="spinner" style={{ width: 11, height: 11 }} /> : <Plus size={13} />} {tr('conn.addserver')}
               </button>
             </div>
           </div>
