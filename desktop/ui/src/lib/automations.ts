@@ -164,6 +164,50 @@ export async function setAutomationEnabled(id: string, enabled: boolean): Promis
   }
 }
 
+/** One cron execution from the merged run ledger (moch.runs.timeline, source "cron"). */
+export interface CronRun {
+  /** Execution id from cron/executions.db. */
+  id: string
+  /** Owning job — the ledger only carries it inside the title, as "job <job_id>". */
+  jobId: string
+  status: string
+  /** Epoch ms; null when the ledger row carried no usable timestamp. */
+  ts: number | null
+  error: string | null
+}
+
+function normalizeCronRun(raw: unknown): CronRun | null {
+  const r = asRec(raw)
+  if (str(r.source) !== 'cron') return null
+  const jobId = /^job (.+)$/.exec(str(r.title) ?? '')?.[1] ?? ''
+  if (!jobId) return null
+  const rawTs = typeof r.ts === 'number' && Number.isFinite(r.ts) ? r.ts : null
+  return {
+    id: str(r.id) ?? `${jobId}-${rawTs ?? Date.now()}`,
+    jobId,
+    status: str(r.status) ?? '',
+    ts: rawTs === null ? null : rawTs < 1e12 ? rawTs * 1000 : rawTs,
+    error: str(r.error),
+  }
+}
+
+/**
+ * Past executions of one job, newest first, via the merged run ledger.
+ * The ledger has no per-job filter (limit caps at 200 server-side), so this
+ * pulls the widest window and matches rows to the job by id or name — the
+ * same identity set cron.manage mutations already address.
+ */
+export async function listAutomationRuns(job: CronJob, keep = 30): Promise<CronRun[]> {
+  const res = await rpc<{ runs?: unknown[] }>('moch.runs.timeline', { limit: 200 }, 15000)
+  const rows = Array.isArray(res?.runs) ? res.runs : []
+  return rows
+    .map(normalizeCronRun)
+    .filter((r): r is CronRun => r !== null)
+    .filter((r) => r.jobId === job.id || r.jobId === job.name)
+    .sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0))
+    .slice(0, keep)
+}
+
 export async function runAutomationNow(id: string): Promise<void> {
   for (const action of ['run_now', 'run']) {
     try {
@@ -214,20 +258,20 @@ export async function updateAutomation(id: string, p: AutomationPatch): Promise<
   }
 }
 
-/** Starter cards for the empty state — label is the card, schedule+prompt prefill the modal. */
-export const AUTOMATION_TEMPLATES: { label: string; schedule: string; prompt: string }[] = [
+/** Starter cards for the empty state — labelKey is the card, schedule+prompt prefill the modal. */
+export const AUTOMATION_TEMPLATES: { labelKey: string; schedule: string; prompt: string }[] = [
   {
-    label: 'Summarize my day at 19:00',
+    labelKey: 'routines.tpl.day',
     schedule: 'every day 19:00',
     prompt: 'Summarize my day: what I worked on, what moved forward, and the one thing to pick up tomorrow.',
   },
   {
-    label: 'Check for deals every 2h',
+    labelKey: 'routines.tpl.deals',
     schedule: 'every 2h',
     prompt: 'Check my watchlist sources for new deals and flag anything worth acting on, with links.',
   },
   {
-    label: 'Weekly journal recap',
+    labelKey: 'routines.tpl.journal',
     schedule: 'every friday 18:00',
     prompt: 'Write my weekly journal recap: highlights, what I learned, and what to change next week.',
   },
