@@ -640,6 +640,8 @@ export async function switchToSession(storedId: string, opts: { profile?: string
   const live = liveIdForStored(storedId)
   if (live && sessionsById.get()[live]) {
     activeSession.set(live)
+    const want = sessionsById.get()[live].profile ?? null
+    if (activeBotAtom.get() !== want) await setActiveBot(want)
     return live
   }
   const res = await rpc<{ session_id?: string; messages?: unknown[]; history?: unknown[]; info?: Record<string, unknown> }>('session.resume', {
