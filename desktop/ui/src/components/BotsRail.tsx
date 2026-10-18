@@ -7,14 +7,15 @@ import { useStore } from '@nanostores/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { MessageSquare, MoreHorizontal, Plus, Search, Settings } from 'lucide-react'
 import type { ViewId } from '../app'
+import CreateBotOverlay from './CreateBotOverlay'
 import {
-  accentFor, activeBotAtom, fleetProfiles, fleetStatusAtom, setActiveBot,
+  accentFor, activeBotAtom, botAvatar, botColor, fleetProfiles, fleetStatusAtom, setActiveBot,
   type FleetQueueEntry,
 } from '../lib/fleet'
 import { activeSession, newChat, sessionOrder, sessionsById, switchToSession } from '../lib/chat'
 import { isConnected } from '../lib/gateway'
 import { locale, tr } from '../lib/strings'
-import { requestFleetFocus, requestFleetNewBot } from '../views/FleetView'
+import { requestFleetFocus } from '../views/FleetView'
 import './BotsRail.css'
 
 /** One roster row's status: the dot kind plus the queued-turn count. */
@@ -28,6 +29,8 @@ interface RailBot {
   accent: string
   dot: DotKind
   waiting: number
+  color?: string
+  avatar?: string
 }
 
 /**
@@ -56,6 +59,7 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const [menuAt, setMenuAt] = useState<{ left: number; top: number } | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
   const bots = useStore(fleetProfiles)
   const fleet = useStore(fleetStatusAtom)
   const active = useStore(activeBotAtom)
@@ -86,6 +90,8 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
             accent: b.avatarAccent ?? accentFor(b.name),
             dot: frozen ? 'frozen' : st?.gateHeld ? 'run' : w > 0 ? 'wait' : 'idle',
             waiting: w,
+            color: botColor(b),
+            avatar: botAvatar(b),
           }
         }),
     ]
@@ -122,11 +128,7 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
     onNav('fleet')
   }
 
-  const openCreate = () => {
-    requestFleetNewBot()
-    window.dispatchEvent(new CustomEvent('moch-fleet-new-bot'))
-    onNav('fleet')
-  }
+  const openCreate = () => setCreateOpen(true)
 
   const toggleMenu = (e: React.MouseEvent<HTMLButtonElement>, key: string) => {
     e.stopPropagation()
@@ -195,8 +197,8 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
                 title={name}
                 aria-current={on ? 'true' : undefined}
               >
-                <span className="rk-avatar" style={{ background: b.accent }}>
-                  {name.slice(0, 2)}
+                <span className="rk-avatar" style={{ background: b.color ?? b.accent }}>
+                  {b.avatar ? <img src={b.avatar} alt="" width={20} height={20} /> : name.slice(0, 2)}
                 </span>
                 <span className="rk-bottext">
                   <span className="rk-botname">{name}</span>
@@ -238,6 +240,13 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
       <button className="rk-newbot" onClick={openCreate} disabled={!connected}>
         <Plus size={14} /> {tr('fleet.create')}
       </button>
+
+      {createOpen ? (
+        <CreateBotOverlay
+          onClose={() => setCreateOpen(false)}
+          onCreated={(name) => { setCreateOpen(false); void pick(name) }}
+        />
+      ) : null}
     </aside>
   )
 }
