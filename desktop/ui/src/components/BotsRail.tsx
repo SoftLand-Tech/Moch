@@ -5,14 +5,14 @@
  */
 import { useStore } from '@nanostores/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { MessageSquare, MoreHorizontal, Plus, Search, Settings } from 'lucide-react'
+import { ChevronLeft, MessageSquare, MessagesSquare, MoreHorizontal, Plus, Search, Settings } from 'lucide-react'
 import type { ViewId } from '../app'
 import CreateBotOverlay from './CreateBotOverlay'
 import {
-  accentFor, activeBotAtom, botAvatar, botColor, fleetProfiles, fleetStatusAtom, setActiveBot,
+  accentFor, activeBotAtom, botAvatar, botColor, fleetProfiles, fleetStatusAtom, homeThreadFor,
   type FleetQueueEntry,
 } from '../lib/fleet'
-import { activeSession, newChat, sessionOrder, sessionsById, switchToSession } from '../lib/chat'
+import { listBotSessions, openHomeThread, startSideChat, switchToSession, type BotSessionRow } from '../lib/chat'
 import { isConnected } from '../lib/gateway'
 import { locale, tr } from '../lib/strings'
 import { requestFleetFocus } from '../views/FleetView'
@@ -59,6 +59,7 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const [menuAt, setMenuAt] = useState<{ left: number; top: number } | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
+  const [chatsFor, setChatsFor] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const bots = useStore(fleetProfiles)
   const fleet = useStore(fleetStatusAtom)
@@ -101,20 +102,12 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
       `${r.name ?? tr('rail.mochi')}\n${r.description}`.toLowerCase().includes(needle))
   }, [bots, fleet, q])
 
-  // Focus the bot's home thread: its most recent stored session, or a fresh
-  // one when none exists yet (the same anchor FleetView's Chat uses).
+  // Focus the bot's home thread: the bound session, or a fresh one when the
+  // bot has none yet. openHomeThread owns the resolution and the binding.
   const pick = async (name: string | null) => {
-    setMenuFor(null)
+    closeMenu()
     try {
-      if (active !== name) await setActiveBot(name)
-      const live = activeSession.get()
-      const cur = live ? sessionsById.get()[live]?.profile : undefined
-      if (cur !== (name ?? undefined)) {
-        const order = sessionOrder.get()
-        const mine = name ? order.find((s) => s.profile === name) : order.find((s) => !s.profile)
-        if (mine) await switchToSession(mine.id)
-        else await newChat()
-      }
+      await openHomeThread(name)
     } catch {
       // Still route to the thread pane; the next send re-anchors to the bot.
     }
@@ -122,10 +115,15 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
   }
 
   const openSettings = (key: string) => {
-    setMenuFor(null)
+    closeMenu()
     requestFleetFocus(key || 'default')
     window.dispatchEvent(new CustomEvent('moch-fleet-focus'))
     onNav('fleet')
+  }
+
+  const closeMenu = () => {
+    setMenuFor(null)
+    setChatsFor(null)
   }
 
   const openCreate = () => setCreateOpen(true)
@@ -133,11 +131,12 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
   const toggleMenu = (e: React.MouseEvent<HTMLButtonElement>, key: string) => {
     e.stopPropagation()
     if (menuFor === key) {
-      setMenuFor(null)
+      closeMenu()
       return
     }
     const r = e.currentTarget.getBoundingClientRect()
-    setMenuAt({ left: Math.min(r.left, window.innerWidth - 160), top: r.bottom + 4 })
+    setMenuAt({ left: Math.min(r.left, window.innerWidth - 180), top: r.bottom + 4 })
+    setChatsFor(null)
     setMenuFor(key)
   }
 
@@ -147,10 +146,10 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
       const t = e.target
       if (menuRef.current?.contains(t as Node)) return
       if (t instanceof Element && t.closest('.rk-more')) return
-      setMenuFor(null)
+      closeMenu()
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuFor(null)
+      if (e.key === 'Escape') closeMenu()
     }
     window.addEventListener('mousedown', onDown)
     window.addEventListener('keydown', onKey)
@@ -221,13 +220,27 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
                 <MoreHorizontal size={14} />
               </button>
               {menuFor === b.key && menuAt ? (
-                <div className="rk-menu" role="menu" ref={menuRef} style={menuAt}>
-                  <button role="menuitem" onClick={() => void pick(b.name)}>
-                    <MessageSquare size={13} /> {tr('rail.menu.open')}
-                  </button>
-                  <button role="menuitem" onClick={() => openSettings(b.key)}>
-                    <Settings size={13} /> {tr('rail.menu.settings')}
-                  </button>
+                <div
+                  className="rk-menu"
+                  role="menu"
+                  ref={menuRef}
+                  style={chatsFor === b.key ? { ...menuAt, width: 230 } : menuAt}
+                >
+                  {chatsFor === b.key ? (
+                    <ChatsMenu bot={b.name} onBack={() => setChatsFor(null)} onDone={closeMenu} onNav={onNav} />
+                  ) : (
+                    <>
+                      <button role="menuitem" onClick={() => void pick(b.name)}>
+                        <MessageSquare size={13} /> {tr('rail.menu.open')}
+                      </button>
+                      <button role="menuitem" onClick={() => setChatsFor(b.key)}>
+                        <MessagesSquare size={13} /> {tr('nav.chats')}
+                      </button>
+                      <button role="menuitem" onClick={() => openSettings(b.key)}>
+                        <Settings size={13} /> {tr('rail.menu.settings')}
+                      </button>
+                    </>
+                  )}
                 </div>
               ) : null}
             </div>
@@ -248,5 +261,87 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
         />
       ) : null}
     </aside>
+  )
+}
+
+/**
+ * The per-bot Chats control: that bot's sessions beside its home thread.
+ * Opening one only switches the center pane; the home binding is never
+ * touched here, so the rail row keeps meaning "go home".
+ */
+function ChatsMenu({ bot, onBack, onDone, onNav }: {
+  bot: string | null
+  onBack: () => void
+  onDone: () => void
+  onNav: (v: ViewId) => void
+}) {
+  const [rows, setRows] = useState<BotSessionRow[] | null>(null)
+  useStore(locale) // subscribe so the control's labels re-render when the language changes
+
+  useEffect(() => {
+    let alive = true
+    setRows(null)
+    listBotSessions(bot)
+      .then((r) => { if (alive) setRows(r) })
+      .catch(() => { if (alive) setRows([]) })
+    return () => { alive = false }
+  }, [bot])
+
+  const home = homeThreadFor(bot)
+  const others = (rows ?? []).filter((r) => r.id !== home)
+
+  const open = async (id: string) => {
+    try {
+      await switchToSession(id, { profile: bot })
+    } catch (err) {
+      // Route to the thread pane anyway; the failed open is visible in the console.
+      console.warn('[rail] could not open the side chat', err)
+    }
+    onDone()
+    onNav('chat')
+  }
+
+  const startNew = async () => {
+    try {
+      await startSideChat(bot)
+    } catch (err) {
+      // Route to the thread pane anyway; the failed create is visible in the console.
+      console.warn('[rail] could not start a side chat', err)
+    }
+    onDone()
+    onNav('chat')
+  }
+
+  const titleStyle: React.CSSProperties = {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  }
+
+  return (
+    <>
+      <button role="menuitem" onClick={onBack}>
+        <ChevronLeft size={13} /> {tr('nav.chats')}
+      </button>
+      <div style={{ maxHeight: 236, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        {rows === null ? (
+          <span style={{ padding: '7px 10px', fontSize: 12.5, color: 'var(--text-faint)' }}>
+            {tr('rail.chats.loading')}
+          </span>
+        ) : others.length === 0 ? (
+          <span style={{ padding: '7px 10px', fontSize: 12.5, color: 'var(--text-faint)' }}>
+            {tr('rail.chats.empty')}
+          </span>
+        ) : others.map((r) => (
+          <button role="menuitem" key={r.id} onClick={() => void open(r.id)} title={r.title || tr('rail.chats.untitled')}>
+            <MessageSquare size={13} />
+            <span style={titleStyle}>{r.title || tr('rail.chats.untitled')}</span>
+          </button>
+        ))}
+      </div>
+      <button role="menuitem" onClick={() => void startNew()}>
+        <Plus size={13} /> {tr('rail.chats.new')}
+      </button>
+    </>
   )
 }

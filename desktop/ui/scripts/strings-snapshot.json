@@ -455,6 +455,22 @@
     "Terminal",
     "الطرفية"
   ],
+  "rail.chats.empty": [
+    "No other chats",
+    "لا محادثات أخرى"
+  ],
+  "rail.chats.loading": [
+    "Loading…",
+    "جارٍ التحميل…"
+  ],
+  "rail.chats.new": [
+    "New side chat",
+    "محادثة جانبية جديدة"
+  ],
+  "rail.chats.untitled": [
+    "Untitled",
+    "بدون عنوان"
+  ],
   "rail.menu": [
     "Bot actions",
     "إجراءات البوت"
