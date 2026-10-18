@@ -6,6 +6,7 @@
  * against scripts/strings-snapshot.json.
  */
 import { atom } from 'nanostores'
+import * as activity from './strings/activity'
 import * as bot from './strings/bot'
 import * as chat from './strings/chat'
 import * as context from './strings/context'
@@ -66,6 +67,7 @@ const EN: Catalog = {
   ...context.en,
   ...create.en,
   ...shell.en,
+  ...activity.en,
 }
 
 const AR: Catalog = {
@@ -76,6 +78,7 @@ const AR: Catalog = {
   ...context.ar,
   ...create.ar,
   ...shell.ar,
+  ...activity.ar,
 }
 
 const CATALOGS: Record<Locale, Catalog> = { en: EN, ar: AR }

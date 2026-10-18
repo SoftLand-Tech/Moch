@@ -121,9 +121,10 @@ export async function refreshTasks(): Promise<void> {
   }
 }
 
-export async function refreshRuns(): Promise<void> {
+/** The board's ledger reads 25 rows; the activity timeline reads deeper. */
+export async function refreshRuns(limit: number = 25): Promise<void> {
   try {
-    const res = await rpc<{ runs?: RawRun[] }>('moch.runs.timeline', { limit: 25 }, 10000)
+    const res = await rpc<{ runs?: RawRun[] }>('moch.runs.timeline', { limit }, 10000)
     runsAtom.set((res.runs ?? []).map(normalizeRun))
   } catch {
     /* the ledger is secondary — keep the last rows on a gateway hiccup */

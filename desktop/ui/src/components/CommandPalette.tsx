@@ -4,10 +4,11 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '@nanostores/react'
-import { ArrowRight, Bot, CalendarClock, Globe, Inbox, MessageSquareText, Plug, Settings, Sparkles, SquareTerminal, UsersRound } from 'lucide-react'
+import { ArrowRight, Activity, Bot, CalendarClock, Globe, Inbox, MessageSquareText, Plug, Settings, Sparkles, SquareTerminal, UsersRound } from 'lucide-react'
 import type { ViewId } from '../app'
 import { fleetProfiles, setActiveBot } from '../lib/fleet'
 import { newChat } from '../lib/chat'
+import { locale, tr } from '../lib/strings'
 
 interface Item {
   id: string
@@ -22,6 +23,7 @@ export default function CommandPalette({ onClose, onNavigate }: { onClose: () =>
   const [sel, setSel] = useState(0)
   const bots = useStore(fleetProfiles)
   const inputRef = useRef<HTMLInputElement>(null)
+  const loc = useStore(locale) // subscribe so the translated entry re-renders on locale change
 
   useEffect(() => { inputRef.current?.focus() }, [])
 
@@ -30,6 +32,7 @@ export default function CommandPalette({ onClose, onNavigate }: { onClose: () =>
       { id: 'v-chat', label: 'Chats', icon: MessageSquareText, run: () => onNavigate('chat') },
       { id: 'v-fleet', label: 'Fleet — your bots', icon: Bot, run: () => onNavigate('fleet') },
       { id: 'v-crew', label: 'Crew — task board', icon: UsersRound, run: () => onNavigate('crew') },
+      { id: 'v-activity', label: tr('activity.palette'), icon: Activity, run: () => onNavigate('history') },
       { id: 'v-inbox', label: 'Inbox — waiting on you', icon: Inbox, run: () => onNavigate('inbox') },
       { id: 'v-browser', label: 'Browser — the agent browser', icon: Globe, run: () => onNavigate('browser') },
       { id: 'v-terminal', label: 'Terminal', icon: SquareTerminal, run: () => onNavigate('terminal') },
@@ -52,7 +55,7 @@ export default function CommandPalette({ onClose, onNavigate }: { onClose: () =>
     if (!q.trim()) return all
     const needle = q.trim().toLowerCase()
     return all.filter((i) => i.label.toLowerCase().includes(needle) || i.hint?.toLowerCase().includes(needle))
-  }, [q, bots, onNavigate])
+  }, [q, bots, onNavigate, loc])
 
   useEffect(() => setSel(0), [q])
 

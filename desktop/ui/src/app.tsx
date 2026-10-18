@@ -18,7 +18,7 @@ import AutomationsView from './views/AutomationsView'
 import SkillsView from './views/SkillsView'
 import ConnectorsView from './views/ConnectorsView'
 import SettingsView from './views/SettingsView'
-import HistoryView from './views/HistoryView'
+import ActivityView from './views/ActivityView'
 import ToolsView from './views/ToolsView'
 import WorkflowsView from './views/WorkflowsView'
 import CommandPalette from './components/CommandPalette'
@@ -118,7 +118,7 @@ export function App() {
               {view === 'skills' && <SkillsView />}
               {view === 'connectors' && <ConnectorsView />}
               {view === 'settings' && <SettingsView onOpenView={setView} />}
-              {view === 'history' && <HistoryView onOpen={setView} />}
+              {view === 'history' && <ActivityView onOpen={setView} />}
               {view === 'tools' && <ToolsView onOpen={setView} />}
               {view === 'workflows' && <WorkflowsView onOpen={setView} />}
             </div>

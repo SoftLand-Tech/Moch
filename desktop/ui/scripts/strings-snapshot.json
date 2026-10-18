@@ -1,4 +1,72 @@
 {
+  "activity.count": [
+    "{n} runs",
+    "{n} أدوار"
+  ],
+  "activity.day.earlier": [
+    "Earlier",
+    "أقدم"
+  ],
+  "activity.day.today": [
+    "Today",
+    "اليوم"
+  ],
+  "activity.day.yesterday": [
+    "Yesterday",
+    "أمس"
+  ],
+  "activity.empty.sub": [
+    "Runs from the board, routines and delegations land here as they happen.",
+    "أدوار اللوحة والروتين والتفويض تظهر هنا فور حدوثها."
+  ],
+  "activity.empty.title": [
+    "Nothing has run yet",
+    "لم يُسجَّل أي نشاط بعد"
+  ],
+  "activity.loading": [
+    "Reading the ledger…",
+    "جارٍ قراءة السجل…"
+  ],
+  "activity.palette": [
+    "Activity — every run, every bot",
+    "النشاط — كل الأدوار، كل البوتات"
+  ],
+  "activity.row.open": [
+    "Open {name}'s thread",
+    "افتح محادثة {name}"
+  ],
+  "activity.source.cron": [
+    "Routine run",
+    "تشغيل روتين"
+  ],
+  "activity.source.delegate": [
+    "Delegation",
+    "تفويض"
+  ],
+  "activity.source.kanban": [
+    "Board task",
+    "مهمة لوحة"
+  ],
+  "activity.status.completed": [
+    "Completed",
+    "مكتمل"
+  ],
+  "activity.status.failed": [
+    "Failed",
+    "فشل"
+  ],
+  "activity.status.interrupted": [
+    "Interrupted",
+    "تم قطعه"
+  ],
+  "activity.status.running": [
+    "Running",
+    "قيد التشغيل"
+  ],
+  "activity.title": [
+    "Activity",
+    "النشاط"
+  ],
   "boot.connecting": [
     "connecting to the gateway…",
     "جارٍ الاتصال بالبوابة…"
