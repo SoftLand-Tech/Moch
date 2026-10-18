@@ -29,6 +29,50 @@ export async function setActiveBot(name: string | null): Promise<void> {
   } catch { /* best-effort */ }
 }
 
+// ── home threads (one continuous session per bot) ──────────────────────────
+
+/**
+ * The bot↔thread binding: profile name (or '' for the default agent) → the
+ * stored session id of that bot's one home thread. The gateway has no
+ * per-profile thread record, so the binding lives here, client-side, and is
+ * honest about it: a stored id that no longer resumes is rebound, never
+ * silently redirected to another bot's session.
+ */
+const HOME_THREADS_KEY = 'moch.desktop.homeThreads.v1'
+
+export const homeThreads = atom<Record<string, string>>({})
+
+export function homeThreadFor(profile: string | null): string | undefined {
+  return homeThreads.get()[profile ?? '']
+}
+
+export function setHomeThread(profile: string | null, storedId: string): void {
+  const next = { ...homeThreads.get(), [profile ?? '']: storedId }
+  homeThreads.set(next)
+  try { localStorage.setItem(HOME_THREADS_KEY, JSON.stringify(next)) } catch { /* best-effort */ }
+}
+
+export function clearHomeThread(profile: string | null): void {
+  const next = { ...homeThreads.get() }
+  delete next[profile ?? '']
+  homeThreads.set(next)
+  try { localStorage.setItem(HOME_THREADS_KEY, JSON.stringify(next)) } catch { /* best-effort */ }
+}
+
+export function loadHomeThreads(): void {
+  try {
+    const raw = localStorage.getItem(HOME_THREADS_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as unknown
+    if (typeof parsed !== 'object' || parsed === null) return
+    const clean: Record<string, string> = {}
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v === 'string' && v) clean[k] = v
+    }
+    homeThreads.set(clean)
+  } catch { /* fresh */ }
+}
+
 export interface FleetProfile {
   name: string
   description: string
@@ -190,6 +234,7 @@ export async function freezeProfile(name: string, frozen: boolean): Promise<void
 
 export async function deleteProfile(name: string): Promise<void> {
   await rpc('moch.profiles.delete', { profile: name, confirm: true }, 15000)
+  clearHomeThread(name)
   if (activeBotAtom.get() === name) await setActiveBot(null)
   await refreshFleet()
 }
