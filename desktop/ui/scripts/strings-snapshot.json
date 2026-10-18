@@ -323,9 +323,29 @@
     "Terminal",
     "الطرفية"
   ],
+  "rail.menu": [
+    "Bot actions",
+    "إجراءات البوت"
+  ],
+  "rail.menu.open": [
+    "Open",
+    "فتح"
+  ],
+  "rail.menu.settings": [
+    "Settings",
+    "الإعدادات"
+  ],
   "rail.mochi": [
     "Mochi",
     "موتشي"
+  ],
+  "rail.mochi.job": [
+    "Your main agent",
+    "وكيلك الأساسي"
+  ],
+  "rail.nodesc": [
+    "No description yet",
+    "لا وصف بعد"
   ],
   "rail.nomatch": [
     "No bots match",
@@ -335,6 +355,10 @@
     "Search",
     "بحث"
   ],
+  "rail.waiting.n": [
+    "{n} waiting",
+    "{n} في الانتظار"
+  ],
   "shell.thread.frozen": [
     "Frozen",
     "مجمّد"
@@ -342,6 +366,10 @@
   "shell.thread.idle": [
     "Idle",
     "خامل"
+  ],
+  "shell.thread.waiting": [
+    "Waiting",
+    "في الانتظار"
   ],
   "shell.thread.working": [
     "Working",

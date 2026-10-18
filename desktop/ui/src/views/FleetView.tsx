@@ -53,6 +53,21 @@ function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
+// Rail hand-offs. The rail navigates here through the app's onNav routing;
+// these one-shot requests carry the intent that routing alone cannot (open
+// the wizard, select a bot). Set before navigating, consumed on mount when
+// this view was unmounted, or live via the window events when already shown.
+let newBotRequested = false
+let focusRequested: string | null = null
+
+export function requestFleetNewBot(): void {
+  newBotRequested = true
+}
+
+export function requestFleetFocus(name: string): void {
+  focusRequested = name
+}
+
 export default function FleetView({ onOpenChat }: { onOpenChat?: () => void }) {
   const profiles = useStore(fleetProfiles)
   const status = useStore(fleetStatusAtom)
@@ -66,6 +81,31 @@ export default function FleetView({ onOpenChat }: { onOpenChat?: () => void }) {
   const [notice, setNotice] = useState('')
 
   useEffect(() => { void refreshFleet() }, [])
+
+  // Consume rail hand-offs: once on mount (the rail set the request before
+  // navigating here), then on the live events while this view stays open.
+  useEffect(() => {
+    const consume = () => {
+      if (newBotRequested) {
+        newBotRequested = false
+        setWizardSeed('')
+        setWizardOpen(true)
+      }
+      if (focusRequested !== null) {
+        setSelected(focusRequested)
+        setNotice('')
+        focusRequested = null
+      }
+    }
+    consume()
+    window.addEventListener('moch-fleet-new-bot', consume)
+    window.addEventListener('moch-fleet-focus', consume)
+    return () => {
+      window.removeEventListener('moch-fleet-new-bot', consume)
+      window.removeEventListener('moch-fleet-focus', consume)
+    }
+    // One-shot wiring on mount; the setters it uses are stable.
+  }, [])
 
   // Drop a selection that no longer exists (deleted on the server, etc).
   useEffect(() => {
