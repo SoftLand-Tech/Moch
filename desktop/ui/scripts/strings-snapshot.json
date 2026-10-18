@@ -867,6 +867,30 @@
     "{n} waiting",
     "{n} في الانتظار"
   ],
+  "settings.account": [
+    "You",
+    "أنت"
+  ],
+  "settings.close": [
+    "Close",
+    "إغلاق"
+  ],
+  "settings.model.current": [
+    "Current",
+    "الحالي"
+  ],
+  "settings.model.hint": [
+    "The model new chats start with.",
+    "النموذج الذي تبدأ به المحادثات الجديدة."
+  ],
+  "settings.nav.general": [
+    "General",
+    "عام"
+  ],
+  "settings.nav.models": [
+    "Models",
+    "النماذج"
+  ],
   "shell.thread.frozen": [
     "Frozen",
     "مجمّد"
