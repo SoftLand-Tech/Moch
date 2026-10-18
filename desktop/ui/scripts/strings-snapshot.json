@@ -935,6 +935,178 @@
     "{n} waiting",
     "{n} في الانتظار"
   ],
+  "routines.close": [
+    "Close",
+    "إغلاق"
+  ],
+  "routines.delete": [
+    "Delete",
+    "حذف"
+  ],
+  "routines.delete.confirm": [
+    "Confirm delete",
+    "تأكيد الحذف"
+  ],
+  "routines.delete.hint": [
+    "Tap again to delete for real",
+    "انقر مرة أخرى للحذف نهائيًا"
+  ],
+  "routines.delete.hint2": [
+    "Delete (two-tap)",
+    "حذف (نقرتان)"
+  ],
+  "routines.deliver": [
+    "Deliver",
+    "التسليم"
+  ],
+  "routines.deliver.local": [
+    "local",
+    "محلي"
+  ],
+  "routines.edit": [
+    "Edit",
+    "تعديل"
+  ],
+  "routines.empty": [
+    "Nothing runs on a schedule yet.",
+    "لا شيء يعمل على جدول بعد."
+  ],
+  "routines.empty.sub": [
+    "Automations are prompts that fire on a schedule — the agent runs locally and delivers the result. Start from a template or write your own.",
+    "الأتمتة أوامر تعمل على جدول — يعمل الوكيل محليًا ويسلّم النتيجة. ابدأ من قالب أو اكتب أمرك."
+  ],
+  "routines.empty.title": [
+    "Nothing runs on a schedule yet",
+    "لا شيء يعمل على جدول بعد"
+  ],
+  "routines.enabled": [
+    "enabled",
+    "مُفعّل"
+  ],
+  "routines.err": [
+    "Action failed: {why}",
+    "فشل الإجراء: {why}"
+  ],
+  "routines.head": [
+    "Automations",
+    "الأتمتة"
+  ],
+  "routines.history": [
+    "History",
+    "السجل"
+  ],
+  "routines.history.empty": [
+    "No runs recorded yet.",
+    "لا تشغيلات مسجلة بعد."
+  ],
+  "routines.history.loading": [
+    "loading runs…",
+    "جارٍ تحميل التشغيلات…"
+  ],
+  "routines.loading": [
+    "loading…",
+    "جارٍ التحميل…"
+  ],
+  "routines.modal.cancel": [
+    "Cancel",
+    "إلغاء"
+  ],
+  "routines.modal.create": [
+    "Create",
+    "إنشاء"
+  ],
+  "routines.modal.edit": [
+    "Edit — {name}",
+    "تعديل — {name}"
+  ],
+  "routines.modal.prompt.ph": [
+    "What should run? Keep it self-contained — cron runs can't ask questions.",
+    "ما الذي يجب أن يعمل؟ اجعله مكتفٍيا بذاته — تشغيلات cron لا تسأل أسئلة."
+  ],
+  "routines.modal.save": [
+    "Save changes",
+    "حفظ التغييرات"
+  ],
+  "routines.modal.schedule.hint": [
+    "Plain language — e.g. \"every 30m\", \"in 45m\", \"every monday 9:00\".",
+    "بلغة طبيعية — مثل «كل ٣٠ د»، «بعد ٤٥ د»، «كل اثنين ٩:٠٠»."
+  ],
+  "routines.new": [
+    "New automation",
+    "أتمتة جديدة"
+  ],
+  "routines.next": [
+    "Next {when}",
+    "التالي {when}"
+  ],
+  "routines.next.none": [
+    "no next run",
+    "لا تشغيل قادم"
+  ],
+  "routines.nextRun": [
+    "Next run",
+    "التشغيل القادم"
+  ],
+  "routines.pause": [
+    "Pause",
+    "إيقاف مؤقت"
+  ],
+  "routines.pause.hint": [
+    "Pause this routine",
+    "إيقاف هذا الروتين مؤقتًا"
+  ],
+  "routines.paused": [
+    "paused",
+    "متوقف مؤقتًا"
+  ],
+  "routines.pausedNote": [
+    "paused — resume to re-arm",
+    "متوقف مؤقتًا — استأنف لإعادة التفعيل"
+  ],
+  "routines.prompt": [
+    "Prompt",
+    "الأمر"
+  ],
+  "routines.prompt.loading": [
+    "loading the full prompt…",
+    "جارٍ تحميل الأمر الكامل…"
+  ],
+  "routines.prompt.none": [
+    "No prompt stored.",
+    "لا أمر محفوظ."
+  ],
+  "routines.resume": [
+    "Resume",
+    "استئناف"
+  ],
+  "routines.resume.hint": [
+    "Resume this routine",
+    "استئناف هذا الروتين"
+  ],
+  "routines.runNow": [
+    "Run now",
+    "شغّل الآن"
+  ],
+  "routines.schedule": [
+    "Schedule",
+    "الجدول"
+  ],
+  "routines.skills": [
+    "Skills",
+    "المهارات"
+  ],
+  "routines.tpl.day": [
+    "Summarize my day at 19:00",
+    "لخّص يومي عند ١٩:٠٠"
+  ],
+  "routines.tpl.deals": [
+    "Check for deals every 2h",
+    "تفقّد العروض كل ساعتين"
+  ],
+  "routines.tpl.journal": [
+    "Weekly journal recap",
+    "ملخص الأسبوع"
+  ],
   "settings.account": [
     "You",
     "أنت"

@@ -1,9 +1,12 @@
 /**
  * Automations — scheduled prompts over the gateway's cron surface
  * (`cron.manage`). The wire shape drifts between gateway generations
- * (id|job_id|name keys, add|create, delete|remove, enabled|paused), so every
- * row is normalized and every mutation tries its action aliases, falling
- * through on "unknown action" errors only — real failures surface verbatim.
+ * (id|job_id|name row keys, add|create, delete|remove, enabled|paused), so
+ * every row is normalized and every mutation tries its action aliases,
+ * falling through on "unknown action" errors only — real failures surface
+ * verbatim. Job-bound actions address a job through the `name` param
+ * carrying its job_id (the same contract as the mobile app); the running
+ * gateway's strict params reject `id`/`job_id` extras.
  */
 import { rpc } from './gateway'
 
@@ -113,7 +116,7 @@ export async function listAutomations(): Promise<CronJob[]> {
 /** Full stored prompt for one job (cron.manage get — the mobile-only extension this fork ships). */
 export async function getAutomation(id: string): Promise<CronJob | null> {
   try {
-    const r = await cron({ action: 'get', id, name: id, job_id: id })
+    const r = await cron({ action: 'get', name: id })
     return normalizeCronJob(r.job ?? asRec(r.result).job)
   } catch {
     return null
@@ -140,34 +143,78 @@ export async function createAutomation(d: AutomationDraft): Promise<void> {
 
 export async function deleteAutomation(id: string): Promise<void> {
   try {
-    await cron({ action: 'delete', id, name: id, job_id: id })
+    await cron({ action: 'delete', name: id })
   } catch (e) {
     if (!isUnknownActionError(e)) throw e
-    await cron({ action: 'remove', id, name: id, job_id: id })
+    await cron({ action: 'remove', name: id })
   }
 }
 
 export async function setAutomationEnabled(id: string, enabled: boolean): Promise<void> {
   const action = enabled ? 'resume' : 'pause'
   try {
-    await cron({ action, id, name: id, job_id: id })
+    await cron({ action, name: id })
     return
   } catch (e) {
     if (!isUnknownActionError(e)) throw e
   }
   // Fork without pause/resume: toggle through update.
   try {
-    await cron({ action: 'update', id, name: id, job_id: id, enabled })
+    await cron({ action: 'update', name: id, enabled })
   } catch (e) {
     if (!isUnknownActionError(e)) throw e
     throw new Error(`this gateway does not support ${action}`)
   }
 }
 
+/** One cron execution from the merged run ledger (moch.runs.timeline, source "cron"). */
+export interface CronRun {
+  /** Execution id from cron/executions.db. */
+  id: string
+  /** Owning job — the ledger only carries it inside the title, as "job <job_id>". */
+  jobId: string
+  status: string
+  /** Epoch ms; null when the ledger row carried no usable timestamp. */
+  ts: number | null
+  error: string | null
+}
+
+function normalizeCronRun(raw: unknown): CronRun | null {
+  const r = asRec(raw)
+  if (str(r.source) !== 'cron') return null
+  const jobId = /^job (.+)$/.exec(str(r.title) ?? '')?.[1] ?? ''
+  if (!jobId) return null
+  const rawTs = typeof r.ts === 'number' && Number.isFinite(r.ts) ? r.ts : null
+  return {
+    id: str(r.id) ?? `${jobId}-${rawTs ?? Date.now()}`,
+    jobId,
+    status: str(r.status) ?? '',
+    ts: rawTs === null ? null : rawTs < 1e12 ? rawTs * 1000 : rawTs,
+    error: str(r.error),
+  }
+}
+
+/**
+ * Past executions of one job, newest first, via the merged run ledger.
+ * The ledger has no per-job filter (limit caps at 200 server-side), so this
+ * pulls the widest window and matches rows to the job by id or name — the
+ * same identity set cron.manage mutations already address.
+ */
+export async function listAutomationRuns(job: CronJob, keep = 30): Promise<CronRun[]> {
+  const res = await rpc<{ runs?: unknown[] }>('moch.runs.timeline', { limit: 200 }, 15000)
+  const rows = Array.isArray(res?.runs) ? res.runs : []
+  return rows
+    .map(normalizeCronRun)
+    .filter((r): r is CronRun => r !== null)
+    .filter((r) => r.jobId === job.id || r.jobId === job.name)
+    .sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0))
+    .slice(0, keep)
+}
+
 export async function runAutomationNow(id: string): Promise<void> {
   for (const action of ['run_now', 'run']) {
     try {
-      await cron({ action, id, name: id, job_id: id })
+      await cron({ action, name: id })
       return
     } catch (e) {
       if (!isUnknownActionError(e)) throw e
@@ -185,7 +232,7 @@ export interface AutomationPatch {
 }
 
 export async function updateAutomation(id: string, p: AutomationPatch): Promise<void> {
-  const params: Rec = { id, name: id, job_id: id, schedule: p.schedule, prompt: p.prompt }
+  const params: Rec = { name: id, schedule: p.schedule, prompt: p.prompt }
   if (p.deliver) params.deliver = p.deliver
   if (p.skills?.length) params.skills = p.skills
   try {
@@ -208,26 +255,26 @@ export async function updateAutomation(id: string, p: AutomationPatch): Promise<
   if (newId === id) return
   if (!newId) throw new Error('editing is not supported by this gateway (update unavailable)')
   try {
-    await cron({ action: 'remove', id, name: id, job_id: id })
+    await cron({ action: 'remove', name: id })
   } catch {
     /* old row left behind — the list refresh will show both */
   }
 }
 
-/** Starter cards for the empty state — label is the card, schedule+prompt prefill the modal. */
-export const AUTOMATION_TEMPLATES: { label: string; schedule: string; prompt: string }[] = [
+/** Starter cards for the empty state — labelKey is the card, schedule+prompt prefill the modal. */
+export const AUTOMATION_TEMPLATES: { labelKey: string; schedule: string; prompt: string }[] = [
   {
-    label: 'Summarize my day at 19:00',
+    labelKey: 'routines.tpl.day',
     schedule: 'every day 19:00',
     prompt: 'Summarize my day: what I worked on, what moved forward, and the one thing to pick up tomorrow.',
   },
   {
-    label: 'Check for deals every 2h',
+    labelKey: 'routines.tpl.deals',
     schedule: 'every 2h',
     prompt: 'Check my watchlist sources for new deals and flag anything worth acting on, with links.',
   },
   {
-    label: 'Weekly journal recap',
+    labelKey: 'routines.tpl.journal',
     schedule: 'every friday 18:00',
     prompt: 'Write my weekly journal recap: highlights, what I learned, and what to change next week.',
   },
