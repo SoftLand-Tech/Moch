@@ -64,7 +64,6 @@ export interface PendingCard {
   id: string
   kind: 'approval' | 'clarify' | 'sudo' | 'secret' | 'vault'
   sessionId?: string
-  title: string
   body?: string
   command?: string
   options?: { label: string; value: string }[]
@@ -76,6 +75,12 @@ export interface PendingCard {
   /** Set when the backend withdrew the question (request.cancel). */
   cancelled?: boolean
   raw: ServerRequest
+}
+
+/** The card's title key per kind — the wire carries no prose, so every
+ *  renderer translates through the catalog and a language switch holds. */
+export function cardTitleKey(kind: PendingCard['kind']): string {
+  return `card.title.${kind}`
 }
 
 export interface SessionState {
@@ -486,11 +491,6 @@ function intakeServerRequest(req: ServerRequest): void {
     id: req.id,
     kind,
     sessionId: req.sessionId,
-    title: kind === 'approval'
-      ? 'Needs your approval'
-      : kind === 'clarify' ? 'Agent asks'
-        : kind === 'sudo' ? 'Sudo password needed'
-          : kind === 'secret' ? 'A secret is needed' : 'Vault',
     body: typeof p.question === 'string' ? p.question
       : typeof p.command === 'string' ? p.command
         : typeof p.description === 'string' ? p.description

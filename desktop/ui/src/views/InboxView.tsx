@@ -2,9 +2,10 @@ import { useStore } from '@nanostores/react'
 import { useEffect, useMemo, useRef } from 'react'
 import { Inbox } from 'lucide-react'
 import {
-  pendingBySession, pendingCount, sessionsById, sessionOrder,
+  cardTitleKey, pendingBySession, pendingCount, sessionsById, sessionOrder,
   type PendingCard,
 } from '../lib/chat'
+import { tr } from '../lib/strings'
 import { accentFor } from '../lib/fleet'
 import { displayBotName } from '../lib/crew'
 import InteractiveCard from '../components/InteractiveCard'
@@ -57,7 +58,7 @@ export default function InboxView() {
         const first = Object.values(pendingBySession.get()).find((c) => !c.cancelled)
         sendNotification({
           title: 'A bot is waiting on you',
-          body: first?.title ?? 'Open Moch to respond.',
+          body: first ? tr(cardTitleKey(first.kind)) : 'Open Moch to respond.',
         })
       } catch {
         /* notifications unavailable in this shell — the badge still shows */

@@ -9,7 +9,7 @@
 import { useState } from 'react'
 import { useStore } from '@nanostores/react'
 import { GitBranch, LockKeyhole } from 'lucide-react'
-import { answerCard, type PendingCard } from '../lib/chat'
+import { answerCard, cardTitleKey, type PendingCard } from '../lib/chat'
 import { locale, tr } from '../lib/strings'
 
 export default function InteractiveCard({ card }: { card: PendingCard }) {
@@ -53,7 +53,7 @@ export default function InteractiveCard({ card }: { card: PendingCard }) {
     <div className={`card${card.danger || isPrivileged ? ' danger' : ''}`}>
       <div className="card-title">
         {isPrivileged ? <LockKeyhole size={15} /> : <GitBranch size={15} />}
-        {card.title}
+        {tr(cardTitleKey(card.kind))}
       </div>
       {body ? <div className="card-body mono">{body}</div> : null}
       {card.command && card.command !== body ? (
