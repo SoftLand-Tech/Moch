@@ -35,7 +35,7 @@ function runDot(status: string): string {
 function fmtTs(ms: number | null): string {
   if (!ms) return ''
   try {
-    return new Date(ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    return new Date(ms).toLocaleString(locale.get() === 'ar' ? 'ar' : undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
   } catch {
     return new Date(ms).toISOString()
   }

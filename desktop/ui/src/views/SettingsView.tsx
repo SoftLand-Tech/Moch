@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useStore } from '@nanostores/react'
 import { BotMessageSquare, ChevronDown, ChevronRight, FolderOpen, Info, Languages, Palette, RotateCw, Terminal } from 'lucide-react'
 import { gatewayInfo, gatewayLogs, hermesHome, isConnected, restartGateway, rpc, workspaceDir } from '../lib/gateway'
-import { locale, setLocale } from '../lib/strings'
+import { locale, setLocale, tr } from '../lib/strings'
 import { revealPath } from '../lib/shell-ops'
 import { browserReadyPref, setBrowserReadyPref } from '../lib/cdp'
 import type { ViewId } from '../app'
@@ -68,7 +68,7 @@ export default function SettingsView({ onOpenView }: { onOpenView?: (v: ViewId) 
   return (
     <main className="focus">
       <div className="focus-head">
-        <span style={{ fontWeight: 650, fontSize: 15 }}>Settings</span>
+        <span style={{ fontWeight: 650, fontSize: 15 }}>{tr('nav.settings')}</span>
       </div>
       <div className="focus-body">
         <div style={{ maxWidth: 720, width: '100%', margin: '0 auto', padding: '20px 24px 56px', display: 'flex', flexDirection: 'column', gap: 34 }}>
@@ -76,27 +76,27 @@ export default function SettingsView({ onOpenView }: { onOpenView?: (v: ViewId) 
           {/* ── (a) Runtime ── */}
           <section>
             <div style={{ ...labelStyle, borderBottom: '1px solid var(--border-soft)', paddingBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Terminal size={13} /> Runtime
+              <Terminal size={13} /> {tr('settings.runtime')}
             </div>
-            <PathRow label="Hermes home" path={homePath} />
-            <PathRow label="Workspace" path={wsPath} />
+            <PathRow label={tr('settings.runtime.home')} path={homePath} />
+            <PathRow label={tr('settings.runtime.workspace')} path={wsPath} />
             <div style={{ padding: '12px 0', borderBottom: '1px solid var(--border-soft)', display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>Hermes version</div>
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)' }}>{tr('settings.runtime.version')}</div>
                 <div className="mono text-faint" style={{ fontSize: 'var(--text-xs)' }}>
-                  {statusError ? <span style={{ color: 'var(--red)' }}>{statusError}</span> : version ?? 'unknown'}
+                  {statusError ? <span style={{ color: 'var(--red)' }}>{statusError}</span> : version ?? tr('settings.unknown')}
                 </div>
               </div>
             </div>
             <div style={{ padding: '14px 0', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)', flex: 1 }}>Gateway runs everything on loopback — restart it if agents act up.</span>
+              <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)', flex: 1 }}>{tr('settings.runtime.restart.hint')}</span>
               <button className="btn" disabled={restarting || !connected} onClick={() => void doRestart()}>
-                {restarting ? <span className="spinner" style={{ width: 11, height: 11 }} /> : <RotateCw size={13} />} Restart gateway
+                {restarting ? <span className="spinner" style={{ width: 11, height: 11 }} /> : <RotateCw size={13} />} {tr('settings.runtime.restart')}
               </button>
             </div>
             <div style={{ borderBottom: '1px solid var(--border-soft)' }}>
               <button className="btn ghost sm" style={{ marginBottom: 8 }} onClick={() => setLogsOpen((v) => !v)}>
-                {logsOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Runtime logs · last {Math.min(tail.length, 100)} lines
+                {logsOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />} {tr('settings.runtime.logs', { n: Math.min(tail.length, 100) })}
               </button>
               {logsOpen ? (
                 <pre
@@ -107,7 +107,7 @@ export default function SettingsView({ onOpenView }: { onOpenView?: (v: ViewId) 
                     whiteSpace: 'pre-wrap', wordBreak: 'break-word', userSelect: 'text', color: 'var(--text-dim)',
                   }}
                 >
-                  {tail.length ? tail.join('\n') : 'No runtime logs yet.'}
+                  {tail.length ? tail.join('\n') : tr('settings.runtime.logs.empty')}
                 </pre>
               ) : null}
             </div>
@@ -116,19 +116,19 @@ export default function SettingsView({ onOpenView }: { onOpenView?: (v: ViewId) 
           {/* ── (b) Appearance ── */}
           <section>
             <div style={{ ...labelStyle, borderBottom: '1px solid var(--border-soft)', paddingBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Palette size={13} /> Appearance
+              <Palette size={13} /> {tr('settings.appearance')}
             </div>
             <div style={{ padding: '14px 0', fontSize: 'var(--text-sm)', color: 'var(--text-faint)', lineHeight: 1.6 }}>
-              Mocheme dark — the desktop ships one theme.
+              {tr('settings.appearance.hint')}
             </div>
           </section>
 
           {/* ── Notifications ── */}
         <section style={{ marginBottom: 26 }}>
-          <div style={{ ...labelStyle }}>Notifications</div>
+          <div style={{ ...labelStyle }}>{tr('settings.notifications')}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 220, fontSize: 12.5, color: 'var(--text-dim)' }}>
-              Approvals waiting on you and finished automations knock while the app is open.
+              {tr('settings.notifications.hint')}
             </div>
             <button
               className="btn"
@@ -140,18 +140,17 @@ export default function SettingsView({ onOpenView }: { onOpenView?: (v: ViewId) 
                 }).catch(() => setNotifState('unavailable'))
               }}
             >
-              {notifState === 'granted' ? 'Enabled' : notifState === 'denied' ? 'Denied — retry' : 'Enable notifications'}
+              {notifState === 'granted' ? tr('settings.notifications.on') : notifState === 'denied' ? tr('settings.notifications.denied') : tr('settings.notifications.enable')}
             </button>
           </div>
         </section>
 
         {/* ── Agent browser ── */}
         <section style={{ marginBottom: 26 }}>
-          <div style={{ ...labelStyle }}>Agent browser</div>
+          <div style={{ ...labelStyle }}>{tr('settings.browser')}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 220, fontSize: 12.5, color: 'var(--text-dim)' }}>
-              Keep the built-in browser ready at launch, so agents always browse in-app instead of
-              opening your system browser.
+              {tr('settings.browser.hint')}
             </div>
             <button
               className={`chip${browserReady ? ' active' : ''}`}
@@ -160,7 +159,7 @@ export default function SettingsView({ onOpenView }: { onOpenView?: (v: ViewId) 
                 setBrowserReadyPref(!browserReady)
               }}
             >
-              {browserReady ? 'Ready at launch' : 'Manual only'}
+              {browserReady ? tr('settings.browser.ready') : tr('settings.browser.manual')}
             </button>
           </div>
         </section>
@@ -168,11 +167,11 @@ export default function SettingsView({ onOpenView }: { onOpenView?: (v: ViewId) 
         {/* ── Language ── */}
           <section>
             <div style={{ ...labelStyle, borderBottom: '1px solid var(--border-soft)', paddingBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Languages size={13} /> Language / اللغة
+              <Languages size={13} /> {tr('settings.language.title')}
             </div>
             <div style={{ padding: '14px 0', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)', flex: 1 }}>
-                English or العربية — the interface switches to right-to-left with Arabic.
+                {tr('settings.language.hint')}
               </span>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className={`chip${loc === 'en' ? ' active' : ''}`} onClick={() => setLocale('en')}>EN</button>
@@ -184,23 +183,23 @@ export default function SettingsView({ onOpenView }: { onOpenView?: (v: ViewId) 
           {/* ── (c) About ── */}
           <section>
             <div style={{ ...labelStyle, borderBottom: '1px solid var(--border-soft)', paddingBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Info size={13} /> About
+              <Info size={13} /> {tr('settings.about')}
             </div>
             <div style={{ padding: '16px 0', display: 'flex', alignItems: 'center', gap: 14 }}>
               <span className="avatar" style={{ width: 44, height: 44, borderRadius: 13, background: 'var(--accent)', fontSize: 18 }}>
                 <BotMessageSquare size={22} color="var(--on-accent)" />
               </span>
               <div>
-                <div style={{ fontWeight: 650, fontSize: 'var(--text-lg)' }}>Moch Desktop 0.1.0</div>
-                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-faint)' }}>Fully local — your agents, keys and data stay on this machine.</div>
+                <div style={{ fontWeight: 650, fontSize: 'var(--text-lg)' }}>{tr('settings.about.app')}</div>
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-faint)' }}>{tr('settings.about.tagline')}</div>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button className="btn" disabled={!wsPath} onClick={() => wsPath && void revealPath(wsPath)}>
-                <FolderOpen size={14} /> Open workspace
+                <FolderOpen size={14} /> {tr('settings.about.workspace')}
               </button>
               <button className="btn" disabled={!homePath} onClick={() => homePath && void revealPath(homePath)}>
-                <FolderOpen size={14} /> Open hermes home
+                <FolderOpen size={14} /> {tr('settings.about.home')}
               </button>
             </div>
           </section>
@@ -220,11 +219,11 @@ function PathRow({ label, path }: { label: string; path: string | null }) {
           style={{ fontSize: 'var(--text-xs)', color: 'var(--text-faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
           title={path ?? undefined}
         >
-          {path ?? 'unknown'}
+          {path ?? tr('settings.unknown')}
         </div>
       </div>
-      <button className="btn sm" disabled={!path} onClick={() => path && void revealPath(path)} title="Show in file manager">
-        <FolderOpen size={13} /> Reveal
+      <button className="btn sm" disabled={!path} onClick={() => path && void revealPath(path)} title={tr('settings.reveal.title')}>
+        <FolderOpen size={13} /> {tr('settings.reveal')}
       </button>
     </div>
   )

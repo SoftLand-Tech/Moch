@@ -6,9 +6,11 @@
  * dev-bridge preview reads the same file through its own endpoint.
  */
 import { useEffect, useState } from 'react'
+import { useStore } from '@nanostores/react'
 import { FileText, FolderOpen, Copy, TriangleAlert } from 'lucide-react'
 import { invoke, inTauri } from '../lib/tauri'
 import { revealPath } from '../lib/shell-ops'
+import { locale, tr } from '../lib/strings'
 
 interface MediaPayload {
   path: string
@@ -45,6 +47,7 @@ async function loadMedia(path: string): Promise<MediaPayload | null> {
 }
 
 export default function MediaBlock({ path }: { path: string }) {
+  useStore(locale)
   const [payload, setPayload] = useState<MediaPayload | null>(null)
   const [failed, setFailed] = useState(false)
   const [loaded, setLoaded] = useState(false)
@@ -90,7 +93,7 @@ export default function MediaBlock({ path }: { path: string }) {
       <div className="media-card">
         <FileText size={15} color="var(--accent)" />
         <span className="mono" style={{ fontSize: 12 }}>{name}</span>
-        <span className="text-faint" style={{ fontSize: 11 }}>{fmtSize(payload.size)} — too large to inline</span>
+        <span className="text-faint" style={{ fontSize: 11 }}>{tr('chat.media.tooLarge', { size: fmtSize(payload.size) })}</span>
         <button className="msg-action" title="Reveal in file manager" onClick={() => void revealPath(path)}>
           <FolderOpen size={12} /> reveal
         </button>
@@ -142,15 +145,15 @@ export default function MediaBlock({ path }: { path: string }) {
       <FileText size={15} color="var(--accent)" />
       <span className="mono" style={{ fontSize: 12, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
       <span className="text-faint" style={{ fontSize: 11, flexShrink: 0 }}>{fmtSize(payload.size)}</span>
-      <button className="msg-action" title="Reveal in file manager" onClick={() => void revealPath(path)}>
-        <FolderOpen size={12} /> reveal
+      <button className="msg-action" title={tr('chat.media.reveal.title')} onClick={() => void revealPath(path)}>
+        <FolderOpen size={12} /> {tr('chat.media.reveal')}
       </button>
       <button
         className="msg-action"
-        title="Copy the path"
+        title={tr('chat.media.copy.title')}
         onClick={() => void navigator.clipboard.writeText(path)}
       >
-        <Copy size={12} /> path
+        <Copy size={12} /> {tr('chat.media.copy')}
       </button>
     </div>
   )

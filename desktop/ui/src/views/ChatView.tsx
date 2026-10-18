@@ -221,14 +221,14 @@ const PHASE_KEYS: Record<string, string> = {
 }
 
 function TurnHeader({ name, phase, time }: { name: string; phase: string; time?: number }) {
-  useStore(locale)
+  const loc = useStore(locale)
   const key = PHASE_KEYS[phase] ?? 'chat.phase.working'
   return (
     <div className="turnhead">
       <span className="tav">{name.slice(0, 2)}</span>
       <b>{name}</b>
       <span className="phase"><span className="plamp" /> {tr(key)}</span>
-      {time ? <span className="ttime">{new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span> : null}
+      {time ? <span className="ttime">{new Date(time).toLocaleTimeString(loc === 'ar' ? 'ar' : undefined, { hour: '2-digit', minute: '2-digit' })}</span> : null}
     </div>
   )
 }

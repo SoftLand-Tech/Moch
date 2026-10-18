@@ -14,6 +14,7 @@ import {
 import { newChat } from '../lib/chat'
 import { isConnected, rpc } from '../lib/gateway'
 import { displayBotName, fmtWhen, type RunEntry } from '../lib/crew'
+import { locale, tr } from '../lib/strings'
 
 interface DescribeResult {
   soul?: string
@@ -22,31 +23,27 @@ interface DescribeResult {
 }
 
 /** Capability cards for the fresh-fleet empty state. */
-const TEMPLATES: { name: string; pitch: string; job: string; icon: typeof Folder }[] = [
+const TEMPLATES: { nameKey: string; pitchKey: string; jobKey: string; icon: typeof Folder }[] = [
   {
-    name: 'Watch a folder', pitch: 'Notices new files land and does the next right thing with them.', icon: Folder,
-    job: 'Watch my Drop folder. When a new file lands, read it and do the next right thing — summarize long docs, sort and rename files, or ask me what to do.',
+    nameKey: 'fleet.tpl.watch.name', pitchKey: 'fleet.tpl.watch.pitch', jobKey: 'fleet.tpl.watch.job', icon: Folder,
   },
   {
-    name: 'Hunt deals daily', pitch: 'Scans listings every morning and surfaces only the wins.', icon: Zap,
-    job: 'Hunt deals daily. Scan the listings and marketplaces I care about each morning and surface only the genuinely good deals, with a short note on why each one is worth it.',
+    nameKey: 'fleet.tpl.deals.name', pitchKey: 'fleet.tpl.deals.pitch', jobKey: 'fleet.tpl.deals.job', icon: Zap,
   },
   {
-    name: 'Keep my journal', pitch: 'A nightly brain-dump companion that writes it all down.', icon: FileText,
-    job: 'Keep my journal. Check in with me every evening, ask how the day went, and write a short dated entry I will actually want to reread.',
+    nameKey: 'fleet.tpl.journal.name', pitchKey: 'fleet.tpl.journal.pitch', jobKey: 'fleet.tpl.journal.job', icon: FileText,
   },
   {
-    name: 'Research anything', pitch: 'Deep-dives a topic and returns a tight, sourced brief.', icon: Search,
-    job: 'Research anything. When I give you a topic, do a deep dive across the web and come back with a tight, sourced brief with the key findings up top.',
+    nameKey: 'fleet.tpl.research.name', pitchKey: 'fleet.tpl.research.pitch', jobKey: 'fleet.tpl.research.job', icon: Search,
   },
 ]
 
 /** Starter jobs offered as chips inside the wizard. */
-const STARTERS: { label: string; job: string }[] = [
-  { label: 'Research assistant', job: 'Help me research topics: gather sources, verify claims, and return tight briefs with the key findings up top.' },
-  { label: 'Deal hunter', job: 'Hunt deals on things I am looking for. Check regularly and flag only the genuinely good ones, with a note on why.' },
-  { label: 'Code helper', job: 'Help me write and review code in this workspace. Keep changes small, tested, and explained.' },
-  { label: 'Daily journal', job: 'Check in each evening and keep a short journal of my day — one entry per day, easy to reread.' },
+const STARTERS: { labelKey: string; jobKey: string }[] = [
+  { labelKey: 'create.starter.research.label', jobKey: 'create.starter.research.job' },
+  { labelKey: 'create.starter.deals.label', jobKey: 'create.starter.deals.job' },
+  { labelKey: 'create.starter.code.label', jobKey: 'create.starter.code.job' },
+  { labelKey: 'create.starter.journal.label', jobKey: 'create.starter.journal.job' },
 ]
 
 function errText(e: unknown): string {
@@ -73,6 +70,7 @@ export default function FleetView({ onOpenChat }: { onOpenChat?: () => void }) {
   const status = useStore(fleetStatusAtom)
   const activeBot = useStore(activeBotAtom)
   const connected = useStore(isConnected)
+  useStore(locale)
   const [selected, setSelected] = useState<string | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
   const [wizardOpen, setWizardOpen] = useState(false)
@@ -133,21 +131,21 @@ export default function FleetView({ onOpenChat }: { onOpenChat?: () => void }) {
     <>
       <aside className="ctx">
         <div className="ctx-head">
-          <span className="ctx-title">Fleet</span>
+          <span className="ctx-title">{tr('fleet.title')}</span>
           <div className="ctx-actions">
-            <button className="btn ghost sm" title="New bot" onClick={() => { setWizardSeed(''); setWizardOpen(true) }}>
-              <Plus size={15} /> New bot
+            <button className="btn ghost sm" title={tr('fleet.create')} onClick={() => { setWizardSeed(''); setWizardOpen(true) }}>
+              <Plus size={15} /> {tr('fleet.create')}
             </button>
           </div>
         </div>
         <div className="ctx-body">
           {profiles.length === 0 ? (
             <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-faint)' }}>
-              {connected ? 'Loading the roster…' : 'Waiting for the gateway…'}
+              {connected ? tr('fleet.roster.loading') : tr('fleet.roster.waiting')}
             </div>
           ) : (
             <>
-              <div className="row-section">Bots · {profiles.length}</div>
+              <div className="row-section">{tr('fleet.roster.bots', { n: profiles.length })}</div>
               {profiles.map((p) => {
                 const frozen = !!statusOf(p.name)?.frozen
                 return (
@@ -172,23 +170,23 @@ export default function FleetView({ onOpenChat }: { onOpenChat?: () => void }) {
                       >
                         {displayBotName(p.name)}
                       </span>
-                      <span className="row-sub" style={{ maxWidth: 'none' }}>{p.description || 'No description yet'}</span>
+                      <span className="row-sub" style={{ maxWidth: 'none' }}>{p.description || tr('rail.nodesc')}</span>
                     </span>
                     {hovered === p.name ? (
                       <button
                         className="chip"
                         style={{ padding: '2px 8px', gap: 4 }}
-                        title={`Start a chat with ${displayBotName(p.name)} (new chats go to this bot)`}
+                        title={tr('fleet.chat.named.title', { name: displayBotName(p.name) })}
                         onClick={(e) => { e.stopPropagation(); void openChat(p.name) }}
                       >
-                        <MessageSquare size={11} /> Chat
+                        <MessageSquare size={11} /> {tr('fleet.chat.button')}
                       </button>
                     ) : frozen ? (
-                      <span title="Frozen — this bot is paused" style={{ display: 'inline-flex', flexShrink: 0 }}>
+                      <span title={tr('fleet.frozen.title')} style={{ display: 'inline-flex', flexShrink: 0 }}>
                         <Pause size={12} color="var(--amber)" />
                       </span>
                     ) : activeBot === p.name ? (
-                      <span title="New chats go to this bot" style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green-soft)', boxShadow: '0 0 6px rgba(74,222,128,0.6)', flexShrink: 0 }} />
+                      <span title={tr('fleet.active.title')} style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green-soft)', boxShadow: '0 0 6px rgba(74,222,128,0.6)', flexShrink: 0 }} />
                     ) : null}
                   </div>
                 )
@@ -212,27 +210,27 @@ export default function FleetView({ onOpenChat }: { onOpenChat?: () => void }) {
                 </span>
               </div>
               {statusOf(selectedProfile.name)?.gateHeld ? (
-                <span className="chip active" style={{ cursor: 'default', padding: '2px 8px' }}>gate held</span>
+                <span className="chip active" style={{ cursor: 'default', padding: '2px 8px' }}>{tr('fleet.gateheld')}</span>
               ) : null}
               <div style={{ flex: 1 }} />
               <button
                 className="btn ghost sm"
                 disabled={!connected}
-                title={statusOf(selectedProfile.name)?.frozen ? 'Resume this bot' : 'Freeze this bot (it stops picking up work)'}
+                title={statusOf(selectedProfile.name)?.frozen ? tr('fleet.resume.title') : tr('fleet.freeze.title')}
                 onClick={() => void freezeToggle(selectedProfile.name, !statusOf(selectedProfile.name)?.frozen, setErr)}
               >
                 {statusOf(selectedProfile.name)?.frozen ? <Play size={13} /> : <Pause size={13} />}
-                {statusOf(selectedProfile.name)?.frozen ? 'Resume' : 'Freeze'}
+                {statusOf(selectedProfile.name)?.frozen ? tr('fleet.resume') : tr('fleet.freeze.btn')}
               </button>
               <button className="btn primary sm" onClick={() => void openChat(selectedProfile.name)}>
-                <MessageSquare size={13} /> Chat
+                <MessageSquare size={13} /> {tr('fleet.chat.button')}
               </button>
             </>
           ) : (
             <>
-              <span style={{ fontWeight: 650, fontSize: 15 }}>Fleet</span>
+              <span style={{ fontWeight: 650, fontSize: 15 }}>{tr('fleet.title')}</span>
               <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
-                {profiles.length} bot{profiles.length === 1 ? '' : 's'} on this machine
+                {tr(profiles.length === 1 ? 'fleet.head.count.one' : 'fleet.head.count.many', { n: profiles.length })}
               </span>
             </>
           )}
@@ -245,23 +243,21 @@ export default function FleetView({ onOpenChat }: { onOpenChat?: () => void }) {
           <div className="focus-body">
             <div className="empty" style={{ padding: '36px 20px', gap: 12 }}>
               <span className="avatar" style={{ width: 54, height: 54, fontSize: 22, borderRadius: 16, background: 'var(--accent)' }}>M</span>
-              <div className="empty-title">Your fleet starts here</div>
+              <div className="empty-title">{tr('fleet.empty.title')}</div>
               <div className="empty-sub" style={{ maxWidth: 460 }}>
-                Bots are little agents with their own job, memory and skills. Give one a job
-                and it works on this machine while you do other things — Mochi (your main
-                agent) is already here to help.
+                {tr('fleet.empty.sub')}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(190px, 250px))', gap: 10, marginTop: 14 }}>
                 {TEMPLATES.map((t) => (
                   <button
-                    key={t.name}
-                    onClick={() => { setWizardSeed(t.job); setWizardOpen(true) }}
+                    key={t.nameKey}
+                    onClick={() => { setWizardSeed(tr(t.jobKey)); setWizardOpen(true) }}
                     style={{ textAlign: 'left', padding: '12px 14px', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)', border: '1px solid var(--border-soft)', display: 'flex', flexDirection: 'column', gap: 5, cursor: 'pointer' }}
                   >
                     <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 650, color: 'var(--text)' }}>
-                      <t.icon size={14} color="var(--accent)" /> {t.name}
+                      <t.icon size={14} color="var(--accent)" /> {tr(t.nameKey)}
                     </span>
-                    <span style={{ fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.45 }}>{t.pitch}</span>
+                    <span style={{ fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.45 }}>{tr(t.pitchKey)}</span>
                   </button>
                 ))}
               </div>
@@ -271,8 +267,8 @@ export default function FleetView({ onOpenChat }: { onOpenChat?: () => void }) {
           <div className="focus-body">
             <div className="empty">
               <Bot size={28} color="var(--text-faint)" />
-              <div className="empty-title">Pick a bot</div>
-              <div className="empty-sub">Select a bot on the left to open its editor — job, SOUL.md, provider and all.</div>
+              <div className="empty-title">{tr('fleet.pick.title')}</div>
+              <div className="empty-sub">{tr('fleet.pick.sub')}</div>
             </div>
           </div>
         )}
@@ -304,6 +300,7 @@ async function freezeToggle(name: string, frozen: boolean, onErr: (m: string) =>
 // ── bot detail (the whole editor — one profiles.configure save) ─────────────
 
 function BotDetail({ profile, notice, onErr }: { profile: FleetProfile; notice: string; onErr: (m: string) => void }) {
+  useStore(locale)
   const [desc, setDesc] = useState('')
   const [soul, setSoul] = useState('')
   const [base, setBase] = useState<{ desc: string; soul: string } | null>(null)
@@ -337,7 +334,7 @@ function BotDetail({ profile, notice, onErr }: { profile: FleetProfile; notice: 
         setDesc(profile.description ?? ''); setSoul(''); setBase({ desc: profile.description ?? '', soul: '' })
         setProvider(profile.model?.provider ?? '')
         setLoading(false)
-        onErr(`Could not load the full bot file: ${errText(e)}`)
+        onErr(tr('fleet.detail.loaderr', { why: errText(e) }))
       })
     return () => { alive = false }
     // Re-run only when switching bots (the parent remounts us per name anyway) —
@@ -377,8 +374,8 @@ function BotDetail({ profile, notice, onErr }: { profile: FleetProfile; notice: 
       const n = r.mirrored?.length ?? 0
       setMirrorResult(
         n > 0
-          ? `Mirrored ${n} key${n === 1 ? '' : 's'} (${r.mirrored.join(', ')}) — this bot now uses your provider.`
-          : 'Nothing needed mirroring — the keys were already in place.',
+          ? tr(n === 1 ? 'fleet.mirror.done.one' : 'fleet.mirror.done.many', { n, list: r.mirrored.join(', ') })
+          : tr('fleet.mirror.none'),
       )
     } catch (e) {
       onErr(errText(e))
@@ -415,12 +412,12 @@ function BotDetail({ profile, notice, onErr }: { profile: FleetProfile; notice: 
       ) : null}
 
       <section>
-        <div style={label}>What is this bot for?</div>
+        <div style={label}>{tr('fleet.detail.desc.label')}</div>
         <textarea
           className="input"
           rows={2}
           disabled={loading}
-          placeholder="One or two sentences — this is the bot's job description."
+          placeholder={tr('fleet.detail.desc.ph')}
           value={desc}
           onChange={(e) => setDesc(e.target.value)}
         />
@@ -429,7 +426,7 @@ function BotDetail({ profile, notice, onErr }: { profile: FleetProfile; notice: 
       <section style={{ display: 'flex', flexDirection: 'column' }}>
         <div style={{ ...label, display: 'flex', alignItems: 'center', gap: 8 }}>
           SOUL.md
-          <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>the bot's personality and working agreement</span>
+          <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>{tr('fleet.detail.soul.sub')}</span>
         </div>
         <textarea
           className="input mono"
@@ -437,20 +434,20 @@ function BotDetail({ profile, notice, onErr }: { profile: FleetProfile; notice: 
           disabled={loading}
           value={soul}
           onChange={(e) => setSoul(e.target.value)}
-          placeholder={loading ? 'Loading…' : '# The bot soul — who it is, how it works.'}
+          placeholder={loading ? tr('rail.chats.loading') : tr('fleet.detail.soul.ph')}
         />
       </section>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <button className="btn primary" disabled={loading || saving || !dirty} onClick={() => void save()}>
-          {saving ? <span className="spinner" style={{ width: 12, height: 12 }} /> : null} Save
+          {saving ? <span className="spinner" style={{ width: 12, height: 12 }} /> : null} {tr('fleet.detail.save')}
         </button>
         {savedAt ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--green-soft)' }}>
-            <Check size={13} /> Saved
+            <Check size={13} /> {tr('fleet.detail.saved')}
           </span>
         ) : dirty ? (
-          <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>Unsaved changes</span>
+          <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>{tr('fleet.detail.unsaved')}</span>
         ) : null}
       </div>
 
@@ -459,17 +456,17 @@ function BotDetail({ profile, notice, onErr }: { profile: FleetProfile; notice: 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 'var(--radius)', background: 'var(--amber-soft)', border: '1px solid var(--amber)', flexWrap: 'wrap' }}>
             <TriangleAlert size={15} color="var(--amber)" />
             <div style={{ flex: 1, minWidth: 200, fontSize: 12.5, color: 'var(--text-dim)' }}>
-              <span style={{ color: 'var(--amber)', fontWeight: 650 }}>No provider.</span>{' '}
-              This bot has no model credentials of its own — mirror your keys so it can actually run.
+              <span style={{ color: 'var(--amber)', fontWeight: 650 }}>{tr('fleet.noprovider.title')}</span>{' '}
+              {tr('fleet.noprovider.body')}
             </div>
             <button className="btn sm" disabled={mirroring} onClick={() => void mirror()}>
-              {mirroring ? <span className="spinner" style={{ width: 11, height: 11 }} /> : null} Use my provider
+              {mirroring ? <span className="spinner" style={{ width: 11, height: 11 }} /> : null} {tr('fleet.noprovider.mirror')}
             </button>
           </div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--text-dim)' }}>
             <Check size={13} color="var(--green-soft)" />
-            {mirrorResult || (provider ? <>Provider: <span className="mono" style={{ color: 'var(--text)' }}>{provider}</span></> : 'Provider ready.')}
+            {mirrorResult || (provider ? <>{tr('fleet.provider.label')} <span className="mono" style={{ color: 'var(--text)' }}>{provider}</span></> : tr('fleet.provider.ready'))}
           </div>
         )}
       </section>
@@ -477,19 +474,19 @@ function BotDetail({ profile, notice, onErr }: { profile: FleetProfile; notice: 
       <BotRuns profile={profile.name} />
 
       <section style={{ marginTop: 'auto', paddingTop: 18, borderTop: '1px solid var(--border-soft)' }}>
-        <div style={{ ...label, color: 'var(--red)' }}>Danger zone</div>
+        <div style={{ ...label, color: 'var(--red)' }}>{tr('fleet.danger.title')}</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 'var(--radius)', background: 'var(--red-soft)', border: '1px solid rgba(255,90,90,0.3)', flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 200, fontSize: 12.5, color: 'var(--text-dim)' }}>
-            Deletes the bot's files, memory and skills. Chats stay, but the bot is gone for good.
+            {tr('fleet.danger.body')}
           </div>
           <button
             className="btn danger"
             disabled={profile.name === 'default' || deleting}
-            title={profile.name === 'default' ? 'Mochi, the main agent, cannot be deleted' : undefined}
+            title={profile.name === 'default' ? tr('fleet.danger.mochi') : undefined}
             onClick={() => void onDelete()}
           >
             <Trash2 size={13} />
-            {deleting ? 'Deleting…' : armDelete ? 'Tap again to confirm' : 'Delete this bot'}
+            {deleting ? tr('fleet.danger.deleting') : armDelete ? tr('fleet.danger.confirm') : tr('fleet.danger.delete')}
           </button>
         </div>
       </section>
@@ -501,6 +498,7 @@ function BotDetail({ profile, notice, onErr }: { profile: FleetProfile; notice: 
 // ── per-bot run history (the fleet observability slice) ────────────────────
 
 function BotRuns({ profile }: { profile: string }) {
+  useStore(locale)
   const [runs, setRuns] = useState<RunEntry[]>([])
   const [open, setOpen] = useState(false)
 
@@ -527,13 +525,13 @@ function BotRuns({ profile }: { profile: string }) {
         onClick={() => setOpen(v => !v)}
         style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
       >
-        <div style={{ fontSize: 11.5, fontWeight: 650, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>Recent runs</div>
+        <div style={{ fontSize: 11.5, fontWeight: 650, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>{tr('fleet.runs.title')}</div>
         <ChevronRight size={13} color="var(--text-faint)" style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 120ms' }} />
       </button>
       {open ? (
         <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
           {runs.length === 0 ? (
-            <div style={{ fontSize: 12, color: 'var(--text-faint)', padding: '6px 0' }}>No runs recorded for this bot yet.</div>
+            <div style={{ fontSize: 12, color: 'var(--text-faint)', padding: '6px 0' }}>{tr('fleet.runs.empty')}</div>
           ) : runs.slice(0, 12).map((r) => (
             <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: failed(r) ? 'var(--red)' : 'var(--text-dim)', padding: '4px 0' }}>
               {icon(r.source)}
@@ -551,6 +549,7 @@ function BotRuns({ profile }: { profile: string }) {
 // ── new bot wizard ──────────────────────────────────────────────────────────
 
 function NewBotWizard({ seed, onClose, onCreated }: { seed: string; onClose: () => void; onCreated: (name: string, notice: string) => void }) {
+  useStore(locale)
   const [job, setJob] = useState(seed)
   const [name, setName] = useState('')
   const [nameEdited, setNameEdited] = useState(false)
@@ -576,13 +575,13 @@ function NewBotWizard({ seed, onClose, onCreated }: { seed: string; onClose: () 
         soul: soulDraft(job, finalName),
         checklist,
       })
-      if (!res.ok) throw new Error(res.error || 'The gateway refused the create')
+      if (!res.ok) throw new Error(res.error || tr('fleet.wizard.refused'))
       saveCreateDefaults(checklist)
       let createdNotice = ''
       if (res.seed && seedHasSkips(res.seed)) {
-        createdNotice = 'Bot created — but some seed steps were skipped (memory or skills copied only partially).'
+        createdNotice = tr('fleet.wizard.partialSeed')
       } else if (res.seedError) {
-        createdNotice = `Bot created — seeding failed: ${res.seedError}`
+        createdNotice = tr('fleet.wizard.seedFail', { why: res.seedError })
       }
       onCreated(finalName, createdNotice)
     } catch (e) {
@@ -593,28 +592,28 @@ function NewBotWizard({ seed, onClose, onCreated }: { seed: string; onClose: () 
 
   return (
     <div className="scrim" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="modal" style={{ width: 580 }} role="dialog" aria-label="New bot">
+      <div className="modal" style={{ width: 580 }} role="dialog" aria-label={tr('fleet.create')}>
         <div className="modal-head">
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Sparkles size={15} color="var(--accent)" /> New bot
+            <Sparkles size={15} color="var(--accent)" /> {tr('fleet.create')}
           </span>
-          <button className="btn ghost sm" onClick={onClose} aria-label="Close"><X size={14} /></button>
+          <button className="btn ghost sm" onClick={onClose} aria-label={tr('settings.close')}><X size={14} /></button>
         </div>
         <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <div style={{ fontSize: 12.5, fontWeight: 650, marginBottom: 6 }}>What is this bot for?</div>
+            <div style={{ fontSize: 12.5, fontWeight: 650, marginBottom: 6 }}>{tr('fleet.detail.desc.label')}</div>
             <textarea
               className="input"
               rows={3}
               autoFocus
-              placeholder="Describe the job in a sentence or two — the bot's whole life is built around this."
+              placeholder={tr('fleet.wizard.job.ph')}
               value={job}
               onChange={(e) => setJob(e.target.value)}
             />
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
               {STARTERS.map((s) => (
-                <button key={s.label} className={`chip${job.trim() === s.job ? ' active' : ''}`} onClick={() => { setJob(s.job); setNameEdited(false) }}>
-                  {s.label}
+                <button key={s.labelKey} className={`chip${job.trim() === tr(s.jobKey) ? ' active' : ''}`} onClick={() => { setJob(tr(s.jobKey)); setNameEdited(false) }}>
+                  {tr(s.labelKey)}
                 </button>
               ))}
             </div>
@@ -622,7 +621,7 @@ function NewBotWizard({ seed, onClose, onCreated }: { seed: string; onClose: () 
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span className="avatar" style={{ width: 26, height: 26, fontSize: 10.5, background: accentFor(finalName) }}>{finalName.slice(0, 2)}</span>
-            <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>moch name</span>
+            <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>{tr('fleet.wizard.name')}</span>
             <input
               className="input mono"
               style={{ flex: 1, fontSize: 12.5 }}
@@ -634,23 +633,23 @@ function NewBotWizard({ seed, onClose, onCreated }: { seed: string; onClose: () 
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 650 }}>Start the bot with</div>
+            <div style={{ fontSize: 12.5, fontWeight: 650 }}>{tr('fleet.wizard.start')}</div>
             <CheckRow
               on={checklist.copyUserMemory}
               onToggle={() => setChecklist((c) => ({ ...c, copyUserMemory: !c.copyUserMemory }))}
-              title="Ideas about me"
-              sub="Copy Mochi's ideas about you — tone, preferences, context."
+              title={tr('fleet.create.ideas')}
+              sub={tr('fleet.wizard.ideas.sub')}
             />
             <CheckRow
               on={checklist.copyMemory}
               onToggle={() => setChecklist((c) => ({ ...c, copyMemory: !c.copyMemory }))}
-              title="Moch's work memory"
-              sub="Also copy Mochi's work memory — projects, decisions, in-flight threads."
+              title={tr('fleet.create.memory')}
+              sub={tr('fleet.wizard.memory.sub')}
             />
             <div>
-              <div style={{ fontSize: 12, color: 'var(--text-faint)', margin: '4px 0 6px' }}>Launch skills</div>
+              <div style={{ fontSize: 12, color: 'var(--text-faint)', margin: '4px 0 6px' }}>{tr('fleet.wizard.skills')}</div>
               {skills.length === 0 ? (
-                <div style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>No launch skills installed.</div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>{tr('fleet.wizard.skills.empty')}</div>
               ) : (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   {skills.map((s) => (
@@ -671,9 +670,9 @@ function NewBotWizard({ seed, onClose, onCreated }: { seed: string; onClose: () 
           {err ? <div style={{ fontSize: 12, color: 'var(--red)' }}>{err}</div> : null}
         </div>
         <div className="modal-foot">
-          <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
+          <button className="btn" onClick={onClose} disabled={busy}>{tr('fleet.cancel')}</button>
           <button className="btn primary" disabled={busy || !job.trim()} onClick={() => void create()}>
-            {busy ? <span className="spinner" style={{ width: 12, height: 12 }} /> : <Sparkles size={13} />} Create bot
+            {busy ? <span className="spinner" style={{ width: 12, height: 12 }} /> : <Sparkles size={13} />} {tr('fleet.create.cta')}
           </button>
         </div>
       </div>

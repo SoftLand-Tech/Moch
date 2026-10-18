@@ -12,6 +12,7 @@ import {
   activeTargetId, browserStatus, browserTabs, cdpConnection, ensureBrowserWatch, getCdp,
   launchBrowser, refreshBrowserStatus, refreshTabs, stopBrowser,
 } from '../lib/cdp'
+import { locale, tr } from '../lib/strings'
 
 export default function BrowserView() {
   const status = useStore(browserStatus)
@@ -20,6 +21,7 @@ export default function BrowserView() {
   const conn = useStore(cdpConnection)
   const [launching, setLaunching] = useState(false)
   const [launchError, setLaunchError] = useState<string | null>(null)
+  useStore(locale)
 
   useEffect(() => {
     ensureBrowserWatch()
@@ -78,9 +80,9 @@ export default function BrowserView() {
     <>
       <aside className="ctx">
         <div className="ctx-head">
-          <span className="ctx-title">Tabs</span>
+          <span className="ctx-title">{tr('ctx.browser.tabs')}</span>
           <div className="ctx-actions">
-            <button className="btn ghost sm" title="New tab (about:blank)" disabled={!status.running} onClick={() => void openNewTab()}>
+            <button className="btn ghost sm" title={tr('ctx.browser.newtab.title')} disabled={!status.running} onClick={() => void openNewTab()}>
               <Plus size={15} />
             </button>
           </div>
@@ -89,8 +91,8 @@ export default function BrowserView() {
           {tabs.length === 0 ? (
             <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-faint)' }}>
               {status.running
-                ? conn === 'connected' ? 'No tabs yet — open one below.' : 'Connecting to Chromium…'
-                : 'Launch the browser to see its tabs here.'}
+                ? conn === 'connected' ? tr('ctx.browser.tabs.empty.running') : tr('ctx.browser.connecting')
+                : tr('ctx.browser.tabs.empty.stopped')}
             </div>
           ) : (
             tabs.map((t) => (
@@ -107,8 +109,8 @@ export default function BrowserView() {
                   <span className="bp-tab-title">{t.title || t.url || 'about:blank'}</span>
                   <button
                     className="bp-close-tab"
-                    title="Close tab"
-                    aria-label={`Close ${t.title || t.url || 'tab'}`}
+                    title={tr('ctx.browser.tab.close')}
+                    aria-label={tr('ctx.browser.tab.closeNamed', { name: t.title || t.url || tr('ctx.browser.tab.new') })}
                     onClick={(e) => { e.stopPropagation(); void closeTab(t.id) }}
                   >
                     <X size={12} />
@@ -120,7 +122,7 @@ export default function BrowserView() {
           )}
           {status.running ? (
             <button className="bp-tab bp-tab-new" onClick={() => void openNewTab()}>
-              <div className="bp-tab-top"><Plus size={13} /><span className="bp-tab-title">New tab</span></div>
+              <div className="bp-tab-top"><Plus size={13} /><span className="bp-tab-title">{tr('ctx.browser.tab.new')}</span></div>
               <span className="bp-tab-url">about:blank</span>
             </button>
           ) : null}
@@ -132,24 +134,24 @@ export default function BrowserView() {
           <span className={`status-dot ${status.running ? (conn === 'connected' ? 'ok' : 'warn') : 'idle'}`} />
           <span style={{ fontSize: 13, color: 'var(--text-dim)', whiteSpace: 'nowrap' }} title={status.executable ?? undefined}>
             {status.running
-              ? status.port != null ? `Chromium · 127.0.0.1:${status.port}` : 'Chromium running'
-              : 'Chromium stopped'}
+              ? status.port != null ? tr('ctx.browser.status.addr', { addr: `127.0.0.1:${status.port}` }) : tr('ctx.browser.status.running')
+              : tr('ctx.browser.status.stopped')}
           </span>
           <span style={{ fontSize: 12, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>
             {status.running && conn !== 'connected'
-              ? '· connecting…'
+              ? tr('ctx.browser.status.connecting')
               : status.running && conn === 'connected'
-                ? `· ${tabs.length} tab${tabs.length === 1 ? '' : 's'}`
+                ? tr(tabs.length === 1 ? 'ctx.browser.status.tabs.one' : 'ctx.browser.status.tabs.many', { n: tabs.length })
                 : ''}
           </span>
           <div style={{ flex: 1 }} />
           {status.running ? (
-            <button className="btn sm" title="Stop the managed Chromium" onClick={() => void stopBrowser().catch(() => { /* noop */ })}>
-              <Power size={13} /> Stop
+            <button className="btn sm" title={tr('ctx.browser.stop.title')} onClick={() => void stopBrowser().catch(() => { /* noop */ })}>
+              <Power size={13} /> {tr('ctx.browser.stop')}
             </button>
           ) : (
             <button className="btn primary sm" disabled={launching} onClick={() => void launch()}>
-              {launching ? 'Launching…' : 'Launch browser'}
+              {launching ? tr('ctx.browser.launching') : tr('ctx.browser.launchBrowser')}
             </button>
           )}
         </div>
@@ -159,17 +161,16 @@ export default function BrowserView() {
           ) : (
             <div className="empty">
               <div className="bp-empty-icon"><Globe size={26} /></div>
-              <div className="empty-title">The agent browser</div>
+              <div className="empty-title">{tr('ctx.browser.empty.title')}</div>
               <div className="empty-sub">
-                A real Chromium that lives on this machine. You drive it from here — and so do your agents:
-                every page hermes opens appears live in this pane, and the two of you share tabs, cookies and history.
+                {tr('ctx.browser.explainer')}
                 {launchError ? <div style={{ color: 'var(--red)', marginTop: 8 }}>{launchError}</div> : null}
               </div>
               <button className="btn primary" disabled={launching} onClick={() => void launch()}>
                 {launching
                   ? <span className="spinner" style={{ width: 13, height: 13, borderWidth: 2 }} />
                   : <Rocket size={14} />}
-                {launching ? 'Launching…' : 'Launch browser'}
+                {launching ? tr('ctx.browser.launching') : tr('ctx.browser.launchBrowser')}
               </button>
             </div>
           )}

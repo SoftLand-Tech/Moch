@@ -4,6 +4,7 @@ import { CircleAlert, FolderOpen, RefreshCw, Sparkles } from 'lucide-react'
 import { listSkills, resolveSkillDir, type Skill } from '../lib/skills'
 import { hermesHome, isConnected, workspaceDir } from '../lib/gateway'
 import { revealPath } from '../lib/shell-ops'
+import { locale, tr } from '../lib/strings'
 
 const labelStyle: React.CSSProperties = {
   fontSize: 'var(--text-xs)',
@@ -15,6 +16,7 @@ const labelStyle: React.CSSProperties = {
 }
 
 export default function SkillsView() {
+  useStore(locale)
   const connected = useStore(isConnected)
   const ws = useStore(workspaceDir)
   const home = useStore(hermesHome)
@@ -43,15 +45,15 @@ export default function SkillsView() {
 
   const skill = skills.find((s) => s.name === selected) ?? null
   const skillDir = skill ? resolveSkillDir(skill, home, ws) : null
-  const skillsRoot = (ws ?? home) ? `${(ws ?? home) as string}/skills` : 'your workspace/skills'
+  const skillsRoot = (ws ?? home) ? `${(ws ?? home) as string}/skills` : tr('skills.root.fallback')
 
   return (
     <>
       <aside className="ctx">
         <div className="ctx-head">
-          <span className="ctx-title">Skills</span>
+          <span className="ctx-title">{tr('nav.skills')}</span>
           <div className="ctx-actions">
-            <button className="btn ghost sm" title="Rescan" onClick={() => void refresh()} disabled={!connected}>
+            <button className="btn ghost sm" title={tr('skills.rescan')} onClick={() => void refresh()} disabled={!connected}>
               <RefreshCw size={14} />
             </button>
           </div>
@@ -59,7 +61,7 @@ export default function SkillsView() {
         <div className="ctx-body">
           {loading ? (
             <div style={{ padding: '14px 12px', display: 'flex', gap: 8, alignItems: 'center', color: 'var(--text-faint)' }}>
-              <span className="spinner" style={{ width: 12, height: 12 }} /> loading…
+              <span className="spinner" style={{ width: 12, height: 12 }} /> {tr('skills.loading')}
             </div>
           ) : error ? (
             <div style={{ padding: '10px 12px', fontSize: 'var(--text-sm)', color: 'var(--red)', display: 'flex', gap: 6 }}>
@@ -67,10 +69,10 @@ export default function SkillsView() {
             </div>
           ) : (
             <>
-              <div className="row-section">Installed skills · {skills.length}</div>
+              <div className="row-section">{tr('skills.installed', { n: skills.length })}</div>
               {skills.length === 0 ? (
                 <div style={{ padding: '8px 12px', fontSize: 'var(--text-sm)', color: 'var(--text-faint)', lineHeight: 1.5 }}>
-                  No skills installed yet.
+                  {tr('skills.none')}
                 </div>
               ) : (
                 skills.map((s) => (
@@ -101,21 +103,21 @@ export default function SkillsView() {
                 {skill.name}
               </span>
               <div style={{ flex: 1 }} />
-              <button className="btn sm" disabled={!skillDir} title={skillDir ?? 'path unknown'} onClick={() => skillDir && void revealPath(skillDir)}>
-                <FolderOpen size={13} /> Open folder
+              <button className="btn sm" disabled={!skillDir} title={skillDir ?? tr('skills.path.unknown')} onClick={() => skillDir && void revealPath(skillDir)}>
+                <FolderOpen size={13} /> {tr('skills.open')}
               </button>
             </div>
             <div className="focus-body">
-              <Field label="Description">
+              <Field label={tr('skills.field.desc')}>
                 {skill.description ? (
                   <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)', lineHeight: 1.6, userSelect: 'text' }}>
                     {skill.description}
                   </div>
                 ) : (
-                  <span className="text-faint" style={{ fontSize: 'var(--text-sm)' }}>No description in its SKILL.md.</span>
+                  <span className="text-faint" style={{ fontSize: 'var(--text-sm)' }}>{tr('skills.nodesc')}</span>
                 )}
               </Field>
-              <Field label="Location">
+              <Field label={tr('skills.field.loc')}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <code
                     className="mono"
@@ -129,13 +131,13 @@ export default function SkillsView() {
                     {skillDir ?? skill.path ?? 'unknown'}
                   </code>
                   <button className="btn sm" disabled={!skillDir} onClick={() => skillDir && void revealPath(skillDir)}>
-                    <FolderOpen size={13} /> Reveal
+                    <FolderOpen size={13} /> {tr('settings.reveal')}
                   </button>
                 </div>
               </Field>
-              <Field label="How skills work">
+              <Field label={tr('skills.field.how')}>
                 <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-faint)', lineHeight: 1.6 }}>
-                  Agents load this procedure on demand — mention it by name in any chat.
+                  {tr('skills.how')}
                 </span>
               </Field>
             </div>
@@ -143,13 +145,12 @@ export default function SkillsView() {
         ) : (
           <div className="empty">
             <Sparkles size={34} color="var(--text-faint)" />
-            <div className="empty-title">No skills installed yet</div>
+            <div className="empty-title">{tr('skills.empty.title')}</div>
             <div className="empty-sub" style={{ userSelect: 'text' }}>
-              Skills are reusable procedures your agents load on demand. Drop folders with a SKILL.md
-              into <span className="mono" style={{ color: 'var(--accent)' }}>{skillsRoot}</span> or teach one in a chat.
+              {tr('skills.empty.pre')} <span className="mono" style={{ color: 'var(--accent)' }}>{skillsRoot}</span> {tr('skills.empty.post')}
             </div>
             <button className="btn" onClick={() => ws && void revealPath(ws)} disabled={!ws}>
-              <FolderOpen size={14} /> Show workspace
+              <FolderOpen size={14} /> {tr('skills.show.ws')}
             </button>
           </div>
         )}
