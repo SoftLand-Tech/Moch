@@ -50,24 +50,35 @@ wait_for() {
 
 # A SIGKILLed or MOCH_KEEP=1 run leaves a vite holding 5173, and strictPort
 # would then fail every later run. Reclaim older temp roots before starting.
+# Identity is the leader's /proc starttime, not its cmdline: the npm->vite
+# launch chain re-execs through shims, so a cmdline snapshot taken right
+# after spawn no longer matches minutes later.
+leader_start() {
+  awk '{ s=$0; sub(/.*\)/, "", s); split(s, a, " "); print a[20] }' "/proc/$1/stat" 2>/dev/null
+}
+
 reclaim_stale_runs() {
-  local old pf pgid
+  local old pf pgid recorded
   for old in /tmp/moch-verify.*; do
     case "$old" in /tmp/moch-verify.??*) ;; *) continue ;; esac
     [ -d "$old" ] || continue
     [ "$old" = "$WORK" ] && continue
     for pf in "$old"/pids/*.pgid; do
       [ -f "$pf" ] || continue
-      pgid="$(cat "$pf" 2>/dev/null || true)"
-      [ -n "$pgid" ] || continue
-      # only group-kill when the recorded leader still looks like ours
-      if [ -r "/proc/$pgid/cmdline" ] && tr '\0' ' ' <"/proc/$pgid/cmdline" | grep -Eq "vite|$old"; then
+      pgid="$(sed -n '1p' "$pf" 2>/dev/null || true)"
+      recorded="$(sed -n '2p' "$pf" 2>/dev/null || true)"
+      [ -n "$pgid" ] && [ -n "$recorded" ] || continue
+      if [ "$(leader_start "$pgid")" = "$recorded" ]; then
         kill -TERM -- "-$pgid" 2>/dev/null || true
       fi
     done
     pkill -TERM -f "$old" 2>/dev/null || true
     rm -rf -- "$old"
   done
+}
+
+record_svc() {
+  printf '%s\n%s\n' "$2" "$(leader_start "$2")" >"$WORK/pids/$1.pgid"
 }
 
 cleanup() {
@@ -118,17 +129,25 @@ echo "[3/6] gateway (state under $STATE)"
   PYTHONDONTWRITEBYTECODE=1 \
   "$VENV/bin/python" -m moch_desktop --port 0) >"$WORK/gateway.log" 2>&1 &
 GW_PGD=$!
-echo "$GW_PGD" >"$WORK/pids/gateway.pgid"
+record_svc gateway "$GW_PGD"
 
 echo "[4/6] vite dev server on :5173"
 (cd "$UI_DIR" && exec setsid env \
   MOCH_DESKTOP_STATE_DIR="$STATE" \
   npm run dev) >"$WORK/vite.log" 2>&1 &
 VITE_PGD=$!
-echo "$VITE_PGD" >"$WORK/pids/vite.pgid"
+record_svc vite "$VITE_PGD"
 
 wait_for "gateway state file" test -s "$STATE/desktop-runtime.json"
-wait_for "vite dev server" curl -fsS --max-time 2 "$URL/"
+# strictPort makes vite exit instead of serving the wrong app, so fail fast
+# on leader death rather than timing out on the readiness curl
+vite_up=0
+for i in $(seq 1 120); do
+  if curl -fsS --max-time 2 "$URL/" >/dev/null 2>&1; then vite_up=1; break; fi
+  kill -0 "$VITE_PGD" 2>/dev/null || die "vite exited early (is port 5173 already taken?)"
+  sleep 0.5
+done
+[ "$vite_up" = 1 ] || die "timed out waiting for vite dev server"
 wait_for "dev-bridge runtime-state" bash -c "curl -fsS --max-time 2 '$URL/dev-bridge/runtime-state' | grep -q '\"port\"'"
 GW_PORT="$(sed -n 's/.*\"port\": \([0-9]\+\).*/\1/p' "$STATE/desktop-runtime.json" | head -n1)"
 echo "[5/6] dev-bridge serving runtime state (gateway port $GW_PORT)"
