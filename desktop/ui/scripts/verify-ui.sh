@@ -6,24 +6,45 @@
 # dev-bridge, writes a DOM dump and a screenshot, then tears everything down.
 # Recipe: orchestrate/moch-desktop-rakazo/reports/R0-recon.md section 6.
 #
+# Every run owns an isolated slice: a
+# ~/.cache/moch-verify/<worktree>.<pid>.* root and an OS-assigned vite port,
+# so parallel runs from parallel worktrees cannot touch each other. /tmp is
+# tmpfs on this box and two concurrent stacks there OOMed the harness; the
+# script refuses to run anywhere under /tmp.
+#
 # Usage: desktop/ui/scripts/verify-ui.sh [screenshot.png]
-#   MOCH_KEEP=1  skip teardown, leave gateway + dev server up for debugging
-#                 (the next run reclaims what this one left behind)
+#   MOCH_KEEP=1      skip teardown, leave gateway + dev server up for debugging
+#                     (the next run reclaims what this one left behind)
+#   MOCH_WORK=dir    run root override (default ~/.cache/moch-verify/<id>.<pid>)
+#   MOCH_IMPORT_FROM hermes home the gateway imports provider config from on
+#                     first run (default: a staged copy of ~/.hermes carrying
+#                     only the provider config, not its 275MB skills tree)
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 UI_DIR="$REPO_ROOT/desktop/ui"
 RUNTIME_DIR="$REPO_ROOT/desktop/runtime"
-URL="http://localhost:5173"
-BUDGET=9000
+URL=""
+RENDER_TIMEOUT=90
 STAMP="$(date +%Y%m%d-%H%M%S)"
 OUT_PNG="${1:-$REPO_ROOT/.devtest/rakazo/$STAMP.png}"
 OUT_DOM="${OUT_PNG%.png}.dom.html"
 
-WORK="$(mktemp -d /tmp/moch-verify.XXXXXX)"
+# Run identity: worktree name plus this script's pid. Concurrent units live
+# in concurrent worktrees, so the name namespaces the run roots and the pid
+# separates a live sibling's root from an abandoned one.
+IDENT="$(printf '%s' "$(basename "$REPO_ROOT")" | tr -c 'A-Za-z0-9-' '-')"
+CACHE_ROOT="$HOME/.cache/moch-verify"
+mkdir -p "$CACHE_ROOT"
+WORK="${MOCH_WORK:-$(mktemp -d "$CACHE_ROOT/${IDENT}.$$.XXXXXX")}"
+case "$WORK" in
+  /tmp|/tmp/*) echo "verify-ui: refusing run root under /tmp (tmpfs; standing order 22): $WORK" >&2; exit 1 ;;
+esac
+mkdir -p "$WORK/tmp"
+export TMPDIR="$WORK/tmp"
 STATE="$WORK/state"
-VENV="$WORK/venv"
+VENV="$CACHE_ROOT/venv-shared"
 GW_PGD=""
 VITE_PGD=""
 
@@ -48,21 +69,26 @@ wait_for() {
   die "timed out waiting for $desc"
 }
 
-# A SIGKILLed or MOCH_KEEP=1 run leaves a vite holding 5173, and strictPort
-# would then fail every later run. Reclaim older temp roots before starting.
-# Identity is the leader's /proc starttime, not its cmdline: the npm->vite
-# launch chain re-execs through shims, so a cmdline snapshot taken right
-# after spawn no longer matches minutes later.
+# A SIGKILLed or MOCH_KEEP=1 run leaves services and a temp root behind.
+# Reclaim only same-worktree roots whose creating script is dead; a foreign
+# root (different worktree name) or a live sibling's (creator pid running)
+# is never touched. Service identity is the leader's /proc starttime, not
+# its cmdline: the npm->vite launch chain re-execs through shims, so a
+# cmdline snapshot taken right after spawn no longer matches minutes later.
 leader_start() {
   awk '{ s=$0; sub(/.*\)/, "", s); split(s, a, " "); print a[20] }' "/proc/$1/stat" 2>/dev/null
 }
 
 reclaim_stale_runs() {
-  local old pf pgid recorded
-  for old in /tmp/moch-verify.*; do
-    case "$old" in /tmp/moch-verify.??*) ;; *) continue ;; esac
+  local old owner pf pgid recorded
+  for old in "$CACHE_ROOT/$IDENT".*; do
     [ -d "$old" ] || continue
     [ "$old" = "$WORK" ] && continue
+    owner="${old##*/}"
+    owner="${owner#$IDENT.}"
+    owner="${owner%%.*}"
+    case "$owner" in ''|*[!0-9]*) continue ;; esac
+    kill -0 "$owner" 2>/dev/null && continue
     for pf in "$old"/pids/*.pgid; do
       [ -f "$pf" ] || continue
       pgid="$(sed -n '1p' "$pf" 2>/dev/null || true)"
@@ -115,36 +141,78 @@ reclaim_stale_runs
 echo "[1/6] npm ci (desktop/ui)"
 (cd "$UI_DIR" && npm ci --no-audit --no-fund)
 
-echo "[2/6] uv venv + requirements (desktop/runtime)"
-uv venv --python 3.12 "$VENV"
-uv pip install -q -p "$VENV/bin/python" -r "$RUNTIME_DIR/requirements.txt"
+echo "[2/6] uv venv + requirements (shared at $VENV)"
+# One venv for every run, past and concurrent. flock serializes a first-time
+# create between two staggered runs; the requirements hash detects a stale
+# venv after a requirements.txt change. uv dies with SIGABRT when its stderr
+# is a capture pipe, so both uv calls write stderr to a log (order 18).
+REQ_HASH="$(sha256sum "$RUNTIME_DIR/requirements.txt" | cut -d' ' -f1)"
+exec 9>"$CACHE_ROOT/.venv.lock"
+flock 9
+if [ -x "$VENV/bin/python" ] && [ "$(cat "$VENV/.req-hash" 2>/dev/null)" = "$REQ_HASH" ]; then
+  echo "reusing resolved venv at $VENV"
+else
+  rm -rf "$VENV"
+  uv venv --python 3.12 "$VENV" 2>"$WORK/uv.err" || { tail -n 20 "$WORK/uv.err" >&2; die "uv venv failed"; }
+  uv pip install -q -p "$VENV/bin/python" -r "$RUNTIME_DIR/requirements.txt" 2>>"$WORK/uv.err" \
+    || { tail -n 20 "$WORK/uv.err" >&2; die "uv pip install failed"; }
+  printf '%s\n' "$REQ_HASH" >"$VENV/.req-hash"
+fi
+flock -u 9
+exec 9>&-
 
 echo "[3/6] gateway (state under $STATE)"
 # setsid gives each service its own process group, so teardown can kill the
 # whole tree (npm->vite, gateway children) without touching this script.
 # MOCH_WORKSPACE keeps the gateway's default ~/Moch out of the user's home.
+# --import-from seeds the fresh state dir with a provider; without it every
+# bot-dependent check dies with "not connected to any AI provider". The
+# default source is a staged copy of ~/.hermes carrying only the provider
+# config (~40KB): the gateway's importer copies the entries that exist in
+# the source, so a source without skills/ imports no 275MB skills tree.
+IMPORT_ARGS=()
+if [ -n "${MOCH_IMPORT_FROM:-}" ]; then
+  IMPORT_ARGS=(--import-from "$MOCH_IMPORT_FROM")
+elif [ -d "$HOME/.hermes" ]; then
+  IMPORT_SRC="$WORK/import-src"
+  mkdir -p "$IMPORT_SRC"
+  for entry in config.yaml auth.json .env USER.md memories; do
+    [ -e "$HOME/.hermes/$entry" ] && cp -a "$HOME/.hermes/$entry" "$IMPORT_SRC/$entry"
+  done
+  IMPORT_ARGS=(--import-from "$IMPORT_SRC")
+fi
 (cd "$RUNTIME_DIR" && exec setsid env \
   MOCH_DESKTOP_STATE_DIR="$STATE" \
   MOCH_WORKSPACE="$STATE/workspace" \
   PYTHONDONTWRITEBYTECODE=1 \
-  "$VENV/bin/python" -m moch_desktop --port 0) >"$WORK/gateway.log" 2>&1 &
+  "$VENV/bin/python" -m moch_desktop --port 0 "${IMPORT_ARGS[@]}") >"$WORK/gateway.log" 2>&1 &
 GW_PGD=$!
 record_svc gateway "$GW_PGD"
 
-echo "[4/6] vite dev server on :5173"
+echo "[4/6] vite dev server (OS-assigned port)"
+# port 0 asks the kernel for a free port, so parallel runs never fight over
+# 5173; vite prints the bound port in its "Local:" line
 (cd "$UI_DIR" && exec setsid env \
   MOCH_DESKTOP_STATE_DIR="$STATE" \
-  npm run dev) >"$WORK/vite.log" 2>&1 &
+  npm run dev -- --port 0) >"$WORK/vite.log" 2>&1 &
 VITE_PGD=$!
 record_svc vite "$VITE_PGD"
 
 wait_for "gateway state file" test -s "$STATE/desktop-runtime.json"
-# strictPort makes vite exit instead of serving the wrong app, so fail fast
-# on leader death rather than timing out on the readiness curl
+# fail fast on leader death rather than timing out on the port/readiness curls
+VITE_PORT=""
+for i in $(seq 1 120); do
+  VITE_PORT="$(sed -n 's/.*localhost:\([0-9][0-9]*\)\/.*/\1/p' "$WORK/vite.log" 2>/dev/null | head -n1)"
+  [ -n "$VITE_PORT" ] && break
+  kill -0 "$VITE_PGD" 2>/dev/null || die "vite exited early"
+  sleep 0.5
+done
+[ -n "$VITE_PORT" ] || die "timed out waiting for vite to report its port"
+URL="http://localhost:$VITE_PORT"
 vite_up=0
 for i in $(seq 1 120); do
   if curl -fsS --max-time 2 "$URL/" >/dev/null 2>&1; then vite_up=1; break; fi
-  kill -0 "$VITE_PGD" 2>/dev/null || die "vite exited early (is port 5173 already taken?)"
+  kill -0 "$VITE_PGD" 2>/dev/null || die "vite exited early"
   sleep 0.5
 done
 [ "$vite_up" = 1 ] || die "timed out waiting for vite dev server"
@@ -152,15 +220,19 @@ wait_for "dev-bridge runtime-state" bash -c "curl -fsS --max-time 2 '$URL/dev-br
 GW_PORT="$(sed -n 's/.*\"port\": \([0-9]\+\).*/\1/p' "$STATE/desktop-runtime.json" | head -n1)"
 echo "[5/6] dev-bridge serving runtime state (gateway port $GW_PORT)"
 
-echo "[6/6] render + assertions (virtual time budget ${BUDGET}ms)"
-chromium --headless --disable-gpu --no-sandbox --user-data-dir="$WORK/render-dom-profile" \
-  --virtual-time-budget="$BUDGET" --window-size=1600,1000 \
-  --dump-dom "$URL" >"$OUT_DOM" 2>"$WORK/render-dom.log"
-chromium --headless --disable-gpu --no-sandbox --user-data-dir="$WORK/render-png-profile" \
-  --virtual-time-budget="$BUDGET" --window-size=1600,1000 \
-  --screenshot="$OUT_PNG" "$URL" 2>"$WORK/render-png.log"
+echo "[6/6] render + assertions (CDP driver, ${RENDER_TIMEOUT}s deadline)"
+# --dump-dom cannot capture this app two ways over: a virtual-time budget
+# never elapses against the always-open gateway websocket (V2's hang), and a
+# plain or --timeout'd dump freezes a quiet page's timers before the shell
+# finishes booting (reproduced on static probe pages). The CDP driver runs a
+# real headless chromium, waits in real time for the ready shell, then takes
+# the DOM and the screenshot in one pass.
+node "$UI_DIR/scripts/render-cdp.mjs" "$URL" "$OUT_DOM" "$OUT_PNG" "$((RENDER_TIMEOUT * 1000))" \
+  || die "render failed or shell not ready within ${RENDER_TIMEOUT}s"
 
-grep -q 'viewwrap' "$OUT_DOM" || die "boot never reached the ready shell; DOM dump kept at $OUT_DOM"
+# the ready shell mounts the view container; the .rk3-view CSS rule alone
+# (always present in the dumped stylesheet) must not satisfy this
+grep -q 'class="rk3-view"' "$OUT_DOM" || die "boot never reached the ready shell; DOM dump kept at $OUT_DOM"
 # the splash <style> block stays in head forever, so match the element itself
 if grep -q 'id="boot-splash"' "$OUT_DOM"; then
   die "boot splash element never removed; dump kept at $OUT_DOM"

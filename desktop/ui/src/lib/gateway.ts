@@ -8,8 +8,8 @@
  */
 
 import { atom, computed } from 'nanostores'
-import { invoke } from './tauri'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { invoke, listen } from './tauri'
+import type { UnlistenFn } from '@tauri-apps/api/event'
 import { JsonRpcGatewayClient, type ConnectionState, type GatewayEvent, type ServerRequest } from '../protocol/json-rpc-gateway'
 
 export interface GatewayStatusPayload {
