@@ -1,0 +1,378 @@
+{
+  "boot.connecting": [
+    "connecting to the gateway…",
+    "جارٍ الاتصال بالبوابة…"
+  ],
+  "boot.error.title": [
+    "The local runtime hit a problem",
+    "واجه وقت التشغيل المحلي مشكلة"
+  ],
+  "boot.local": [
+    "The hermes agents, your bots and everything else live right here on this machine — nothing leaves it.",
+    "وكلاء هيرميس وبوتاتك وكل شيء آخر يعيشون هنا على هذا الجهاز — لا شيء يغادره."
+  ],
+  "boot.retry": [
+    "Retry",
+    "إعادة المحاولة"
+  ],
+  "bot.chat": [
+    "Chat with {name}",
+    "تحدث مع {name}"
+  ],
+  "bot.delete.body": [
+    "Deleting tombstones this bot: its scheduled jobs stop firing (ticker skips tombstones), running turns stop at the next boundary. Kanban tasks it holds stay on the board until the M9.4 crew board offers reassignment.",
+    "الحذف يضع علامة قبر على هذا البوت: مهامه المجدولة تتوقف (الجدول يتخطى الملفات الموابَرة)، والأدوار الجارية تتوقف عند الحد التالي. مهام كانبان تبقى على اللوحة حتى توفر لوحة الطاقم (M9.4) إعادة الإسناد."
+  ],
+  "bot.delete.confirm": [
+    "Tap again to confirm deletion",
+    "اضغط مرة أخرى للتأكيد"
+  ],
+  "bot.delete.cta": [
+    "Delete this bot",
+    "احذف هذا البوت"
+  ],
+  "bot.delete.doing": [
+    "Deleting…",
+    "جارٍ الحذف…"
+  ],
+  "bot.delete.failed": [
+    "Couldn't delete this bot: {why}",
+    "تعذّر حذف هذا البوت: {why}"
+  ],
+  "bot.delete.title": [
+    "Danger zone",
+    "منطقة الخطر"
+  ],
+  "bot.job": [
+    "Job / description",
+    "المهمة / الوصف"
+  ],
+  "bot.save": [
+    "Save",
+    "حفظ"
+  ],
+  "bot.save.failed": [
+    "Couldn't save: {why}",
+    "فشل الحفظ: {why}"
+  ],
+  "bot.saved": [
+    "saved",
+    "تم الحفظ"
+  ],
+  "bot.soul": [
+    "SOUL.md — the job description",
+    "SOUL.md — وصف المهمة"
+  ],
+  "chat.clarify.pending.many": [
+    "{n} questions still need answers before sending.",
+    "{n} أسئلة لا تزال بحاجة إلى إجابات قبل الإرسال."
+  ],
+  "chat.clarify.pending.one": [
+    "1 question still needs an answer before sending.",
+    "سؤال واحد لا يزال بحاجة إلى إجابة قبل الإرسال."
+  ],
+  "chat.composer.placeholder": [
+    "Ask Mochi anything — / for commands",
+    "اسأل موتشي أي شيء — اكتب / للأوامر"
+  ],
+  "chat.composer.placeholder.bot": [
+    "Message {name}…",
+    "راسل {name}…"
+  ],
+  "chat.composer.placeholder.steer": [
+    "Steer the running turn — delivered at the next boundary…",
+    "وجّه الدور الجاري — يُسلَّم عند الحد التالي…"
+  ],
+  "chat.empty.sub": [
+    "Your agents run entirely on this machine — they can use the terminal, browse the web, remember across chats, and work while you're elsewhere. Ask for anything.",
+    "وكلاؤك يعملون بالكامل على هذا الجهاز — يمكنهم استخدام الطرفية وتصفح الويب والتذكّر عبر المحادثات والعمل أثناء انشغالك. اطلب أي شيء."
+  ],
+  "chat.empty.title": [
+    "What should Mochi do?",
+    "ماذا يفعل موتشي؟"
+  ],
+  "chat.empty.title.bot": [
+    "Talk to {name}",
+    "تحدث مع {name}"
+  ],
+  "chat.foreign.hint": [
+    "Tap to review and answer it here.",
+    "اضغط لمراجعتها والإجابة عليها من هنا."
+  ],
+  "chat.foreign.title": [
+    "Another session on this machine is asking you something",
+    "جلسة أخرى على هذا الجهاز تطلب منك إجابة"
+  ],
+  "chat.list.empty": [
+    "No chats yet — say hi below.",
+    "لا محادثات بعد — قل مرحبًا بالأسفل."
+  ],
+  "crew.assign": [
+    "Reassign",
+    "إعادة تعيين"
+  ],
+  "crew.complete": [
+    "Complete",
+    "إكمال"
+  ],
+  "crew.complete.summary": [
+    "completed from the phone (human override)",
+    "أُكملت من الهاتف (تجاوز بشري)"
+  ],
+  "crew.err": [
+    "Action failed: {why}",
+    "فشل الإجراء: {why}"
+  ],
+  "crew.hint": [
+    "Board — tasks you create are picked up by the assignee bot within about a minute. Run ledger below.",
+    "اللوحة — المهام التي تنشئها يتناولها بوت المكلّف خلال دقيقة تقريبًا. سجل الأدوار بالأسفل."
+  ],
+  "crew.moch": [
+    "Moch",
+    "موك"
+  ],
+  "crew.new": [
+    "New task",
+    "مهمة جديدة"
+  ],
+  "crew.new.assignee": [
+    "Assign to",
+    "عيّن إلى"
+  ],
+  "crew.new.body": [
+    "Details (optional)",
+    "تفاصيل (اختياري)"
+  ],
+  "crew.new.cta": [
+    "Put on board",
+    "أضف إلى اللوحة"
+  ],
+  "crew.new.title": [
+    "Task — e.g. summarize yesterday's prices",
+    "المهمة — مثال: لخّص أسعار الأمس"
+  ],
+  "crew.offline": [
+    "Crew offline — showing the last board",
+    "طاقم العمل غير متصل — يُعرض آخر لوح"
+  ],
+  "crew.timeline": [
+    "Run ledger",
+    "سجل الأدوار"
+  ],
+  "crew.timeline.empty": [
+    "No runs recorded yet.",
+    "لا أدوار مسجلة بعد."
+  ],
+  "files.empty": [
+    "empty folder",
+    "مجلد فارغ"
+  ],
+  "files.waiting": [
+    "waiting for the workspace…",
+    "في انتظار مساحة العمل…"
+  ],
+  "fleet.cancel": [
+    "Cancel",
+    "إلغاء"
+  ],
+  "fleet.chat": [
+    "Chat with {name}",
+    "تحدث مع {name}"
+  ],
+  "fleet.create": [
+    "New bot",
+    "بوت جديد"
+  ],
+  "fleet.create.cta": [
+    "Create bot",
+    "أنشئ البوت"
+  ],
+  "fleet.create.err": [
+    "Could not create the bot: {why}",
+    "تعذّر إنشاء البوت: {why}"
+  ],
+  "fleet.create.ideas": [
+    "Ideas about me",
+    "معرفة من أنا"
+  ],
+  "fleet.create.ideas.hint": [
+    "Copy what Moch knows about you (USER.md) into this bot — it starts familiar instead of a stranger.",
+    "انسخ ما يعرفه موك عنك (USER.md) إلى هذا البوت — يبدأ عارفًا بك بدلًا من غريب."
+  ],
+  "fleet.create.job": [
+    "Describe the job — e.g. watch price drops daily",
+    "صِف المهمة — مثال: تابع تخفيضات الأسعار يوميًا"
+  ],
+  "fleet.create.memory": [
+    "Moch's work memory",
+    "ذاكرة موك العاملة"
+  ],
+  "fleet.create.memory.hint": [
+    "Also copy Moch's accumulated MEMORY.md — usually noisy; leave off unless the bot needs the history.",
+    "انسخ أيضًا ذاكرة موك المتراكمة (MEMORY.md) — عادة مشوشة؛ اتركها مطفأة ما لم يحتج البوت التاريخ."
+  ],
+  "fleet.create.partial": [
+    "Bot created — some checklist items were skipped (existing files are never overwritten).",
+    "تم إنشاء البوت — تم تخطي بعض عناصر القائمة (الملفات الموجودة لا تُستبدل أبدًا)."
+  ],
+  "fleet.create.skills": [
+    "Skills to give it",
+    "مهارات تمنحها له"
+  ],
+  "fleet.create.skills.empty": [
+    "No skills found in Moch",
+    "لا توجد مهارات لدى موك"
+  ],
+  "fleet.create.skills.unavailable": [
+    "Skill list unavailable on this gateway",
+    "قائمة المهارات غير متاحة على هذه البوابة"
+  ],
+  "fleet.create.suggested": [
+    "Suggested name",
+    "اسم مقترح"
+  ],
+  "fleet.detail.back": [
+    "Fleet",
+    "الأسطول"
+  ],
+  "fleet.empty.body": [
+    "Bots are profiles on this device with their own memory, skills and computer. Describe a job below — creation is instant and nothing about chat changes.",
+    "البوتات ملفات على هذا الجهاز لها ذاكرة ومهارات وجهاز خاص بها. صِف المهمة بالأسفل — الإنشاء فوري ولا يتغير شيء في المحادثة."
+  ],
+  "fleet.empty.title": [
+    "Your fleet starts here",
+    "أسطولك يبدأ من هنا"
+  ],
+  "fleet.freeze": [
+    "Freeze {name}",
+    "تجميد {name}"
+  ],
+  "fleet.freeze.failed": [
+    "Couldn't freeze/unfreeze {name}: {why}",
+    "تعذّر تجميد/إلغاء تجميد {name}: {why}"
+  ],
+  "fleet.offline": [
+    "Fleet offline",
+    "الأسطول غير متصل"
+  ],
+  "fleet.refresh": [
+    "Refresh fleet",
+    "تحديث الأسطول"
+  ],
+  "fleet.runtime.active": [
+    "fleet runtime · {active}/{slots} turns",
+    "وقت التشغيل · {active}/{slots} مهام"
+  ],
+  "fleet.runtime.idle": [
+    "fleet runtime idle on this gateway",
+    "وقت تشغيل الأسطول خامل على هذه البوابة"
+  ],
+  "fleet.title": [
+    "Fleet",
+    "الأسطول"
+  ],
+  "fleet.unfreeze": [
+    "Unfreeze {name}",
+    "إلغاء تجميد {name}"
+  ],
+  "fleet.waiting": [
+    "{n} waiting ({prios})",
+    "{n} في الانتظار ({prios})"
+  ],
+  "nav.automations": [
+    "Automations",
+    "الأتمتة"
+  ],
+  "nav.browser": [
+    "Browser",
+    "المتصفح"
+  ],
+  "nav.chats": [
+    "Chats",
+    "المحادثات"
+  ],
+  "nav.connectors": [
+    "Connectors",
+    "الموصّلات"
+  ],
+  "nav.crew": [
+    "Crew",
+    "الطاقم"
+  ],
+  "nav.files": [
+    "Files",
+    "الملفات"
+  ],
+  "nav.fleet": [
+    "Fleet",
+    "الأسطول"
+  ],
+  "nav.inbox": [
+    "Inbox",
+    "الوارد"
+  ],
+  "nav.settings": [
+    "Settings",
+    "الإعدادات"
+  ],
+  "nav.skills": [
+    "Skills",
+    "المهارات"
+  ],
+  "nav.terminal": [
+    "Terminal",
+    "الطرفية"
+  ],
+  "rail.mochi": [
+    "Mochi",
+    "موتشي"
+  ],
+  "rail.nomatch": [
+    "No bots match",
+    "لا بوتات مطابقة"
+  ],
+  "rail.search": [
+    "Search",
+    "بحث"
+  ],
+  "shell.thread.frozen": [
+    "Frozen",
+    "مجمّد"
+  ],
+  "shell.thread.idle": [
+    "Idle",
+    "خامل"
+  ],
+  "shell.thread.working": [
+    "Working",
+    "يعمل"
+  ],
+  "status.bots.many": [
+    "bots",
+    "بوتات"
+  ],
+  "status.bots.one": [
+    "bot",
+    "بوت"
+  ],
+  "status.fullyLocal": [
+    "fully local",
+    "محلي بالكامل"
+  ],
+  "status.offline": [
+    "offline",
+    "غير متصل"
+  ],
+  "status.runtime.local": [
+    "local runtime",
+    "وقت تشغيل محلي"
+  ],
+  "status.turns": [
+    "turns",
+    "مهام"
+  ],
+  "status.workspace": [
+    "workspace",
+    "مساحة العمل"
+  ]
+}
