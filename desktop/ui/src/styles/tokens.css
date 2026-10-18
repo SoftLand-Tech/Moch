@@ -1,30 +1,40 @@
-/* Moch Desktop — FINAL design tokens (user's fused design, sampled from
-   design-mockups/final-design.png). Same var names as before so every view
-   inherits the new identity; values are the sampled navy/indigo palette. */
+/* Moch Desktop — Mocheme tokens (the app's palette, app/src/lib/theme.ts
+   MOHEME_PALETTE + docs/moch.css). Near-black indigo surfaces hue-locked to
+   Mochi's visor navy, one saturated accent — the antenna orange #F79236,
+   reserved for the primary action — cream for the user's own words, blush
+   for warm secondary marks. The --accent/-soft/-on-accent aliases serve the
+   views written against the older token names; both families are Mocheme. */
 
 :root{
-  /* Surfaces — deep navy */
-  --bg: #0b1019;
-  --bg-card: #0d141f;
-  --bg-elev: #121a2b;
-  --bg-hover: #182238;
-  --input-bg: #101826;
-  --surf: #101826;
-  --titlebar: #0c131d;
-  --think-bg: #131b2e;
+  /* Surfaces — hue-matched to Mochi's visor navy, kept near-black */
+  --bg: #0a0813;
+  --bg-card: #151220;
+  --bg-elev: #1a1727;
+  --bg-hover: #272535;
+  --input-bg: #1a1727;
+  --surf: #151220;
+  --titlebar: #100e1a;
+  --think-bg: #1a1727;
   --scrim: rgba(0, 0, 0, 0.55);
 
   /* Text */
-  --text: #eef1f8;
-  --text-dim: #a7b0c5;
-  --text-faint: #6f7890;
+  --text: #ffffff;
+  --text-dim: #b4b1c4;
+  --text-faint: #86829b;
 
-  /* Primary — indigo */
-  --acc: #4751de;
-  --acc-dark: #3338aa;
-  --acc2: #8d93d3;
-  --on-acc: #ffffff;
-  --acc-soft: rgba(71, 81, 222, 0.18);
+  /* Accent — Mochi's sprout orange; on-accent is dark ink (white fails
+     contrast on this lightness of orange). */
+  --acc: #f79236;
+  --acc-dark: #c56f1f;
+  --acc2: #fa9b6a;
+  --on-acc: #2e1a08;
+  --acc-soft: rgba(247, 146, 54, 0.12);
+
+  /* Aliases for the older token names — same Mocheme values. */
+  --accent: var(--acc);
+  --accent-dark: var(--acc-dark);
+  --on-accent: var(--on-acc);
+  --accent-soft: var(--acc-soft);
 
   /* Status */
   --green: #34d399;
@@ -35,16 +45,16 @@
   --amber-soft: rgba(245, 165, 36, 0.12);
   --green-tint: rgba(74, 222, 128, 0.12);
 
-  /* Borders */
-  --border: rgba(148, 163, 204, 0.13);
-  --border-soft: rgba(148, 163, 204, 0.07);
+  /* Borders — cream-tinted, the Mocheme line family */
+  --border: rgba(248, 239, 229, 0.11);
+  --border-soft: rgba(248, 239, 229, 0.06);
 
-  /* Messages */
-  --user-bubble: #141b35;
-  --user-text: #e8ecf8;
-  --blush: #8d93d3;
-  --think-border: rgba(141, 147, 211, 0.3);
-  --btn-tint: rgba(148, 163, 204, 0.06);
+  /* Messages — the user's words ride Mochi's cream */
+  --user-bubble: #f6ece1;
+  --user-text: #2b283b;
+  --blush: #fa9b6a;
+  --think-border: rgba(248, 239, 229, 0.3);
+  --btn-tint: rgba(248, 239, 229, 0.06);
 
   /* Diff */
   --diff-add: #4ade80;
@@ -52,7 +62,7 @@
   --diff-add-bg: rgba(52, 211, 153, 0.09);
   --diff-del-bg: rgba(248, 113, 113, 0.09);
 
-  /* Shell geometry */
+  /* Shell geometry — the three-pane Rakazo shell */
   --rail-w: 60px;
   --ctx-w: 264px;
   --stage-w: 420px;
@@ -60,6 +70,8 @@
   --tsb-w: 264px;
   --wb-w: 380px;
   --statusbar-h: 30px;
+  --rail3-w: 264px;
+  --ctx3-w: 420px;
 
   /* Type */
   --font-ui: "Inter", "Segoe UI", system-ui, sans-serif;
@@ -82,12 +94,14 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-ui);
 button, input, textarea, select{font:inherit;color:inherit}
 button{cursor:pointer;background:none;border:none;padding:0}
 input, textarea{user-select:text}
-::selection{background:rgba(71,81,222,.4)}
+/* Orange stays a single-job accent (the primary action); focus and selection
+   ride cream so they never become a second orange voice. */
+::selection{background:rgba(248,239,229,.24)}
 ::-webkit-scrollbar{width:10px;height:10px}
-::-webkit-scrollbar-thumb{background:rgba(148,163,204,.14);border-radius:6px;border:2.5px solid var(--bg)}
-::-webkit-scrollbar-thumb:hover{background:rgba(148,163,204,.24)}
+::-webkit-scrollbar-thumb{background:rgba(248,239,229,.14);border-radius:6px;border:2.5px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:rgba(248,239,229,.24)}
 ::-webkit-scrollbar-track{background:transparent}
-:focus-visible{outline:2px solid var(--acc);outline-offset:1px;border-radius:4px}
+:focus-visible{outline:2px solid var(--text-dim);outline-offset:1px;border-radius:4px}
 .text-dim{color:var(--text-dim)}
 .text-faint{color:var(--text-faint)}
 .mono{font-family:var(--font-mono)}
