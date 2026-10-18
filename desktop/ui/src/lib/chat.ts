@@ -693,9 +693,22 @@ export async function listBotSessions(profile: string | null): Promise<BotSessio
  * Open the bot's one home thread: the bound stored id when it resumes, the
  * profile's most recent stored session when no binding exists yet (bots from
  * before the binding), or a fresh session on first selection. Keyed per
- * profile, so it can never land in another bot's session.
+ * profile, so it can never land in another bot's session. Single-flight per
+ * profile: a double boot (React StrictMode) or a double click must not mint
+ * two home sessions for one bot.
  */
-export async function openHomeThread(profile: string | null): Promise<string | null> {
+const openingHome = new Map<string, Promise<string | null>>()
+
+export function openHomeThread(profile: string | null): Promise<string | null> {
+  const key = profile ?? ''
+  const inflight = openingHome.get(key)
+  if (inflight) return inflight
+  const run = resolveHomeThread(profile).finally(() => openingHome.delete(key))
+  openingHome.set(key, run)
+  return run
+}
+
+async function resolveHomeThread(profile: string | null): Promise<string | null> {
   if (activeBotAtom.get() !== profile) await setActiveBot(profile)
   const bound = homeThreadFor(profile)
   if (bound) {
