@@ -725,9 +725,23 @@ async function resolveHomeThread(profile: string | null): Promise<string | null>
       // persisted): fall through and rebind
     }
   }
-  // A cleared binding (deleted bot) must adopt nothing: the dead bot's chats
-  // survive as data, so adopting would hand the recreate the old home thread.
+  // A cleared binding (deleted bot) must adopt nothing from the store: the
+  // dead bot's chats survive as data, so adopting would hand the recreate the
+  // old home thread. A LIVE session for the profile is different — it was
+  // opened by this client after the recreate (the create overlay's intro
+  // thread), so it becomes the home instead of minting an empty second one.
   if (homeClearedFor(profile)) {
+    const live = Object.values(sessionsById.get())
+      .filter((s) => (s.profile ?? null) === profile)
+      .sort((a, b) => b.createdAt - a.createdAt)[0]
+    if (live) {
+      const stored = storedIdFor(live.liveId)
+      if (stored) {
+        setHomeThread(profile, stored)
+        activeSession.set(live.liveId)
+        return live.liveId
+      }
+    }
     const liveId = await newChat()
     const stored = storedIdFor(liveId)
     if (stored) setHomeThread(profile, stored)
