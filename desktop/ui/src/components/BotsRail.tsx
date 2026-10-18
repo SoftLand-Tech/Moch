@@ -7,8 +7,9 @@ import { useStore } from '@nanostores/react'
 import { useMemo, useState } from 'react'
 import { Plus, Search, Settings } from 'lucide-react'
 import type { ViewId } from '../app'
+import CreateBotOverlay from './CreateBotOverlay'
 import {
-  accentFor, activeBotAtom, fleetProfiles, fleetStatusAtom, setActiveBot,
+  accentFor, activeBotAtom, botAvatar, botColor, fleetProfiles, fleetStatusAtom, setActiveBot,
 } from '../lib/fleet'
 import { isConnected } from '../lib/gateway'
 import { locale, tr } from '../lib/strings'
@@ -19,6 +20,8 @@ interface RailBot {
   description: string
   frozen: boolean
   working: boolean
+  color?: string
+  avatar?: string
 }
 
 function botStatus(b: RailBot): { dot: 'run' | 'idle' | 'frozen'; label: string } {
@@ -29,6 +32,7 @@ function botStatus(b: RailBot): { dot: 'run' | 'idle' | 'frozen'; label: string 
 
 export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
   const [q, setQ] = useState('')
+  const [createOpen, setCreateOpen] = useState(false)
   const bots = useStore(fleetProfiles)
   const fleet = useStore(fleetStatusAtom)
   const active = useStore(activeBotAtom)
@@ -49,6 +53,8 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
           description: b.description,
           frozen: frozen(b.name) || !!b.frozen,
           working: working(b.name),
+          color: botColor(b),
+          avatar: botAvatar(b),
         })),
     ]
     const needle = q.trim().toLowerCase()
@@ -102,9 +108,9 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
             >
               <span
                 className="rk-avatar"
-                style={{ background: b.name ? accentFor(b.name) : 'var(--text-faint)' }}
+                style={{ background: b.name ? (b.color ?? accentFor(b.name)) : 'var(--text-faint)' }}
               >
-                {name.slice(0, 2)}
+                {b.avatar ? <img src={b.avatar} alt="" width={20} height={20} /> : name.slice(0, 2)}
               </span>
               <span className="rk-botname">{name}</span>
               <span className={`rk-dot ${st.dot}`} title={st.label} />
@@ -115,9 +121,16 @@ export default function BotsRail({ onNav }: { onNav: (v: ViewId) => void }) {
         {!connected ? <div className="rk-norows">{tr('fleet.offline')}</div> : null}
       </div>
 
-      <button className="rk-newbot" onClick={() => onNav('fleet')} disabled={!connected}>
+      <button className="rk-newbot" onClick={() => setCreateOpen(true)} disabled={!connected}>
         <Plus size={14} /> {tr('fleet.create')}
       </button>
+
+      {createOpen ? (
+        <CreateBotOverlay
+          onClose={() => setCreateOpen(false)}
+          onCreated={(name) => { setCreateOpen(false); pick(name) }}
+        />
+      ) : null}
     </aside>
   )
 }

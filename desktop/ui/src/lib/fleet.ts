@@ -221,3 +221,76 @@ export function slugifyName(job: string): string {
     .join('-')
   return (base || 'bot').slice(0, 32)
 }
+
+// ── the hiring flow (create overlay) ────────────────────────────────────────
+
+/** The fixed Mocheme-adjacent accent set a bot's color is picked from. */
+export const CREATE_COLORS: string[] = ACCENTS
+
+/** Avatar sprites shipped with the app (the /mochi asset path pattern). */
+export const AVATAR_ASSETS: string[] = [
+  '/mochi/mochi-greeting.svg',
+  '/mochi/mochi-listening.svg',
+  '/mochi/mochi-deep-thinking.svg',
+  '/mochi/mochi-confused.svg',
+  '/mochi/mochi-connecting.svg',
+  '/mochi/mochi-approval.svg',
+  '/mochi/mochi-celebration.svg',
+]
+
+/** Typed ui_meta readers — the rail treats anything else in there as absent. */
+export function botColor(p: FleetProfile): string | undefined {
+  const c = p.uiMeta?.color
+  return typeof c === 'string' && c.startsWith('#') ? c : undefined
+}
+
+export function botAvatar(p: FleetProfile): string | undefined {
+  const a = p.uiMeta?.avatar
+  return typeof a === 'string' && a.startsWith('/mochi/') ? a : undefined
+}
+
+/** Persist color (+ avatar when picked) through the profile's ui_meta channel. */
+export async function saveBotIdentity(name: string, color: string, avatar: string | null): Promise<void> {
+  await rpc('profiles.configure', {
+    name,
+    ui_meta: { color, ...(avatar ? { avatar } : {}) },
+  }, 15000)
+  await refreshFleet()
+}
+
+export interface CreateBotInput {
+  name: string
+  description: string
+  soul: string
+  checklist: CreateChecklist
+  color: string
+  avatar: string | null
+}
+
+/** Create the bot, then pin its look. One call so callers can't get one without the other. */
+export async function createBot(input: CreateBotInput): Promise<
+  { ok: boolean; path?: string; error?: string; seed?: SeedResult; seedError?: string }
+> {
+  const res = await createProfile({
+    name: input.name,
+    description: input.description,
+    soul: input.soul,
+    checklist: input.checklist,
+  })
+  if (res.ok) await saveBotIdentity(input.name, input.color, input.avatar)
+  return res
+}
+
+/**
+ * The intro turn: one run in the bot's fresh home session. The prompt row is
+ * model-facing scaffolding (display_kind "hidden"), so the transcript opens
+ * with the bot's own introduction, not a fabricated user message; what happens
+ * to a message typed mid-intro is the gateway's busy path, not ours.
+ */
+export async function submitIntroTurn(sessionId: string, prompt: string): Promise<void> {
+  await rpc('prompt.submit', {
+    session_id: sessionId,
+    text: prompt,
+    display_kind: 'hidden',
+  })
+}

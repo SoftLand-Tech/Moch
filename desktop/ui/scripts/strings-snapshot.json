@@ -107,6 +107,138 @@
     "No chats yet — say hi below.",
     "لا محادثات بعد — قل مرحبًا بالأسفل."
   ],
+  "create.cancel": [
+    "Cancel",
+    "إلغاء"
+  ],
+  "create.cta": [
+    "Create bot",
+    "أنشئ البوت"
+  ],
+  "create.cta.busy": [
+    "Creating {name}…",
+    "جارٍ إنشاء {name}…"
+  ],
+  "create.err": [
+    "Could not create the bot: {why}",
+    "تعذّر إنشاء البوت: {why}"
+  ],
+  "create.err.late": [
+    "{name} exists, but its thread or introduction failed: {why}",
+    "{name} موجود، لكن فشل فتح حواره أو تقديمه: {why}"
+  ],
+  "create.intro.prompt": [
+    "You have just been created as {name}, a Moch bot. Your job, as written by your owner: {job}\n\nBefore any real work, introduce yourself in this thread. In two or three sentences of your own words, state how you understood your job, then ask for anything you are missing to do it well. This introduction is your only task right now.",
+    "لقد أنشئت للتو باسم {name}، أحد بوتات موك. مهمتك كما كتبها صاحبك: {job}\n\nقبل أي عمل حقيقي، قدّم نفسك في هذا الحوار. في جملتين أو ثلاث بكلماتك الخاصة، اشرح كيف فهمت مهمتك، ثم اطلب ما ينقصك لأدائها على الوجه الصحيح. هذا التقديم هو مهمتك الوحيدة الآن."
+  ],
+  "create.job.label": [
+    "The job",
+    "المهمة"
+  ],
+  "create.job.placeholder": [
+    "One or two plain sentences. This bot’s whole life is built around them.",
+    "جملة أو جملتان بلغة بسيطة. حياة هذا البوت كلها تُبنى عليهما."
+  ],
+  "create.look.avatar": [
+    "Avatar",
+    "الصورة"
+  ],
+  "create.look.avatar.approval": [
+    "Showing results",
+    "يعرض النتائج"
+  ],
+  "create.look.avatar.celebration": [
+    "Celebrating",
+    "يحتفل"
+  ],
+  "create.look.avatar.confused": [
+    "Puzzled",
+    "محتار"
+  ],
+  "create.look.avatar.connecting": [
+    "Connecting",
+    "يتصل"
+  ],
+  "create.look.avatar.deep-thinking": [
+    "Deep in thought",
+    "غارق في التفكير"
+  ],
+  "create.look.avatar.greeting": [
+    "Greeting",
+    "التحية"
+  ],
+  "create.look.avatar.listening": [
+    "Listening",
+    "الإنصات"
+  ],
+  "create.look.avatar.none": [
+    "Initials",
+    "الأحرف الأولى"
+  ],
+  "create.look.color": [
+    "Color",
+    "اللون"
+  ],
+  "create.look.label": [
+    "Look",
+    "المظهر"
+  ],
+  "create.name.label": [
+    "Name",
+    "الاسم"
+  ],
+  "create.openanyway": [
+    "Open {name} anyway",
+    "افتح {name} رغم ذلك"
+  ],
+  "create.soul.hint": [
+    "The working agreement it starts with. Editable later in its editor.",
+    "اتفاق العمل الذي يبدأ به. يمكن تعديله لاحقًا في محرره."
+  ],
+  "create.soul.label": [
+    "Soul draft",
+    "مسودة الروح"
+  ],
+  "create.start.label": [
+    "Start the bot with",
+    "يبدأ البوت بـ"
+  ],
+  "create.starter.code.job": [
+    "Help me write and review code in this workspace. Keep changes small, tested, and explained.",
+    "ساعدني في كتابة الأكواد ومراجعتها في مساحة العمل هذه. اجعل التغييرات صغيرة ومختبرة ومشروحة."
+  ],
+  "create.starter.code.label": [
+    "Code helper",
+    "مساعد برمجة"
+  ],
+  "create.starter.deals.job": [
+    "Hunt deals on things I am looking for. Check regularly and flag only the genuinely good ones, with a note on why.",
+    "تتبع العروض على ما أبحث عنه. راجع بانتظام ولا ترفع إلا العروض الجيدة فعلًا، مع ملاحظة عن سبب جدواها."
+  ],
+  "create.starter.deals.label": [
+    "Deal hunter",
+    "صائد العروض"
+  ],
+  "create.starter.journal.job": [
+    "Check in each evening and keep a short journal of my day — one entry per day, easy to reread.",
+    "راسلني كل مساء واحتفظ بمفكرة قصيرة ليومي — مدخل واحد يوميًا، سهل القراءة لاحقًا."
+  ],
+  "create.starter.journal.label": [
+    "Daily journal",
+    "مفكرة يومية"
+  ],
+  "create.starter.research.job": [
+    "Help me research topics: gather sources, verify claims, and return tight briefs with the key findings up top.",
+    "ساعدني في البحث: اجمع المصادر، تحقق من الادعاءات، وأعد ملخصات محكمة بأهم النتائج في المقدمة."
+  ],
+  "create.starter.research.label": [
+    "Research assistant",
+    "مساعد بحث"
+  ],
+  "create.title": [
+    "Hire a bot",
+    "وظّف بوتًا"
+  ],
   "crew.assign": [
     "Reassign",
     "إعادة تعيين"
