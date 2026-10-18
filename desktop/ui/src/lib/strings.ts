@@ -12,6 +12,7 @@ import * as context from './strings/context'
 import * as create from './strings/create'
 import * as crew from './strings/crew'
 import * as fleet from './strings/fleet'
+import * as routines from './strings/routines'
 import * as shell from './strings/shell'
 
 export type Locale = 'en' | 'ar'
@@ -60,6 +61,7 @@ type Catalog = Record<string, string>
 
 const EN: Catalog = {
   ...fleet.en,
+  ...routines.en,
   ...crew.en,
   ...bot.en,
   ...chat.en,
@@ -70,6 +72,7 @@ const EN: Catalog = {
 
 const AR: Catalog = {
   ...fleet.ar,
+  ...routines.ar,
   ...crew.ar,
   ...bot.ar,
   ...chat.ar,
