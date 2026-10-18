@@ -109,3 +109,47 @@
   background: var(--bg-hover);
   color: var(--text);
 }
+
+/* The account row — the rail's foot and the one door to app settings. */
+.rk-account {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 12px 12px;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  color: var(--text-dim);
+}
+
+.rk-account:hover,
+.rk-account:focus-visible {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.rk-account-av {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--bg-elev);
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.rk-account b {
+  flex: 1;
+  min-width: 0;
+  text-align: start;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rk-account svg:last-child {
+  color: var(--text-faint);
+  flex-shrink: 0;
+}

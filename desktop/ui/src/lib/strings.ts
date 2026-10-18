@@ -13,6 +13,7 @@ import * as context from './strings/context'
 import * as create from './strings/create'
 import * as crew from './strings/crew'
 import * as fleet from './strings/fleet'
+import * as settings from './strings/settings'
 import * as shell from './strings/shell'
 
 export type Locale = 'en' | 'ar'
@@ -68,6 +69,7 @@ const EN: Catalog = {
   ...create.en,
   ...shell.en,
   ...activity.en,
+  ...settings.en,
 }
 
 const AR: Catalog = {
@@ -79,6 +81,7 @@ const AR: Catalog = {
   ...create.ar,
   ...shell.ar,
   ...activity.ar,
+  ...settings.ar,
 }
 
 const CATALOGS: Record<Locale, Catalog> = { en: EN, ar: AR }
