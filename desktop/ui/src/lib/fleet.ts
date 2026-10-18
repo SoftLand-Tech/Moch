@@ -36,14 +36,23 @@ export async function setActiveBot(name: string | null): Promise<void> {
  * stored session id of that bot's one home thread. The gateway has no
  * per-profile thread record, so the binding lives here, client-side, and is
  * honest about it: a stored id that no longer resumes is rebound, never
- * silently redirected to another bot's session.
+ * silently redirected to another bot's session. A null entry is a tombstone:
+ * the bot was deleted, so a recreate must start a fresh home thread instead
+ * of adopting the dead bot's surviving chats (they stay readable as data).
  */
 const HOME_THREADS_KEY = 'moch.desktop.homeThreads.v1'
 
-export const homeThreads = atom<Record<string, string>>({})
+export const homeThreads = atom<Record<string, string | null>>({})
 
 export function homeThreadFor(profile: string | null): string | undefined {
-  return homeThreads.get()[profile ?? '']
+  const v = homeThreads.get()[profile ?? '']
+  return typeof v === 'string' && v ? v : undefined
+}
+
+/** True when this profile's binding was deliberately cleared (bot deleted). */
+export function homeClearedFor(profile: string | null): boolean {
+  const v = homeThreads.get()[profile ?? '']
+  return v === null
 }
 
 export function setHomeThread(profile: string | null, storedId: string): void {
@@ -53,8 +62,7 @@ export function setHomeThread(profile: string | null, storedId: string): void {
 }
 
 export function clearHomeThread(profile: string | null): void {
-  const next = { ...homeThreads.get() }
-  delete next[profile ?? '']
+  const next = { ...homeThreads.get(), [profile ?? '']: null }
   homeThreads.set(next)
   try { localStorage.setItem(HOME_THREADS_KEY, JSON.stringify(next)) } catch { /* best-effort */ }
 }
@@ -65,9 +73,10 @@ export function loadHomeThreads(): void {
     if (!raw) return
     const parsed = JSON.parse(raw) as unknown
     if (typeof parsed !== 'object' || parsed === null) return
-    const clean: Record<string, string> = {}
+    const clean: Record<string, string | null> = {}
     for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof v === 'string' && v) clean[k] = v
+      if (v === null) clean[k] = null
+      else if (typeof v === 'string' && v) clean[k] = v
     }
     homeThreads.set(clean)
   } catch { /* fresh */ }

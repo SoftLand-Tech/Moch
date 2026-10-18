@@ -9,7 +9,7 @@
 
 import { atom, computed } from 'nanostores'
 import { rpc, onEvent, onServerRequest, workspaceDir } from './gateway'
-import { activeBotAtom, homeThreadFor, setActiveBot, setHomeThread } from './fleet'
+import { activeBotAtom, homeClearedFor, homeThreadFor, setActiveBot, setHomeThread } from './fleet'
 import type { ServerRequest } from '../protocol/json-rpc-gateway'
 
 // ── model ───────────────────────────────────────────────────────────────────
@@ -724,6 +724,14 @@ async function resolveHomeThread(profile: string | null): Promise<string | null>
       // the bound id no longer resumes (deleted, or a draft that never
       // persisted): fall through and rebind
     }
+  }
+  // A cleared binding (deleted bot) must adopt nothing: the dead bot's chats
+  // survive as data, so adopting would hand the recreate the old home thread.
+  if (homeClearedFor(profile)) {
+    const liveId = await newChat()
+    const stored = storedIdFor(liveId)
+    if (stored) setHomeThread(profile, stored)
+    return liveId
   }
   const others = await listBotSessions(profile).catch(() => [])
   const latest = others.find((r) => r.id !== bound)
