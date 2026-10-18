@@ -1,9 +1,12 @@
 /**
  * Automations — scheduled prompts over the gateway's cron surface
  * (`cron.manage`). The wire shape drifts between gateway generations
- * (id|job_id|name keys, add|create, delete|remove, enabled|paused), so every
- * row is normalized and every mutation tries its action aliases, falling
- * through on "unknown action" errors only — real failures surface verbatim.
+ * (id|job_id|name row keys, add|create, delete|remove, enabled|paused), so
+ * every row is normalized and every mutation tries its action aliases,
+ * falling through on "unknown action" errors only — real failures surface
+ * verbatim. Job-bound actions address a job through the `name` param
+ * carrying its job_id (the same contract as the mobile app); the running
+ * gateway's strict params reject `id`/`job_id` extras.
  */
 import { rpc } from './gateway'
 
@@ -113,7 +116,7 @@ export async function listAutomations(): Promise<CronJob[]> {
 /** Full stored prompt for one job (cron.manage get — the mobile-only extension this fork ships). */
 export async function getAutomation(id: string): Promise<CronJob | null> {
   try {
-    const r = await cron({ action: 'get', id, name: id, job_id: id })
+    const r = await cron({ action: 'get', name: id })
     return normalizeCronJob(r.job ?? asRec(r.result).job)
   } catch {
     return null
@@ -140,24 +143,24 @@ export async function createAutomation(d: AutomationDraft): Promise<void> {
 
 export async function deleteAutomation(id: string): Promise<void> {
   try {
-    await cron({ action: 'delete', id, name: id, job_id: id })
+    await cron({ action: 'delete', name: id })
   } catch (e) {
     if (!isUnknownActionError(e)) throw e
-    await cron({ action: 'remove', id, name: id, job_id: id })
+    await cron({ action: 'remove', name: id })
   }
 }
 
 export async function setAutomationEnabled(id: string, enabled: boolean): Promise<void> {
   const action = enabled ? 'resume' : 'pause'
   try {
-    await cron({ action, id, name: id, job_id: id })
+    await cron({ action, name: id })
     return
   } catch (e) {
     if (!isUnknownActionError(e)) throw e
   }
   // Fork without pause/resume: toggle through update.
   try {
-    await cron({ action: 'update', id, name: id, job_id: id, enabled })
+    await cron({ action: 'update', name: id, enabled })
   } catch (e) {
     if (!isUnknownActionError(e)) throw e
     throw new Error(`this gateway does not support ${action}`)
@@ -211,7 +214,7 @@ export async function listAutomationRuns(job: CronJob, keep = 30): Promise<CronR
 export async function runAutomationNow(id: string): Promise<void> {
   for (const action of ['run_now', 'run']) {
     try {
-      await cron({ action, id, name: id, job_id: id })
+      await cron({ action, name: id })
       return
     } catch (e) {
       if (!isUnknownActionError(e)) throw e
@@ -229,7 +232,7 @@ export interface AutomationPatch {
 }
 
 export async function updateAutomation(id: string, p: AutomationPatch): Promise<void> {
-  const params: Rec = { id, name: id, job_id: id, schedule: p.schedule, prompt: p.prompt }
+  const params: Rec = { name: id, schedule: p.schedule, prompt: p.prompt }
   if (p.deliver) params.deliver = p.deliver
   if (p.skills?.length) params.skills = p.skills
   try {
@@ -252,7 +255,7 @@ export async function updateAutomation(id: string, p: AutomationPatch): Promise<
   if (newId === id) return
   if (!newId) throw new Error('editing is not supported by this gateway (update unavailable)')
   try {
-    await cron({ action: 'remove', id, name: id, job_id: id })
+    await cron({ action: 'remove', name: id })
   } catch {
     /* old row left behind — the list refresh will show both */
   }

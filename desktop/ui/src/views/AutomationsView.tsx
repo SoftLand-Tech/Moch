@@ -101,13 +101,23 @@ export default function AutomationsView() {
 
   // Slow poll (never faster than 30s) keeps next-run times and history fresh.
   useEffect(() => {
-    const t = setInterval(() => {
+    const tick = () => {
       if (!connected) return
       void refresh(true)
       const job = selectedRef.current
       if (job) void loadRuns(job)
-    }, 60_000)
-    return () => clearInterval(t)
+    }
+    const t = setInterval(tick, 60_000)
+    // Background tabs throttle timers to ~1/min; catch up the moment the
+    // surface is looked at again.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') tick()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [connected, refresh, loadRuns])
 
   // Selecting a job pulls its history (and the FULL prompt — list ships a 100-char preview).
