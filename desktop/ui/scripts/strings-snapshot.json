@@ -123,6 +123,10 @@
     "Vault",
     "الخزنة"
   ],
+  "chat.at.clear": [
+    "Clear address",
+    "إزالة التوجيه"
+  ],
   "chat.at.empty": [
     "No bots match",
     "لا روبوتات مطابقة"
@@ -166,6 +170,10 @@
   "chat.composer.at": [
     "Address a bot",
     "توجيه إلى روبوت"
+  ],
+  "chat.composer.at.fail": [
+    "Could not open {name}'s thread — try again.",
+    "تعذّر فتح محادثة {name} — حاول مجددًا."
   ],
   "chat.composer.code.label": [
     "Code",
