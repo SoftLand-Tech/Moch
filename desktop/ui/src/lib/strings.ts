@@ -131,10 +131,21 @@ const EN: Catalog = {
   'nav.inbox': 'Inbox',
   'nav.browser': 'Browser',
   'nav.terminal': 'Terminal',
+  'nav.files': 'Files',
   'nav.automations': 'Automations',
   'nav.skills': 'Skills',
   'nav.connectors': 'Connectors',
   'nav.settings': 'Settings',
+
+  // ── Desktop: the Rakazo three-pane shell ──
+  'rail.mochi': 'Mochi',
+  'rail.search': 'Search',
+  'rail.nomatch': 'No bots match',
+  'shell.thread.working': 'Working',
+  'shell.thread.idle': 'Idle',
+  'shell.thread.frozen': 'Frozen',
+  'files.waiting': 'waiting for the workspace…',
+  'files.empty': 'empty folder',
 
   // ── Desktop: status bar ──
   'status.runtime.local': 'local runtime',
@@ -242,10 +253,21 @@ const AR: Catalog = {
   'nav.inbox': 'الوارد',
   'nav.browser': 'المتصفح',
   'nav.terminal': 'الطرفية',
+  'nav.files': 'الملفات',
   'nav.automations': 'الأتمتة',
   'nav.skills': 'المهارات',
   'nav.connectors': 'الموصّلات',
   'nav.settings': 'الإعدادات',
+
+  // ── سطح المكتب: هيكل ركازو ثلاثي الألواح ──
+  'rail.mochi': 'موتشي',
+  'rail.search': 'بحث',
+  'rail.nomatch': 'لا بوتات مطابقة',
+  'shell.thread.working': 'يعمل',
+  'shell.thread.idle': 'خامل',
+  'shell.thread.frozen': 'مجمّد',
+  'files.waiting': 'في انتظار مساحة العمل…',
+  'files.empty': 'مجلد فارغ',
 
   // ── سطح المكتب: شريط الحالة ──
   'status.runtime.local': 'وقت تشغيل محلي',
