@@ -1,8 +1,8 @@
 import { useStore } from '@nanostores/react'
 import { useEffect, useState } from 'react'
 import { connectionState, isConnected, runtimeBoot, startGateway, wireEvents } from './lib/gateway'
-import { hookChatEvents, loadMarks, refreshSessionOrder } from './lib/chat'
-import { loadActiveBot, refreshFleet } from './lib/fleet'
+import { activeSession, hookChatEvents, loadMarks, openHomeThread, refreshSessionOrder } from './lib/chat'
+import { activeBotAtom, loadActiveBot, loadHomeThreads, refreshFleet } from './lib/fleet'
 import { useKnocks } from './lib/knocks'
 import { ensureBrowserReady, ensureBrowserWatch } from './lib/cdp'
 import BotsRail from './components/BotsRail'
@@ -44,6 +44,7 @@ export function App() {
   useEffect(() => {
     loadMarks()
     loadActiveBot()
+    loadHomeThreads()
     const stopEvents = wireEvents()
     const stopChat = hookChatEvents()
     void startGateway()
@@ -69,6 +70,10 @@ export function App() {
     if (connected) {
       void refreshFleet()
       void refreshSessionOrder()
+      // A fresh boot reopens the active bot's home thread (the binding from
+      // the last run); only when no session is open yet, so a reconnect never
+      // yanks the pane off whatever thread the user switched to.
+      if (!activeSession.get()) void openHomeThread(activeBotAtom.get()).catch(() => {})
       ensureBrowserWatch()
       void ensureBrowserReady()
     }
