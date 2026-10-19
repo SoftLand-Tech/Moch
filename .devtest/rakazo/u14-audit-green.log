@@ -1,0 +1,5 @@
+u14 audit: locale tour en+ar, start 2026-10-18T23:47:55Z, elapsed 23s, exit 0
+(node:19951) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+check-dom-strings: clean — every rendered string resolves through the catalog or the documented allowlist (556 EN keys)
+u14 audit green (populated final stack http://localhost:39785, basil bot + routine + transcript present): clean, 556 EN keys, exit 0, run 2026-10-19T00:24:11Z

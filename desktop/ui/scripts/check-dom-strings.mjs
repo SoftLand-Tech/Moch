@@ -77,6 +77,14 @@ const PATTERN_ALLOWLIST = [
     },
   },
   {
+    why: 'data: calendar timestamps formatted from run ledgers',
+    test: (s) =>
+      /^(?:[A-Za-z]{3} )?\d{1,2}, \d{1,2}:\d{2} (?:AM|PM)$/.test(s)
+      || /^\d{1,2}:\d{2}$/.test(s)
+      || /^\d{1,2}:\d{2} [صم]$/.test(s)
+      || /^\d{1,2} \S+، \d{1,2}:\d{2} [صم]$/.test(s),
+  },
+  {
     why: 'data/code: dotted fragments',
     test: (s) => {
       let i = 0
@@ -102,15 +110,21 @@ const EXACT_ALLOWLIST = [
   { s: 'about:blank', why: 'code: the blank page url' },
   { s: '?', why: 'code: the unknown-marker' },
   { s: '⌄', why: 'code: the model picker dropdown chevron' },
+  { s: '⧉ copy', why: 'code: message-foot action, icon glyph and label in one span' },
+  { s: '♪ listen', why: 'code: message-foot action, icon glyph and label in one span' },
+  { s: '✎ save as skill', why: 'code: message-foot action, icon glyph and label in one span' },
+  { s: '↻ retry', why: 'code: message-foot action, icon glyph and label in one span' },
   { s: '…', why: 'code: the pending breadcrumb' },
   { s: 'unknown', why: 'data: fallback while the runtime has not answered yet' },
   { s: 'Moch Desktop 0.1.0', why: 'proper-noun: product name + version' },
 ]
 // DOM subtrees whose text is runtime data, never UI copy: PTY output (the
 // compact context-panel terminal hosts xterm under .term-host; the full
-// terminal view wraps the same host in .term-stack) and the roster avatar
-// monogram, which is the bot's own name sliced to two characters.
-const DATA_SURFACES = ['.term-host', '.term-stack', '.rk-avatar', '.bp-canvas', 'script', 'style', 'pre']
+// terminal view wraps the same host in .term-stack), the roster avatar
+// monogram (the bot's own name sliced to two characters), and transcript
+// message bodies (the bot's speech; overlays like ask cards render as
+// siblings of .msg and stay collected).
+const DATA_SURFACES = ['.term-host', '.term-stack', '.rk-avatar', '.msg', '.bp-canvas', 'script', 'style', 'pre']
 
 // ── matcher ─────────────────────────────────────────────────────────────────
 const norm = (s) => s.replace(/\s+/g, ' ').replace(/&amp;/g, '&').replace(/&mdash;/g, '—').replace(/&hellip;/g, '…').replace(/&apos;/g, "'").trim()
@@ -132,6 +146,14 @@ for (const catalog of [EN, AR]) {
     CATALOG_ENTRIES.push({ parts, longest: parts.reduce((a, b) => (b.length > a.length ? b : a)) })
   }
 }
+// A part edge needs its non-letter guard only when the part itself ends (or
+// begins) with a letter: "Next {when}" interpolates a date that can start
+// with a month name, and the trailing space already draws the boundary.
+const edgedOn = (entry) => {
+  const first = entry.parts[0]
+  const last = entry.parts[entry.parts.length - 1]
+  return { start: isLetter(first[0]), end: isLetter(last[last.length - 1]) }
+}
 const allowedExact = new Set(EXACT_ALLOWLIST.map((e) => norm(e.s)))
 function isAllowed(s) {
   const t = norm(s)
@@ -152,7 +174,10 @@ function inCatalog(s) {
       end = idx + p.length
       maxGap = GAP
     }
-    return !isLetter(start > 0 ? t[start - 1] : '') && !isLetter(end < t.length ? t[end] : '')
+    const guard = edgedOn(e)
+    const before = start > 0 ? t[start - 1] : ''
+    const after = end < t.length ? t[end] : ''
+    return !(guard.start && isLetter(before)) && !(guard.end && isLetter(after))
   })
 }
 
