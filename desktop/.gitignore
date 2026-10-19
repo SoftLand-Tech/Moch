@@ -1,0 +1,10 @@
+# Moch Desktop build artifacts
+runtime/.venv/
+ui/dist/
+ui/node_modules/
+src-tauri/target/
+src-tauri/gen/schemas/
+.devtest/
+*.log
+desktop/runtime/*.json
+!desktop/runtime/requirements.txt

@@ -1,0 +1,196 @@
+<!doctype html>
+<!-- DESIGN 2 — "LEDGER" · typographic discipline (Codex/DSH-inspired)
+     Single focus column, no boxes: bullets/indent/fill. Live status row.
+     Full-page static mockup. 1520×960. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Moch · Ledger — design 2</title>
+<style>
+  :root{
+    --bg:#0e0d0c; --bg2:#131211; --bg3:#181716;
+    --fg:#e8e5e0; --fg2:#a5a198; --fg3:#6f6a61;
+    --acc:#f79236; --acc-dim:#8a5a26;
+    --ok:#7fb069; --err:#e07a5f; --info:#8ea4c2;
+    --fill:#1c1a17; --fill2:#221f1b;
+    --line:#262319;
+    --mono:"JetBrains Mono","Fira Code",ui-monospace,monospace;
+    --sans:"Inter","Segoe UI",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:var(--sans);color:var(--fg)}
+  .artboard{width:1520px;height:960px;background:var(--bg);display:flex;overflow:hidden;box-shadow:0 20px 80px rgba(0,0,0,.6)}
+  /* rail */
+  .rail{width:64px;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:16px 0;gap:6px}
+  .rail .logo{width:36px;height:36px;border-radius:10px;background:var(--acc);color:#141008;display:grid;place-items:center;font-family:var(--mono);font-weight:700;font-size:17px;margin-bottom:18px}
+  .rb{width:44px;height:44px;border-radius:11px;display:grid;place-items:center;color:var(--fg3);font-size:11px;font-family:var(--mono)}
+  .rb.on{background:var(--fill2);color:var(--acc)}
+  .rb .n{position:absolute;margin:-26px 0 0 22px;background:var(--acc);color:#141008;font-size:9px;font-weight:700;border-radius:8px;padding:1px 5px}
+  .rail .grow{flex:1}
+  /* sessions column */
+  .sess{width:264px;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column}
+  .sess header{padding:20px 20px 10px;display:flex;align-items:center}
+  .sess header b{font-size:13px;letter-spacing:.1em;color:var(--fg2);font-family:var(--mono)}
+  .sess header .new{margin-left:auto;color:var(--acc);font-family:var(--mono);font-size:16px}
+  .sr{display:flex;align-items:center;gap:9px;padding:8px 20px;font-size:13px;color:var(--fg2)}
+  .sr.on{background:var(--fill);color:var(--fg);box-shadow:inset 2px 0 0 var(--acc)}
+  .sr .t{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sr .glyph{font-family:var(--mono);font-size:10px;color:var(--fg3)}
+  .sr .run{color:var(--acc);font-size:10px}
+  .bots{margin:12px 14px 0;border:1px solid var(--line);border-radius:12px;padding:10px 6px}
+  .bots .h{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;color:var(--fg3);padding:0 10px 6px}
+  .bot{display:flex;align-items:center;gap:9px;padding:6px 10px;border-radius:8px;font-size:12.5px}
+  .bot.on{background:var(--fill2)}
+  .bot .sq{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-family:var(--mono);font-size:9px;font-weight:700;color:#141008}
+  .bot .st{margin-left:auto;font-family:var(--mono);font-size:9.5px}
+  /* main column */
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  /* live status row */
+  .liverow{display:flex;align-items:center;gap:12px;padding:13px 34px;border-bottom:1px solid var(--line);background:var(--bg)}
+  .liverow .spin{width:9px;height:9px;border-radius:50%;background:var(--acc);box-shadow:0 0 10px var(--acc);animation:pulse 1.2s infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  .liverow .head{font-size:13.5px;color:var(--fg)}
+  .liverow .head em{font-style:normal;color:var(--acc)}
+  .liverow .clock{font-family:var(--mono);font-size:11px;color:var(--fg3)}
+  .liverow .esc{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--fg3);border:1px solid var(--line);border-radius:6px;padding:3px 9px}
+  /* transcript */
+  .t{flex:1;overflow:hidden;padding:26px 44px;display:flex;flex-direction:column;gap:4px}
+  .tc{max-width:760px;margin:0 auto;width:100%}
+  .u{background:var(--fill);border-radius:12px;padding:11px 16px;font-size:14.5px;line-height:1.55;color:var(--fg);margin:14px 0 18px;max-width:78%;margin-left:auto}
+  .m{font-size:14.5px;line-height:1.74;color:var(--fg)}
+  .m p{margin:0 0 12px} .m strong{color:#fff}
+  .m code{font-family:var(--mono);font-size:12.5px;background:var(--fill2);color:var(--acc);padding:1px 6px;border-radius:4px}
+  /* reasoning = dim italic */
+  .r{font-size:13px;font-style:italic;color:var(--fg2);line-height:1.65;padding:2px 0 2px 14px;border-left:2px solid var(--acc-dim);margin:8px 0 10px}
+  /* tool rows: typographic, no boxes */
+  .a{display:flex;align-items:baseline;gap:8px;font-size:13px;padding:3px 0 3px 0;color:var(--fg2)}
+  .a .b{color:var(--acc);font-size:14px}
+  .a b{color:var(--fg);font-weight:600}
+  .a .c{font-family:var(--mono);font-size:12px;color:var(--fg2)}
+  .a .meta{font-family:var(--mono);font-size:10.5px;color:var(--fg3)}
+  .a .more{font-family:var(--mono);font-size:10.5px;color:var(--acc);cursor:default}
+  .tail{font-family:var(--mono);font-size:11.5px;color:var(--fg3);padding:2px 0 2px 26px;white-space:pre;line-height:1.6}
+  .g{font-family:var(--mono);font-size:11px;color:var(--fg3);padding-left:26px}
+  /* diff */
+  .diff{font-family:var(--mono);font-size:12px;line-height:1.7;margin:8px 0 4px 26px;border-left:2px solid var(--line);white-space:pre}
+  .diff .add{background:rgba(127,176,105,.13);color:#b9d8a8;display:inline-block;width:100%;padding-left:8px}
+  .diff .del{background:rgba(224,122,95,.12);color:#e0a595;display:inline-block;width:100%;padding-left:8px}
+  .diff .ctx{color:var(--fg3);padding-left:8px;display:inline-block;width:100%}
+  /* turn separator */
+  .end{display:flex;align-items:center;gap:10px;margin:18px 0;font-family:var(--mono);font-size:10.5px;color:var(--fg3)}
+  .end:before{content:"";flex:1;height:1px;background:var(--line)}
+  .end:after{content:"";flex:1;height:1px;background:var(--line)}
+  /* approval */
+  .appr{max-width:560px;margin:10px auto;background:var(--bg3);border:1px solid var(--acc-dim);border-radius:14px;padding:18px 22px}
+  .appr .q{font-size:14.5px;font-weight:600;margin-bottom:8px}
+  .appr .why{font-size:12.5px;font-style:italic;color:var(--fg2);margin-bottom:10px}
+  .appr .cmd{font-family:var(--mono);font-size:12.5px;background:var(--fill);border-radius:8px;padding:10px 14px;margin-bottom:14px;color:var(--acc)}
+  .appr .opts{display:flex;flex-direction:column;gap:8px}
+  .appr .opt{font-size:13px;color:var(--fg);border:1px solid var(--line);border-radius:9px;padding:9px 14px}
+  .appr .opt.hot{border-color:var(--acc);color:var(--acc)}
+  .appr .opt small{display:block;color:var(--fg3);font-size:11px;margin-top:2px}
+  .echo{font-family:var(--mono);font-size:11.5px;color:var(--ok);padding:6px 0 2px}
+  /* composer */
+  .comp{padding:12px 44px 20px}
+  .cbox{max-width:760px;margin:0 auto;background:var(--fill);border:1px solid var(--line);border-radius:16px;padding:5px 6px 7px}
+  .cbox textarea{width:100%;background:none;border:none;outline:none;color:var(--fg);font-family:var(--sans);font-size:14.5px;padding:11px 14px 4px;resize:none;height:42px}
+  .cbar{display:flex;align-items:center;gap:10px;padding:4px 10px 2px;font-family:var(--mono);font-size:11px;color:var(--fg3)}
+  .cbar .m-chip{color:var(--acc)}
+  .cbar .grow{flex:1}
+  .cbar .go{width:32px;height:32px;border-radius:50%;background:var(--acc);color:#141008;display:grid;place-items:center;font-weight:800}
+  /* footer */
+  .foot{height:32px;border-top:1px solid var(--line);display:flex;align-items:center;gap:16px;padding:0 24px;font-family:var(--mono);font-size:10.5px;color:var(--fg3)}
+  .foot .ok{color:var(--ok)} .foot .grow{flex:1}
+</style>
+</head>
+<body>
+<div class="artboard">
+
+  <nav class="rail">
+    <div class="logo">M</div>
+    <div class="rb on">⌘1<br>chat</div>
+    <div class="rb">⌘2<br>fleet</div>
+    <div class="rb">⌘3<br>crew</div>
+    <div class="rb"><span class="n">2</span>⌘4<br>inbox</div>
+    <div class="rb">⌘5<br>web</div>
+    <div class="rb">⌘6<br>term</div>
+    <div class="rb">⌘7<br>cron</div>
+    <div class="grow"></div>
+    <div class="rb">⚙</div>
+  </nav>
+
+  <aside class="sess">
+    <header><b>SESSIONS</b><span class="new">+</span></header>
+    <div class="sr on"><span class="glyph">└─</span><span class="t">Release checklist v2</span><span class="run">●</span></div>
+    <div class="sr"><span class="glyph">├─</span><span class="t">Deal digest — keyboards</span></div>
+    <div class="sr"><span class="glyph">│</span><span class="t">Desk setup research</span></div>
+    <div class="sr"><span class="glyph">└─</span><span class="t">Q3 numbers memo</span></div>
+    <div class="sr"><span class="glyph"></span><span class="t">Cron knock fix</span></div>
+    <div class="sr"><span class="glyph"></span><span class="t">Website hero rewrite</span></div>
+    <div class="bots">
+      <div class="h">FLEET</div>
+      <div class="bot on"><span class="sq" style="background:#f79236">MO</span>Mochi<span class="st" style="color:var(--acc)">working</span></div>
+      <div class="bot"><span class="sq" style="background:#7fb069">WD</span>watch-deals<span class="st">idle</span></div>
+      <div class="bot"><span class="sq" style="background:#8ea4c2">SC</span>scratch<span class="st">idle</span></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="liverow">
+      <div class="spin"></div>
+      <div class="head">Mochi is <em>verifying the built AppImage boots</em>…</div>
+      <div class="clock">00:41</div>
+      <div class="esc">esc to interrupt</div>
+    </div>
+
+    <div class="t"><div class="tc">
+      <div class="u">Cut the 1.0.1 release: bump versions, build the AppImage, and make sure it actually opens on a clean boot before you call it done.</div>
+
+      <div class="r">Two things to touch: tauri.conf.json version and Cargo.toml. Then a release build, then — the honest part — I should launch the artifact once and look at it, not just trust the build's exit code. I'll time the window appearance too; 121ms is the number to beat.</div>
+
+      <div class="a"><span class="b">•</span><b>Edited</b> <span class="c">tauri.conf.json</span> <span class="meta">+1 −1</span> <span class="meta">0.1s</span></div>
+      <div class="a"><span class="b">•</span><b>Edited</b> <span class="c">Cargo.toml</span> <span class="meta">+1 −1</span> <span class="meta">0.1s</span></div>
+      <div class="tail">└ version 0.1.0 → 0.1.1 (2 files)</div>
+
+      <div class="a"><span class="b">•</span><b>Ran</b> <span class="c">tauri build 2>&1 | tail -3</span> <span class="meta">4m 34s</span> <span class="more">+ 48 lines ▾</span></div>
+      <div class="tail">    Finished `release` profile [optimized] target(s) in 4m 34s
+└ Bundling Moch_0.1.1_amd64.AppImage (98.2 MiB)
+└ 1 bundle finished</div>
+      <div class="g">3:41 PM</div>
+
+      <div class="a"><span class="b">•</span><b>Spawned</b> <span class="c">the built AppImage</span> <span class="meta">checking first paint…</span></div>
+
+      <div class="m"><p><strong>It opens.</strong> Window visible in <code>121ms</code>, statusbar green at <code>1.3s</code> (gateway adopt), session list rendered with all 4 chats. One honest catch: the version in the window title still reads <code>0.1.0</code> — the <code>productName</code> doesn't carry the version, that's a <code>tauri.conf</code> <code>title</code> thing, not the bundle. Left as-is; it's cosmetic and I've noted it.</p></div>
+
+      <div class="end">Worked for 5m 12s · 5 tool calls · $0.006 · 14:02 → 14:07</div>
+
+      <div class="u">Nice. Now run the smoke suite against this build, and ask me before you delete anything.</div>
+
+      <div class="appr">
+        <div class="q">Mochi wants to remove the old test artifacts</div>
+        <div class="why">Cleaning ~/.devtest before the suite so stale state can't mask a real failure.</div>
+        <div class="cmd">$ rm -rf ~/.devtest/desktop-state && ./smoke.sh --fresh</div>
+        <div class="opts">
+          <div class="opt hot">Yes, proceed</div>
+          <div class="opt">Yes, and don't ask again for commands that start with <b>rm -rf ~/.devtest</b></div>
+          <div class="opt">No, and tell Mochi what to do differently</div>
+        </div>
+        <div class="echo">✔ you approved this once · echoed into the transcript</div>
+      </div>
+    </div></div>
+
+    <div class="comp">
+      <div class="cbox">
+        <textarea>Everything is a row. Ask plainly…</textarea>
+        <div class="cbar"><span class="m-chip">glm-5.3-flash ⌄</span><span>@Mochi</span><span>/ cmds</span><span class="grow"></span><span>normal ▾</span><div class="go">↵</div></div>
+      </div>
+    </div>
+    <div class="foot">
+      <span class="ok">● local</span><span>3 bots</span><span>2 waiting</span><span class="grow"></span>
+      <span>ctx 42% [██████░░░░]</span><span>18 tok/s</span><span>cache 91%</span><span>v0.1.1</span>
+    </div>
+  </main>
+
+</div>
+</body>
+</html>

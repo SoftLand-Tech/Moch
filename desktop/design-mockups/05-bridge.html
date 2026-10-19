@@ -1,0 +1,263 @@
+<!doctype html>
+<!-- DESIGN 5 — "BRIDGE" · the bot-first command bridge (hermes/opencode hybrid,
+     Mocheme colors evolved). Fleet rail with status dots, scaffold-style quiet
+     rows, arc-border running indicator, composer status stack, ::preview
+     widget, [████░░] meter. 1520×960. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Moch · Bridge — design 5</title>
+<style>
+  :root{
+    --bg:#0a0813; --bg2:#0f0c1b; --bg3:#151220; --bg4:#1a1727; --raise:#232033;
+    --fg:#f4f2fa; --fg2:#b4b1c4; --fg3:#86829b;
+    --acc:#f79236; --acc2:#ffb066; --wash:rgba(247,146,54,.12);
+    --ok:#4ade80; --amber:#f5a524; --red:#ff5a5a; --sky:#7ab8e8; --violet:#a78bfa; --teal:#5fd4c4;
+    --line:rgba(248,239,229,.09); --line2:rgba(248,239,229,.16);
+    --mono:"JetBrains Mono",ui-monospace,monospace;
+    --sans:"Inter","Segoe UI",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#030208;display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:var(--sans);color:var(--fg)}
+  .artboard{width:1520px;height:960px;background:var(--bg);display:flex;overflow:hidden;box-shadow:0 20px 80px rgba(0,0,0,.65)}
+  /* ── fleet rail (the star) ── */
+  .fleet{width:76px;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:14px 0;gap:8px}
+  .fleet .logo{width:40px;height:40px;border-radius:13px;background:var(--acc);color:#2e1a08;display:grid;place-items:center;font-weight:800;font-size:18px;margin-bottom:14px}
+  .fb{position:relative;width:46px;height:46px;border-radius:13px;display:grid;place-items:center;font-size:12px;font-weight:700;color:#14101f;cursor:default}
+  .fb .sd{position:absolute;right:9px;bottom:9px;width:9px;height:9px;border-radius:50%;border:2px solid var(--bg2)}
+  .fb.on{background:var(--wash);box-shadow:inset 0 0 0 1px var(--acc)}
+  .fb .hl{position:absolute;left:-14px;top:14px;width:3px;height:18px;border-radius:2px;background:var(--acc)}
+  .fleet .grow{flex:1}
+  .fleet .sq{width:22px;height:22px;border-radius:7px;display:grid;place-items:center;font-size:8.5px;font-weight:700;color:#14101f;opacity:.75}
+  .fleet .sq:hover{opacity:1}
+  /* ── sessions ── */
+  .sess{width:252px;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column}
+  .sess header{padding:18px 18px 10px;display:flex;align-items:center;gap:8px}
+  .sess header b{font-size:14px}
+  .sess header .n{margin-left:auto;color:var(--acc);font-size:17px}
+  .search{margin:2px 14px 12px;padding:8px 12px;border-radius:10px;border:1px solid var(--line);color:var(--fg3);font-size:12.5px;display:flex;gap:8px}
+  .srow{display:flex;align-items:center;gap:9px;padding:8px 18px;font-size:13px;color:var(--fg2)}
+  .srow.on{background:var(--bg4);color:var(--fg)}
+  .srow .t{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .srow .sd{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+  .srow .sd.hollow{background:transparent;border:2px solid var(--fg3)}
+  .botstamp{margin:10px 14px 4px;padding:10px 12px;border-radius:12px;background:var(--wash);border:1px solid rgba(247,146,54,.25)}
+  .botstamp .h{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--acc2);font-weight:600}
+  .botstamp p{font-size:11px;color:var(--fg3);margin-top:4px;line-height:1.5}
+  /* ── center ── */
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .top{display:flex;align-items:center;gap:10px;padding:14px 26px;border-bottom:1px solid var(--line)}
+  .top .who{display:flex;gap:9px;align-items:center}
+  .top .who .av{width:26px;height:26px;border-radius:8px;background:var(--acc);color:#2e1a08;display:grid;place-items:center;font-size:10px;font-weight:700}
+  .top .who b{font-size:14px}
+  .top .arc{position:relative;width:30px;height:22px}
+  .top .arc:before{content:"";position:absolute;inset:0;border-radius:12px;border:1.5px solid transparent;border-top-color:var(--acc);animation:spin 1.6s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .top .chip{font-size:11px;color:var(--fg2);border:1px solid var(--line);border-radius:99px;padding:3px 10px}
+  .top .chip.busy{border-color:var(--acc);color:var(--acc2)}
+  .top .r{margin-left:auto;display:flex;gap:14px;font-size:11.5px;color:var(--fg3)}
+  /* transcript — scaffold language */
+  .tl{flex:1;overflow:hidden;padding:22px 40px}
+  .wrap{max-width:730px;margin:0 auto}
+  .u{display:flex;justify-content:flex-end;margin:16px 0 20px}
+  .u>div{max-width:74%;background:#f6ece1;color:#2b283b;border-radius:16px 16px 5px 16px;padding:11px 16px;font-size:14.5px;line-height:1.55}
+  /* scaffold rows: quiet, 64% ink */
+  .scaf{margin:2px 0 8px}
+  .srow2{display:flex;align-items:baseline;gap:9px;font-size:12.5px;color:var(--fg2);padding:3.5px 2px;opacity:.85}
+  .srow2:hover{opacity:1}
+  .srow2 .gl{color:var(--acc);font-family:var(--mono);font-size:11.5px}
+  .srow2 b{color:var(--fg);font-weight:500}
+  .srow2 .mono{font-family:var(--mono);font-size:11.5px;color:var(--fg2)}
+  .srow2 .dim{font-family:var(--mono);font-size:10.5px;color:var(--fg3)}
+  .srow2 .ok{color:var(--ok);font-size:11px}
+  .runsum{display:flex;align-items:center;gap:9px;padding:6px 2px;font-size:12px;color:var(--fg3)}
+  .runsum .ic{color:var(--acc);font-size:12px}
+  .runsum .ticker{color:var(--fg2);font-family:var(--mono);font-size:11px;background:var(--bg3);padding:2px 9px;border-radius:6px}
+  /* reasoning */
+  .think{margin:6px 0 10px;padding:0 0 0 14px;border-left:2px solid rgba(247,146,54,.35)}
+  .think .h{font-size:12px;color:var(--acc2);margin-bottom:5px}
+  .think .h .t{animation:bre 1.8s ease-in-out infinite}
+  @keyframes bre{50%{opacity:.45}}
+  .think .b{font-size:12.5px;line-height:1.65;color:var(--fg2);max-height:72px;overflow:hidden;position:relative}
+  .think .b:after{content:"";position:absolute;bottom:0;left:0;right:0;height:34px;background:linear-gradient(transparent,var(--bg))}
+  /* message */
+  .m{font-size:14.5px;line-height:1.74;color:var(--fg)}
+  .m p{margin-bottom:12px}
+  .m code{font-family:var(--mono);font-size:12.5px;background:var(--wash);color:var(--acc2);padding:1px 6px;border-radius:5px}
+  .m strong{color:#fff}
+  .m ul{margin:0 0 12px 20px}.m li{margin:4px 0}
+  /* ::preview live widget */
+  .widget{border:1px solid var(--line2);border-radius:14px;overflow:hidden;margin:10px 0 6px;background:var(--bg3)}
+  .widget .bar{display:flex;align-items:center;gap:8px;padding:8px 14px;font-family:var(--mono);font-size:10px;color:var(--fg3);border-bottom:1px solid var(--line)}
+  .widget .bar span{margin-left:auto;color:var(--acc)}
+  .widget .content{padding:16px;display:flex;gap:14px;align-items:center}
+  .widget .gauge{width:92px;height:92px;border-radius:50%;background:conic-gradient(var(--acc) 0 41%,var(--bg4) 41% 100%);display:grid;place-items:center}
+  .widget .gauge div{width:70px;height:70px;border-radius:50%;background:var(--bg3);display:grid;place-items:center;font-family:var(--mono);font-size:18px;color:var(--acc)}
+  .widget .rows{flex:1;display:flex;flex-direction:column;gap:7px}
+  .widget .wr{display:flex;justify-content:space-between;font-size:12px;color:var(--fg2)}
+  .widget .wr b{font-family:var(--mono);color:var(--fg);font-weight:500}
+  .widget .wr b.ok{color:var(--ok)}
+  /* composer + status stack */
+  .compwrap{padding:0 40px 18px}
+  .stack{max-width:730px;margin:0 auto 8px;display:flex;flex-direction:column;gap:6px}
+  .todo{display:flex;align-items:center;gap:10px;background:var(--bg3);border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:12.5px;color:var(--fg2)}
+  .todo .gl{font-family:var(--mono);color:var(--acc)}
+  .todo .now{color:var(--fg)}
+  .todo .ghost{margin-left:auto;font-size:10.5px;color:var(--fg3);font-family:var(--mono)}
+  .sub{display:flex;align-items:center;gap:10px;background:var(--bg3);border:1px solid var(--line);border-radius:12px;padding:9px 14px;font-size:12px;color:var(--fg2)}
+  .sub .sd{width:8px;height:8px;border-radius:50%;background:var(--sky);box-shadow:0 0 8px var(--sky)}
+  .sub b{color:var(--fg)}
+  .sub span{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--fg3)}
+  .cbox{max-width:730px;margin:0 auto;background:var(--bg3);border-radius:18px;padding:5px 6px 7px;box-shadow:0 0 0 1px var(--line),0 0 0 3px transparent;position:relative}
+  .cbox.run:after{content:"";position:absolute;inset:-3px;border-radius:21px;padding:1.5px;background:conic-gradient(var(--acc),transparent 30%,var(--acc));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;animation:spin 2.4s linear infinite}
+  .cbox textarea{width:100%;background:none;border:none;outline:none;color:var(--fg);font-family:var(--sans);font-size:14.5px;padding:11px 14px 4px;resize:none;height:42px}
+  .cbar{display:flex;align-items:center;gap:9px;padding:4px 10px 2px;font-size:11.5px;color:var(--fg3)}
+  .cbar .pill{border:1px solid var(--line);border-radius:99px;padding:3px 11px}
+  .cbar .pill.m{color:var(--acc2);border-color:rgba(247,146,54,.4)}
+  .cbar .grow{flex:1}
+  .cbar .go{width:32px;height:32px;border-radius:50%;background:var(--acc);color:#2e1a08;display:grid;place-items:center;font-weight:800}
+  /* right: preview+browser mini */
+  .side{width:370px;border-left:1px solid var(--line);background:var(--bg2);display:flex;flex-direction:column}
+  .side header{display:flex;gap:2px;padding:12px 12px 0}
+  .side .t{font-size:12px;padding:8px 14px;color:var(--fg3);border-radius:9px 9px 0 0}
+  .side .t.on{color:var(--fg);background:var(--bg);border:1px solid var(--line);border-bottom-color:var(--bg);margin-bottom:-1px}
+  .side .body{flex:1;background:var(--bg);border-top:1px solid var(--line);margin:0 8px 8px;border-radius:0 0 12px 12px;overflow:hidden;display:flex;flex-direction:column}
+  .shot{flex:1;background:#0d0a18;display:grid;place-items:center;position:relative;overflow:hidden}
+  .shot .fake{width:86%;height:78%;background:linear-gradient(160deg,#181430,#0f0c1b);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:9px}
+  .fake .l{height:10px;border-radius:5px;background:var(--bg4)}
+  .fake .l.b{width:70%}.fake .l.s{width:45%}
+  .fake .img{flex:1;border-radius:8px;background:radial-gradient(circle at 30% 30%,rgba(247,146,54,.25),transparent 60%),var(--bg3)}
+  .caption{padding:10px 16px;font-family:var(--mono);font-size:10.5px;color:var(--fg3);display:flex;gap:8px;align-items:center;border-top:1px solid var(--line)}
+  .caption .live{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 6px var(--ok)}
+  .usage{margin:0 8px 10px;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+  .usage .h{font-size:10.5px;color:var(--fg3);text-transform:uppercase;letter-spacing:.12em;margin-bottom:8px}
+  .ubar{display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--bg4)}
+  .ubar i{display:block;height:100%}
+  .uleg{display:flex;gap:14px;margin-top:8px;font-size:10.5px;color:var(--fg2)}
+  .uleg .sw{width:8px;height:8px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:-1px}
+  /* statusbar with meter */
+  .sb{height:30px;border-top:1px solid var(--line);display:flex;align-items:center;gap:16px;padding:0 18px;font-family:var(--mono);font-size:10.5px;color:var(--fg3)}
+  .sb .ok{color:var(--ok)}
+  .sb .grow{flex:1}
+  .sb .m{letter-spacing:-1px;font-size:11px}
+  .sb .m .on{color:var(--acc)} .sb .m .off{color:var(--bg4)}
+</style>
+</head>
+<body>
+<div class="artboard">
+
+  <!-- FLEET RAIL -->
+  <nav class="fleet">
+    <div class="logo">M</div>
+    <div class="fb on"><span class="hl"></span>MO<span class="sd" style="background:var(--acc);border-color:var(--bg2)"></span></div>
+    <div class="fb" style="background:var(--ok)">WD<span class="sd" style="background:var(--bg2)"></span></div>
+    <div class="fb" style="background:var(--sky)">SC<span class="sd" class="hollow" style="background:transparent;border:2px solid var(--bg2)"></span></div>
+    <div class="fb" style="background:var(--violet)">JB<span class="sd" style="background:var(--amber);border-color:var(--bg2)"></span></div>
+    <div class="grow"></div>
+    <div class="sq" style="background:var(--acc)">MO</div>
+    <div class="sq" style="background:var(--teal)">PC</div>
+    <div class="sq" style="border:1px dashed var(--fg3);color:var(--fg3);background:none">+</div>
+  </nav>
+
+  <!-- SESSIONS -->
+  <aside class="sess">
+    <header><b>Mochi</b><span style="font-size:11px;color:var(--fg3)">· release</span><span class="n">+</span></header>
+    <div class="search">⌕ search<span style="margin-left:auto">⌘K</span></div>
+    <div class="botstamp">
+      <div class="h">◆ watch-deals is working</div>
+      <p>Deal digest — 6 candidates found, filtering for real discounts…</p>
+    </div>
+    <div class="srow on"><span class="t">Release 0.1.1</span><span class="sd" style="background:var(--acc)"></span></div>
+    <div class="srow"><span class="t">Side chat · title check</span><span class="sd hollow"></span></div>
+    <div class="srow"><span class="t">Desk research brief</span></div>
+    <div class="srow"><span class="t">Cron knock fix</span></div>
+    <div class="srow"><span class="t">Website hero rewrite</span></div>
+    <div class="srow"><span class="t">Q3 numbers memo</span></div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+    <div class="top">
+      <div class="who"><div class="av">MO</div><b>Release 0.1.1</b></div>
+      <div class="arc"></div>
+      <span class="chip busy">turn running</span>
+      <span class="chip">glm-5.3-flash</span>
+      <div class="r"><span>Fork ⌘⇧F</span><span>Verbose ⌃O</span><span>Speak ⌘L</span></div>
+    </div>
+
+    <div class="tl"><div class="wrap">
+      <div class="u"><div>Ship 0.1.1 — bump, build, open it yourself to verify, run the smoke suite, and show me the numbers when you're done.</div></div>
+
+      <div class="think">
+        <div class="h"><span class="t">◍ thinking · 11s</span></div>
+        <div class="b">Three files carry versions; the release script names the artifact; smoke expects 41 tests. Build takes ~5 min so I'll verify the window while the suite runs after…</div>
+      </div>
+
+      <div class="scaf">
+        <div class="srow2"><span class="gl">▤</span><b>read</b> <span class="mono">release.sh · tauri.conf.json · Cargo.toml · package.json</span> <span class="dim">0.4s</span></div>
+        <div class="srow2"><span class="gl">✎</span><b>patch</b> <span class="mono">3 files</span> <span class="dim" style="color:var(--ok)">+3 −3</span> <span class="dim">0.3s</span></div>
+        <div class="srow2"><span class="gl">▷</span><b>build</b> <span class="mono">tauri build</span> <span class="dim">4m 34s</span> <span class="ok">✓ 98.2MB</span></div>
+        <div class="srow2"><span class="gl">◎</span><b>launch</b> <span class="mono">the fresh AppImage</span> <span class="dim">window @ 121ms</span> <span class="ok">✓</span></div>
+        <div class="runsum"><span class="ic">≡</span> 4 tool calls · thought for a while <span class="ticker">smoke 12/41 ▸</span></div>
+      </div>
+
+      <div class="m">
+        <p><strong>Verified with my own eyes, then with the suite.</strong> The bundle opens in <code>121ms</code>, adopts the gateway in <code>1.3s</code>, and restores all four sessions. Live numbers below — the gauge updates as the suite finishes:</p>
+      </div>
+
+      <div class="widget">
+        <div class="bar">::preview · release-status.html <span>live · themed · clickable</span></div>
+        <div class="content">
+          <div class="gauge"><div>41%</div></div>
+          <div class="rows">
+            <div class="wr"><span>window first paint</span><b class="ok">121ms</b></div>
+            <div class="wr"><span>gateway adopt</span><b class="ok">1.3s</b></div>
+            <div class="wr"><span>suite passing</span><b>12 / 41</b></div>
+            <div class="wr"><span>cache hit</span><b>91%</b></div>
+          </div>
+        </div>
+      </div>
+    </div></div>
+
+    <!-- composer status stack -->
+    <div class="compwrap">
+      <div class="stack">
+        <div class="todo"><span class="gl">☑</span><span>Version bumps</span><span class="gl" style="color:var(--ok)">☑</span><span>Build</span><span class="gl" style="color:var(--acc)">◐</span><span class="now">Smoke suite</span><span class="ghost">· scroll up to dim ·</span></div>
+        <div class="sub"><span class="sd"></span><b>smoke-runner</b> is livestreaming · test 12/41<span>inspect ▸</span></div>
+      </div>
+      <div class="cbox run">
+        <textarea>Steer, ask, or start something new…</textarea>
+        <div class="cbar"><span class="pill m">glm-5.3-flash ⌄</span><span class="pill">@ Mochi</span><span class="pill">/ cmds</span><span class="grow"></span><div class="go">↑</div></div>
+      </div>
+    </div>
+
+    <div class="sb">
+      <span class="ok">● local runtime</span><span>4 bots · 1 working</span><span class="grow"></span>
+      <span class="m"><span class="on">████</span><span class="on">██</span><span class="off">░░░░</span> 42%</span>
+      <span>18 tok/s</span><span>2 waiting on you</span>
+    </div>
+  </main>
+
+  <!-- SIDE: browser + usage -->
+  <aside class="side">
+    <header><div class="t">Browser</div><div class="t on">Preview</div><div class="t">Files</div></header>
+    <div class="body">
+      <div class="shot"><div class="fake">
+        <div class="l b"></div><div class="l s"></div><div class="img"></div><div class="l"></div><div class="l s"></div>
+      </div></div>
+      <div class="caption"><span class="live"></span> example.org · driven by you + your agents · about:blank → example.org</div>
+    </div>
+    <div class="usage">
+      <div class="h">Context · this chat</div>
+      <div class="ubar"><i style="width:34%;background:var(--violet)"></i><i style="width:8%;background:var(--acc)"></i><i style="width:6%;background:var(--sky)"></i></div>
+      <div class="uleg">
+        <span><i class="sw" style="background:var(--violet)"></i>history 34%</span>
+        <span><i class="sw" style="background:var(--acc)"></i>tools 8%</span>
+        <span><i class="sw" style="background:var(--sky)"></i>files 6%</span>
+      </div>
+    </div>
+  </aside>
+
+</div>
+</body>
+</html>

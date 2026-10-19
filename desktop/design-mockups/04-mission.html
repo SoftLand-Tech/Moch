@@ -1,0 +1,273 @@
+<!doctype html>
+<!-- DESIGN 4 — "MISSION" · the goal-loop ADE (ZCode-inspired)
+     Tabbed right workbench (Goal/Browser/Terminal/Diff), titlebar status
+     chips, iteration dividers + checklist, tachometer statusbar. 1520×960. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Moch · Mission — design 4</title>
+<style>
+  :root{
+    --bg:#161616; --bg2:#1c1c1c; --bg3:#202020; --bg4:#262626;
+    --fg:#f0f0f0; --fg2:#a8a8a8; --fg3:#737373;
+    --vi:#8b7cf6; --vi2:#a89dff; --viwash:rgba(139,124,246,.12);
+    --amber:#f5b455; --teal:#5fd4c4; --sky:#6cb2ea; --red:#ef7373; --green:#7ed491;
+    --line:#2c2c2c; --line2:#383838;
+    --mono:"JetBrains Mono",ui-monospace,monospace;
+    --sans:"Inter","Segoe UI",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0a0a0a;display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:var(--sans);color:var(--fg)}
+  .artboard{width:1520px;height:960px;background:var(--bg);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 80px rgba(0,0,0,.6)}
+  /* ── titlebar with live status chips ── */
+  .title{height:52px;background:var(--bg2);border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 16px;gap:14px}
+  .title .logo{width:28px;height:28px;border-radius:8px;background:#fff;color:#111;display:grid;place-items:center;font-weight:800;font-size:14px}
+  .title .ws{font-size:13px;font-weight:600}
+  .title .ws span{color:var(--fg3);font-weight:400}
+  .chips{margin-left:auto;display:flex;gap:8px}
+  .chip{display:flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:8px;background:var(--bg3);font-size:11.5px;color:var(--fg2);border:1px solid var(--line)}
+  .chip b{color:var(--fg);font-weight:600;font-variant-numeric:tabular-nums}
+  .chip .lamp{width:7px;height:7px;border-radius:50%}
+  .chip.primary{background:#fff;color:#111;border-color:#fff;font-weight:600}
+  /* ── body ── */
+  .body{flex:1;display:flex;min-height:0}
+  /* left: tasks */
+  .left{width:280px;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column}
+  .model{margin:14px 14px 4px;padding:12px;border-radius:10px;background:var(--bg3);border:1px solid var(--line)}
+  .model .m{font-size:13px;font-weight:600}
+  .model .m span{float:right;color:var(--fg3);font-weight:400;font-size:11px}
+  .model .lv{display:flex;gap:4px;margin-top:8px}
+  .model .lv span{flex:1;text-align:center;font-size:10px;padding:4px 0;border-radius:6px;background:var(--bg4);color:var(--fg3)}
+  .model .lv span.on{background:var(--vi);color:#fff;font-weight:600}
+  .sec{padding:16px 18px 6px;font-size:10px;letter-spacing:.16em;color:var(--fg3);text-transform:uppercase;display:flex}
+  .sec span{margin-left:auto;color:var(--vi2);font-size:14px;letter-spacing:0}
+  .task{display:flex;gap:10px;padding:9px 18px;align-items:center}
+  .task .tt{flex:1;min-width:0}
+  .task b{font-size:12.5px;font-weight:500;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .task span{font-size:10.5px;color:var(--fg3)}
+  .task.on{background:var(--bg3);box-shadow:inset 2px 0 0 var(--vi)}
+  .task .age{font-size:10px;color:var(--fg3);font-family:var(--mono)}
+  .task .st{width:8px;height:8px;border-radius:50%}
+  /* center */
+  .center{flex:1;display:flex;flex-direction:column;min-width:0}
+  .viewtabs{display:flex;gap:2px;padding:10px 22px 0;border-bottom:1px solid var(--line)}
+  .vt{font-size:12.5px;padding:9px 16px;color:var(--fg3);border-radius:9px 9px 0 0}
+  .vt.on{color:var(--fg);background:var(--bg);border:1px solid var(--line);border-bottom:1px solid var(--bg);margin-bottom:-1px}
+  .vt .cnt{font-size:9.5px;background:var(--vi);color:#fff;border-radius:8px;padding:1px 6px;margin-left:6px}
+  .stream{flex:1;overflow:hidden;padding:20px 34px}
+  .wrap{max-width:740px;margin:0 auto}
+  .u{display:flex;justify-content:flex-end;margin:14px 0 18px}
+  .u>div{max-width:76%;background:var(--bg3);border-radius:12px;padding:11px 15px;font-size:14px;line-height:1.55}
+  /* iteration divider — the goal loop made visible */
+  .iter{display:flex;align-items:center;gap:12px;margin:20px 0 14px;font-family:var(--mono);font-size:10.5px;color:var(--fg3)}
+  .iter .n{background:var(--viwash);color:var(--vi2);padding:3px 10px;border-radius:99px;font-weight:600}
+  .iter:before,.iter:after{content:"";flex:1;height:1px;background:var(--line)}
+  /* thinking — violet */
+  .think{margin:4px 0 12px;border-left:2px solid var(--vi);padding:2px 0 2px 16px}
+  .think .h{font-size:12px;color:var(--vi2);margin-bottom:6px;display:flex;gap:8px;align-items:center}
+  .think .h .face{width:18px;height:10px;border:2px solid var(--vi2);border-radius:6px;position:relative}
+  .think .h .face:after{content:"";position:absolute;left:3px;top:2px;width:3px;height:3px;border-radius:50%;background:var(--vi2);box-shadow:12px 0 0 var(--vi2)}
+  .think .b{font-size:12.5px;line-height:1.65;color:var(--fg2)}
+  /* tool rows: progressive tense */
+  .acts{margin:6px 0 10px}
+  .arow{display:flex;align-items:baseline;gap:9px;font-size:13px;color:var(--fg2);padding:3.5px 0}
+  .arow .gl{color:var(--amber);font-family:var(--mono);font-size:12px}
+  .arow b{color:var(--fg);font-weight:500}
+  .arow .past{color:var(--fg3);font-style:italic}
+  .arow .now{color:var(--teal)}
+  .arow .meta{font-family:var(--mono);font-size:10.5px;color:var(--fg3)}
+  .arow .ok{color:var(--green)}
+  /* message */
+  .m{font-size:14.5px;line-height:1.72;color:var(--fg)}
+  .m p{margin-bottom:11px}
+  .m code{font-family:var(--mono);font-size:12.5px;background:var(--bg3);color:var(--teal);padding:1px 6px;border-radius:5px}
+  .m strong{color:#fff}
+  .check{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin:10px 0}
+  .check .h{font-size:11px;letter-spacing:.12em;color:var(--fg3);text-transform:uppercase;margin-bottom:8px}
+  .ck{display:flex;gap:10px;align-items:center;font-size:13px;color:var(--fg2);padding:3px 0}
+  .ck .box{width:15px;height:15px;border-radius:5px;border:1.5px solid var(--line2);display:grid;place-items:center;font-size:10px;color:#111}
+  .ck.done .box{background:var(--green);border-color:var(--green)} .ck.done{color:var(--fg3);text-decoration:line-through}
+  .ck.now .box{border-color:var(--vi)} .ck.now{color:var(--fg)}
+  .ck .box.hole{border-style:dashed;border-color:var(--amber)} .ck.hole{color:var(--amber)}
+  /* permission inline card */
+  .perm{background:var(--bg2);border:1px solid var(--line2);border-left:3px solid var(--amber);border-radius:12px;padding:14px 18px;margin:12px 0}
+  .perm .q{font-size:13.5px;font-weight:600;margin-bottom:8px}
+  .perm .tiers{display:flex;gap:8px;flex-wrap:wrap}
+  .perm .t{font-size:11.5px;padding:6px 12px;border-radius:8px;background:var(--bg3);color:var(--fg2);border:1px solid var(--line)}
+  .perm .t.hot{background:#fff;color:#111;font-weight:600;border-color:#fff}
+  /* composer */
+  .comp{padding:12px 34px 18px}
+  .cbox{max-width:740px;margin:0 auto;background:var(--bg2);border:1px solid var(--line2);border-radius:14px;padding:5px 6px 7px}
+  .cbox textarea{width:100%;background:none;border:none;outline:none;color:var(--fg);font-family:var(--sans);font-size:14px;padding:11px 13px 4px;resize:none;height:40px}
+  .cbar{display:flex;align-items:center;gap:8px;padding:4px 10px 2px;font-size:11px;color:var(--fg3)}
+  .cbar .sym{font-family:var(--mono);color:var(--vi2)}
+  .cbar .grow{flex:1}
+  .cbar .go{width:30px;height:30px;border-radius:8px;background:#fff;color:#111;display:grid;place-items:center;font-weight:800}
+  /* ── right workbench ── */
+  .right{width:420px;border-left:1px solid var(--line);background:var(--bg2);display:flex;flex-direction:column}
+  .wtabs{display:flex;border-bottom:1px solid var(--line)}
+  .wt{flex:1;text-align:center;font-size:11.5px;padding:12px 0;color:var(--fg3);border-bottom:2px solid transparent}
+  .wt.on{color:var(--fg);border-bottom-color:var(--vi)}
+  .wt .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-left:5px;animation:bl 1.4s infinite}
+  @keyframes bl{50%{opacity:.3}}
+  .wbody{flex:1;overflow:hidden;display:flex;flex-direction:column}
+  /* goal view */
+  .goalp{padding:18px 20px;overflow:hidden;flex:1}
+  .goal{font-size:14px;line-height:1.6;font-weight:500;margin-bottom:14px}
+  .goalbox{background:var(--bg3);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+  .goalbox .h{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--fg3);text-transform:uppercase;letter-spacing:.12em;margin-bottom:10px}
+  .goalbox .h b{color:var(--vi2)}
+  .ev{display:flex;gap:10px;align-items:flex-start;font-size:12px;color:var(--fg2);padding:4px 0}
+  .ev .ok{color:var(--green)} .ev .now{color:var(--amber)}
+  .mini-map{margin-top:14px;background:var(--bg3);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .mini-map .h{font-size:10.5px;color:var(--fg3);text-transform:uppercase;letter-spacing:.12em;margin-bottom:12px}
+  .nodes{display:flex;align-items:center;justify-content:space-between;position:relative}
+  .nodes:before{content:"";position:absolute;left:16px;right:16px;top:13px;height:2px;background:var(--line2)}
+  .node{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:6px;width:72px}
+  .node .p{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:9.5px;font-weight:700;color:#111}
+  .node .p.hole{background:var(--bg4);border:2px dashed var(--amber);color:var(--amber)}
+  .node span{font-size:9.5px;color:var(--fg3);text-align:center;line-height:1.3}
+  .node .lamp{width:8px;height:8px;border-radius:50%;margin-top:2px}
+  /* tachometer statusbar */
+  .tach{height:38px;border-top:1px solid var(--line);background:var(--bg2);display:flex;align-items:center;gap:0;font-family:var(--mono);font-size:10.5px;color:var(--fg3)}
+  .tseg{display:flex;align-items:center;gap:7px;padding:0 16px;height:100%;border-right:1px solid var(--line)}
+  .tseg b{color:var(--fg);font-weight:600;font-variant-numeric:tabular-nums;font-size:12px}
+  .tseg .u{font-size:9px}
+  .ctx{flex:1;display:flex;align-items:center;gap:10px;padding:0 16px}
+  .ctx .bar{flex:1;height:5px;border-radius:3px;background:var(--bg4);overflow:hidden}
+  .ctx .bar i{display:block;height:100%;width:38%;background:linear-gradient(90deg,var(--vi),var(--teal))}
+  .tach .ok{color:var(--green)}
+</style>
+</head>
+<body>
+<div class="artboard">
+
+  <div class="title">
+    <div class="logo">M</div>
+    <div class="ws">Release 0.1.1 <span>· ~/ai/learning/Moch</span></div>
+    <div class="chips">
+      <div class="chip"><span class="lamp" style="background:var(--green)"></span><b>3</b> agents</div>
+      <div class="chip"><span class="lamp" style="background:var(--amber)"></span><b>1</b> needs you</div>
+      <div class="chip"><b>7</b> background jobs</div>
+      <div class="chip primary">Goal running · 2:14</div>
+    </div>
+  </div>
+
+  <div class="body">
+    <!-- LEFT: model + tasks -->
+    <aside class="left">
+      <div class="model">
+        <div class="m">GLM-5.3-Flash <span>⌄</span></div>
+        <div class="lv"><span>Low</span><span class="on">High</span><span>Max</span></div>
+      </div>
+      <div class="sec">Tasks <span>+</span></div>
+      <div class="task on"><div class="tt"><b>Release 0.1.1</b><span>goal · iteration 2</span></div><span class="st" style="background:var(--vi)"></span><span class="age">now</span></div>
+      <div class="task"><div class="tt"><b>Deal digest — keyboards</b><span>watch-deals</span></div><span class="st" style="background:var(--green)"></span><span class="age">14m</span></div>
+      <div class="task"><div class="tt"><b>Desk research brief</b><span>scratch · paused</span></div><span class="st" style="background:var(--fg3)"></span><span class="age">2h</span></div>
+      <div class="sec">Automations</div>
+      <div class="task"><div class="tt"><b>Morning digest</b><span>every day 09:00</span></div><span class="age">tomorrow</span></div>
+      <div class="task"><div class="tt"><b>Deal sweep</b><span>every 2h</span></div><span class="age">17:51</span></div>
+    </aside>
+
+    <!-- CENTER -->
+    <main class="center">
+      <div class="viewtabs">
+        <div class="vt on">Chat</div>
+        <div class="vt">Trajectory</div>
+        <div class="vt">Crew<span class="cnt">3</span></div>
+        <div class="vt" style="margin-left:auto;color:var(--vi2)">⌘K</div>
+      </div>
+
+      <div class="stream"><div class="wrap">
+        <div class="u"><div>Cut the 0.1.1 release. Bump everything, build, verify it opens, run the smoke suite. Ask before deleting anything.</div></div>
+
+        <div class="iter"><span class="n">ITERATION 1</span> evidence gathered · continuing</div>
+
+        <div class="think">
+          <div class="h"><span class="face"></span> Thinking · 11s</div>
+          <div class="b">Version strings live in three files. The smoke script hardcodes the artifact name — I'll read it before editing so the build and the test agree on 0.1.1.</div>
+        </div>
+
+        <div class="acts">
+          <div class="arow"><span class="gl">‣</span><span class="past">Reading</span> <b>scripts/release.sh</b> <span class="meta">0.2s</span> <span class="ok">✓</span></div>
+          <div class="arow"><span class="gl">‣</span><span class="past">Editing</span> <b>tauri.conf.json</b> <span class="meta">+1 −1</span> <span class="ok">✓</span></div>
+          <div class="arow"><span class="gl">‣</span><span class="past">Editing</span> <b>Cargo.toml · package.json</b> <span class="meta">+2 −2</span> <span class="ok">✓</span></div>
+          <div class="arow"><span class="gl">‣</span><span class="past">Building</span> <b>release AppImage</b> <span class="meta">4m 34s</span> <span class="ok">✓ 98.2MB</span></div>
+          <div class="arow"><span class="gl">‣</span><span class="now">Verifying —</span> <b>launched the bundle</b> <span class="meta">window @ 121ms</span> <span class="ok">✓</span></div>
+        </div>
+
+        <div class="iter"><span class="n">ITERATION 2</span> goal not met · task continues</div>
+
+        <div class="m">
+          <p><strong>Halfway there.</strong> The build is real and it opens — but the goal said <em>verify</em>, and I've only verified my own eyes. The smoke suite is the evidence that counts:</p>
+        </div>
+
+        <div class="check">
+          <div class="h">Goal checklist</div>
+          <div class="ck done"><span class="box">✓</span> Version bumped in 3 files</div>
+          <div class="ck done"><span class="box">✓</span> Release AppImage built (98.2MB)</div>
+          <div class="ck done"><span class="box">✓</span> Bundle opens · window @ 121ms</div>
+          <div class="ck now"><span class="box">◐</span> Smoke suite against the fresh bundle</div>
+          <div class="ck hole"><span class="box hole">?</span> Sandbox cleanup — <b style="color:var(--amber)">needs you</b></div>
+        </div>
+
+        <div class="perm">
+          <div class="q">Clean the test sandbox before the suite runs?</div>
+          <div style="font-family:var(--mono);font-size:12px;color:var(--amber);margin-bottom:10px">$ rm -rf ~/.devtest/desktop-state</div>
+          <div class="tiers">
+            <div class="t hot">Once</div><div class="t">This session</div><div class="t">This project</div><div class="t">Always</div><div class="t" style="color:var(--red)">Deny</div>
+          </div>
+        </div>
+      </div></div>
+
+      <div class="comp">
+        <div class="cbox">
+          <textarea>Run the next iteration…</textarea>
+          <div class="cbar"><span class="sym">⇥</span><span class="sym">@</span> files <span class="sym">#</span> tasks <span class="sym">/</span> cmds <span class="sym">$</span> skills<span class="grow"></span><span>⇧⇥ plan ▾</span><div class="go">↑</div></div>
+        </div>
+      </div>
+    </main>
+
+    <!-- RIGHT workbench -->
+    <aside class="right">
+      <div class="wtabs">
+        <div class="wt on">Goal</div><div class="wt">Browser<span class="dot"></span></div><div class="wt">Terminal</div><div class="wt">Diff</div>
+      </div>
+      <div class="wbody"><div class="goalp">
+        <div class="goal">"Cut the 0.1.1 release: bump versions, build, verify it opens, run the smoke suite, ask before deleting."</div>
+
+        <div class="goalbox">
+          <div class="h">Evidence · <b>iteration 2</b></div>
+          <div class="ev"><span class="ok">✓</span> window visible @ 121ms (measured)</div>
+          <div class="ev"><span class="ok">✓</span> statusbar green @ 1.3s (gateway adopt)</div>
+          <div class="ev"><span class="ok">✓</span> 4 sessions restored from state.db</div>
+          <div class="ev"><span class="now">◐</span> smoke suite 12/41 — running…</div>
+        </div>
+
+        <div class="mini-map">
+          <div class="h">Workflow · who's on it</div>
+          <div class="nodes">
+            <div class="node"><div class="p" style="background:var(--vi)">MO</div><span>Mochi<br>release</span><div class="lamp" style="background:var(--amber)"></div></div>
+            <div class="node"><div class="p" style="background:var(--sky)">SM</div><span>smoke<br>runner</span><div class="lamp" style="background:var(--amber)"></div></div>
+            <div class="node"><div class="p hole">?</div><span>you<br>approve</span><div class="lamp" style="background:var(--red)"></div></div>
+            <div class="node"><div class="p" style="background:var(--green)">WD</div><span>digest<br>done</span><div class="lamp" style="background:var(--green)"></div></div>
+          </div>
+        </div>
+      </div></div>
+    </aside>
+  </div>
+
+  <!-- tachometer -->
+  <div class="tach">
+    <div class="tseg"><span class="ok">●</span> local</div>
+    <div class="tseg"><b>6</b><span class="u">turns</span></div>
+    <div class="tseg"><b>412</b><span class="u">steps</span></div>
+    <div class="tseg"><b>18.4</b><span class="u">tok/s</span></div>
+    <div class="tseg"><b>91%</b><span class="u">cache</span></div>
+    <div class="ctx"><span>ctx</span><div class="bar"><i></i></div><span>38%</span></div>
+    <div class="tseg" style="border-right:none">v0.1.1</div>
+  </div>
+
+</div>
+</body>
+</html>

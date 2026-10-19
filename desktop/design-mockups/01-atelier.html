@@ -1,0 +1,213 @@
+<!doctype html>
+<!-- DESIGN 1 — "ATELIER" · warm editorial (Claude-inspired, Moch-orange warmed)
+     Full-page static mockup of the Moch Desktop app. 1520×960 artboard. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Moch · Atelier — design 1</title>
+<style>
+  :root{
+    --paper:#faf6ef; --paper-2:#f3ede1; --paper-3:#ece4d4;
+    --ink:#221c14; --ink-2:#5c5344; --ink-3:#8f8574;
+    --coral:#c96b3b; --coral-deep:#a9532c; --coral-wash:#f5e3d7;
+    --moss:#5c7a4e; --moss-wash:#e9efe2;
+    --sky:#4e6e8f; --sky-wash:#e4ecf2;
+    --line:#e2d8c6; --line-2:#d4c8b2;
+    --code-bg:#211c14; --code-ink:#e8e0d0;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    --sans:"Avenir Next","Segoe UI",system-ui,sans-serif;
+    --mono:"JetBrains Mono","Fira Code",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#141210;display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:var(--sans);color:var(--ink)}
+  .artboard{width:1520px;height:960px;background:var(--paper);display:flex;overflow:hidden;box-shadow:0 20px 80px rgba(0,0,0,.5);transform-origin:center}
+  /* ── left: sessions ── */
+  .side{width:300px;background:var(--paper-2);border-right:1px solid var(--line);display:flex;flex-direction:column}
+  .brand{display:flex;align-items:center;gap:12px;padding:22px 22px 16px}
+  .brand .logo{width:38px;height:38px;border-radius:12px;background:var(--coral);display:grid;place-items:center;color:#fff;font-family:var(--serif);font-size:20px}
+  .brand b{font-family:var(--serif);font-size:19px;font-weight:400;letter-spacing:.01em}
+  .brand span{font-size:11px;color:var(--ink-3);display:block;margin-top:2px}
+  .search{margin:4px 18px 14px;display:flex;gap:8px;align-items:center;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:8px 12px;color:var(--ink-3);font-size:13px}
+  .sec{padding:14px 22px 6px;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+  .row{display:flex;align-items:center;gap:10px;padding:9px 22px;font-size:13.5px;color:var(--ink-2);cursor:default}
+  .row.active{background:var(--paper);color:var(--ink);box-shadow:inset 3px 0 0 var(--coral)}
+  .row .t{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .row .dot{width:7px;height:7px;border-radius:50%}
+  .row .when{font-size:11px;color:var(--ink-3)}
+  .bot{display:flex;align-items:center;gap:10px;margin:6px 22px;padding:10px 12px;border-radius:12px;background:var(--paper);border:1px solid var(--line)}
+  .bot .av{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-family:var(--serif);color:#fff;font-size:13px}
+  .bot b{font-size:13px;font-weight:600}
+  .bot span{font-size:11px;color:var(--ink-3)}
+  .bot .st{margin-left:auto;font-size:10px;padding:2px 8px;border-radius:99px;background:var(--moss-wash);color:var(--moss)}
+  .foot{margin-top:auto;padding:16px 22px;border-top:1px solid var(--line);font-size:11.5px;color:var(--ink-3)}
+  /* ── center: conversation ── */
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .top{display:flex;align-items:center;gap:12px;padding:16px 30px;border-bottom:1px solid var(--line)}
+  .top .crumb{font-family:var(--serif);font-size:16.5px}
+  .top .chip{font-size:11.5px;color:var(--ink-2);border:1px solid var(--line-2);border-radius:99px;padding:3px 11px}
+  .top .chip.work{border-color:var(--coral);color:var(--coral)}
+  .top .right{margin-left:auto;display:flex;gap:8px;align-items:center;color:var(--ink-3);font-size:12px}
+  .stream{flex:1;overflow:hidden;padding:26px 56px;display:flex;flex-direction:column;gap:22px}
+  .col{max-width:680px;margin:0 auto;width:100%}
+  .user{align-self:flex-end;max-width:72%;background:var(--paper-3);border-radius:16px 16px 5px 16px;padding:12px 16px;font-size:14.5px;line-height:1.55}
+  .doc{font-size:15px;line-height:1.72;color:var(--ink)}
+  .doc h2{font-family:var(--serif);font-weight:400;font-size:21px;margin:4px 0 10px}
+  .doc p{margin-bottom:12px}
+  .doc code{font-family:var(--mono);font-size:12.5px;background:var(--coral-wash);color:var(--coral-deep);padding:1px 6px;border-radius:5px}
+  .doc ul{margin:0 0 12px 20px} .doc li{margin:5px 0}
+  .think{border:1px dashed var(--line-2);border-radius:12px;overflow:hidden;margin:2px 0}
+  .think>div:first-child{display:flex;gap:9px;align-items:center;padding:8px 14px;background:var(--paper-2);font-size:12px;color:var(--ink-2);cursor:default}
+  .think .caret{margin-left:auto;color:var(--ink-3);font-size:11px}
+  .think .body{padding:10px 16px;font-size:13px;line-height:1.6;color:var(--ink-2);border-top:1px dashed var(--line-2)}
+  .tool{display:flex;align-items:baseline;gap:9px;padding:6px 4px;font-size:13px;color:var(--ink-2)}
+  .tool .b{color:var(--coral)} .tool b{font-weight:600;color:var(--ink)}
+  .tool .cmd{font-family:var(--mono);font-size:12px;color:var(--ink-2)}
+  .tool .dur{font-size:11px;color:var(--ink-3)}
+  .tool .tail{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);padding-left:20px;display:block}
+  .sep{display:flex;align-items:center;gap:12px;color:var(--ink-3);font-size:11.5px}
+  .sep:before,.sep:after{content:"";flex:1;height:1px;background:var(--line)}
+  .artcard{border:1px solid var(--line-2);border-radius:14px;overflow:hidden;margin:6px 0;background:var(--paper)}
+  .artcard header{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--paper-2);font-size:12px;color:var(--ink-2)}
+  .artcard header .acts{margin-left:auto;display:flex;gap:10px;font-size:11px;color:var(--coral)}
+  .artcard .code{font-family:var(--mono);font-size:12px;line-height:1.65;padding:14px 16px;color:var(--code-ink);background:var(--code-bg);white-space:pre}
+  .artcard .code .add{background:rgba(120,200,120,.16);color:#b9e4b9;display:inline-block;width:100%}
+  .msgfoot{display:flex;gap:14px;color:var(--ink-3);font-size:11.5px;margin-top:2px}
+  .msgfoot span{cursor:default} .msgfoot span:hover{color:var(--coral)}
+  /* ── right: artifact panel ── */
+  .art{width:400px;border-left:1px solid var(--line);background:var(--paper-2);display:flex;flex-direction:column}
+  .art header{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--line)}
+  .art header b{font-family:var(--serif);font-weight:400;font-size:15px}
+  .art header .acts{margin-left:auto;display:flex;gap:12px;font-size:11.5px;color:var(--coral)}
+  .art .canvas{flex:1;padding:18px;overflow:hidden}
+  .prevc{background:var(--paper);border:1px solid var(--line);border-radius:14px;height:100%;padding:20px 22px;font-family:var(--serif);overflow:hidden}
+  .prevc h1{font-weight:400;font-size:22px;margin-bottom:4px}
+  .prevc .meta{font-family:var(--sans);font-size:11px;color:var(--ink-3);margin-bottom:14px}
+  .prevc p{font-family:var(--sans);font-size:13px;line-height:1.65;color:var(--ink-2);margin-bottom:11px}
+  .prevc .stat{display:flex;gap:10px;margin:16px 0}
+  .prevc .stat div{flex:1;background:var(--paper-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .prevc .stat b{font-family:var(--serif);font-size:20px;font-weight:400;color:var(--coral)}
+  .prevc .stat span{font-size:10.5px;color:var(--ink-3);display:block}
+  .editbar{margin:0 18px 18px;padding:10px 14px;border:1px dashed var(--coral);border-radius:10px;font-size:12px;color:var(--coral-deep);background:var(--coral-wash);display:flex;gap:8px;align-items:center}
+  /* ── composer ── */
+  .composer{padding:14px 56px 22px}
+  .box{max-width:680px;margin:0 auto;border:1.5px solid var(--line-2);border-radius:18px;background:var(--paper);padding:6px 8px 8px}
+  .box textarea{width:100%;border:none;outline:none;background:none;font-family:var(--sans);font-size:14.5px;padding:10px 12px 4px;resize:none;height:44px;color:var(--ink)}
+  .box .bar{display:flex;align-items:center;gap:8px;padding:4px 8px 2px}
+  .pill{font-size:11.5px;color:var(--ink-2);border:1px solid var(--line);border-radius:99px;padding:3px 11px;cursor:default}
+  .pill.model{color:var(--coral);border-color:var(--coral)}
+  .send{margin-left:auto;width:34px;height:34px;border-radius:50%;background:var(--coral);color:#fff;display:grid;place-items:center;font-size:16px}
+  .perm{max-width:680px;margin:0 auto 10px;display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ink-2)}
+  .perm .mode{border:1px solid var(--line-2);border-radius:8px;padding:4px 10px;color:var(--ink-2)}
+  .perm .mode b{color:var(--ink)}
+  .statusbar{height:30px;border-top:1px solid var(--line);display:flex;align-items:center;gap:18px;padding:0 20px;font-size:11px;color:var(--ink-3);font-family:var(--mono)}
+  .statusbar .ok{color:var(--moss)}
+  .statusbar .grow{flex:1}
+  .meter{display:inline-flex;align-items:center;gap:6px}
+  .meter .bar{width:70px;height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+  .meter .bar i{display:block;height:100%;width:42%;background:var(--coral)}
+</style>
+</head>
+<body>
+<div class="artboard">
+
+  <aside class="side">
+    <div class="brand"><div class="logo">M</div><div><b>Moch</b><span>Atelier · local fleet</span></div></div>
+    <div class="search">⌕  Search conversations…<span style="margin-left:auto;opacity:.6">⌘K</span></div>
+
+    <div class="sec">The Fleet</div>
+    <div class="bot"><div class="av" style="background:#c96b3b">Mo</div><div><b>Mochi</b><br><span>your main agent</span></div><div class="st">idle</div></div>
+    <div class="bot"><div class="av" style="background:#5c7a4e">WD</div><div><b>watch-deals</b><br><span>hunts keyboard deals</span></div><div class="st" style="background:var(--coral-wash);color:var(--coral)">working</div></div>
+    <div class="bot"><div class="av" style="background:#4e6e8f">SC</div><div><b>scratch</b><br><span>research briefs</span></div><div class="st">idle</div></div>
+
+    <div class="sec">Today</div>
+    <div class="row active"><span class="t">Landing page rewrite</span><span class="when">now</span></div>
+    <div class="row"><span class="t">Keyboard deal digest</span><span class="dot" style="background:var(--coral)"></span><span class="when">14:02</span></div>
+    <div class="row"><span class="t">Quarterly numbers memo</span><span class="when">11:38</span></div>
+    <div class="sec">Yesterday</div>
+    <div class="row"><span class="t">Fix the cron knock path</span><span class="when">Tue</span></div>
+    <div class="row"><span class="t">Reading list → briefs</span><span class="when">Tue</span></div>
+
+    <div class="foot">3 bots · everything on this machine</div>
+  </aside>
+
+  <main class="main">
+    <div class="top">
+      <div class="crumb">Landing page rewrite</div>
+      <div class="chip work">● Mochi is working</div>
+      <div class="chip">glm-5.3-flash</div>
+      <div class="right">History ⌘H &nbsp;·&nbsp; Fork ⌘⇧F &nbsp;·&nbsp; Speak ⌘L</div>
+    </div>
+
+    <div class="stream"><div class="col">
+      <div class="user">Rewrite the hero of our landing page. Warmer tone, keep it under 90 words, and put the numbers in a little stat row.</div>
+
+      <div class="think"><div>◍ Thinking <span style="color:var(--coral)">· 14s</span><span class="caret">▾</span></div>
+        <div class="body">The current hero is feature-led ("Blazing fast local agents"). A warmer register means human-led copy first, proof second. I'll draft 90 words max, then build the stat row from the real numbers on the page: 6.3MB binary, 121ms open, 3s recovery…</div></div>
+
+      <div class="tool"><span class="b">•</span><b>Read</b> <span class="cmd">docs/index.html</span><span class="dur">0.2s</span></div>
+      <div class="tool"><span class="b">•</span><b>Edited</b> <span class="cmd">docs/index.html</span><span style="color:var(--moss);font-size:11.5px">+38 −12</span><span class="dur">1.1s</span>
+        <span class="tail">└ &lt;h1&gt;Your agents, home by six.&lt;/h1&gt; … +34 lines</span></div>
+
+      <div class="doc">
+        <h2>Done — the hero reads human now.</h2>
+        <p>I led with the feeling instead of the spec sheet, then let the numbers carry the proof in a stat row. The file is open on the right; the <code>stat-row</code> block is new.</p>
+        <ul>
+          <li>Headline: warm, one idea, no adjectives doing the work</li>
+          <li>Stat row: <code>6.3MB</code> binary · <code>121ms</code> open · <code>3s</code> recovery</li>
+          <li>CTA stays orange; the cream keeps it from shouting</li>
+        </ul>
+      </div>
+
+      <div class="artcard">
+        <header><b>docs/index.html</b><span style="color:var(--ink-3)">· hero section</span>
+          <div class="acts"><span>Open</span><span>Copy</span><span>Revert</span></div></header>
+        <div class="code">  &lt;section class="hero"&gt;
+<span class="add">+   &lt;h1&gt;Your agents, home by six.&lt;/h1&gt;</span>
+<span class="add">+   &lt;p&gt;Moch keeps your bots on your machine — they browse,</span>
+<span class="add">+      build, and remember, and nothing ever leaves home.&lt;/p&gt;</span>
+    &lt;div class="cta"&gt;…</div&gt;</div>
+      </div>
+
+      <div class="msgfoot"><span>⧉ Copy</span><span>↻ Retry</span><span>♪ Listen</span><span>✎ Save as skill</span></div>
+      <div class="sep">Worked for 1m 12s · 3 tool calls · $0.004</div>
+    </div></div>
+
+    <div class="composer">
+      <div class="perm"><div class="mode">Approvals: <b>Smart</b></div><div class="mode">Verbosity: <b>Normal</b></div></div>
+      <div class="box">
+        <textarea>Ask Mochi anything — the warm way…</textarea>
+        <div class="bar">
+          <span class="pill model">glm-5.3-flash ⌄</span>
+          <span class="pill">@ Mochi</span>
+          <span class="pill">⌘; side chat</span>
+          <div class="send">↑</div>
+        </div>
+      </div>
+    </div>
+    <div class="statusbar">
+      <span class="ok">● local runtime</span><span>3 bots</span><span class="grow"></span>
+      <span class="meter"><span>ctx</span><span class="bar"><i></i></span>42%</span>
+      <span>18 tok/s</span><span>fully local · no cloud</span>
+    </div>
+  </main>
+
+  <aside class="art">
+    <header><b>Artifact</b><span style="font-size:11px;color:var(--ink-3)">index.html · live</span>
+      <div class="acts"><span>Edit with Mochi</span><span>Export</span></div></header>
+    <div class="canvas"><div class="prevc">
+      <h1>Your agents, home by six.</h1>
+      <div class="meta">HERO PREVIEW · rendered locally</div>
+      <p>Moch keeps your bots on your machine — they browse, build, and remember, and nothing ever leaves home.</p>
+      <div class="stat">
+        <div><b>6.3<small>MB</small></b><span>the whole app</span></div>
+        <div><b>121<small>ms</small></b><span>to first window</span></div>
+        <div><b>3<small>s</small></b><span>crash recovery</span></div>
+      </div>
+      <p style="font-family:var(--serif);font-size:14px">"It feels like the agents live here, because they do."</p>
+    </div></div>
+    <div class="editbar">✎ Highlight anything and ask Mochi to edit it in place</div>
+  </aside>
+
+</div>
+</body>
+</html>

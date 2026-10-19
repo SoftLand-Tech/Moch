@@ -1,0 +1,254 @@
+<!doctype html>
+<!-- DESIGN 3 — "DECK" · cards on deep canvas (opencode-inspired)
+     Floating elevated cards, session tabs, shimmering tool ledger,
+     permission dock fused to composer, tri-region. 1520×960. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Moch · Deck — design 3</title>
+<style>
+  :root{
+    --canvas:#08080a; --card:#16161a; --card2:#1c1c21; --raise:#232329;
+    --ring:rgba(255,255,255,.07); --line:rgba(255,255,255,.1);
+    --tx:#f2f2f4; --tx2:#a3a3ad; --tx3:#6e6e78;
+    --acc:#f79236; --acc2:#ffc07a;
+    --ok:#6bd586; --bad:#f17471; --plan:#c7a2ff; --build:#a2bcff; --explore:#ffe08a; --review:#89d3b6;
+    --mono:"JetBrains Mono",ui-monospace,monospace;
+    --sans:"Inter","Segoe UI",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:var(--sans);color:var(--tx)}
+  .artboard{width:1520px;height:960px;background:var(--canvas);padding:8px;display:flex;flex-direction:column;gap:8px;overflow:hidden;box-shadow:0 20px 80px rgba(0,0,0,.6)}
+  .card{background:var(--card);border-radius:12px;box-shadow:0 0 0 .5px var(--ring),0 8px 24px rgba(0,0,0,.45)}
+  /* ── titlebar card with session tabs ── */
+  .titlebar{height:46px;display:flex;align-items:center;padding:0 10px;gap:10px}
+  .logo{width:26px;height:26px;border-radius:8px;background:var(--acc);color:#1a1105;display:grid;place-items:center;font-weight:800;font-size:13px;margin:0 4px}
+  .tabs{display:flex;gap:4px;align-items:center;height:100%}
+  .tab{display:flex;align-items:center;gap:8px;height:34px;padding:0 14px;border-radius:9px;font-size:12.5px;color:var(--tx2);background:transparent}
+  .tab.on{background:var(--raise);color:var(--tx);box-shadow:0 0 0 .5px var(--ring)}
+  .tab .x{color:var(--tx3);font-size:11px}
+  .tab .busy{width:7px;height:7px;border-radius:50%;background:var(--acc);box-shadow:0 0 8px var(--acc)}
+  .tmeta{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--tx3);padding-right:8px}
+  .tmeta .chip{background:var(--card2);border-radius:99px;padding:4px 12px;display:flex;gap:6px;align-items:center}
+  .tmeta .chip b{color:var(--tx2);font-weight:500}
+  /* ── body: 3 regions ── */
+  .body{flex:1;display:flex;gap:8px;min-height:0}
+  /* chat region */
+  .chat{flex:1.6;display:flex;flex-direction:column;min-width:460px;overflow:hidden}
+  .chat .inner{flex:1;display:flex;flex-direction:column;min-height:0}
+  .rail-mini{display:flex;gap:6px;padding:10px 16px 0;font-size:11.5px;color:var(--tx3)}
+  .rail-mini span{padding:4px 10px;border-radius:99px}
+  .rail-mini span.on{background:var(--raise);color:var(--tx)}
+  .tl{flex:1;overflow:hidden;padding:18px 26px;display:flex;flex-direction:column}
+  .wrap{max-width:720px;margin:0 auto;width:100%}
+  .u{align-self:flex-end;max-width:76%;background:var(--raise);border-radius:14px 14px 4px 14px;padding:11px 15px;font-size:14px;line-height:1.55}
+  .umeta{display:flex;justify-content:flex-end;gap:10px;font-size:10.5px;color:var(--tx3);margin:3px 6px 14px 0;font-family:var(--mono)}
+  /* reasoning group */
+  .think{display:flex;flex-direction:column;gap:0;margin:2px 0 10px}
+  .think>.h{display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--tx2);padding:5px 2px}
+  .think>.h .t{background:linear-gradient(90deg,var(--tx3) 0%,#fff 50%,var(--tx3) 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:sh 1.6s linear infinite}
+  @keyframes sh{to{background-position:-200% 0}}
+  .think>.h .done{color:var(--tx3);animation:none}
+  .think>.b{font-size:12.5px;color:var(--tx3);line-height:1.6;padding:4px 12px;border-left:2px solid var(--line);margin:2px 0 4px 6px}
+  /* TOOL LEDGER — the signature */
+  .ledger{display:flex;flex-direction:column;margin:6px 0 12px;border-radius:10px;background:var(--card2);overflow:hidden;box-shadow:0 0 0 .5px var(--ring)}
+  .lrow{display:flex;align-items:center;gap:10px;height:32px;padding:0 14px;font-size:13px;color:var(--tx2);border-bottom:.5px solid var(--line)}
+  .lrow:last-child{border-bottom:none}
+  .lrow .ic{width:16px;text-align:center;color:var(--tx3);font-size:12px}
+  .lrow .lbl{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lrow .lbl.run{background:linear-gradient(90deg,var(--tx3) 0%,#fff 50%,var(--tx3) 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:sh 1.2s linear infinite}
+  .lrow .lbl b{color:var(--tx);font-weight:500}
+  .lrow .num{font-family:var(--mono);font-size:11px}
+  .lrow .num.add{color:var(--ok)} .lrow .num.del{color:var(--bad)}
+  .lrow .dur{font-family:var(--mono);font-size:10.5px;color:var(--tx3)}
+  .lrow .chev{color:var(--tx3);font-size:10px}
+  .lgroup{display:flex;align-items:center;gap:10px;height:30px;padding:0 14px;font-size:12px;color:var(--tx3);background:var(--card)}
+  .lgroup b{color:var(--tx2);font-weight:500;font-variant-numeric:tabular-nums}
+  /* assistant message */
+  .m{font-size:14.5px;line-height:1.7;color:var(--tx);margin:8px 0 4px}
+  .m p{margin-bottom:10px}
+  .m code{font-family:var(--mono);font-size:12.5px;background:var(--raise);color:var(--acc2);padding:1px 6px;border-radius:5px}
+  .m strong{color:#fff}
+  .ameta{display:flex;gap:12px;font-size:10.5px;color:var(--tx3);margin:4px 2px 0;font-family:var(--mono)}
+  /* subagent card */
+  .subagent{display:flex;gap:12px;align-items:center;background:var(--card2);border-radius:10px;padding:10px 14px;margin:10px 0;box-shadow:0 0 0 .5px var(--ring)}
+  .subagent .av{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-size:11px;font-weight:700;color:#101010}
+  .subagent .info{flex:1}
+  .subagent .info b{font-size:12.5px;font-weight:500}
+  .subagent .info span{display:block;font-size:11px;color:var(--tx3)}
+  .subagent .pill{font-size:10px;padding:2px 9px;border-radius:99px;background:rgba(107,213,134,.12);color:var(--ok)}
+  /* permission dock (fused above composer) */
+  .dock{max-width:720px;margin:0 auto 8px;display:flex;align-items:center;gap:10px;background:var(--card2);border-radius:12px;padding:10px 14px;box-shadow:0 0 0 .5px var(--ring)}
+  .dock .ic{width:26px;height:26px;border-radius:8px;background:rgba(247,146,54,.14);display:grid;place-items:center;color:var(--acc)}
+  .dock .q{flex:1;font-size:12.5px;color:var(--tx2)} .dock .q b{color:var(--tx)}
+  .dock button{font:inherit;font-size:12px;border-radius:8px;padding:7px 13px;cursor:default}
+  .dock .allow{background:var(--acc);color:#1a1105;font-weight:600}
+  .dock .ghost{background:transparent;color:var(--tx3);box-shadow:0 0 0 .5px var(--line)}
+  /* composer */
+  .comp{max-width:720px;margin:0 auto;width:100%;padding:0 26px 16px}
+  .cbox{background:var(--card2);border-radius:14px;box-shadow:0 0 0 .5px var(--ring);padding:5px 6px 7px}
+  .cbox textarea{width:100%;background:none;border:none;outline:none;color:var(--tx);font-family:var(--sans);font-size:14px;padding:11px 13px 4px;resize:none;height:40px}
+  .cbar{display:flex;align-items:center;gap:8px;padding:4px 10px 2px;font-size:11px;color:var(--tx3)}
+  .cbar .mchip{color:var(--acc)}
+  .cbar .grow{flex:1}
+  .cbar .go{width:30px;height:30px;border-radius:50%;background:var(--acc);color:#1a1105;display:grid;place-items:center;font-weight:800}
+  /* right region */
+  .side{width:400px;display:flex;flex-direction:column;gap:8px;min-width:0}
+  .panel{display:flex;flex-direction:column;overflow:hidden}
+  .panel header{display:flex;align-items:center;gap:8px;padding:12px 16px;font-size:12.5px;color:var(--tx2)}
+  .panel header .tabs2{display:flex;gap:2px;margin-left:6px}
+  .panel header .t2{font-size:11.5px;padding:4px 10px;border-radius:7px;color:var(--tx3)}
+  .panel header .t2.on{background:var(--raise);color:var(--tx)}
+  .panel header .plus{margin-left:auto;color:var(--tx3)}
+  /* file tree */
+  .ft{flex:1;padding:2px 8px;font-family:var(--mono);font-size:12px;color:var(--tx2);overflow:hidden}
+  .ftr{display:flex;align-items:center;gap:8px;padding:4px 10px;border-radius:7px}
+  .ftr.on{background:var(--raise)}
+  .ftr .dm{font-family:var(--mono);font-size:10px;color:var(--ok);margin-left:auto}
+  .ftr .d{padding-left:22px;color:var(--tx3)}
+  /* diff card */
+  .diffcard{flex:1.2;display:flex;flex-direction:column;overflow:hidden}
+  .diffcard .file{display:flex;align-items:center;gap:8px;padding:10px 16px;font-family:var(--mono);font-size:11.5px;color:var(--tx2);background:var(--card2);border-bottom:.5px solid var(--line)}
+  .diffcard .file .a{color:var(--ok);font-size:10.5px} .diffcard .file .r{color:var(--bad);font-size:10.5px}
+  .diffln{font-family:var(--mono);font-size:11.5px;line-height:1.75;white-space:pre;padding:10px 0;overflow:hidden}
+  .diffln .add{background:rgba(107,213,134,.09);color:#c9ecd1;display:inline-block;width:100%;padding-left:14px}
+  .diffln .del{background:rgba(241,116,113,.09);color:#f0c1bf;display:inline-block;width:100%;padding-left:14px}
+  .diffln .ctx{color:var(--tx3);padding-left:14px;display:inline-block;width:100%}
+  /* bottom terminal card */
+  .termcard{height:190px;display:flex;flex-direction:column}
+  .termcard header{padding:10px 16px}
+  .term{flex:1;background:#0a0a0c;margin:0 8px 8px;border-radius:8px;padding:10px 14px;font-family:var(--mono);font-size:11.5px;line-height:1.7;color:#b9e3c0;overflow:hidden}
+  .term .p{color:var(--acc)} .term .dim{color:var(--tx3)}
+  /* fleet strip (left of chat? bottom-left card) */
+  .fleet{height:150px;display:flex;flex-direction:column}
+  .fleet .bots{display:flex;gap:10px;padding:8px 14px 14px}
+  .fbot{flex:1;display:flex;gap:9px;align-items:center;background:var(--card2);border-radius:10px;padding:9px 12px;box-shadow:0 0 0 .5px var(--ring)}
+  .fbot .av{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;font-size:10px;font-weight:700;color:#101010}
+  .fbot b{font-size:11.5px;font-weight:500;display:block}
+  .fbot span{font-size:9.5px;color:var(--tx3)}
+  .fbot .live{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 6px var(--ok)}
+</style>
+</head>
+<body>
+<div class="artboard">
+
+  <!-- titlebar card -->
+  <div class="titlebar card">
+    <div class="logo">M</div>
+    <div class="tabs">
+      <div class="tab on"><span class="busy"></span> Release checklist <span class="x">✕</span></div>
+      <div class="tab"> Deal digest <span class="x">✕</span></div>
+      <div class="tab" style="color:var(--tx3)"> + </div>
+    </div>
+    <div class="tmeta">
+      <div class="chip">● <b>2 agents</b> running</div>
+      <div class="chip">⌘K</div>
+      <div class="chip">96% cache</div>
+    </div>
+  </div>
+
+  <div class="body">
+    <!-- CHAT -->
+    <section class="chat card">
+      <div class="inner">
+        <div class="rail-mini"><span class="on">Chat</span><span>Trajectory</span><span style="margin-left:auto">Fork ⌘⇧F · Verbose ⌃O</span></div>
+        <div class="tl"><div class="wrap">
+
+          <div class="u">Ship 0.1.1: version bumps everywhere, build, then actually open it and look.</div>
+          <div class="umeta">mochi · glm-5.3 · 14:02 · ⧉ ⎋</div>
+
+          <div class="think">
+            <div class="h"><span>◍</span><span class="t">Reading the release script…</span></div>
+            <div class="b">Three files carry the version string; the smoke script expects the AppImage name…</div>
+            <div class="h"><span style="color:var(--ok)">✓</span><span class="done">Thought for 9s</span></div>
+          </div>
+
+          <div class="ledger">
+            <div class="lrow"><span class="ic">▤</span><span class="lbl">Read <b>scripts/release.sh</b></span><span class="dur">0.2s</span><span class="chev">▾</span></div>
+            <div class="lrow"><span class="ic">▤</span><span class="lbl">Read <b>tauri.conf.json</b> · <b>Cargo.toml</b> · <b>package.json</b></span><span class="dur">0.3s</span><span class="chev">▾</span></div>
+            <div class="lrow"><span class="ic">✎</span><span class="lbl">Edited <b>3 files</b></span><span class="num add">+3</span><span class="num del">−3</span><span class="dur">0.4s</span><span class="chev">▾</span></div>
+            <div class="lrow"><span class="ic">▷</span><span class="lbl run">Building <b>tauri build</b>…</span><span class="dur">2:14</span></div>
+            <div class="lgroup"><b>4</b> tools · <b>2</b> merged reads · collapsed for calm ▾</div>
+          </div>
+
+          <div class="m">
+            <p><strong>Built and verified.</strong> The AppImage opens in <code>121ms</code>, and the smoke suite passes 41/41 against the fresh bundle. Two notes rode along in the artifacts panel — the title still says 0.1.0 (cosmetic, <code>title</code> in tauri.conf), and the suite left a <code>.devtest</code> sandbox behind.</p>
+          </div>
+          <div class="ameta"><span>14:07 · 5m 12s</span><span>⧉ copy</span><span>↻ retry</span><span>♪ listen</span></div>
+
+          <div class="subagent">
+            <div class="av" style="background:var(--build)">SM</div>
+            <div class="info"><b>smoke-runner</b><span>spawned subagent · 41 tests · 0 failures</span></div>
+            <span class="pill">done · 38s</span>
+          </div>
+
+          <div class="think">
+            <div class="h"><span>◍</span><span class="t">Deciding whether the sandbox is safe to delete…</span></div>
+          </div>
+
+        </div></div>
+
+        <div class="comp">
+          <div class="dock">
+            <div class="ic">⌫</div>
+            <div class="q"><b>Mochi wants to run</b> rm -rf ~/.devtest/desktop-state <b>— clean the sandbox first?</b></div>
+            <button class="ghost">Deny</button>
+            <button class="ghost">Always</button>
+            <button class="allow">Allow once ⏎</button>
+          </div>
+          <div class="cbox">
+            <textarea>Message Mochi… @ files · # chats · / commands</textarea>
+            <div class="cbar"><span class="mchip">glm-5.3-flash ⌄</span><span>@ Mochi ⌄</span><span>⇧⇥ auto ▾</span><span class="grow"></span><div class="go">↑</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SIDE: files + diff -->
+    <aside class="side">
+      <div class="panel card" style="flex:1">
+        <header>Files <div class="tabs2"><span class="t2 on">Tree</span><span class="t2">Search</span></div><span class="plus">⌘P</span></header>
+        <div class="ft">
+          <div class="ftr">▸ desktop/</div>
+          <div class="ftr d">▸ src-tauri/</div>
+          <div class="ftr d on">tauri.conf.json <span class="dm">M</span></div>
+          <div class="ftr d">Cargo.toml <span class="dm">M</span></div>
+          <div class="ftr d">Cargo.lock</div>
+          <div class="ftr d">▸ ui/</div>
+          <div class="ftr d d">package.json <span class="dm">M</span></div>
+          <div class="ftr">▸ scripts/</div>
+          <div class="ftr d">release.sh <span class="dm" style="color:var(--acc)">R</span></div>
+        </div>
+      </div>
+      <div class="diffcard card">
+        <header>Review <div class="tabs2"><span class="t2 on">Unified</span><span class="t2">Split</span></div></header>
+        <div class="file">tauri.conf.json <span class="a">+1</span><span class="r">−1</span></div>
+        <div class="diffln"><span class="ctx">  "productName": "Moch",</span><span class="del">-  "version": "0.1.0",</span><span class="add">+  "version": "0.1.1",</span><span class="ctx">  "identifier": "tech.softland.moch.desktop",</span></div>
+      </div>
+    </aside>
+
+    <!-- SIDE2: fleet + terminal -->
+    <aside class="side" style="width:300px">
+      <div class="fleet card">
+        <header>The Fleet <span class="plus" style="margin-left:auto">+</span></header>
+        <div class="bots">
+          <div class="fbot"><div class="av" style="background:var(--acc)">MO</div><div><b>Mochi</b><span>release · 41 tests</span></div><span class="live"></span></div>
+        </div>
+        <div class="bots" style="padding-top:0">
+          <div class="fbot"><div class="av" style="background:var(--ok)">WD</div><div><b>watch-deals</b><span>digest · 6 found</span></div></div>
+          <div class="fbot"><div class="av" style="background:var(--build)">SC</div><div><b>scratch</b><span>idle</span></div></div>
+        </div>
+      </div>
+      <div class="termcard card">
+        <header>Terminal <span class="plus">+</span></header>
+        <div class="term"><span class="p">~/Moch ❯</span> ./target/release/moch-desktop &
+<span class="dim">[moch] gateway adopted in 1.3s</span>
+<span class="dim">[moch] window visible @ 121ms</span>
+<span class="p">~/Moch ❯</span> <span style="background:var(--acc);color:#101010">&nbsp;</span></div>
+      </div>
+    </aside>
+  </div>
+
+</div>
+</body>
+</html>

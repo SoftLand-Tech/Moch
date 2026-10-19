@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Moch</title>
+    <style>
+      /* First-paint splash: the window never flashes white */
+      html, body { margin: 0; background: #0a0813; }
+      #boot-splash {
+        position: fixed; inset: 0; display: grid; place-items: center;
+        background: #0a0813; color: #b4b1c4; z-index: 999;
+        font-family: system-ui, sans-serif; font-size: 13px; gap: 14px;
+      }
+      #boot-splash .ring {
+        width: 34px; height: 34px; border-radius: 50%;
+        border: 3px solid rgba(248,239,229,0.12); border-top-color: #f79236;
+        animation: bootspin 0.9s linear infinite;
+      }
+      @keyframes bootspin { to { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <div id="boot-splash"><div class="ring"></div><div id="boot-msg">Moch is waking up…</div></div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

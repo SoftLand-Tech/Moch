@@ -1,0 +1,155 @@
+/*
+ * BotsRail row additions: the two-line roster rows (name + one-line job),
+ * the waiting badge, and the row menu. Logical properties only, so the
+ * dir="rtl" flip mirrors the rail with no overrides. Amber (not orange)
+ * for waiting; orange stays the new-bot entry alone.
+ */
+
+.rk-rowwrap {
+  position: relative;
+}
+
+.rk-bottext {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: flex-start;
+}
+
+.rk-bottext .rk-botname {
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
+.rk-botdesc {
+  max-width: 100%;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rk-badge {
+  flex-shrink: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--amber-soft);
+  border: 1px solid var(--amber);
+  color: var(--amber);
+  font-size: 10px;
+  font-weight: 650;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rk-dot.wait {
+  background: var(--amber);
+}
+
+.rk-more {
+  position: absolute;
+  inset-inline-end: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+  background: var(--bg-hover);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 90ms ease;
+}
+
+.rk-rowwrap:hover .rk-more,
+.rk-rowwrap:focus-within .rk-more {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.rk-rowwrap:has(.rk-bot.on) .rk-more {
+  background: var(--bg-elev);
+}
+
+.rk-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 150px;
+  padding: 4px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+}
+
+.rk-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  text-align: start;
+}
+
+.rk-menu button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* The account row — the rail's foot and the one door to app settings. */
+.rk-account {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 12px 12px;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  color: var(--text-dim);
+}
+
+.rk-account:hover,
+.rk-account:focus-visible {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.rk-account-av {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--bg-elev);
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.rk-account b {
+  flex: 1;
+  min-width: 0;
+  text-align: start;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rk-account svg:last-child {
+  color: var(--text-faint);
+  flex-shrink: 0;
+}

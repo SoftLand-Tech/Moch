@@ -1,0 +1,2226 @@
+{
+  "activity.count": [
+    "{n} runs",
+    "{n} أدوار"
+  ],
+  "activity.day.earlier": [
+    "Earlier",
+    "أقدم"
+  ],
+  "activity.day.today": [
+    "Today",
+    "اليوم"
+  ],
+  "activity.day.yesterday": [
+    "Yesterday",
+    "أمس"
+  ],
+  "activity.empty.sub": [
+    "Runs from the board, routines and delegations land here as they happen.",
+    "أدوار اللوحة والروتين والتفويض تظهر هنا فور حدوثها."
+  ],
+  "activity.empty.title": [
+    "Nothing has run yet",
+    "لم يُسجَّل أي نشاط بعد"
+  ],
+  "activity.loading": [
+    "Reading the ledger…",
+    "جارٍ قراءة السجل…"
+  ],
+  "activity.palette": [
+    "Activity — every run, every bot",
+    "النشاط — كل الأدوار، كل البوتات"
+  ],
+  "activity.row.open": [
+    "Open {name}'s thread",
+    "افتح محادثة {name}"
+  ],
+  "activity.source.cron": [
+    "Routine run",
+    "تشغيل روتين"
+  ],
+  "activity.source.delegate": [
+    "Delegation",
+    "تفويض"
+  ],
+  "activity.source.kanban": [
+    "Board task",
+    "مهمة لوحة"
+  ],
+  "activity.status.completed": [
+    "Completed",
+    "مكتمل"
+  ],
+  "activity.status.failed": [
+    "Failed",
+    "فشل"
+  ],
+  "activity.status.interrupted": [
+    "Interrupted",
+    "تم قطعه"
+  ],
+  "activity.status.running": [
+    "Running",
+    "قيد التشغيل"
+  ],
+  "activity.title": [
+    "Activity",
+    "النشاط"
+  ],
+  "boot.connecting": [
+    "connecting to the gateway…",
+    "جارٍ الاتصال بالبوابة…"
+  ],
+  "boot.error.title": [
+    "The local runtime hit a problem",
+    "واجه وقت التشغيل المحلي مشكلة"
+  ],
+  "boot.local": [
+    "The hermes agents, your bots and everything else live right here on this machine — nothing leaves it.",
+    "وكلاء هيرميس وبوتاتك وكل شيء آخر يعيشون هنا على هذا الجهاز — لا شيء يغادره."
+  ],
+  "boot.retry": [
+    "Retry",
+    "إعادة المحاولة"
+  ],
+  "bot.chat": [
+    "Chat with {name}",
+    "تحدث مع {name}"
+  ],
+  "bot.delete.body": [
+    "Deleting tombstones this bot: its scheduled jobs stop firing (ticker skips tombstones), running turns stop at the next boundary. Kanban tasks it holds stay on the board until the M9.4 crew board offers reassignment.",
+    "الحذف يضع علامة قبر على هذا البوت: مهامه المجدولة تتوقف (الجدول يتخطى الملفات الموابَرة)، والأدوار الجارية تتوقف عند الحد التالي. مهام كانبان تبقى على اللوحة حتى توفر لوحة الطاقم (M9.4) إعادة الإسناد."
+  ],
+  "bot.delete.confirm": [
+    "Tap again to confirm deletion",
+    "اضغط مرة أخرى للتأكيد"
+  ],
+  "bot.delete.cta": [
+    "Delete this bot",
+    "احذف هذا البوت"
+  ],
+  "bot.delete.doing": [
+    "Deleting…",
+    "جارٍ الحذف…"
+  ],
+  "bot.delete.failed": [
+    "Couldn't delete this bot: {why}",
+    "تعذّر حذف هذا البوت: {why}"
+  ],
+  "bot.delete.title": [
+    "Danger zone",
+    "منطقة الخطر"
+  ],
+  "bot.job": [
+    "Job / description",
+    "المهمة / الوصف"
+  ],
+  "bot.save": [
+    "Save",
+    "حفظ"
+  ],
+  "bot.save.failed": [
+    "Couldn't save: {why}",
+    "فشل الحفظ: {why}"
+  ],
+  "bot.saved": [
+    "saved",
+    "تم الحفظ"
+  ],
+  "bot.soul": [
+    "SOUL.md — the job description",
+    "SOUL.md — وصف المهمة"
+  ],
+  "card.allow": [
+    "Allow",
+    "اسمح"
+  ],
+  "card.answer": [
+    "Answer",
+    "أجب"
+  ],
+  "card.answer.all": [
+    "Answer all",
+    "أجب عن الكل"
+  ],
+  "card.answer.placeholder": [
+    "your answer",
+    "إجابتك"
+  ],
+  "card.approve": [
+    "Approve",
+    "وافق"
+  ],
+  "card.approve.always": [
+    "Always allow",
+    "اسمح دائمًا"
+  ],
+  "card.approve.session": [
+    "Approve for this chat",
+    "وافق لهذه المحادثة"
+  ],
+  "card.deny": [
+    "Deny",
+    "ارفض"
+  ],
+  "card.secret.placeholder": [
+    "the secret value",
+    "القيمة السرية"
+  ],
+  "card.sudo.placeholder": [
+    "sudo password",
+    "كلمة سر sudo"
+  ],
+  "card.title.approval": [
+    "Needs your approval",
+    "يحتاج موافقتك"
+  ],
+  "card.title.clarify": [
+    "Agent asks",
+    "الوكيل يسأل"
+  ],
+  "card.title.secret": [
+    "A secret is needed",
+    "قيمة سرية مطلوبة"
+  ],
+  "card.title.sudo": [
+    "Sudo password needed",
+    "كلمة سر sudo مطلوبة"
+  ],
+  "card.title.vault": [
+    "Vault",
+    "الخزنة"
+  ],
+  "chat.at.clear": [
+    "Clear address",
+    "إزالة التوجيه"
+  ],
+  "chat.at.empty": [
+    "No bots match",
+    "لا روبوتات مطابقة"
+  ],
+  "chat.at.label": [
+    "To",
+    "إلى"
+  ],
+  "chat.clarify.pending.many": [
+    "{n} questions still need answers before sending.",
+    "{n} أسئلة لا تزال بحاجة إلى إجابات قبل الإرسال."
+  ],
+  "chat.clarify.pending.one": [
+    "1 question still needs an answer before sending.",
+    "سؤال واحد لا يزال بحاجة إلى إجابة قبل الإرسال."
+  ],
+  "chat.clear": [
+    "Clear",
+    "تفريغ"
+  ],
+  "chat.clear.confirm.body": [
+    "The thread stays with its bot. The history so far is removed.",
+    "تبقى المحادثة مع روبوتها. يُحذف السجل حتى الآن."
+  ],
+  "chat.clear.confirm.title": [
+    "Clear this conversation?",
+    "تفريغ هذه المحادثة؟"
+  ],
+  "chat.clear.fail": [
+    "Could not clear the conversation — try again.",
+    "تعذر تفريغ المحادثة — حاول مجددًا."
+  ],
+  "chat.clear.go": [
+    "Clear",
+    "تفريغ"
+  ],
+  "chat.clear.keep": [
+    "Keep",
+    "إبقاء"
+  ],
+  "chat.composer.at": [
+    "Address a bot",
+    "توجيه إلى روبوت"
+  ],
+  "chat.composer.at.fail": [
+    "Could not open {name}'s thread — try again.",
+    "تعذّر فتح محادثة {name} — حاول مجددًا."
+  ],
+  "chat.composer.code.label": [
+    "Code",
+    "طرفية"
+  ],
+  "chat.composer.code.title": [
+    "Open the terminal workbench",
+    "افتح منصة الطرفية"
+  ],
+  "chat.composer.model": [
+    "Model",
+    "النموذج"
+  ],
+  "chat.composer.placeholder": [
+    "Ask Mochi anything — / for commands",
+    "اسأل موتشي أي شيء — اكتب / للأوامر"
+  ],
+  "chat.composer.placeholder.bot": [
+    "Message {name}…",
+    "راسل {name}…"
+  ],
+  "chat.composer.placeholder.held": [
+    "Held until the current run finishes…",
+    "يبقى محفوظًا حتى ينتهي الدور الجاري…"
+  ],
+  "chat.composer.placeholder.steer": [
+    "Steer the running turn — delivered at the next boundary…",
+    "وجّه الدور الجاري — يُسلَّم عند الحد التالي…"
+  ],
+  "chat.composer.send": [
+    "Send",
+    "إرسال"
+  ],
+  "chat.composer.steer.fail": [
+    "Could not steer — your message is back in the composer.",
+    "تعذّر التوجيه — عادت رسالتك إلى المحرر."
+  ],
+  "chat.composer.stop.label": [
+    "Stop",
+    "إيقاف"
+  ],
+  "chat.composer.stop.title": [
+    "Stop the running turn",
+    "أوقف الدور الجاري"
+  ],
+  "chat.composer.tools.label": [
+    "Tools",
+    "أدوات"
+  ],
+  "chat.composer.tools.title": [
+    "Slash commands",
+    "أوامر الشرطة المائلة"
+  ],
+  "chat.composer.voice.go": [
+    "Dictate — transcribed through your gateway",
+    "إملاء — يُتفريغ عبر بوابتك"
+  ],
+  "chat.composer.voice.stop": [
+    "Stop and transcribe",
+    "أوقف وفرّج النص"
+  ],
+  "chat.diff.copy": [
+    "Copy",
+    "نسخ"
+  ],
+  "chat.diff.unavailable": [
+    "(diff preview unavailable)",
+    "(معاينة الفرق غير متوفرة)"
+  ],
+  "chat.diff.view": [
+    "View diff",
+    "عرض الفرق"
+  ],
+  "chat.empty.chip.automation": [
+    "Set up an automation",
+    "أنشئ أتمتة"
+  ],
+  "chat.empty.chip.browser": [
+    "Look up something in the browser",
+    "ابحث عن شيء في المتصفح"
+  ],
+  "chat.empty.chip.capabilities": [
+    "What can you do?",
+    "ما الذي تستطيع فعله؟"
+  ],
+  "chat.empty.chip.workspace": [
+    "Show me the workspace",
+    "أرني مساحة العمل"
+  ],
+  "chat.empty.sub": [
+    "Your agents run entirely on this machine — they can use the terminal, browse the web, remember across chats, and work while you're elsewhere. Ask for anything.",
+    "وكلاؤك يعملون بالكامل على هذا الجهاز — يمكنهم استخدام الطرفية وتصفح الويب والتذكّر عبر المحادثات والعمل أثناء انشغالك. اطلب أي شيء."
+  ],
+  "chat.empty.title": [
+    "What should Mochi do?",
+    "ماذا يفعل موتشي؟"
+  ],
+  "chat.empty.title.bot": [
+    "Talk to {name}",
+    "تحدث مع {name}"
+  ],
+  "chat.foreign.hint": [
+    "Tap to review and answer it here.",
+    "اضغط لمراجعتها والإجابة عليها من هنا."
+  ],
+  "chat.foreign.title": [
+    "Another session on this machine is asking you something",
+    "جلسة أخرى على هذا الجهاز تطلب منك إجابة"
+  ],
+  "chat.list.empty": [
+    "No chats yet — say hi below.",
+    "لا محادثات بعد — قل مرحبًا بالأسفل."
+  ],
+  "chat.media.copy": [
+    "path",
+    "المسار"
+  ],
+  "chat.media.copy.title": [
+    "Copy the path",
+    "انسخ المسار"
+  ],
+  "chat.media.reveal": [
+    "reveal",
+    "إظهار"
+  ],
+  "chat.media.reveal.title": [
+    "Reveal in file manager",
+    "إظهار في مدير الملفات"
+  ],
+  "chat.media.tooLarge": [
+    "{size} — too large to inline",
+    "{size} — كبيرة جدًا للعرض المضمّن"
+  ],
+  "chat.model.close": [
+    "Close",
+    "إغلاق"
+  ],
+  "chat.model.needskey": [
+    "needs key",
+    "يحتاج مفتاحًا"
+  ],
+  "chat.model.none": [
+    "No models — connect a provider in Connectors.",
+    "لا نماذج — اربط مزوّدًا في «الموصلات»."
+  ],
+  "chat.model.search": [
+    "Search models…",
+    "ابحث في النماذج…"
+  ],
+  "chat.model.title": [
+    "Switch model",
+    "تبديل النموذج"
+  ],
+  "chat.phase.browsing": [
+    "Browsing",
+    "يتصفح"
+  ],
+  "chat.phase.editing": [
+    "Editing",
+    "يحرر"
+  ],
+  "chat.phase.recovering": [
+    "Recovering",
+    "يتعافى"
+  ],
+  "chat.phase.researching": [
+    "Researching",
+    "يبحث"
+  ],
+  "chat.phase.running": [
+    "Running commands",
+    "ينفذ أوامر"
+  ],
+  "chat.phase.skills": [
+    "Loading skills",
+    "يحمّل المهارات"
+  ],
+  "chat.phase.thinking": [
+    "Thinking",
+    "يفكر"
+  ],
+  "chat.phase.working": [
+    "Working",
+    "يعمل"
+  ],
+  "chat.steer.chip.steering": [
+    "Steering",
+    "توجيه"
+  ],
+  "chat.steer.chip.waiting": [
+    "Waiting",
+    "انتظار"
+  ],
+  "chat.steer.title.paused": [
+    "The run is paused on your answer, sends are held",
+    "الدور متوقف على إجابتك، والإرسال يُحفظ"
+  ],
+  "chat.steer.title.steering": [
+    "Sends join the live run at its next step",
+    "الإرسال ينضم إلى الدور الجاري عند خطوته التالية"
+  ],
+  "chat.steer.title.waiting": [
+    "Sends are held and answered after this run",
+    "الإرسال يُحفظ ويُجاب بعد هذا الدور"
+  ],
+  "chat.think.chars": [
+    "{n} chars",
+    "{n} حرفًا"
+  ],
+  "chat.think.reasoning": [
+    "Reasoning",
+    "استدلال"
+  ],
+  "chat.think.thinking": [
+    "Thinking",
+    "يفكر"
+  ],
+  "chat.tools.count": [
+    "{n} tools",
+    "{n} أدوات"
+  ],
+  "chat.tools.done": [
+    "{n} tools · {d}",
+    "{n} أدوات · {d}"
+  ],
+  "chat.tools.earlier": [
+    "+{n} earlier steps",
+    "+{n} خطوات سابقة"
+  ],
+  "chat.tools.working": [
+    "Working · {n} tools",
+    "يعمل · {n} أدوات"
+  ],
+  "conn.addkey": [
+    "Add provider key",
+    "أضف مفتاح مزوّد"
+  ],
+  "conn.addserver": [
+    "Add server",
+    "أضف الخادم"
+  ],
+  "conn.apikey": [
+    "API key",
+    "مفتاح API"
+  ],
+  "conn.cancel": [
+    "Cancel",
+    "إلغاء"
+  ],
+  "conn.catalog": [
+    "From catalog {n}",
+    "من الفهرس {n}"
+  ],
+  "conn.catalog.hint": [
+    "A preset fills its own config — leave the JSON empty.",
+    "الإعداد المسبق يملأ ضبطه بنفسه — اترك الـ JSON فارغًا."
+  ],
+  "conn.config": [
+    "Config JSON",
+    "ضبط JSON"
+  ],
+  "conn.config.hint": [
+    "A “url” makes it an http server; a “command” (+ args, env) makes it stdio.",
+    "«url» تجعله خادم http؛ و«command» (+ args وenv) تجعله stdio."
+  ],
+  "conn.confirm": [
+    "Confirm",
+    "تأكيد"
+  ],
+  "conn.connect": [
+    "Connect",
+    "اتصال"
+  ],
+  "conn.connect.named": [
+    "Connect {name}",
+    "اتصل بـ {name}"
+  ],
+  "conn.current": [
+    "current",
+    "الحالي"
+  ],
+  "conn.disconnect": [
+    "Disconnect",
+    "قطع الاتصال"
+  ],
+  "conn.err.config": [
+    "provide a config JSON or pick a catalog preset",
+    "أدخل ضبط JSON أو اختر إعدادًا مسبقًا من الفهرس"
+  ],
+  "conn.err.obj": [
+    "config must be a JSON object, e.g. {\"url\": \"https://…\"} or {\"command\": \"npx\", \"args\": […]}",
+    "يجب أن يكون الضبط كائن JSON، مثل {\"url\": \"https://…\"} أو {\"command\": \"npx\", \"args\": […]}"
+  ],
+  "conn.freetier": [
+    "free tier",
+    "طبقة مجانية"
+  ],
+  "conn.key.save": [
+    "Save key",
+    "احفظ المفتاح"
+  ],
+  "conn.key.stored": [
+    "Stored locally in the hermes home .env — never leaves this machine.",
+    "يُخزن محليًا في .env بمنزل hermes — لا يغادر هذا الجهاز أبدًا."
+  ],
+  "conn.mcp": [
+    "MCP servers",
+    "خوادم MCP"
+  ],
+  "conn.mcp.add": [
+    "Add MCP server",
+    "أضف خادم MCP"
+  ],
+  "conn.mcp.addBtn": [
+    "Add",
+    "إضافة"
+  ],
+  "conn.mcp.disabled": [
+    "disabled",
+    "معطّل"
+  ],
+  "conn.mcp.loading": [
+    "loading servers…",
+    "جارٍ تحميل الخوادم…"
+  ],
+  "conn.mcp.none": [
+    "No MCP servers configured. Add one from the catalog or with a JSON config.",
+    "لا خوادم MCP مضبطة. أضف واحدة من الفهرس أو بضبط JSON."
+  ],
+  "conn.mcp.notconnected": [
+    "not connected",
+    "غير متصل"
+  ],
+  "conn.mcp.tools.n": [
+    "{n} tools",
+    "{n} أدوات"
+  ],
+  "conn.models.n": [
+    "{n} models",
+    "{n} نماذج"
+  ],
+  "conn.name": [
+    "Name",
+    "الاسم"
+  ],
+  "conn.name.ph": [
+    "e.g. github",
+    "مثل github"
+  ],
+  "conn.providers": [
+    "Model providers",
+    "مزوّدو النماذج"
+  ],
+  "conn.providers.loading": [
+    "loading providers…",
+    "جارٍ تحميل المزوّدين…"
+  ],
+  "conn.refresh": [
+    "Refresh",
+    "تحديث"
+  ],
+  "conn.remove": [
+    "Remove",
+    "إزالة"
+  ],
+  "conn.remove.again": [
+    "Click again to remove",
+    "انقر مرة أخرى للإزالة"
+  ],
+  "conn.rescan": [
+    "Rescan",
+    "إعادة الفحص"
+  ],
+  "conn.slug.ph": [
+    "provider slug e.g. openai",
+    "معرّف مزوّد مثل openai"
+  ],
+  "conn.status.connected": [
+    "connected",
+    "متصل"
+  ],
+  "conn.status.nokey": [
+    "no key",
+    "بلا مفتاح"
+  ],
+  "conn.status.unknown": [
+    "unknown",
+    "مجهول"
+  ],
+  "conn.test": [
+    "Test",
+    "اختبار"
+  ],
+  "conn.test.failed": [
+    "test failed",
+    "فشل الاختبار"
+  ],
+  "conn.test.ok": [
+    "test ok",
+    "نجح الاختبار"
+  ],
+  "conn.unavailable": [
+    "The provider list isn't available — connect one directly by slug:",
+    "قائمة المزوّدين غير متاحة — اربط أحدهم مباشرة بالمعرّف:"
+  ],
+  "create.cancel": [
+    "Cancel",
+    "إلغاء"
+  ],
+  "create.cta": [
+    "Create bot",
+    "أنشئ البوت"
+  ],
+  "create.cta.busy": [
+    "Creating {name}…",
+    "جارٍ إنشاء {name}…"
+  ],
+  "create.err": [
+    "Could not create the bot: {why}",
+    "تعذّر إنشاء البوت: {why}"
+  ],
+  "create.err.late": [
+    "{name} exists, but its thread or introduction failed: {why}",
+    "{name} موجود، لكن فشل فتح حواره أو تقديمه: {why}"
+  ],
+  "create.intro.prompt": [
+    "You have just been created as {name}, a Moch bot. Your job, as written by your owner: {job}\n\nBefore any real work, introduce yourself in this thread. In two or three sentences of your own words, state how you understood your job, then ask for anything you are missing to do it well. This introduction is your only task right now.",
+    "لقد أنشئت للتو باسم {name}، أحد بوتات موك. مهمتك كما كتبها صاحبك: {job}\n\nقبل أي عمل حقيقي، قدّم نفسك في هذا الحوار. في جملتين أو ثلاث بكلماتك الخاصة، اشرح كيف فهمت مهمتك، ثم اطلب ما ينقصك لأدائها على الوجه الصحيح. هذا التقديم هو مهمتك الوحيدة الآن."
+  ],
+  "create.job.label": [
+    "The job",
+    "المهمة"
+  ],
+  "create.job.placeholder": [
+    "One or two plain sentences. This bot’s whole life is built around them.",
+    "جملة أو جملتان بلغة بسيطة. حياة هذا البوت كلها تُبنى عليهما."
+  ],
+  "create.look.avatar": [
+    "Avatar",
+    "الصورة"
+  ],
+  "create.look.avatar.approval": [
+    "Showing results",
+    "يعرض النتائج"
+  ],
+  "create.look.avatar.celebration": [
+    "Celebrating",
+    "يحتفل"
+  ],
+  "create.look.avatar.confused": [
+    "Puzzled",
+    "محتار"
+  ],
+  "create.look.avatar.connecting": [
+    "Connecting",
+    "يتصل"
+  ],
+  "create.look.avatar.deep-thinking": [
+    "Deep in thought",
+    "غارق في التفكير"
+  ],
+  "create.look.avatar.greeting": [
+    "Greeting",
+    "التحية"
+  ],
+  "create.look.avatar.listening": [
+    "Listening",
+    "الإنصات"
+  ],
+  "create.look.avatar.none": [
+    "Initials",
+    "الأحرف الأولى"
+  ],
+  "create.look.color": [
+    "Color",
+    "اللون"
+  ],
+  "create.look.label": [
+    "Look",
+    "المظهر"
+  ],
+  "create.name.label": [
+    "Name",
+    "الاسم"
+  ],
+  "create.openanyway": [
+    "Open {name} anyway",
+    "افتح {name} رغم ذلك"
+  ],
+  "create.soul.hint": [
+    "The working agreement it starts with. Editable later in its editor.",
+    "اتفاق العمل الذي يبدأ به. يمكن تعديله لاحقًا في محرره."
+  ],
+  "create.soul.label": [
+    "Soul draft",
+    "مسودة الروح"
+  ],
+  "create.start.label": [
+    "Start the bot with",
+    "يبدأ البوت بـ"
+  ],
+  "create.starter.code.job": [
+    "Help me write and review code in this workspace. Keep changes small, tested, and explained.",
+    "ساعدني في كتابة الأكواد ومراجعتها في مساحة العمل هذه. اجعل التغييرات صغيرة ومختبرة ومشروحة."
+  ],
+  "create.starter.code.label": [
+    "Code helper",
+    "مساعد برمجة"
+  ],
+  "create.starter.deals.job": [
+    "Hunt deals on things I am looking for. Check regularly and flag only the genuinely good ones, with a note on why.",
+    "تتبع العروض على ما أبحث عنه. راجع بانتظام ولا ترفع إلا العروض الجيدة فعلًا، مع ملاحظة عن سبب جدواها."
+  ],
+  "create.starter.deals.label": [
+    "Deal hunter",
+    "صائد العروض"
+  ],
+  "create.starter.journal.job": [
+    "Check in each evening and keep a short journal of my day — one entry per day, easy to reread.",
+    "راسلني كل مساء واحتفظ بمفكرة قصيرة ليومي — مدخل واحد يوميًا، سهل القراءة لاحقًا."
+  ],
+  "create.starter.journal.label": [
+    "Daily journal",
+    "مفكرة يومية"
+  ],
+  "create.starter.research.job": [
+    "Help me research topics: gather sources, verify claims, and return tight briefs with the key findings up top.",
+    "ساعدني في البحث: اجمع المصادر، تحقق من الادعاءات، وأعد ملخصات محكمة بأهم النتائج في المقدمة."
+  ],
+  "create.starter.research.label": [
+    "Research assistant",
+    "مساعد بحث"
+  ],
+  "create.title": [
+    "Hire a bot",
+    "وظّف بوتًا"
+  ],
+  "crew.assign": [
+    "Reassign",
+    "إعادة تعيين"
+  ],
+  "crew.assignedTo": [
+    "Assigned to {name}",
+    "مكلّفة إلى {name}"
+  ],
+  "crew.board.count.many": [
+    "{n} tasks · {m} hands",
+    "{n} مهام · {m} أيادٍ"
+  ],
+  "crew.board.count.one": [
+    "{n} task · {m} hand",
+    "مهمة واحدة · يد واحدة"
+  ],
+  "crew.board.title": [
+    "Task board",
+    "لوحة المهام"
+  ],
+  "crew.col.blocked": [
+    "Blocked",
+    "معطّلة"
+  ],
+  "crew.col.done": [
+    "Done",
+    "منجزة"
+  ],
+  "crew.col.empty": [
+    "Empty",
+    "فارغة"
+  ],
+  "crew.col.highlight": [
+    "Highlight the {col} column",
+    "إبراز عمود {col}"
+  ],
+  "crew.col.ready": [
+    "Ready",
+    "جاهزة"
+  ],
+  "crew.col.running": [
+    "Working",
+    "قيد العمل"
+  ],
+  "crew.complete": [
+    "Complete",
+    "إكمال"
+  ],
+  "crew.complete.summary": [
+    "completed from the phone (human override)",
+    "أُكملت من الهاتف (تجاوز بشري)"
+  ],
+  "crew.completedAt": [
+    "Completed {when}",
+    "أُكملت {when}"
+  ],
+  "crew.donePrefix": [
+    "Done: {title}",
+    "منجزة: {title}"
+  ],
+  "crew.empty.sub": [
+    "Tasks you add here are picked up by your agents — Mochi by default, or any bot you assign.",
+    "المهام التي تضيفها هنا يتناولها وكلاؤك — موتشي افتراضيًا أو أي بوت تعيّنه."
+  ],
+  "crew.empty.title": [
+    "The board is clear",
+    "اللوحة خالية"
+  ],
+  "crew.err": [
+    "Action failed: {why}",
+    "فشل الإجراء: {why}"
+  ],
+  "crew.filter.all": [
+    "All · {n}",
+    "الكل · {n}"
+  ],
+  "crew.hint": [
+    "Board — tasks you create are picked up by the assignee bot within about a minute. Run ledger below.",
+    "اللوحة — المهام التي تنشئها يتناولها بوت المكلّف خلال دقيقة تقريبًا. سجل الأدوار بالأسفل."
+  ],
+  "crew.how": [
+    "Agents pick tasks from Ready — Mochi by default, or any bot you assign. Runs from the board, cron and delegates land in the ledger below.",
+    "يختار الوكلاء المهام من «جاهزة» — موتشي افتراضيًا أو أي بوت تعيّنه. الأدوار من اللوحة والمهام المجدولة والتفويض تهبط في السجل بالأسفل."
+  ],
+  "crew.moch": [
+    "Moch",
+    "موك"
+  ],
+  "crew.moveTo": [
+    "Move this task to {name}",
+    "انقل هذه المهمة إلى {name}"
+  ],
+  "crew.new": [
+    "New task",
+    "مهمة جديدة"
+  ],
+  "crew.new.assignee": [
+    "Assign to",
+    "عيّن إلى"
+  ],
+  "crew.new.body": [
+    "Details (optional)",
+    "تفاصيل (اختياري)"
+  ],
+  "crew.new.bodyPh": [
+    "Context, links, constraints — anything the agent needs.",
+    "السياق والروابط والقيود — كل ما يحتاجه الوكيل."
+  ],
+  "crew.new.cancel": [
+    "Cancel",
+    "إلغاء"
+  ],
+  "crew.new.create": [
+    "Create task",
+    "إنشاء المهمة"
+  ],
+  "crew.new.cta": [
+    "Put on board",
+    "أضف إلى اللوحة"
+  ],
+  "crew.new.title": [
+    "Task — e.g. summarize yesterday's prices",
+    "المهمة — مثال: لخّص أسعار الأمس"
+  ],
+  "crew.new.titleLabel": [
+    "Title",
+    "العنوان"
+  ],
+  "crew.new.titlePh": [
+    "What needs doing?",
+    "ما الذي يحتاج إنجازًا؟"
+  ],
+  "crew.noDetails": [
+    "No details.",
+    "لا تفاصيل."
+  ],
+  "crew.offline": [
+    "Crew offline — showing the last board",
+    "طاقم العمل غير متصل — يُعرض آخر لوح"
+  ],
+  "crew.reassign": [
+    "Reassign:",
+    "إعادة تعيين:"
+  ],
+  "crew.refresh": [
+    "Refresh",
+    "تحديث"
+  ],
+  "crew.refresh.title": [
+    "Refresh the board and ledger",
+    "تحديث اللوحة والسجل"
+  ],
+  "crew.sections.columns": [
+    "Columns",
+    "الأعمدة"
+  ],
+  "crew.sections.filters": [
+    "Quick filters",
+    "مرشحات سريعة"
+  ],
+  "crew.sections.how": [
+    "How it works",
+    "كيف تعمل"
+  ],
+  "crew.tasks.n": [
+    "{n} tasks",
+    "{n} مهام"
+  ],
+  "crew.timeline": [
+    "Run ledger",
+    "سجل الأدوار"
+  ],
+  "crew.timeline.empty": [
+    "No runs recorded yet.",
+    "لا أدوار مسجلة بعد."
+  ],
+  "crew.timeline.hint": [
+    "No runs yet — activity from the board, cron jobs and delegates lands here.",
+    "لا أدوار بعد — نشاط اللوحة والمهام المجدولة والتفويض يظهر هنا."
+  ],
+  "crew.timeline.sources": [
+    "kanban · cron · delegate",
+    "لوحة · مجدول · تفويض"
+  ],
+  "ctx.browser.address.aria": [
+    "Address",
+    "العنوان"
+  ],
+  "ctx.browser.address.ph": [
+    "Search or enter address",
+    "ابحث أو أدخل عنوانًا"
+  ],
+  "ctx.browser.back": [
+    "Back",
+    "رجوع"
+  ],
+  "ctx.browser.caption": [
+    "Driven by you and your agents — hermes sees this same browser.",
+    "تشغّله أنت ووكلاؤك — هيرميس يرى هذا المتصفح نفسه."
+  ],
+  "ctx.browser.captionTitle": [
+    "Driven by you and your agents",
+    "تشغّله أنت ووكلاؤك"
+  ],
+  "ctx.browser.connecting": [
+    "Connecting to Chromium…",
+    "جارٍ الاتصال بـ Chromium…"
+  ],
+  "ctx.browser.empty.title": [
+    "The agent browser",
+    "متصفح الوكلاء"
+  ],
+  "ctx.browser.explainer": [
+    "A real Chromium that lives on this machine. You drive it from here — and so do your agents: every page hermes opens appears live in this pane, and the two of you share tabs, cookies and history.",
+    "Chromium حقيقي يعيش على هذا الجهاز. تقوده من هنا — ووكلاؤك كذلك: كل صفحة يفتحها hermes تظهر مباشرة في هذه اللوحة، وتشاركان التبويبات وملفات تعريف الارتباط والسجل."
+  ],
+  "ctx.browser.forward": [
+    "Forward",
+    "تقدّم"
+  ],
+  "ctx.browser.idle": [
+    "The agent browser isn't running.",
+    "متصفح الوكلاء لا يعمل."
+  ],
+  "ctx.browser.insecure": [
+    "Not encrypted",
+    "غير مشفّر"
+  ],
+  "ctx.browser.launch": [
+    "Launch Chromium",
+    "تشغيل Chromium"
+  ],
+  "ctx.browser.launchBrowser": [
+    "Launch browser",
+    "تشغيل المتصفح"
+  ],
+  "ctx.browser.launching": [
+    "Launching…",
+    "جارٍ التشغيل…"
+  ],
+  "ctx.browser.live": [
+    "live",
+    "مباشر"
+  ],
+  "ctx.browser.newtab.title": [
+    "New tab (about:blank)",
+    "تبويب جديد (about:blank)"
+  ],
+  "ctx.browser.notab": [
+    "No tab attached — open one from the tab list.",
+    "لا يوجد تبويب مرفق — افتح واحدًا من قائمة التبويبات."
+  ],
+  "ctx.browser.openExternal": [
+    "Open in system browser",
+    "فتح في متصفح النظام"
+  ],
+  "ctx.browser.reload": [
+    "Reload",
+    "إعادة تحميل"
+  ],
+  "ctx.browser.secure": [
+    "Encrypted connection (https)",
+    "اتصال مشفّر (https)"
+  ],
+  "ctx.browser.starting": [
+    "Starting the screencast…",
+    "جارٍ بدء بث الشاشة…"
+  ],
+  "ctx.browser.status.addr": [
+    "Chromium · {addr}",
+    "Chromium · {addr}"
+  ],
+  "ctx.browser.status.connecting": [
+    "· connecting…",
+    "· جارٍ الاتصال…"
+  ],
+  "ctx.browser.status.running": [
+    "Chromium running",
+    "Chromium يعمل"
+  ],
+  "ctx.browser.status.stopped": [
+    "Chromium stopped",
+    "Chromium متوقف"
+  ],
+  "ctx.browser.status.tabs.many": [
+    "· {n} tabs",
+    "· {n} تبويبات"
+  ],
+  "ctx.browser.status.tabs.one": [
+    "· {n} tab",
+    "· تبويب واحد"
+  ],
+  "ctx.browser.stop": [
+    "Stop",
+    "إيقاف"
+  ],
+  "ctx.browser.stop.title": [
+    "Stop the managed Chromium",
+    "إيقاف Chromium المُدار"
+  ],
+  "ctx.browser.tab.close": [
+    "Close tab",
+    "إغلاق التبويب"
+  ],
+  "ctx.browser.tab.closeNamed": [
+    "Close {name}",
+    "إغلاق {name}"
+  ],
+  "ctx.browser.tab.new": [
+    "New tab",
+    "تبويب جديد"
+  ],
+  "ctx.browser.tabs": [
+    "Tabs",
+    "التبويبات"
+  ],
+  "ctx.browser.tabs.empty.running": [
+    "No tabs yet — open one below.",
+    "لا تبويبات بعد — افتح واحدًا بالأسفل."
+  ],
+  "ctx.browser.tabs.empty.stopped": [
+    "Launch the browser to see its tabs here.",
+    "شغّل المتصفح لتظهر تبويباته هنا."
+  ],
+  "ctx.browser.tabs.many": [
+    "{n} open tabs",
+    "{n} تبويبات مفتوحة"
+  ],
+  "ctx.browser.tabs.one": [
+    "{n} open tab",
+    "تبويب مفتوح واحد"
+  ],
+  "ctx.browser.viewport.aria": [
+    "Browser viewport — click to type into the page",
+    "منطقة عرض المتصفح — انقر للكتابة داخل الصفحة"
+  ],
+  "ctx.diff.changed": [
+    "Changed files",
+    "الملفات المتغيّرة"
+  ],
+  "ctx.diff.empty": [
+    "Files your agents edit land here.",
+    "الملفات التي يعدّلها وكلاؤك تظهر هنا."
+  ],
+  "ctx.diff.hint": [
+    "Select one to view the diff.",
+    "اختر ملفًا لعرض الفرق."
+  ],
+  "ctx.diff.nopatch": [
+    "No patch text captured",
+    "لم يُلتقط نص الفرق"
+  ],
+  "ctx.files.changes": [
+    "Changes",
+    "التغييرات"
+  ],
+  "ctx.files.preview.close": [
+    "Close preview",
+    "إغلاق المعاينة"
+  ],
+  "ctx.files.preview.loading": [
+    "reading…",
+    "جارٍ القراءة…"
+  ],
+  "ctx.files.preview.readError": [
+    "Could not read the file",
+    "تعذّرت قراءة الملف"
+  ],
+  "ctx.files.preview.tooLarge": [
+    "File too large to preview",
+    "الملف كبير جدًا للمعاينة"
+  ],
+  "ctx.files.preview.truncated": [
+    "Preview truncated after {n} KB",
+    "تم اقتطاع المعاينة بعد {n} كيلوبايت"
+  ],
+  "ctx.files.preview.unsupported": [
+    "No text preview for this file type",
+    "لا توجد معاينة نصية لهذا النوع من الملفات"
+  ],
+  "ctx.files.refresh": [
+    "Refresh",
+    "تحديث"
+  ],
+  "ctx.files.root": [
+    "Back to workspace root",
+    "العودة إلى جذر مساحة العمل"
+  ],
+  "ctx.files.view.aria": [
+    "Files view",
+    "عرض الملفات"
+  ],
+  "ctx.files.workspace": [
+    "Workspace",
+    "مساحة العمل"
+  ],
+  "ctx.panel.aria": [
+    "Computer",
+    "الحاسوب"
+  ],
+  "ctx.term.clear": [
+    "clear",
+    "تفريغ"
+  ],
+  "ctx.term.clearTitle": [
+    "Clear the viewport",
+    "تفريغ الشاشة"
+  ],
+  "ctx.term.restart": [
+    "restart",
+    "إعادة تشغيل"
+  ],
+  "ctx.term.restartTitle": [
+    "Kill and respawn this shell",
+    "إنهاء الجلسة وإعادة تشغيل الطرفية"
+  ],
+  "files.empty": [
+    "empty folder",
+    "مجلد فارغ"
+  ],
+  "files.waiting": [
+    "waiting for the workspace…",
+    "في انتظار مساحة العمل…"
+  ],
+  "fleet.active.title": [
+    "New chats go to this bot",
+    "المحادثات الجديدة تذهب إلى هذا البوت"
+  ],
+  "fleet.cancel": [
+    "Cancel",
+    "إلغاء"
+  ],
+  "fleet.chat": [
+    "Chat with {name}",
+    "تحدث مع {name}"
+  ],
+  "fleet.chat.button": [
+    "Chat",
+    "محادثة"
+  ],
+  "fleet.chat.named.title": [
+    "Start a chat with {name} (new chats go to this bot)",
+    "ابدأ محادثة مع {name} (المحادثات الجديدة تذهب إلى هذا البوت)"
+  ],
+  "fleet.create": [
+    "New bot",
+    "بوت جديد"
+  ],
+  "fleet.create.cta": [
+    "Create bot",
+    "أنشئ البوت"
+  ],
+  "fleet.create.err": [
+    "Could not create the bot: {why}",
+    "تعذّر إنشاء البوت: {why}"
+  ],
+  "fleet.create.ideas": [
+    "Ideas about me",
+    "معرفة من أنا"
+  ],
+  "fleet.create.ideas.hint": [
+    "Copy what Moch knows about you (USER.md) into this bot — it starts familiar instead of a stranger.",
+    "انسخ ما يعرفه موك عنك (USER.md) إلى هذا البوت — يبدأ عارفًا بك بدلًا من غريب."
+  ],
+  "fleet.create.job": [
+    "Describe the job — e.g. watch price drops daily",
+    "صِف المهمة — مثال: تابع تخفيضات الأسعار يوميًا"
+  ],
+  "fleet.create.memory": [
+    "Moch's work memory",
+    "ذاكرة موك العاملة"
+  ],
+  "fleet.create.memory.hint": [
+    "Also copy Moch's accumulated MEMORY.md — usually noisy; leave off unless the bot needs the history.",
+    "انسخ أيضًا ذاكرة موك المتراكمة (MEMORY.md) — عادة مشوشة؛ اتركها مطفأة ما لم يحتج البوت التاريخ."
+  ],
+  "fleet.create.partial": [
+    "Bot created — some checklist items were skipped (existing files are never overwritten).",
+    "تم إنشاء البوت — تم تخطي بعض عناصر القائمة (الملفات الموجودة لا تُستبدل أبدًا)."
+  ],
+  "fleet.create.skills": [
+    "Skills to give it",
+    "مهارات تمنحها له"
+  ],
+  "fleet.create.skills.empty": [
+    "No skills found in Moch",
+    "لا توجد مهارات لدى موك"
+  ],
+  "fleet.create.skills.unavailable": [
+    "Skill list unavailable on this gateway",
+    "قائمة المهارات غير متاحة على هذه البوابة"
+  ],
+  "fleet.create.suggested": [
+    "Suggested name",
+    "اسم مقترح"
+  ],
+  "fleet.danger.body": [
+    "Deletes the bot's files, memory and skills. Chats stay, but the bot is gone for good.",
+    "يحذف ملفات البوت وذاكرته ومهاراته. المحادثات تبقى، لكن البوت يذهب إلى غير رجعة."
+  ],
+  "fleet.danger.confirm": [
+    "Tap again to confirm",
+    "انقر مرة أخرى للتأكيد"
+  ],
+  "fleet.danger.delete": [
+    "Delete this bot",
+    "احذف هذا البوت"
+  ],
+  "fleet.danger.deleting": [
+    "Deleting…",
+    "جارٍ الحذف…"
+  ],
+  "fleet.danger.mochi": [
+    "Mochi, the main agent, cannot be deleted",
+    "موتشي، الوكيل الأساسي، لا يمكن حذفه"
+  ],
+  "fleet.danger.title": [
+    "Danger zone",
+    "منطقة الخطر"
+  ],
+  "fleet.detail.back": [
+    "Fleet",
+    "الأسطول"
+  ],
+  "fleet.detail.desc.label": [
+    "What is this bot for?",
+    "ما وظيفة هذا البوت؟"
+  ],
+  "fleet.detail.desc.ph": [
+    "One or two sentences — this is the bot's job description.",
+    "جملة أو جملتان — هذا هو وصف وظيفة البوت."
+  ],
+  "fleet.detail.loaderr": [
+    "Could not load the full bot file: {why}",
+    "تعذّر تحميل ملف البوت كاملًا: {why}"
+  ],
+  "fleet.detail.save": [
+    "Save",
+    "حفظ"
+  ],
+  "fleet.detail.saved": [
+    "Saved",
+    "حُفظ"
+  ],
+  "fleet.detail.soul.ph": [
+    "# The bot soul — who it is, how it works.",
+    "# روح البوت — من هو وكيف يعمل."
+  ],
+  "fleet.detail.soul.sub": [
+    "the bot's personality and working agreement",
+    "شخصية البوت واتفاقية عمله"
+  ],
+  "fleet.detail.unsaved": [
+    "Unsaved changes",
+    "تغييرات غير محفوظة"
+  ],
+  "fleet.empty.body": [
+    "Bots are profiles on this device with their own memory, skills and computer. Describe a job below — creation is instant and nothing about chat changes.",
+    "البوتات ملفات على هذا الجهاز لها ذاكرة ومهارات وجهاز خاص بها. صِف المهمة بالأسفل — الإنشاء فوري ولا يتغير شيء في المحادثة."
+  ],
+  "fleet.empty.sub": [
+    "Bots are little agents with their own job, memory and skills. Give one a job and it works on this machine while you do other things — Mochi (your main agent) is already here to help.",
+    "البوتات وكلاء صغار لكل منهم مهمته وذاكرته ومهاراته. أعطِ أحدهم مهمة وسيعمل على هذا الجهاز بينما تشتغل أنت على أمور أخرى — موتشي (وكيلك الأساسي) هنا بالفعل للمساعدة."
+  ],
+  "fleet.empty.title": [
+    "Your fleet starts here",
+    "أسطولك يبدأ من هنا"
+  ],
+  "fleet.freeze": [
+    "Freeze {name}",
+    "تجميد {name}"
+  ],
+  "fleet.freeze.btn": [
+    "Freeze",
+    "تجميد"
+  ],
+  "fleet.freeze.failed": [
+    "Couldn't freeze/unfreeze {name}: {why}",
+    "تعذّر تجميد/إلغاء تجميد {name}: {why}"
+  ],
+  "fleet.freeze.title": [
+    "Freeze this bot (it stops picking up work)",
+    "جمّد هذا البوت (يتوقف عن تناول العمل)"
+  ],
+  "fleet.frozen.title": [
+    "Frozen — this bot is paused",
+    "مجمّد — هذا البوت متوقف مؤقتًا"
+  ],
+  "fleet.gateheld": [
+    "gate held",
+    "بانتظار موافقتك"
+  ],
+  "fleet.head.count.many": [
+    "{n} bots on this machine",
+    "{n} بوتات على هذا الجهاز"
+  ],
+  "fleet.head.count.one": [
+    "{n} bot on this machine",
+    "بوت واحد على هذا الجهاز"
+  ],
+  "fleet.mirror.done.many": [
+    "Mirrored {n} keys ({list}) — this bot now uses your provider.",
+    "نُسخت {n} مفاتيح ({list}) — هذا البوت يستخدم مزوّدك الآن."
+  ],
+  "fleet.mirror.done.one": [
+    "Mirrored 1 key ({list}) — this bot now uses your provider.",
+    "نُسخ مفتاح واحد ({list}) — هذا البوت يستخدم مزوّدك الآن."
+  ],
+  "fleet.mirror.none": [
+    "Nothing needed mirroring — the keys were already in place.",
+    "لا شيء بحاجة إلى نسخ — المفاتيح كانت في مكانها بالفعل."
+  ],
+  "fleet.noprovider.body": [
+    "This bot has no model credentials of its own — mirror your keys so it can actually run.",
+    "لهذا البوت لا بيانات اعتماد نموذج خاصة به — انسخ مفاتيحك ليصبح قادرًا على العمل."
+  ],
+  "fleet.noprovider.mirror": [
+    "Use my provider",
+    "استخدم مزوّدي"
+  ],
+  "fleet.noprovider.title": [
+    "No provider.",
+    "لا مزوّد."
+  ],
+  "fleet.offline": [
+    "Fleet offline",
+    "الأسطول غير متصل"
+  ],
+  "fleet.pick.sub": [
+    "Select a bot on the left to open its editor — job, SOUL.md, provider and all.",
+    "اختر بوتًا من القائمة لفتح محرّره — المهمة وSOUL.md والمزوّد وكل شيء."
+  ],
+  "fleet.pick.title": [
+    "Pick a bot",
+    "اختر بوتًا"
+  ],
+  "fleet.provider.label": [
+    "Provider:",
+    "المزوّد:"
+  ],
+  "fleet.provider.ready": [
+    "Provider ready.",
+    "المزوّد جاهز."
+  ],
+  "fleet.refresh": [
+    "Refresh fleet",
+    "تحديث الأسطول"
+  ],
+  "fleet.resume": [
+    "Resume",
+    "استئناف"
+  ],
+  "fleet.resume.title": [
+    "Resume this bot",
+    "استأنف هذا البوت"
+  ],
+  "fleet.roster.bots": [
+    "Bots · {n}",
+    "بوتات · {n}"
+  ],
+  "fleet.roster.loading": [
+    "Loading the roster…",
+    "جارٍ تحميل القائمة…"
+  ],
+  "fleet.roster.waiting": [
+    "Waiting for the gateway…",
+    "في انتظار البوابة…"
+  ],
+  "fleet.runs.empty": [
+    "No runs recorded for this bot yet.",
+    "لا أدوار مسجلة لهذا البوت بعد."
+  ],
+  "fleet.runs.title": [
+    "Recent runs",
+    "أدوار حديثة"
+  ],
+  "fleet.runtime.active": [
+    "fleet runtime · {active}/{slots} turns",
+    "وقت التشغيل · {active}/{slots} مهام"
+  ],
+  "fleet.runtime.idle": [
+    "fleet runtime idle on this gateway",
+    "وقت تشغيل الأسطول خامل على هذه البوابة"
+  ],
+  "fleet.title": [
+    "Fleet",
+    "الأسطول"
+  ],
+  "fleet.tpl.deals.job": [
+    "Hunt deals daily. Scan the listings and marketplaces I care about each morning and surface only the genuinely good deals, with a short note on why each one is worth it.",
+    "اصطد العروض يوميًا. افحص الإعلانات والأسواق التي تهمّني كل صباح وأبرز الصفقات الجيدة حقًا فقط، مع ملاحظة قصيرة عن سبب جدوى كل واحدة."
+  ],
+  "fleet.tpl.deals.name": [
+    "Hunt deals daily",
+    "اصطد العروض يوميًا"
+  ],
+  "fleet.tpl.deals.pitch": [
+    "Scans listings every morning and surfaces only the wins.",
+    "يفحص الإعلانات كل صباح ولا يُظهر إلا الفرص الحقيقية."
+  ],
+  "fleet.tpl.journal.job": [
+    "Keep my journal. Check in with me every evening, ask how the day went, and write a short dated entry I will actually want to reread.",
+    "احفظ مذكرتي. تواصل معي كل مساء، اسأل كيف كان اليوم، واكتب مدخلة مؤرخة قصيرة سأرغب فعلًا في إعادة قراءتها."
+  ],
+  "fleet.tpl.journal.name": [
+    "Keep my journal",
+    "احفظ مذكرتي"
+  ],
+  "fleet.tpl.journal.pitch": [
+    "A nightly brain-dump companion that writes it all down.",
+    "رفيق مسائي يستمع ويكتب كل شيء."
+  ],
+  "fleet.tpl.research.job": [
+    "Research anything. When I give you a topic, do a deep dive across the web and come back with a tight, sourced brief with the key findings up top.",
+    "ابحث في أي شيء. حين أعطيك موضوعًا، قم بغوص عميق عبر الويب وعُد بموجز محكم موثق مع النتائج الأساسية في الأعلى."
+  ],
+  "fleet.tpl.research.name": [
+    "Research anything",
+    "ابحث في أي شيء"
+  ],
+  "fleet.tpl.research.pitch": [
+    "Deep-dives a topic and returns a tight, sourced brief.",
+    "يغوص في موضوع ويعيد موجزًا محكمًا موثقًا."
+  ],
+  "fleet.tpl.watch.job": [
+    "Watch my Drop folder. When a new file lands, read it and do the next right thing — summarize long docs, sort and rename files, or ask me what to do.",
+    "راقب مجلد الإسقاط لدي. عند هبوط ملف جديد، اقرأه وافعل التالي الصائب — لخّص المستندات الطويلة، أو رتّب الملفات وأعد تسميتها، أو اسألني ماذا أفعل."
+  ],
+  "fleet.tpl.watch.name": [
+    "Watch a folder",
+    "راقب مجلدًا"
+  ],
+  "fleet.tpl.watch.pitch": [
+    "Notices new files land and does the next right thing with them.",
+    "يلاحظ الملفات الجديدة ويفعل معها التالي الصائب."
+  ],
+  "fleet.unfreeze": [
+    "Unfreeze {name}",
+    "إلغاء تجميد {name}"
+  ],
+  "fleet.waiting": [
+    "{n} waiting ({prios})",
+    "{n} في الانتظار ({prios})"
+  ],
+  "fleet.wizard.ideas.sub": [
+    "Copy Mochi's ideas about you — tone, preferences, context.",
+    "انسخ أفكار موتشي عنك — النبرة والتفضيلات والسياق."
+  ],
+  "fleet.wizard.job.ph": [
+    "Describe the job in a sentence or two — the bot's whole life is built around this.",
+    "صِف المهمة في جملة أو جملتين — حياة البوت كلها تُبنى حولها."
+  ],
+  "fleet.wizard.memory.sub": [
+    "Also copy Mochi's work memory — projects, decisions, in-flight threads.",
+    "انسخ أيضًا ذاكرة موتشي العاملة — المشاريع والقرارات والمحادثات الجارية."
+  ],
+  "fleet.wizard.name": [
+    "moch name",
+    "اسم moch"
+  ],
+  "fleet.wizard.partialSeed": [
+    "Bot created — but some seed steps were skipped (memory or skills copied only partially).",
+    "أُنشئ البوت — لكن بعض خطوات البذر تخطيت (الذاكرة أو المهارات نُسخت جزئيًا فقط)."
+  ],
+  "fleet.wizard.refused": [
+    "The gateway refused the create",
+    "رفضت البوابة الإنشاء"
+  ],
+  "fleet.wizard.seedFail": [
+    "Bot created — seeding failed: {why}",
+    "أُنشئ البوت — فشل البذر: {why}"
+  ],
+  "fleet.wizard.skills": [
+    "Launch skills",
+    "مهارات الإطلاق"
+  ],
+  "fleet.wizard.skills.empty": [
+    "No launch skills installed.",
+    "لا مهارات إطلاق مثبتة."
+  ],
+  "fleet.wizard.start": [
+    "Start the bot with",
+    "ابدأ البوت مع"
+  ],
+  "inbox.empty.sub": [
+    "Approvals, questions and sudo requests from any bot land here the moment they ask. Mochi keeps working until one shows up.",
+    "الموافقات والأسئلة وطلبات sudo من أي بوت تظهر هنا لحظة طلبها. موتشي تواصل العمل حتى تظهر واحدة."
+  ],
+  "inbox.empty.title": [
+    "Nothing needs you",
+    "لا شيء ينتظرك"
+  ],
+  "inbox.kind.approval": [
+    "Approval",
+    "موافقة"
+  ],
+  "inbox.kind.clarify": [
+    "Question",
+    "سؤال"
+  ],
+  "inbox.kind.secret": [
+    "Secret",
+    "قيمة سرية"
+  ],
+  "inbox.kind.sudo": [
+    "Sudo",
+    "Sudo"
+  ],
+  "inbox.kind.vault": [
+    "Vault",
+    "الخزنة"
+  ],
+  "inbox.notify.body": [
+    "Open Moch to respond.",
+    "افتح Moch للرد."
+  ],
+  "inbox.notify.title": [
+    "A bot is waiting on you",
+    "بوت ينتظرك"
+  ],
+  "inbox.open.n": [
+    "{n} open",
+    "{n} مفتوحة"
+  ],
+  "inbox.session": [
+    "Session",
+    "جلسة"
+  ],
+  "inbox.title": [
+    "Waiting on you",
+    "بانتظارك"
+  ],
+  "nav.automations": [
+    "Automations",
+    "الأتمتة"
+  ],
+  "nav.browser": [
+    "Browser",
+    "المتصفح"
+  ],
+  "nav.chats": [
+    "Chats",
+    "المحادثات"
+  ],
+  "nav.connectors": [
+    "Connectors",
+    "الموصّلات"
+  ],
+  "nav.crew": [
+    "Crew",
+    "الطاقم"
+  ],
+  "nav.files": [
+    "Files",
+    "الملفات"
+  ],
+  "nav.fleet": [
+    "Fleet",
+    "الأسطول"
+  ],
+  "nav.inbox": [
+    "Inbox",
+    "الوارد"
+  ],
+  "nav.settings": [
+    "Settings",
+    "الإعدادات"
+  ],
+  "nav.skills": [
+    "Skills",
+    "المهارات"
+  ],
+  "nav.terminal": [
+    "Terminal",
+    "الطرفية"
+  ],
+  "palette.browser": [
+    "Browser — the agent browser",
+    "المتصفح — متصفح الوكلاء"
+  ],
+  "palette.chatwith": [
+    "Chat with @{name}",
+    "تحدّث مع {name}"
+  ],
+  "palette.crew": [
+    "Crew — task board",
+    "الطاقم — لوحة المهام"
+  ],
+  "palette.fleet": [
+    "Fleet — your bots",
+    "الأسطول — بوتاتك"
+  ],
+  "palette.inbox": [
+    "Inbox — waiting on you",
+    "الوارد — بانتظارك"
+  ],
+  "palette.newchat": [
+    "New chat",
+    "محادثة جديدة"
+  ],
+  "palette.newchat.hint": [
+    "fresh session",
+    "جلسة جديدة"
+  ],
+  "palette.nomatch": [
+    "Nothing matches.",
+    "لا نتائج مطابقة."
+  ],
+  "palette.placeholder": [
+    "Jump to anything — views, bots, actions…",
+    "اِقفز إلى أي شيء — واجهات وبوتات وإجراءات…"
+  ],
+  "rail.chats.empty": [
+    "No other chats",
+    "لا محادثات أخرى"
+  ],
+  "rail.chats.loading": [
+    "Loading…",
+    "جارٍ التحميل…"
+  ],
+  "rail.chats.new": [
+    "New side chat",
+    "محادثة جانبية جديدة"
+  ],
+  "rail.chats.untitled": [
+    "Untitled",
+    "بدون عنوان"
+  ],
+  "rail.menu": [
+    "Bot actions",
+    "إجراءات البوت"
+  ],
+  "rail.menu.open": [
+    "Open",
+    "فتح"
+  ],
+  "rail.menu.settings": [
+    "Settings",
+    "الإعدادات"
+  ],
+  "rail.mochi": [
+    "Mochi",
+    "موتشي"
+  ],
+  "rail.mochi.job": [
+    "Your main agent",
+    "وكيلك الأساسي"
+  ],
+  "rail.nodesc": [
+    "No description yet",
+    "لا وصف بعد"
+  ],
+  "rail.nomatch": [
+    "No bots match",
+    "لا بوتات مطابقة"
+  ],
+  "rail.search": [
+    "Search",
+    "بحث"
+  ],
+  "rail.waiting.n": [
+    "{n} waiting",
+    "{n} في الانتظار"
+  ],
+  "routines.close": [
+    "Close",
+    "إغلاق"
+  ],
+  "routines.delete": [
+    "Delete",
+    "حذف"
+  ],
+  "routines.delete.confirm": [
+    "Confirm delete",
+    "تأكيد الحذف"
+  ],
+  "routines.delete.hint": [
+    "Tap again to delete for real",
+    "انقر مرة أخرى للحذف نهائيًا"
+  ],
+  "routines.delete.hint2": [
+    "Delete (two-tap)",
+    "حذف (نقرتان)"
+  ],
+  "routines.deliver": [
+    "Deliver",
+    "التسليم"
+  ],
+  "routines.deliver.local": [
+    "local",
+    "محلي"
+  ],
+  "routines.edit": [
+    "Edit",
+    "تعديل"
+  ],
+  "routines.empty": [
+    "Nothing runs on a schedule yet.",
+    "لا شيء يعمل على جدول بعد."
+  ],
+  "routines.empty.sub": [
+    "Automations are prompts that fire on a schedule — the agent runs locally and delivers the result. Start from a template or write your own.",
+    "الأتمتة أوامر تعمل على جدول — يعمل الوكيل محليًا ويسلّم النتيجة. ابدأ من قالب أو اكتب أمرك."
+  ],
+  "routines.empty.title": [
+    "Nothing runs on a schedule yet",
+    "لا شيء يعمل على جدول بعد"
+  ],
+  "routines.enabled": [
+    "enabled",
+    "مُفعّل"
+  ],
+  "routines.err": [
+    "Action failed: {why}",
+    "فشل الإجراء: {why}"
+  ],
+  "routines.head": [
+    "Automations",
+    "الأتمتة"
+  ],
+  "routines.history": [
+    "History",
+    "السجل"
+  ],
+  "routines.history.empty": [
+    "No runs recorded yet.",
+    "لا تشغيلات مسجلة بعد."
+  ],
+  "routines.history.loading": [
+    "loading runs…",
+    "جارٍ تحميل التشغيلات…"
+  ],
+  "routines.loading": [
+    "loading…",
+    "جارٍ التحميل…"
+  ],
+  "routines.modal.cancel": [
+    "Cancel",
+    "إلغاء"
+  ],
+  "routines.modal.create": [
+    "Create",
+    "إنشاء"
+  ],
+  "routines.modal.edit": [
+    "Edit — {name}",
+    "تعديل — {name}"
+  ],
+  "routines.modal.prompt.ph": [
+    "What should run? Keep it self-contained — cron runs can't ask questions.",
+    "ما الذي يجب أن يعمل؟ اجعله مكتفٍيا بذاته — تشغيلات cron لا تسأل أسئلة."
+  ],
+  "routines.modal.save": [
+    "Save changes",
+    "حفظ التغييرات"
+  ],
+  "routines.modal.schedule.hint": [
+    "Plain language — e.g. \"every 30m\", \"in 45m\", \"every monday 9:00\".",
+    "بلغة طبيعية — مثل «كل ٣٠ د»، «بعد ٤٥ د»، «كل اثنين ٩:٠٠»."
+  ],
+  "routines.new": [
+    "New automation",
+    "أتمتة جديدة"
+  ],
+  "routines.next": [
+    "Next {when}",
+    "التالي {when}"
+  ],
+  "routines.next.none": [
+    "no next run",
+    "لا تشغيل قادم"
+  ],
+  "routines.nextRun": [
+    "Next run",
+    "التشغيل القادم"
+  ],
+  "routines.pause": [
+    "Pause",
+    "إيقاف مؤقت"
+  ],
+  "routines.pause.hint": [
+    "Pause this routine",
+    "إيقاف هذا الروتين مؤقتًا"
+  ],
+  "routines.paused": [
+    "paused",
+    "متوقف مؤقتًا"
+  ],
+  "routines.pausedNote": [
+    "paused — resume to re-arm",
+    "متوقف مؤقتًا — استأنف لإعادة التفعيل"
+  ],
+  "routines.prompt": [
+    "Prompt",
+    "الأمر"
+  ],
+  "routines.prompt.loading": [
+    "loading the full prompt…",
+    "جارٍ تحميل الأمر الكامل…"
+  ],
+  "routines.prompt.none": [
+    "No prompt stored.",
+    "لا أمر محفوظ."
+  ],
+  "routines.resume": [
+    "Resume",
+    "استئناف"
+  ],
+  "routines.resume.hint": [
+    "Resume this routine",
+    "استئناف هذا الروتين"
+  ],
+  "routines.runNow": [
+    "Run now",
+    "شغّل الآن"
+  ],
+  "routines.schedule": [
+    "Schedule",
+    "الجدول"
+  ],
+  "routines.skills": [
+    "Skills",
+    "المهارات"
+  ],
+  "routines.tpl.day": [
+    "Summarize my day at 19:00",
+    "لخّص يومي عند ١٩:٠٠"
+  ],
+  "routines.tpl.deals": [
+    "Check for deals every 2h",
+    "تفقّد العروض كل ساعتين"
+  ],
+  "routines.tpl.journal": [
+    "Weekly journal recap",
+    "ملخص الأسبوع"
+  ],
+  "settings.about": [
+    "About",
+    "عن التطبيق"
+  ],
+  "settings.about.app": [
+    "Moch Desktop 0.1.0",
+    "Moch Desktop 0.1.0"
+  ],
+  "settings.about.home": [
+    "Open hermes home",
+    "افتح منزل hermes"
+  ],
+  "settings.about.tagline": [
+    "Fully local — your agents, keys and data stay on this machine.",
+    "محلي بالكامل — وكلاؤك ومفاتيحك وبياناتك تبقى على هذا الجهاز."
+  ],
+  "settings.about.workspace": [
+    "Open workspace",
+    "افتح مساحة العمل"
+  ],
+  "settings.account": [
+    "You",
+    "أنت"
+  ],
+  "settings.appearance": [
+    "Appearance",
+    "المظهر"
+  ],
+  "settings.appearance.hint": [
+    "Mocheme dark — the desktop ships one theme.",
+    "موك-سيم داكن — يأتي سطح المكتب بسمة واحدة."
+  ],
+  "settings.browser": [
+    "Agent browser",
+    "متصفح الوكلاء"
+  ],
+  "settings.browser.hint": [
+    "Keep the built-in browser ready at launch, so agents always browse in-app instead of opening your system browser.",
+    "أبقِ المتصفح المدمج جاهزًا عند الإطلاق، ليتصفح الوكلاء داخل التطبيق دائمًا بدل فتح متصفح نظامك."
+  ],
+  "settings.browser.manual": [
+    "Manual only",
+    "يدوي فقط"
+  ],
+  "settings.browser.ready": [
+    "Ready at launch",
+    "جاهز عند الإطلاق"
+  ],
+  "settings.close": [
+    "Close",
+    "إغلاق"
+  ],
+  "settings.language.hint": [
+    "English or العربية — the interface switches to right-to-left with Arabic.",
+    "English أو العربية — تتحول الواجهة إلى اليمين مع العربية."
+  ],
+  "settings.language.title": [
+    "Language / اللغة",
+    "Language / اللغة"
+  ],
+  "settings.model.current": [
+    "Current",
+    "الحالي"
+  ],
+  "settings.model.hint": [
+    "The model new chats start with.",
+    "النموذج الذي تبدأ به المحادثات الجديدة."
+  ],
+  "settings.nav.general": [
+    "General",
+    "عام"
+  ],
+  "settings.nav.models": [
+    "Models",
+    "النماذج"
+  ],
+  "settings.notifications": [
+    "Notifications",
+    "الإشعارات"
+  ],
+  "settings.notifications.denied": [
+    "Denied — retry",
+    "مرفوضة — أعد المحاولة"
+  ],
+  "settings.notifications.enable": [
+    "Enable notifications",
+    "فعّل الإشعارات"
+  ],
+  "settings.notifications.hint": [
+    "Approvals waiting on you and finished automations knock while the app is open.",
+    "الموافقات التي تنتظرك والأتمتات المنتهية تطرق الباب أثناء فتح التطبيق."
+  ],
+  "settings.notifications.on": [
+    "Enabled",
+    "مفعّلة"
+  ],
+  "settings.reveal": [
+    "Reveal",
+    "إظهار"
+  ],
+  "settings.reveal.title": [
+    "Show in file manager",
+    "إظهار في مدير الملفات"
+  ],
+  "settings.runtime": [
+    "Runtime",
+    "وقت التشغيل"
+  ],
+  "settings.runtime.home": [
+    "Hermes home",
+    "منزل hermes"
+  ],
+  "settings.runtime.logs": [
+    "Runtime logs · last {n} lines",
+    "سجلات وقت التشغيل · آخر {n} سطرًا"
+  ],
+  "settings.runtime.logs.empty": [
+    "No runtime logs yet.",
+    "لا سجلات بعد."
+  ],
+  "settings.runtime.restart": [
+    "Restart gateway",
+    "إعادة تشغيل البوابة"
+  ],
+  "settings.runtime.restart.hint": [
+    "Gateway runs everything on loopback — restart it if agents act up.",
+    "تعمل البوابة كل شيء على العنوان المحلي — أعد تشغيلها إن ساء سلوك الوكلاء."
+  ],
+  "settings.runtime.version": [
+    "Hermes version",
+    "إصدار hermes"
+  ],
+  "settings.runtime.workspace": [
+    "Workspace",
+    "مساحة العمل"
+  ],
+  "settings.unknown": [
+    "unknown",
+    "مجهول"
+  ],
+  "shell.thread.frozen": [
+    "Frozen",
+    "مجمّد"
+  ],
+  "shell.thread.idle": [
+    "Idle",
+    "خامل"
+  ],
+  "shell.thread.waiting": [
+    "Waiting",
+    "في الانتظار"
+  ],
+  "shell.thread.waitingInput": [
+    "Waiting on you",
+    "ينتظرك"
+  ],
+  "shell.thread.working": [
+    "Working",
+    "يعمل"
+  ],
+  "skills.empty.post": [
+    "or teach one in a chat.",
+    "أو علّم واحدة في محادثة."
+  ],
+  "skills.empty.pre": [
+    "Skills are reusable procedures your agents load on demand. Drop folders with a SKILL.md into",
+    "المهارات إجراءات قابلة لإعادة الاستخدام يحمّلها وكلاؤك عند الحاجة. أفلِت مجلدات فيها SKILL.md في"
+  ],
+  "skills.empty.title": [
+    "No skills installed yet",
+    "لا مهارات مثبتة بعد"
+  ],
+  "skills.field.desc": [
+    "Description",
+    "الوصف"
+  ],
+  "skills.field.how": [
+    "How skills work",
+    "كيف تعمل المهارات"
+  ],
+  "skills.field.loc": [
+    "Location",
+    "الموقع"
+  ],
+  "skills.how": [
+    "Agents load this procedure on demand — mention it by name in any chat.",
+    "يحمّل الوكلاء هذا الإجراء عند الحاجة — اذكره بالاسم في أي محادثة."
+  ],
+  "skills.installed": [
+    "Installed skills · {n}",
+    "مهارات مثبتة · {n}"
+  ],
+  "skills.loading": [
+    "loading…",
+    "جارٍ التحميل…"
+  ],
+  "skills.nodesc": [
+    "No description in its SKILL.md.",
+    "لا وصف في SKILL.md الخاص بها."
+  ],
+  "skills.none": [
+    "No skills installed yet.",
+    "لا مهارات مثبتة بعد."
+  ],
+  "skills.open": [
+    "Open folder",
+    "افتح المجلد"
+  ],
+  "skills.path.unknown": [
+    "path unknown",
+    "المسار مجهول"
+  ],
+  "skills.rescan": [
+    "Rescan",
+    "إعادة الفحص"
+  ],
+  "skills.root.fallback": [
+    "your workspace/skills",
+    "مساحة عملك/skills"
+  ],
+  "skills.show.ws": [
+    "Show workspace",
+    "أظهر مساحة العمل"
+  ],
+  "status.bots.many": [
+    "bots",
+    "بوتات"
+  ],
+  "status.bots.one": [
+    "bot",
+    "بوت"
+  ],
+  "status.fullyLocal": [
+    "fully local",
+    "محلي بالكامل"
+  ],
+  "status.offline": [
+    "offline",
+    "غير متصل"
+  ],
+  "status.runtime.local": [
+    "local runtime",
+    "وقت تشغيل محلي"
+  ],
+  "status.turns": [
+    "turns",
+    "مهام"
+  ],
+  "status.workspace": [
+    "workspace",
+    "مساحة العمل"
+  ],
+  "term.close": [
+    "Close this terminal",
+    "أغلق هذه الطرفية"
+  ],
+  "term.closeNamed": [
+    "Close {label}",
+    "إغلاق {label}"
+  ],
+  "term.defaultShell": [
+    "default shell",
+    "الصدفة الافتراضية"
+  ],
+  "term.defaultShell.title": [
+    "The PTY launches your default login shell ($SHELL)",
+    "تُطلق الطرفية صدفتك الافتراضية ($SHELL)"
+  ],
+  "term.empty.sub": [
+    "Spawn a shell in the agent workspace to run commands alongside your bots.",
+    "أنشئ طرفية في مساحة عمل الوكلاء لتشغيل الأوامر إلى جانب بوتاتك."
+  ],
+  "term.empty.title": [
+    "No terminals",
+    "لا طرفيات"
+  ],
+  "term.new": [
+    "New terminal",
+    "طرفية جديدة"
+  ],
+  "term.none": [
+    "No live terminals — spawn one below.",
+    "لا طرفيات نشطة — أنشئ واحدة بالأسفل."
+  ],
+  "term.restart": [
+    "Restart",
+    "إعادة تشغيل"
+  ],
+  "term.session.label": [
+    "shell {n}",
+    "طرفية {n}"
+  ],
+  "term.sessions": [
+    "Sessions",
+    "الجلسات"
+  ],
+  "term.sessions.aria": [
+    "Terminal sessions",
+    "جلسات الطرفية"
+  ],
+  "term.sessions.live": [
+    "{n} live",
+    "{n} نشطة"
+  ],
+  "term.show": [
+    "Show this terminal",
+    "اعرض هذه الطرفية"
+  ]
+}

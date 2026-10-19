@@ -1143,7 +1143,7 @@ def _(rid, params: dict) -> dict:
             continuity=is_truthy_value(params.get("continuity")) if params.get("continuity") is not None else None,
             deliver=_str_arg(params, "deliver") or None)
         return _ok(rid, json.loads(raw))
-    if action in {"remove", "pause", "resume"}:
+    if action in {"remove", "pause", "resume", "run"}:
         return _ok(rid, json.loads(cronjob(action=action, job_id=jid)))
     if action == "get":
         # Edit-prefill read (#108): _format_job's prompt_preview caps at 100 chars and the

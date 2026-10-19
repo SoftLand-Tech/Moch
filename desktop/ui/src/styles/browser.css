@@ -1,0 +1,306 @@
+/* BrowserPane internals — the CDP screencast surface, its chrome strips,
+   and the tab rows in the Browser view's ctx column. Token-driven like the
+   rest of the shell. */
+
+.browser-pane {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg);
+}
+
+/* ── idle / not-running state ──────────────────────────────────────── */
+
+.bp-idle {
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: var(--text-sm);
+}
+
+/* ── top strip: nav buttons + URL bar + actions ────────────────────── */
+
+.bp-chrome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  min-height: 40px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.browser-pane.compact .bp-chrome {
+  padding: 4px 6px;
+  min-height: 34px;
+}
+
+.bp-nav {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.bp-icon-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  color: var(--text-dim);
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.bp-icon-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.bp-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.bp-url {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 12px;
+  background: var(--input-bg);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+}
+
+.bp-url:focus-within {
+  border-color: var(--accent);
+}
+
+.bp-url-scheme {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+
+.bp-url input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  user-select: text;
+}
+
+.bp-url input::placeholder {
+  color: var(--text-faint);
+  font-family: var(--font-ui);
+}
+
+.bp-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.bp-tabcount {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+/* ── the screencast viewport ───────────────────────────────────────── */
+
+.bp-viewport {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #0d0a18;
+}
+
+/* Canvas keeps its intrinsic aspect (device dims of the frame) and shrinks
+   to fit the pane; input coordinates map through the display scale. */
+.bp-canvas {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  display: block;
+  outline: none;
+}
+
+.bp-canvas:focus {
+  box-shadow: 0 0 0 2px var(--accent-soft), 0 0 0 1px var(--accent);
+}
+
+.bp-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: var(--text-sm);
+  background: rgba(10, 8, 19, 0.72);
+  pointer-events: none;
+}
+
+/* ── bottom strip: the shared-browser caption ──────────────────────── */
+
+.bp-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  min-height: 24px;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border-soft);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.browser-pane.compact .bp-foot {
+  padding: 3px 8px;
+}
+
+.bp-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.bp-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.bp-live.on .bp-live-dot {
+  background: var(--green-soft);
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.6);
+  animation: bp-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes bp-pulse {
+  50% { opacity: 0.45; }
+}
+
+.bp-caption {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Browser view bits ─────────────────────────────────────────────── */
+
+/* focus-body host so the absolutely-positioned pane has an anchor */
+.bp-host {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* tab rows (ctx column) — two-line, favicon-less */
+.bp-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  text-align: left;
+  transition: background 100ms ease;
+}
+
+.bp-tab:hover {
+  background: var(--bg-hover);
+}
+
+.bp-tab.active {
+  background: var(--bg-elev);
+  color: var(--text);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.bp-tab-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bp-tab-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bp-tab-url {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bp-tab-new {
+  color: var(--text-faint);
+  border: 1px dashed var(--border);
+}
+
+.bp-close-tab {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+
+.bp-close-tab:hover {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.bp-empty-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
