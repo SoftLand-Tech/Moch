@@ -51,8 +51,8 @@ export interface BotsRosterProps {
   /** The roster from `profiles.list` (`fleetProfiles`), or raw wire rows. */
   profiles: readonly (FleetProfile | RosterProfileLike)[]
   /**
-   * Open a bot's canonical chat. `''` is the default agent (whose tap starts
-   * an ordinary chat — it has no `Bot Chat` of its own).
+   * Open a bot's canonical chat. `''` is the default agent — it has no
+   * `Bot Chat` of its own, so its row just returns to the chat surface.
    */
   onOpenBot: (key: string) => void
   /** Open the create flow (the Fleet screen). */

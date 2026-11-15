@@ -41,8 +41,8 @@ export interface RosterSession {
 export interface RosterRow {
   /**
    * What a tap hands back to the shell. `''` means the DEFAULT agent — there
-   * is no bot roster entry to chat with there, so the shell starts an ordinary
-   * chat (the same key the desktop rail uses for its Mochi row).
+   * is no bot roster entry to chat with there, so the shell just returns to
+   * the chat surface (the same key the desktop rail uses for its Mochi row).
    */
   key: string
   /** The real profile name (never `''`), used for RPCs and status lookups. */
