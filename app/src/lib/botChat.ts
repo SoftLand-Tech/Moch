@@ -209,6 +209,9 @@ async function botChatDeps(): Promise<BotChatDeps> {
       // PREVIOUS conversation, so activate here — unless something moved the
       // screen while the resume was in flight (that tap wins).
       if (chat.activeSession.get() === before) chat.activeSession.set(r.sessionId)
+      // The user is looking at this chat now: its badge is served.
+      const { clearAttention } = await import('./attention')
+      clearAttention(r.storedId)
       // Boot restores this key, so a relaunch lands back in the bot chat.
       const storage = (await import('@react-native-async-storage/async-storage')).default
       void storage.setItem(chat.SESSION_KEY, r.storedId).catch(() => {})
@@ -288,9 +291,9 @@ async function openBotChatOnce(profile: string): Promise<string> {
   const created = await createBotChat(profile)
   if (created.kind === 'conflict') {
     // Another client (desktop, peer DM, a second phone) claimed the name
-    // between our lookup and our title write. Adopt the winner's row; the
-    // losing live session stays an empty hidden draft and is reaped.
-    const winner = matchBotChat(await listBotChatRows(profile))
+    // between our lookup and our title write. Re-run the lookup and adopt the
+    // winner; the losing live session stays an empty hidden draft and is reaped.
+    const winner = await findBotChat(profile)
     if (!winner) {
       throw botChatFailure(
         `Could not open ${profile}'s ${BOT_CHAT_TITLE} — another client just claimed ` +

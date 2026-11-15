@@ -33,16 +33,18 @@ import { attentionById, rowStatus } from '../lib/attention'
 import { isConnected as isConnectedAtom, connectionState, retryNow, rpc } from '../lib/gateway'
 import {
   activeProjectIdAtom,
+  buildSessionOwnerIndex,
   identityAtom,
   loadIdentity,
-  projectForCwd,
+  projectIdForSession,
+  projectSessionIdsAtom,
   projectsAtom,
   refreshProjects,
   setActiveProject,
   setIdentity,
 } from '../lib/workspace'
 import type { Identity } from '../lib/workspace'
-import { tr } from '../lib/strings'
+import { tr, localeAtom } from '../lib/strings'
 import {
   activeStoredId,
   busyStoredKey,
@@ -207,12 +209,17 @@ export function ScreenShell({
     void loadLastActive()
   }, [])
 
+  // Locale switches must re-render the drawer's copy (nav labels are tr()).
+  const locale = useStore(localeAtom)
   const runningAuto = useStore(runningAutomationCount)
 
   // ── UI-1: identity (Sessions | Bots) + project rail ──────────────────────
   const identity = useStore(identityAtom)
   const projects = useStore(projectsAtom)
   const activeProjectId = useStore(activeProjectIdAtom)
+  // Membership map from projects.tree — session.list rows carry no cwd or
+  // project id on the current gateway, so this is what makes the filter real.
+  const projectSessionIds = useStore(projectSessionIdsAtom)
   // Restore the persisted identity once; refresh the project tree on mount and
   // whenever the connection comes back (offline keeps the last tree).
   React.useEffect(() => {
@@ -246,18 +253,23 @@ export function ScreenShell({
   // drawer's own grouped chat list is the richer surface. Fleet/Crew are
   // hidden from the drawer (bots are profiles now, not a separate board) —
   // their routes and screens stay put for deep links and legacy surfaces.
-  const topNav = useMemo<NavItem[]>(() => [
-    { key: 'chat', label: tr('sidebar.chats'), icon: 'chatbubble-outline' },
-    { key: 'inbox', label: tr('sidebar.inbox'), icon: 'mail-unread-outline', badge: inboxN },
-    { key: 'browser', label: tr('sidebar.browser'), icon: 'globe-outline' },
-    { key: 'terminal', label: tr('sidebar.terminal'), icon: 'terminal-outline' },
-    { key: 'automations', label: tr('sidebar.automations'), icon: 'timer-outline', mochis: runningAuto },
-    { key: 'library', label: tr('sidebar.library'), icon: 'library-outline', activeFor: 'connectors' },
-  ], [runningAuto, inboxN])
+  const topNav = useMemo<NavItem[]>(() => {
+    // `locale` is read so tr() copy refreshes on a language switch.
+    void locale
+    return [
+      { key: 'chat', label: tr('sidebar.chats'), icon: 'chatbubble-outline' },
+      { key: 'inbox', label: tr('sidebar.inbox'), icon: 'mail-unread-outline', badge: inboxN },
+      { key: 'browser', label: tr('sidebar.browser'), icon: 'globe-outline' },
+      { key: 'terminal', label: tr('sidebar.terminal'), icon: 'terminal-outline' },
+      { key: 'automations', label: tr('sidebar.automations'), icon: 'timer-outline', mochis: runningAuto },
+      { key: 'library', label: tr('sidebar.library'), icon: 'library-outline', activeFor: 'connectors' },
+    ]
+  }, [runningAuto, inboxN, locale])
 
-  const bottomNav = useMemo<NavItem[]>(() => [
-    { key: 'settings', label: tr('sidebar.settings'), icon: 'settings-outline' },
-  ], [])
+  const bottomNav = useMemo<NavItem[]>(() => {
+    void locale
+    return [{ key: 'settings', label: tr('sidebar.settings'), icon: 'settings-outline' }]
+  }, [locale])
 
   const recent = useMemo<RecentChat[]>(() => {
     // The server list is the source of truth: it covers every stored
@@ -267,6 +279,7 @@ export function ScreenShell({
     // BUG-085: unanswered questions keep the amber dot even after the chat
     // was opened (opening clears the event-driven mark; the question still
     // blocks) — derived from pendingBySession, the source of truth.
+    void locale // tr() copy below re-reads on a language switch
     const statusOf = (id: string) => rowStatus(busy.includes(id), attention[id], pendingStored.includes(id))
 
     // UI-1 identity split: bots are profiles, so a row carrying a real
@@ -283,11 +296,17 @@ export function ScreenShell({
     // A selection that is no longer in the tree (archived on another device)
     // is not a filter either: it would blank the whole list.
     const selected = activeProjectId == null ? null : projects.find((p) => p.id === activeProjectId) ?? null
-    const inProject = (r: { project_id?: string; cwd?: string }) => {
+    // Reverse index of the tree's membership map: session id → project id.
+    // Built here so the filter below stays O(rows) and re-runs only when the
+    // tree actually changes.
+    const ownerIndex = buildSessionOwnerIndex(projectSessionIds)
+
+    const inProject = (r: { id?: string; project_id?: string; cwd?: string }) => {
       if (!selected) return true
-      if (r.project_id) return r.project_id === selected.id
-      if (r.cwd) return projectForCwd(r.cwd)?.id === selected.id
-      return true
+      const owner = projectIdForSession(r, ownerIndex)
+      // undefined = nothing classifies the row → never hide it.
+      if (owner === undefined) return true
+      return owner === selected.id
     }
 
     const fromServer = rows
@@ -337,7 +356,7 @@ export function ScreenShell({
     // Uncapped: the sidebar's own search filters this list, and server rows
     // are bounded by the session.list fetch anyway.
     return [...locals, ...fromServer]
-  }, [rows, all, busy, attention, current, pendingStored, lastActiveMap, identity, activeProjectId, projects])
+  }, [rows, all, busy, attention, current, pendingStored, lastActiveMap, identity, activeProjectId, projects, projectSessionIds, locale])
 
   const go = useCallback(
     (key: string) => {

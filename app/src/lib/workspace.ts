@@ -21,6 +21,7 @@ import { atom } from 'nanostores'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { log } from './log'
 import { rpc } from './gateway'
+import { tr } from './strings'
 
 // ── Identity ────────────────────────────────────────────────────────────────
 
@@ -78,6 +79,8 @@ interface ProjectTreeNode {
   isNoProject?: boolean
   sessionCount?: number
   lastActive?: number
+  /** Every session id the server claims for this project (not just previews). */
+  sessionIds?: string[]
   repos?: Array<{ path?: string | null }>
 }
 
@@ -89,6 +92,14 @@ interface ProjectsTreeResult {
 export const projectsAtom = atom<ProjectRow[]>([])
 /** `null` = the default/Personal bucket — not an id. */
 export const activeProjectIdAtom = atom<string | null>(null)
+/**
+ * Per-project session ids, straight from each node's `sessionIds` (every row
+ * the server claims for it, not just the preview window). The drawer's project
+ * filter needs this because `session.list` rows carry neither `cwd` nor
+ * `project_id` on the current gateway — without it the filter could only ever
+ * fall back to "don't hide anything".
+ */
+export const projectSessionIdsAtom = atom<Record<string, string[]>>({})
 /** Non-null only when a fetch failed and nothing is cached to fall back to. */
 export const projectsErrorAtom = atom<string | null>(null)
 export const projectsLoadingAtom = atom(false)
@@ -138,11 +149,17 @@ export function refreshProjects(): Promise<void> {
       const res = await rpc<ProjectsTreeResult>('projects.tree', {})
       const nodes = Array.isArray(res?.projects) ? res.projects : []
       const rows = nodes.map(toProjectRow).filter((r): r is ProjectRow => r != null)
+      const ids: Record<string, string[]> = {}
+      for (const n of nodes) {
+        if (typeof n?.id !== 'string' || !Array.isArray(n.sessionIds)) continue
+        ids[n.id] = n.sessionIds.filter((s): s is string => typeof s === 'string')
+      }
       projectsAtom.set(rows)
+      projectSessionIdsAtom.set(ids)
       activeProjectIdAtom.set(normalizeActiveId(res?.active_id, rows))
       projectsErrorAtom.set(null)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Could not load projects'
+      const msg = err instanceof Error ? err.message : tr('project.error.load')
       log('info', 'projects', `projects.tree failed: ${msg}`)
       // Offline-safe: the last tree stays. Only complain when the drawer would
       // otherwise render an empty section with no explanation.
@@ -168,7 +185,7 @@ export async function setActiveProject(id: string | null): Promise<void> {
     await rpc('projects.set_active', { id })
   } catch (err) {
     activeProjectIdAtom.set(prev)
-    const msg = err instanceof Error ? err.message : 'Could not select the project'
+    const msg = err instanceof Error ? err.message : tr('project.error.select')
     log('warn', 'projects', `projects.set_active failed: ${msg}`)
   }
 }
@@ -198,6 +215,46 @@ export function projectForCwd(cwd: string): ProjectRow | undefined {
   return best
 }
 
+/**
+ * Reverse index of `projects.tree`'s membership map: session id → project id.
+ * Built once per tree so a filter over the session list stays O(rows).
+ */
+export function buildSessionOwnerIndex(ids: Record<string, string[]>): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const [pid, list] of Object.entries(ids)) {
+    for (const sid of list) out.set(sid, pid)
+  }
+  return out
+}
+
+/**
+ * The project a stored session belongs to, per the last `projects.tree`:
+ * id membership when the row carries `project_id`, else the server's
+ * `sessionIds` claim (pass the index to avoid rebuilding it per row), else
+ * the folder map on `cwd`.
+ *
+ * Return contract: a project id, `null` when the server explicitly claims the
+ * row for the default (Personal) bucket, `undefined` when nothing classifies
+ * it — callers must NOT treat `undefined` as "belongs to no project".
+ */
+export function projectIdForSession(
+  row: { id?: string; cwd?: string; project_id?: string },
+  ownerIndex?: Map<string, string>,
+): string | null | undefined {
+  if (row.project_id) return row.project_id
+  const id = typeof row.id === 'string' ? row.id : ''
+  if (id) {
+    const index = ownerIndex ?? buildSessionOwnerIndex(projectSessionIdsAtom.get())
+    const pid = index.get(id)
+    if (pid) {
+      const p = projectsAtom.get().find((r) => r.id === pid)
+      return p?.isNoProject ? null : pid
+    }
+  }
+  if (row.cwd) return projectForCwd(row.cwd)?.id
+  return undefined
+}
+
 function normalizePath(raw: string | null | undefined): string {
   if (typeof raw !== 'string') return ''
   let p = raw.trim().replace(/\\/g, '/')
@@ -212,7 +269,7 @@ function normalizePath(raw: string | null | undefined): string {
 
 export async function createProject(name: string, folder?: string): Promise<void> {
   const clean = name.trim()
-  if (!clean) throw new Error('Project name required')
+  if (!clean) throw new Error(tr('project.error.nameRequired'))
   const path = folder?.trim()
   await rpc('projects.create', {
     name: clean,
@@ -224,7 +281,7 @@ export async function createProject(name: string, folder?: string): Promise<void
 
 export async function renameProject(id: string, name: string): Promise<void> {
   const clean = name.trim()
-  if (!clean) throw new Error('Project name required')
+  if (!clean) throw new Error(tr('project.error.nameRequired'))
   await rpc('projects.update', { id, name: clean })
   await refreshProjects()
 }
@@ -254,7 +311,7 @@ export const projectActions = {
       await createProject(name, folder)
       return null
     } catch (e) {
-      return e instanceof Error ? e.message : 'Could not create the project'
+      return e instanceof Error ? e.message : tr('project.error.create')
     }
   },
   rename: async (id: string, name: string): Promise<string | null> => {
@@ -262,7 +319,7 @@ export const projectActions = {
       await renameProject(id, name)
       return null
     } catch (e) {
-      return e instanceof Error ? e.message : 'Could not rename the project'
+      return e instanceof Error ? e.message : tr('project.error.rename')
     }
   },
   archive: async (id: string): Promise<string | null> => {
@@ -270,7 +327,7 @@ export const projectActions = {
       await archiveProject(id)
       return null
     } catch (e) {
-      return e instanceof Error ? e.message : 'Could not archive the project'
+      return e instanceof Error ? e.message : tr('project.error.archive')
     }
   },
   remove: async (id: string): Promise<string | null> => {
@@ -278,7 +335,7 @@ export const projectActions = {
       await deleteProject(id)
       return null
     } catch (e) {
-      return e instanceof Error ? e.message : 'Could not delete the project'
+      return e instanceof Error ? e.message : tr('project.error.delete')
     }
   },
 }
