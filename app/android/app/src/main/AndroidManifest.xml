@@ -47,7 +47,15 @@
          an embedded agent runtime gateway (subtype declared below).
          Hand-edited prebuilt manifest: a future expo prebuild regeneration
          must preserve these hand-edited lines (re-edit per app/AGENTS.md). -->
-    <service android:name=".hermes.HermesService" android:exported="false" android:foregroundServiceType="specialUse">
+    <!-- BUG-147: the type list must cover EVERY branch in HermesService
+         onStartCommand — API 34+ passes specialUse, API 29-33 still passes
+         dataSync, and startForeground throws "foregroundServiceType 0x1 is
+         not a subset of … attribute" on any device that only declares one of
+         them (crash-on-open on Android 12/13). Declaring both is safe: the
+         ~6h dataSync timeout applies only while RUNNING with that type, and
+         the 34+ branch never does. FOREGROUND_SERVICE_DATA_SYNC above stays
+         declared for the same reason. -->
+    <service android:name=".hermes.HermesService" android:exported="false" android:foregroundServiceType="specialUse|dataSync">
       <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="embedded_agent_runtime_gateway"/>
     </service>
     <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|smallestScreenSize|assetsPaths" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="portrait">
