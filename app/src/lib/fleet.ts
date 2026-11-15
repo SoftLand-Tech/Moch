@@ -42,6 +42,17 @@ export function getActiveBot(): string | null {
   return activeBotAtom.get()
 }
 
+/** The profile's canonical "Bot Chat" registry row, when the gateway reports
+ *  one (`profiles.list` with `include_sessions`). `id` is the stored registry
+ *  row; `resolvedId` is the live compression tip. Its NAME is the identity —
+ *  see `lib/botChat.ts`, which never mints a second one. */
+export interface FleetCanonicalSession {
+  id: string
+  resolvedId?: string
+  title?: string
+  messageCount?: number
+}
+
 export interface FleetProfile {
   name: string
   description: string
@@ -49,6 +60,8 @@ export interface FleetProfile {
   frozen?: boolean
   gateHeld?: boolean
   model?: { provider: string; default: string }
+  /** Present only when the profile HAS a canonical Bot Chat. */
+  canonicalSession?: FleetCanonicalSession
 }
 
 export interface FleetQueueEntry {
@@ -70,21 +83,63 @@ export const fleetStatusAtom = atom<FleetStatus | null>(null)
 /** Last refresh error (banner in the Fleet screen; empty = healthy). */
 export const fleetError = atom<string>('')
 
+interface ProfilesListRow {
+  name: string
+  description?: string
+  ui_meta?: Record<string, unknown>
+  /** Roster session fields — only with `include_sessions` (the default). */
+  canonical_session?: {
+    id?: unknown
+    resolved_id?: unknown
+    root_title?: unknown
+    title?: unknown
+    message_count?: unknown
+  } | null
+}
+
 interface ProfilesListResult {
-  profiles?: { name: string; description?: string; ui_meta?: Record<string, unknown> }[]
-  items?: { name: string; description?: string }[]
+  profiles?: ProfilesListRow[]
+  items?: ProfilesListRow[]
+}
+
+/** Map the wire's `canonical_session` (snake_case) onto the typed field. All
+ *  fields are coerced defensively: an older gateway may omit them. */
+function canonicalSessionOf(row: ProfilesListRow): FleetCanonicalSession | undefined {
+  const cs = row.canonical_session
+  if (!cs || typeof cs !== 'object') return undefined
+  const id = typeof cs.id === 'string' ? cs.id.trim() : ''
+  if (!id) return undefined
+  const resolvedId = typeof cs.resolved_id === 'string' ? cs.resolved_id.trim() : ''
+  const rawTitle = typeof cs.title === 'string' ? cs.title : typeof cs.root_title === 'string' ? cs.root_title : ''
+  const title = rawTitle.trim()
+  const messageCount = typeof cs.message_count === 'number' && Number.isFinite(cs.message_count)
+    ? cs.message_count
+    : undefined
+  return {
+    id,
+    ...(resolvedId ? { resolvedId } : {}),
+    ...(title ? { title } : {}),
+    ...(messageCount === undefined ? {} : { messageCount }),
+  }
 }
 
 /** Refresh the roster + fleet runtime status. Safe to call offline (no-ops). */
 export async function refreshFleet(): Promise<void> {
   try {
-    const lst = await rpc<ProfilesListResult>('profiles.list', {}, 15000)
+    // `include_sessions` is an accepted (and default-true) param on every
+    // gateway that ships the roster fields; asking explicitly documents the
+    // dependency and is ignored by older peers that predate it.
+    const lst = await rpc<ProfilesListResult>('profiles.list', { include_sessions: true }, 15000)
     const rows = lst.profiles ?? lst.items ?? (Array.isArray(lst) ? (lst as never) : [])
     fleetProfiles.set(
-      (rows as { name: string; description?: string }[]).map((r) => ({
-        name: r.name,
-        description: r.description ?? '',
-      })),
+      (rows as ProfilesListRow[]).map((r) => {
+        const canonicalSession = canonicalSessionOf(r)
+        return {
+          name: r.name,
+          description: r.description ?? '',
+          ...(canonicalSession ? { canonicalSession } : {}),
+        }
+      }),
     )
     fleetError.set('')
   } catch (e) {

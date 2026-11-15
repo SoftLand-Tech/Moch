@@ -275,6 +275,27 @@ export const pendingStoredIds = computed([sessionsById, pendingBySession], (map,
   return out
 })
 
+/**
+ * Read-only re-key of `pendingBySession` into STORED ids — the Inbox's source
+ * (lib/inbox). Mirrors `pendingStoredIds`'s live→stored mapping, but keeps the
+ * requests themselves so the row can say WHAT is being asked. Requests filed
+ * under a live id no `sessionsById` entry tracks (BUG-086: sessions started on
+ * the host by an automation/CLI) have no stored id to file them under, so they
+ * stay out — the chat screen's aggregate card owns those.
+ *
+ * Read-only by construction: the map's arrays are shared, never copied, and
+ * nothing here mutates them.
+ */
+export const pendingByStoredId = computed([sessionsById, pendingBySession], (map, pend): Record<string, PendingRequest[]> => {
+  const out: Record<string, PendingRequest[]> = {}
+  for (const [liveId, list] of Object.entries(pend)) {
+    if (!list?.length) continue
+    const stored = map[liveId]?.storedId
+    if (stored) out[stored] = list
+  }
+  return out
+})
+
 /** BUG-086: pendingBySession keys that no sessionsById entry tracks — the
  *  raw live id of a session started elsewhere (automation/CLI on the host).
  *  These questions are perfectly answerable (the answer is a JSON-RPC

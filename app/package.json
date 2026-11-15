@@ -86,7 +86,8 @@
     "watch": "./scripts/hermes-push-watch.sh",
     "test:sharein": "tsx scripts/test-sharein.ts",
     "test:terminal": "tsx scripts/test-terminal.ts",
-    "test:browser-relay": "tsx scripts/test-browser-relay.ts"
+    "test:browser-relay": "tsx scripts/test-browser-relay.ts",
+    "test:botchat": "tsx scripts/test-bot-chat.ts"
   },
   "private": true
 }

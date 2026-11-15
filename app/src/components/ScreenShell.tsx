@@ -32,6 +32,18 @@ import { runningAutomationCount, refreshRunningAutomations } from '../lib/automa
 import { attentionById, rowStatus } from '../lib/attention'
 import { isConnected as isConnectedAtom, connectionState, retryNow, rpc } from '../lib/gateway'
 import {
+  activeProjectIdAtom,
+  identityAtom,
+  loadIdentity,
+  projectForCwd,
+  projectsAtom,
+  refreshProjects,
+  setActiveProject,
+  setIdentity,
+} from '../lib/workspace'
+import type { Identity } from '../lib/workspace'
+import { tr } from '../lib/strings'
+import {
   activeStoredId,
   busyStoredKey,
   pendingCount,
@@ -48,6 +60,7 @@ import {
 import { loadCatalog } from '../lib/slash'
 import { loadLastActive, loadSessions, lastActiveByStoredId, lastActiveFor, patchRowTitle, refreshRunningSessions, sessionRows, toMs } from '../lib/sessionList'
 import { forgetChatMarks, loadChatMarks, toggleArchive, togglePin } from '../lib/chatListState'
+import { inboxCount } from '../lib/inbox'
 
 /**
  * ChatGPT-style shell: a compact top bar with a hamburger, the screen title,
@@ -196,22 +209,54 @@ export function ScreenShell({
 
   const runningAuto = useStore(runningAutomationCount)
 
+  // ── UI-1: identity (Sessions | Bots) + project rail ──────────────────────
+  const identity = useStore(identityAtom)
+  const projects = useStore(projectsAtom)
+  const activeProjectId = useStore(activeProjectIdAtom)
+  // Restore the persisted identity once; refresh the project tree on mount and
+  // whenever the connection comes back (offline keeps the last tree).
+  React.useEffect(() => {
+    void loadIdentity()
+  }, [])
+  React.useEffect(() => {
+    if (online) void refreshProjects()
+  }, [online])
+  // Inbox badge (slice C's module). It exists now, so this is a plain
+  // subscription; the badge is a count of `ask` items only.
+  const inboxN = useStore(inboxCount)
+
+  const handleIdentity = useCallback((i: Identity) => {
+    void setIdentity(i)
+    if (i === 'sessions') void refreshProjects()
+  }, [])
+
+  const handleProject = useCallback((id: string | null) => {
+    void setActiveProject(id)
+  }, [])
+
+  // "New project" lives in the drawer's ProjectList (its own dialog); the
+  // shell only needs to re-read the tree + sessions after one is created.
+  const handleNewProject = useCallback(() => {
+    void refreshProjects()
+    void loadSessions()
+  }, [])
+
   // ── Drawer nav (ChatGPT-style): top block + Settings docked at the bottom ─
   // The Chats screen stays reachable via the chat header's search icon; the
-  // drawer's own grouped chat list is the richer surface. Skills and Models
-  // moved into Settings' AGENT section.
+  // drawer's own grouped chat list is the richer surface. Fleet/Crew are
+  // hidden from the drawer (bots are profiles now, not a separate board) —
+  // their routes and screens stay put for deep links and legacy surfaces.
   const topNav = useMemo<NavItem[]>(() => [
-    { key: 'chat', label: 'Chat', icon: 'chatbubble-outline' },
-    { key: 'fleet', label: 'Fleet', icon: 'people-outline' },
-    { key: 'crew', label: 'Crew', icon: 'grid-outline' },
-    { key: 'browser', label: 'Browser', icon: 'globe-outline' },
-    { key: 'terminal', label: 'Terminal', icon: 'terminal-outline' },
-    { key: 'automations', label: 'Automations', icon: 'timer-outline', mochis: runningAuto },
-    { key: 'connectors', label: 'Connectors', icon: 'extension-puzzle-outline' },
-  ], [runningAuto])
+    { key: 'chat', label: tr('sidebar.chats'), icon: 'chatbubble-outline' },
+    { key: 'inbox', label: tr('sidebar.inbox'), icon: 'mail-unread-outline', badge: inboxN },
+    { key: 'browser', label: tr('sidebar.browser'), icon: 'globe-outline' },
+    { key: 'terminal', label: tr('sidebar.terminal'), icon: 'terminal-outline' },
+    { key: 'automations', label: tr('sidebar.automations'), icon: 'timer-outline', mochis: runningAuto },
+    { key: 'library', label: tr('sidebar.library'), icon: 'library-outline', activeFor: 'connectors' },
+  ], [runningAuto, inboxN])
 
   const bottomNav = useMemo<NavItem[]>(() => [
-    { key: 'settings', label: 'Settings', icon: 'settings-outline' },
+    { key: 'settings', label: tr('sidebar.settings'), icon: 'settings-outline' },
   ], [])
 
   const recent = useMemo<RecentChat[]>(() => {
@@ -223,7 +268,32 @@ export function ScreenShell({
     // was opened (opening clears the event-driven mark; the question still
     // blocks) — derived from pendingBySession, the source of truth.
     const statusOf = (id: string) => rowStatus(busy.includes(id), attention[id], pendingStored.includes(id))
-    const fromServer = rows.map((r) => {
+
+    // UI-1 identity split: bots are profiles, so a row carrying a real
+    // profile name is a bot chat. `default` is the assistant itself, not a
+    // bot — counting it as one would hide every ordinary chat in Bots mode
+    // and show nothing in Sessions.
+    const isBotRow = (profile?: string) => !!profile && profile !== 'default'
+
+    // UI-1 project filter: only when a project is selected. Rows that carry
+    // the project id filter on it; rows without one fall back to the folder
+    // map (`projectForCwd`); rows with NO metadata at all are never hidden —
+    // an old row disappearing because the client couldn't classify it reads
+    // as data loss, not as a filter.
+    // A selection that is no longer in the tree (archived on another device)
+    // is not a filter either: it would blank the whole list.
+    const selected = activeProjectId == null ? null : projects.find((p) => p.id === activeProjectId) ?? null
+    const inProject = (r: { project_id?: string; cwd?: string }) => {
+      if (!selected) return true
+      if (r.project_id) return r.project_id === selected.id
+      if (r.cwd) return projectForCwd(r.cwd)?.id === selected.id
+      return true
+    }
+
+    const fromServer = rows
+      .filter((r) => (identity === 'bots' ? isBotRow(r.profile) : !isBotRow(r.profile)))
+      .filter(inProject)
+      .map((r) => {
       const rawTitle = r.title || r.preview?.slice(0, 60) || 'Untitled'
       // BUG-112: a row from a bot profile identifies itself in the drawer even
       // when its title doesn't (chats started while a bot was active are
@@ -252,10 +322,13 @@ export function ScreenShell({
       // `new:` pseudo ids are the optimistic new-chat window's stand-ins —
       // never drawer rows (their create may still fail).
       .filter((s) => s.storedId && !s.storedId.startsWith('new:') && !seen.has(s.storedId))
+      // In-memory entries carry no profile: they belong to the identity that
+      // created them, so they only render in Sessions.
+      .filter(() => identity !== 'bots')
       .sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0))
       .map((s) => ({
         id: s.storedId,
-        title: s.title || 'New chat',
+        title: s.title || tr('sidebar.newChat'),
         ts: Math.max(s.createdAtMs ?? 0, lastActiveFor(s.storedId)),
         status: statusOf(s.storedId),
         active: s.storedId === current,
@@ -264,7 +337,7 @@ export function ScreenShell({
     // Uncapped: the sidebar's own search filters this list, and server rows
     // are bounded by the session.list fetch anyway.
     return [...locals, ...fromServer]
-  }, [rows, all, busy, attention, current, pendingStored, lastActiveMap])
+  }, [rows, all, busy, attention, current, pendingStored, lastActiveMap, identity, activeProjectId, projects])
 
   const go = useCallback(
     (key: string) => {
@@ -273,19 +346,17 @@ export function ScreenShell({
       const route =
         key === 'chat'
           ? '/(tabs)/chat'
-          : key === 'fleet'
-            ? '/(tabs)/fleet'
-            : key === 'crew'
-              ? '/(tabs)/crew'
+          : key === 'inbox'
+            ? '/(tabs)/inbox'
+            : key === 'library'
+              ? '/(tabs)/connectors'
               : key === 'browser'
                 ? '/(tabs)/browser'
                 : key === 'terminal'
                   ? '/(tabs)/terminal'
                   : key === 'automations'
                     ? '/(tabs)/automations'
-                    : key === 'connectors'
-                      ? '/(tabs)/connectors'
-                      : '/(tabs)/settings'
+                    : '/(tabs)/settings'
       // navigate, never push: `/(tabs)` is a single route on the root stack,
       // so push mounts a whole fresh copy of every tab screen each tap —
       // navigate just switches the tab inside the instance we already have.
@@ -533,6 +604,12 @@ export function ScreenShell({
         onRequestOpen={() => setOpen(true)}
         nav={topNav}
         bottomNav={bottomNav}
+        identity={identity}
+        onIdentity={handleIdentity}
+        projects={projects}
+        activeProjectId={activeProjectId}
+        onProject={handleProject}
+        onNewProject={handleNewProject}
         recent={recent}
         onNav={go}
         onNewChat={startNew}

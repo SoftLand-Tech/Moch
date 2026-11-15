@@ -31,6 +31,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="automations" />
       <Tabs.Screen name="skills" />
       <Tabs.Screen name="connectors" />
+      <Tabs.Screen name="inbox" />
       <Tabs.Screen name="settings" />
     </Tabs>
   )

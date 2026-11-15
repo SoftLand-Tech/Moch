@@ -14,7 +14,7 @@ import {
   TextInput,
   useWindowDimensions,
 } from 'react-native'
-import type { GestureResponderEvent, PanResponderGestureState, ViewStyle } from 'react-native'
+import type { GestureResponderEvent, PanResponderGestureState, TextStyle, ViewStyle } from 'react-native'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { Icon } from './Icon'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -26,6 +26,10 @@ import { archivedIds, groupChats, pinnedIds } from '../lib/chatListState'
 import type { RowStatus } from '../lib/attention'
 import { C, S, useStyles, useShape } from '../lib/theme'
 import { useReduceMotion } from './useReduceMotion'
+import { IdentitySwitch } from './IdentitySwitch'
+import { ProjectList } from './ProjectList'
+import { tr, localeAtom } from '../lib/strings'
+import type { Identity, ProjectRow } from '../lib/workspace'
 
 export interface NavItem {
   key: string
@@ -34,6 +38,12 @@ export interface NavItem {
   badge?: number
   /** Active automations: renders up to 3 mini Mochis, +N past that. */
   mochis?: number
+  /**
+   * Route slug this row belongs to when it differs from `key` — e.g. the
+   * Library row opens /(tabs)/connectors for now, and the drawer highlights
+   * by route suffix.
+   */
+  activeFor?: string
 }
 
 export interface RecentChat {
@@ -82,6 +92,16 @@ interface Props {
    * above the New-chat pill at the panel's bottom edge.
    */
   bottomNav?: NavItem[]
+  /** Sessions | Bots switch, rendered directly under the brand row. */
+  identity: Identity
+  onIdentity: (i: Identity) => void
+  /** Projects for the drawer's project list (Sessions mode only). */
+  projects: ProjectRow[]
+  activeProjectId: string | null
+  /** Select a project; `null` = the default (Personal) bucket. */
+  onProject: (id: string | null) => void
+  onNewProject: () => void
+  onProjectMenu?: (p: ProjectRow) => void
   recent: RecentChat[]
   onNav: (key: string) => void
   onNewChat: () => void
@@ -231,6 +251,13 @@ export function Sidebar({
   onRequestOpen,
   nav,
   bottomNav,
+  identity,
+  onIdentity,
+  projects,
+  activeProjectId,
+  onProject,
+  onNewProject,
+  onProjectMenu,
   recent,
   onNav,
   onNewChat,
@@ -243,8 +270,13 @@ export function Sidebar({
 }: Props) {
   const s = useStyles(makeS)
   const S = useShape()
+  // Locale switches must re-render the drawer's own copy (project labels,
+  // search placeholder) — tr() reads the atom, not React state.
+  useStore(localeAtom)
   const pathname = usePathname()
-  const activeKey = nav.find((n) => pathname?.endsWith(n.key))?.key
+  // A row can own a route whose slug differs from its key (Library currently
+  // opens the connectors screen); highlight by that slug when present.
+  const activeKey = nav.find((n) => pathname?.endsWith(n.activeFor ?? n.key))?.key
   const { width, height } = useWindowDimensions()
   const insets = useSafeAreaInsets()
   const anim = progress
@@ -614,7 +646,7 @@ export function Sidebar({
           <Pressable
             style={s.sectionLabelRow}
             onPress={() => setArchOpen((v) => !v)}
-            accessibilityLabel={`${archOpen ? 'Collapse' : 'Expand'} archived chats`}
+            accessibilityLabel={`${tr(archOpen ? 'sidebar.collapse' : 'sidebar.expand')} ${tr('sidebar.archivedChats')}`}
           >
             <Text style={s.sectionLabel}>{section.label} ({section.count ?? 0})</Text>
             <Icon name={archOpen ? 'chevron-up' : 'chevron-down'} size={12} color={C.textFaint} />
@@ -633,7 +665,7 @@ export function Sidebar({
   const renderSectionFooter = useCallback(() => <View style={s.sectionGap} />, [])
 
   const listEmpty = useCallback(
-    () => (searching ? <Text style={s.noMatch}>No chats matching “{query.trim()}”</Text> : null),
+    () => (searching ? <Text style={s.noMatch}>{tr('sidebar.noMatch', { query: query.trim() })}</Text> : null),
     [searching, query],
   )
 
@@ -694,7 +726,7 @@ export function Sidebar({
         pointerEvents={open ? 'auto' : 'none'}
         {...panelPan.panHandlers}
       >
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close menu" />
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={tr('sidebar.closeMenu')} />
       </Animated.View>
 
       <Animated.View
@@ -717,13 +749,29 @@ export function Sidebar({
             style={({ pressed }) => [s.iconBtn, pressed && s.iconBtnPressed]}
             onPress={onClose}
             hitSlop={10}
-            accessibilityLabel="Close menu"
+            accessibilityLabel={tr('sidebar.closeMenu')}
           >
             <Icon name="close" size={20} color={C.textDim} />
           </Pressable>
         </View>
 
+        {/* Identity (Sessions | Bots) — the drawer's top-level switch. */}
+        <IdentitySwitch identity={identity} onChange={onIdentity} />
+
         <View>{renderNavRows(nav)}</View>
+
+        {/* Sessions mode owns the project rail; Bots mode leaves this slot
+            empty — the roster body is slice D's surface. */}
+        {identity === 'sessions' ? (
+          <ProjectList
+            projects={projects}
+            activeProjectId={activeProjectId}
+            onSelect={onProject}
+            onNewProject={onNewProject}
+            onProjectMenu={onProjectMenu}
+            active={open}
+          />
+        ) : null}
 
         {recent.length > 0 ? (
           <>
@@ -734,12 +782,12 @@ export function Sidebar({
                 style={s.searchInput}
                 value={query}
                 onChangeText={setQuery}
-                placeholder="Search chats…"
+                placeholder={tr('sidebar.searchChats')}
                 placeholderTextColor={C.textFaint}
                 autoCorrect={false}
                 autoCapitalize="none"
                 editable={open}
-                accessibilityLabel="Search chats"
+                accessibilityLabel={tr('sidebar.searchChats')}
                 onFocus={() => {
                   searchFocusRef.current = true
                 }}
@@ -752,7 +800,7 @@ export function Sidebar({
                   onPress={() => setQuery('')}
                   hitSlop={8}
                   style={({ pressed }) => [s.clearBtn, pressed && s.iconBtnPressed]}
-                  accessibilityLabel="Clear search"
+                  accessibilityLabel={tr('sidebar.clearSearch')}
                 >
                   <Icon name="close" size={14} color={C.textFaint} />
                 </Pressable>
@@ -797,10 +845,10 @@ export function Sidebar({
             onNewChat()
             onClose()
           }}
-          accessibilityLabel="New chat"
+          accessibilityLabel={tr('sidebar.newChat')}
         >
           <Icon name="add" size={20} color={C.onAccent} />
-          <Text style={s.newChatText}>New chat</Text>
+          <Text style={s.newChatText}>{tr('sidebar.newChat')}</Text>
         </Pressable>
       </Animated.View>
 
@@ -808,29 +856,34 @@ export function Sidebar({
       {shownMenu ? (
         <View style={s.overlay} pointerEvents="box-none">
           <Animated.View style={[StyleSheet.absoluteFill, s.menuScrim, { opacity: menuAnim }]}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={closeDialogs} accessibilityLabel="Close menu" />
+            <Pressable style={StyleSheet.absoluteFill} onPress={closeDialogs} accessibilityLabel={tr('sidebar.closeMenu')} />
           </Animated.View>
           <Animated.View
             style={[s.menuCard, { left: menuLeft, top: menuTop, opacity: menuAnim, transform: [{ scale: menuScale }] }]}
           >
             <MenuRow
               icon="pin-outline"
-              label={menuPinned ? 'Unpin' : 'Pin'}
+              label={menuPinned ? tr('sidebar.unpin') : tr('sidebar.pin')}
               onPress={() => {
                 onPinToggle?.(shownMenu.chat.id)
                 closeDialogs()
               }}
             />
-            <MenuRow icon="pencil-outline" label="Rename" onPress={() => openRename(shownMenu.chat)} />
+            <MenuRow icon="pencil-outline" label={tr('sidebar.rename')} onPress={() => openRename(shownMenu.chat)} />
             <MenuRow
               icon="archive-outline"
-              label={menuArchived ? 'Unarchive' : 'Archive'}
+              label={menuArchived ? tr('sidebar.unarchive') : tr('sidebar.archive')}
               onPress={() => {
                 onArchiveToggle?.(shownMenu.chat.id)
                 closeDialogs()
               }}
             />
-            <MenuRow icon="trash-can-outline" label="Delete" danger onPress={() => openDelete(shownMenu.chat)} />
+            <MenuRow
+              icon="trash-can-outline"
+              label={tr('sidebar.delete')}
+              danger
+              onPress={() => openDelete(shownMenu.chat)}
+            />
           </Animated.View>
         </View>
       ) : null}
@@ -839,32 +892,32 @@ export function Sidebar({
       {shownRename ? (
         <View style={s.overlay}>
           <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: C.scrim, opacity: renameAnim }]}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={closeDialogs} accessibilityLabel="Cancel rename" />
+            <Pressable style={StyleSheet.absoluteFill} onPress={closeDialogs} accessibilityLabel={tr('sidebar.cancel')} />
           </Animated.View>
           <RAnimated.View style={renameKbPad}>
             <Animated.View style={[s.dialogCard, { opacity: renameAnim, transform: [{ scale: renameScale }] }]}>
-              <Text style={s.dialogTitle}>Rename chat</Text>
+              <Text style={s.dialogTitle}>{tr('sidebar.renameChatTitle')}</Text>
               <TextInput
-                style={s.renameInput}
+                style={s.dialogInput}
                 value={renameText}
                 onChangeText={setRenameText}
                 autoFocus
                 selectTextOnFocus
                 maxLength={200}
                 onSubmitEditing={() => void saveRename()}
-                accessibilityLabel="Chat name"
+                accessibilityLabel={tr('sidebar.chatName')}
               />
               {dialogError ? <Text style={s.dialogError}>{dialogError}</Text> : null}
               <View style={s.dialogButtons}>
                 <Pressable style={[s.dialogBtn, dialogBusy && s.dialogBtnBusy]} onPress={closeDialogs} disabled={dialogBusy}>
-                  <Text style={s.dialogBtnText}>Cancel</Text>
+                  <Text style={s.dialogBtnText}>{tr('sidebar.cancel')}</Text>
                 </Pressable>
                 <Pressable
                   style={[s.dialogBtnPrimary, (dialogBusy || !renameText.trim()) && s.dialogBtnBusy]}
                   onPress={() => void saveRename()}
                   disabled={dialogBusy || !renameText.trim()}
                 >
-                  <Text style={s.dialogBtnPrimaryText}>Save</Text>
+                  <Text style={s.dialogBtnPrimaryText}>{tr('sidebar.save')}</Text>
                 </Pressable>
               </View>
             </Animated.View>
@@ -876,24 +929,24 @@ export function Sidebar({
       {shownConfirm ? (
         <View style={s.overlay}>
           <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: C.scrim, opacity: confirmAnim }]}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={closeDialogs} accessibilityLabel="Cancel delete" />
+            <Pressable style={StyleSheet.absoluteFill} onPress={closeDialogs} accessibilityLabel={tr('sidebar.cancel')} />
           </Animated.View>
           <Animated.View style={[s.dialogCard, { opacity: confirmAnim, transform: [{ scale: confirmScale }] }]}>
-            <Text style={s.dialogTitle}>Delete this chat?</Text>
+            <Text style={s.dialogTitle}>{tr('sidebar.deleteChatTitle')}</Text>
             <Text style={s.dialogBody}>
-              “{shownConfirm.title}” is permanently removed from Moch.
+              {tr('sidebar.deleteChatBody', { title: shownConfirm.title })}
             </Text>
             {dialogError ? <Text style={s.dialogError}>{dialogError}</Text> : null}
             <View style={s.dialogButtons}>
               <Pressable style={[s.dialogBtn, dialogBusy && s.dialogBtnBusy]} onPress={closeDialogs} disabled={dialogBusy}>
-                <Text style={s.dialogBtnText}>Cancel</Text>
+                <Text style={s.dialogBtnText}>{tr('sidebar.cancel')}</Text>
               </Pressable>
               <Pressable
                 style={[s.dialogBtnDanger, dialogBusy && s.dialogBtnBusy]}
                 onPress={() => void runDelete()}
                 disabled={dialogBusy}
               >
-                <Text style={s.dialogBtnDangerText}>Delete</Text>
+                <Text style={s.dialogBtnDangerText}>{tr('sidebar.delete')}</Text>
               </Pressable>
             </View>
           </Animated.View>
@@ -988,7 +1041,7 @@ const RecentRow = React.memo(function RecentRow({
       onLongPress={(e) => onMenu(c, e)}
       delayLongPress={350}
       style={({ pressed }) => [s.recentRow, pressed && s.recentRowPressed]}
-      accessibilityLabel={`Open ${c.title}`}
+      accessibilityLabel={tr('sidebar.openChat', { title: c.title })}
     >
       <Text style={[s.recentTitle, c.active && s.recentTitleActive]} numberOfLines={1}>
         {c.title}
@@ -999,13 +1052,77 @@ const RecentRow = React.memo(function RecentRow({
         style={s.rowMenu}
         hitSlop={6}
         onPress={(e) => onMenu(c, e)}
-        accessibilityLabel={`Options for ${c.title}`}
+        accessibilityLabel={tr('sidebar.chatOptions', { title: c.title })}
       >
         <Icon name="ellipsis-horizontal" size={15} color={C.textFaint} />
       </Pressable>
     </Pressable>
   )
 })
+
+/**
+ * The drawer's dialog card language (title / input / body / buttons), shared
+ * by the chat dialogs and the project dialogs (ProjectList). One definition,
+ * so a second dialog style can never drift in.
+ */
+function makeDialogStyles() {
+  // `satisfies` (not a `: Type` annotation) keeps the literal types — a widened
+  // `string` for alignSelf/fontWeight leaks into StyleSheet.create and breaks
+  // every style in this sheet.
+  return {
+    dialogCard: {
+      width: '86%',
+      maxWidth: 400,
+      alignSelf: 'center',
+      backgroundColor: C.bgCard,
+      borderRadius: 16,
+      padding: 18,
+      gap: 12,
+    },
+    dialogTitle: { color: C.text, fontSize: 16, fontWeight: '700' },
+    dialogBody: { color: C.textDim, fontSize: 13.5 },
+    dialogError: { color: C.red, fontSize: 12.5 },
+    dialogInput: {
+      backgroundColor: C.inputBg,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: C.borderSoft,
+      color: C.text,
+      fontSize: 15,
+      paddingHorizontal: 12,
+      minHeight: 44,
+    },
+    dialogButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },
+    dialogBtn: {
+      minHeight: 40,
+      paddingHorizontal: 16,
+      borderRadius: 20,
+      justifyContent: 'center',
+      backgroundColor: C.bgHover,
+    },
+    dialogBtnBusy: { opacity: 0.5 },
+    dialogBtnText: { color: C.text, fontSize: 14.5, fontWeight: '600' },
+    dialogBtnPrimary: {
+      minHeight: 40,
+      paddingHorizontal: 18,
+      borderRadius: 20,
+      justifyContent: 'center',
+      backgroundColor: C.accent,
+    },
+    dialogBtnPrimaryText: { color: C.onAccent, fontSize: 14.5, fontWeight: '700' },
+    dialogBtnDanger: {
+      minHeight: 40,
+      paddingHorizontal: 18,
+      borderRadius: 20,
+      justifyContent: 'center',
+      backgroundColor: C.red,
+    },
+    dialogBtnDangerText: { color: '#FFFFFF', fontSize: 14.5, fontWeight: '700' },
+  } satisfies Record<string, ViewStyle | TextStyle>
+}
+
+/** Exported so ProjectList's dialogs reuse the exact same card/button styles. */
+export const makeDialogS = () => StyleSheet.create(makeDialogStyles())
 
 const makeS = () => StyleSheet.create({
   // Explicit stacking floor: the drawer's subtree must paint above the chat
@@ -1180,52 +1297,6 @@ const makeS = () => StyleSheet.create({
   menuRowPressed: { backgroundColor: C.bgHover },
   menuRowLabel: { color: C.text, fontSize: 15.5, flex: 1 },
 
-  dialogCard: {
-    width: '86%',
-    maxWidth: 400,
-    alignSelf: 'center',
-    backgroundColor: C.bgCard,
-    borderRadius: 16,
-    padding: 18,
-    gap: 12,
-  },
-  dialogTitle: { color: C.text, fontSize: 16, fontWeight: '700' },
-  dialogBody: { color: C.textDim, fontSize: 13.5 },
-  dialogError: { color: C.red, fontSize: 12.5 },
-  renameInput: {
-    backgroundColor: C.inputBg,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: C.borderSoft,
-    color: C.text,
-    fontSize: 15,
-    paddingHorizontal: 12,
-    minHeight: 44,
-  },
-  dialogButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },
-  dialogBtn: {
-    minHeight: 40,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    justifyContent: 'center',
-    backgroundColor: C.bgHover,
-  },
-  dialogBtnBusy: { opacity: 0.5 },
-  dialogBtnText: { color: C.text, fontSize: 14.5, fontWeight: '600' },
-  dialogBtnPrimary: {
-    minHeight: 40,
-    paddingHorizontal: 18,
-    borderRadius: 20,
-    justifyContent: 'center',
-    backgroundColor: C.accent,
-  },
-  dialogBtnPrimaryText: { color: C.onAccent, fontSize: 14.5, fontWeight: '700' },
-  dialogBtnDanger: {
-    minHeight: 40,
-    paddingHorizontal: 18,
-    borderRadius: 20,
-    justifyContent: 'center',
-    backgroundColor: C.red,
-  },
-  dialogBtnDangerText: { color: '#FFFFFF', fontSize: 14.5, fontWeight: '700' },
+  // Chat dialogs + project dialogs: one shared definition (makeDialogStyles).
+  ...makeDialogStyles(),
 })
