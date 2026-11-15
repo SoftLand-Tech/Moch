@@ -20,6 +20,8 @@ import { C, useStyles, setTheme, THEME_OPTIONS, themeId, type ThemeId } from '..
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { localeAtom, setLocale, tr } from '../../src/lib/strings'
 import { showAlert } from '../../src/components/AlertDialog'
+import { thinkerAtom, setThinker, stopOpencodeServer, type Thinker } from '../../src/lib/thinker'
+import { readAbout, saveAbout } from '../../src/lib/aboutMe'
 
 export default function Settings() {
   const s = useStyles(makeS)
@@ -284,6 +286,8 @@ function SettingsInner() {
   // two clipboard exports read the live array imperatively at press time.
   const msgCount = useStore(useMemo(() => computed(messages, (m) => m.length), []))
   const notifOn = useStore(notificationsEnabled)
+  const thinker = useStore(thinkerAtom)
+  const [aboutBusy, setAboutBusy] = React.useState(false)
 
   const stateColor = state === 'open' ? C.greenSoft : state === 'connecting' ? C.amber : C.red
   const stateLabel =
@@ -394,6 +398,59 @@ function SettingsInner() {
             label="Disconnect"
             danger
             onPress={() => { disconnect() }}
+          />
+        </Section>
+
+        <Section title="THINKER">
+          <Row
+            icon="sparkles-outline"
+            label={thinker === 'moch' ? 'Moch (hermes) — active' : 'OpenCode — active'}
+            sub={thinker === 'moch'
+              ? 'The full agent on this phone. Everything is available.'
+              : 'Free-model brain in the Linux guest. Bots, crew, automations and the agent browser are hidden.'}
+          />
+          <Divider />
+          <Row
+            icon="swap-horizontal-outline"
+            label="Switch thinker"
+            sub="Changes which brain answers new chats"
+            chevron
+            onPress={() => showAlert('Switch thinker', 'New chats use the other brain. Existing chats keep their own history. OpenCode needs the Linux guest installed and its server running.', [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'OpenCode',
+                onPress: () => { void (async () => {
+                  await setThinker('opencode')
+                  showAlert('OpenCode selected', 'Open a new chat — Moch will start the OpenCode server in the Linux guest. If it fails, install the guest under RUNTIME.')
+                })() },
+              },
+              {
+                text: 'Moch',
+                onPress: () => { void (async () => {
+                  await stopOpencodeServer()
+                  await setThinker('moch')
+                })() },
+              },
+            ])}
+          />
+        </Section>
+
+        <Section title="MEMORY">
+          <Row
+            icon="person-circle-outline"
+            label="About me"
+            sub="What Moch remembers about you (USER.md)"
+            chevron
+            onPress={() => { void (async () => {
+              if (aboutBusy) return
+              setAboutBusy(true)
+              try {
+                const entries = await readAbout()
+                showAlert('About me', entries.length ? entries.join('\n') : 'Nothing saved yet — finish onboarding or send a message and Moch will remember.', [{ text: 'OK' }])
+              } finally {
+                setAboutBusy(false)
+              }
+            })() }}
           />
         </Section>
 

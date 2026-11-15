@@ -1,25 +1,29 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { View, Text, StyleSheet, ActivityIndicator, Pressable } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { router, useFocusEffect } from 'expo-router'
+import { router } from 'expo-router'
 import { MochiStage } from '../src/components/Mascot'
-import { connectThisPhone, connect, connConfig, loadSavedConfig, type ConnConfig } from '../src/lib/gateway'
+import { connectThisPhone, connect, loadSavedConfig, type ConnConfig } from '../src/lib/gateway'
 import { getEmbeddedGateway } from '../src/lib/mochiRuntime'
 import { C, useStyles } from '../src/lib/theme'
+import { loadOnboarded, onboardedAtom } from '../src/lib/aboutMe'
+import { useStore } from '@nanostores/react'
 
 /**
- * Onboarding — local only (2026-11-15).
+ * Entry screen — local only (2026-11-15).
  *
- * This build has no remote pairing: the agent is the embedded runtime on this
- * device. The screen waits for the loopback gateway, dials it, then opens
- * chat. A saved config from the remote era may still be on disk; it is never
- * dialed, and a one-time notice names it so the user can forget it.
+ * Boots the embedded runtime and then either resumes chat (returning user) or
+ * starts the three-step onboarding: thinker → environment → about you.
+ *
+ * No remote pairing: a saved config from the remote era may still be on disk,
+ * but it is never dialed. A one-time notice names it so it can be forgotten.
  */
 export default function Onboarding() {
   const s = useStyles(makeS)
   const [phase, setPhase] = useState<'starting' | 'error'>('starting')
   const [detail, setDetail] = useState('')
   const [legacy, setLegacy] = useState<ConnConfig | null>(null)
+  const onboarded = useStore(onboardedAtom)
   const mounted = useRef(true)
 
   useEffect(() => {
@@ -29,6 +33,7 @@ export default function Onboarding() {
         if (mounted.current && c && !/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(c.host)) setLegacy(c)
       })
       .catch(() => {})
+    void loadOnboarded()
     return () => { mounted.current = false }
   }, [])
 
@@ -38,7 +43,9 @@ export default function Onboarding() {
     try {
       await connectThisPhone()
       if (!mounted.current) return
-      router.replace('/(tabs)/chat')
+      // Returning user → chat. First run → the three-step wizard.
+      if (onboardedAtom.get()) router.replace('/(tabs)/chat')
+      else router.replace('/onboarding/thinker')
     } catch (e) {
       if (!mounted.current) return
       setDetail(e instanceof Error ? e.message : String(e))
@@ -46,36 +53,19 @@ export default function Onboarding() {
     }
   }
 
-  useEffect(() => {
-    // Reached from the cfg branch's Stack after a successful boot? The layout
-    // already dialed the phone — this screen is only the pre-config boot
-    // surface, so hand straight to chat instead of dialing twice.
-    if (connConfig.get()) {
-      router.replace('/(tabs)/chat')
-      return
-    }
-    void openAgent()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // The layout's boot dial can land while this screen is already mounted (it
-  // renders inside the cfg-null branch). Follow it into chat; never leave the
-  // user staring at "Starting…" over a live connection.
-  useFocusEffect(
-    React.useCallback(() => {
-      if (connConfig.get()) router.replace('/(tabs)/chat')
-    }, []),
-  )
+  useEffect(() => { void openAgent() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const retry = async () => {
-    // A retry may follow a killed runtime: re-read its live host/token instead
-    // of trusting the failed attempt's snapshot.
     setPhase('starting')
     setDetail('')
     const gw = await getEmbeddedGateway().catch(() => null)
     if (gw?.running && gw.ready && gw.port && gw.token) {
       try {
         await connect({ host: `127.0.0.1:${gw.port}`, token: gw.token, tls: false, name: 'This phone' })
-        if (mounted.current) router.replace('/(tabs)/chat')
+        if (mounted.current) {
+          if (onboardedAtom.get()) router.replace('/(tabs)/chat')
+          else router.replace('/onboarding/thinker')
+        }
         return
       } catch (e) {
         setDetail(e instanceof Error ? e.message : String(e))

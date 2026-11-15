@@ -31,6 +31,8 @@ import { syncBackendIdentity } from '../src/lib/backendIdentity'
 import { pruneRelayMedia } from '../src/lib/mediaCache'
 import { C, loadTheme, useStyles } from '../src/lib/theme'
 import { loadActiveBot } from '../src/lib/fleet'
+import { loadThinker } from '../src/lib/thinker'
+import { loadOnboarded } from '../src/lib/aboutMe'
 
 // Keep the native splash up until the animated overlay is committed on top
 // of the app — global scope, un-awaited, per the SDK 57 docs.
@@ -90,6 +92,8 @@ export default function RootLayout() {
     const offDial = onDialConfig(syncBackendIdentity)
     void loadTheme()
     void loadActiveBot()
+    void loadThinker()
+    void loadOnboarded()
     // Captured, not fired-and-forgotten: the boot IIFE below awaits this
     // BEFORE its first dial. initPush restores the saved push token into the
     // atom, and dial→wsUrl() reads it — without the await, the first dial of
@@ -331,6 +335,9 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="bot" options={{ headerShown: false, presentation: 'modal' }} />
         <Stack.Screen name="setup" options={{ headerShown: false, presentation: 'modal' }} />
+        <Stack.Screen name="onboarding/thinker" options={{ headerShown: false }} />
+        <Stack.Screen name="onboarding/environment" options={{ headerShown: false }} />
+        <Stack.Screen name="onboarding/about" options={{ headerShown: false }} />
       </Stack>
       {!online && state !== 'idle' && bootStruggling ? (
         <View style={s.overlay}>

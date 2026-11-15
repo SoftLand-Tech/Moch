@@ -298,6 +298,20 @@ def _run_server(port: int) -> None:
         except Exception:
             traceback.print_exc()
 
+        # ONBOARDING-V2: local-only surfaces, registered regardless of the
+        # fleet flag — the provider-credential refresh (fixes "changed the key
+        # and nothing happened until restart"), the About-me memory writer, and
+        # the OpenCode thinker bridge. Each is idempotent and never fatal.
+        try:
+            from moch import rpc_thinker as _rpc_thinker
+            _rpc_thinker.install(_tg_server)
+            from moch import rpc_about as _rpc_about
+            _rpc_about.install(_tg_server)
+            from moch import opencode_server as _oc
+            _oc.install(_tg_server)
+        except Exception:
+            traceback.print_exc()
+
         # hermes' in-process cron ticker (scheduled automations) only arms
         # under HERMES_DESKTOP=1 — the embedded serve process is exactly the
         # desktop-shell situation (a serve backend with no external
