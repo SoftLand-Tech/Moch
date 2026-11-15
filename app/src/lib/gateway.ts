@@ -578,7 +578,7 @@ async function dial(c: ConnConfig, opts?: { isRetry?: boolean; plaintextConfirme
   const v = validateConfig(c)
   // C-05 (#95): a plaintext dial to a PUBLIC host is never silent — the
   // token rides the dial URL, so ws:// hands it to every network hop. Only
-  // a config the user explicitly confirmed (PairForm / deep-link dialog,
+  // a config the user explicitly confirmed (the retired pairing dialog,
   // remembered per-server) may do it. Private hosts (loopback embedded
   // runtime, LAN pairing) are the documented plaintext flow: unaffected.
   // Refusal happens BEFORE any state/persistence so no reconnect timer is
@@ -706,6 +706,31 @@ export async function connect(c: ConnConfig, opts?: { plaintextConfirmed?: boole
   // upsertServer) or the explicit opts (one-shot); dial() enforces it.
   await dial(c, opts)
 }
+
+/**
+ * Local-only boot (2026-11-15): the phone app no longer pairs to computers.
+ * Wait for the embedded runtime's loopback gateway and dial it. Chaquopy's
+ * first boot extracts CPython + the vendored tree, so this polls instead of
+ * assuming the gateway is up on the first frame; the caller renders a
+ * "Starting your agent" surface meanwhile.
+ */
+export async function connectThisPhone(opts?: { timeoutMs?: number; pollMs?: number }): Promise<void> {
+  const timeoutMs = opts?.timeoutMs ?? 180_000
+  const pollMs = opts?.pollMs ?? 1_000
+  const deadline = Date.now() + timeoutMs
+  let lastError = ''
+  while (Date.now() < deadline) {
+    const gw = await getEmbeddedGateway().catch(() => null)
+    if (gw?.running && gw.ready && gw.port && gw.token) {
+      await connect({ host: `127.0.0.1:${gw.port}`, token: gw.token, tls: false, name: 'This phone' })
+      return
+    }
+    if (gw?.error) lastError = gw.error
+    await new Promise<void>((resolve) => setTimeout(resolve, pollMs))
+  }
+  throw new Error(lastError || 'The on-phone agent is still starting — try again in a moment.')
+}
+
 
 export function disconnect() {
   manualClose = true

@@ -9,9 +9,7 @@ import * as Clipboard from 'expo-clipboard'
 import Constants from 'expo-constants'
 import * as Haptics from 'expo-haptics'
 import { router } from 'expo-router'
-import { connConfig, connectionState, gatewayError, disconnect, retryNow, redactedUrl,
-  servers as serversStore, activeServerId, switchToServer, removeServer, forgetActiveServer,
-  mostRecentServer, type SavedServer } from '../../src/lib/gateway'
+import { connConfig, connectionState, gatewayError, disconnect, retryNow, redactedUrl } from '../../src/lib/gateway'
 import { activeSession, messages } from '../../src/lib/chat'
 import { diagLog, logText } from '../../src/lib/log'
 import {
@@ -286,31 +284,17 @@ function SettingsInner() {
   // two clipboard exports read the live array imperatively at press time.
   const msgCount = useStore(useMemo(() => computed(messages, (m) => m.length), []))
   const notifOn = useStore(notificationsEnabled)
-  const savedServers = useStore(serversStore)
-  const activeId = useStore(activeServerId)
 
   const stateColor = state === 'open' ? C.greenSoft : state === 'connecting' ? C.amber : C.red
   const stateLabel =
     state === 'open' ? 'Connected' : state === 'connecting' ? 'Connecting…'
     : state === 'error' ? 'Connection error' : 'Offline'
 
-  const forgetServer = async (sv: SavedServer) => {
-    const remaining = await removeServer(sv.id)
-    if (activeId === sv.id || !connConfig.get()) {
-      const next = mostRecentServer(remaining)
-      if (next) {
-        try { await switchToServer(next.id); return } catch {}
-      }
-      router.replace('/')
-    }
-  }
-
   const copyDiagnostics = async () => {
     const text = [
       // #66 / BUG-119: the real installed build (was a hardcoded "Moch v1.0").
       `Moch v${appVersion()} (${appBuild()})`,
       `Server: ${cfg ? redactedUrl(cfg) : '—'}`,
-      `Computers saved: ${savedServers.length}`,
       `State: ${state}${err ? ` (${err.slice(0, 200)})` : ''}`,
       `Session: ${sid ?? '—'} · messages: ${msgCount}`,
       ``,
@@ -328,24 +312,6 @@ function SettingsInner() {
     const clipped = text.length > 50000
     await Clipboard.setStringAsync(text.slice(0, 50000))
     showAlert('Copied', clipped ? 'Copied — long transcripts are capped at 50,000 characters.' : 'Transcript copied to clipboard.')
-  }
-
-  const forgetCurrent = () => {
-    showAlert('Forget this computer?', 'Removes the current computer from this device. Others stay saved.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Forget', style: 'destructive', onPress: async () => {
-        // BUG-034: tear the socket down BEFORE forgetting — the old flow
-        // left a live 'open' connection to the machine it just revoked
-        // (green "Connected" hero, its events still streaming in).
-        disconnect()
-        const remaining = await forgetActiveServer()
-        const next = mostRecentServer(remaining)
-        if (next) {
-          try { await switchToServer(next.id); return } catch {}
-        }
-        router.replace('/')
-      } },
-    ])
   }
 
   return (
@@ -410,52 +376,11 @@ function SettingsInner() {
           />
         </Section>
 
-        <Section title="COMPUTERS">
-          {savedServers.length === 0 ? (
-            <Row icon="laptop-outline" label={cfg?.host ?? '—'} sub="Current session — pair to remember it" chevron />
-          ) : (
-            savedServers.slice().sort((a, b) => b.lastUsedAt - a.lastUsedAt).map((sv, i) => {
-              const active = sv.id === activeId
-              return (
-                <React.Fragment key={sv.id}>
-                  {i > 0 ? <Divider /> : null}
-                  <View style={s.serverRow}>
-                    <Pressable
-                      style={({ pressed }) => [s.serverMain, pressed && s.rowPressed]}
-                      disabled={active}
-                      onPress={() => { void switchToServer(sv.id).catch((e) => showAlert('Switch failed', e instanceof Error ? e.message : String(e))) }}
-                      accessibilityLabel={active ? `Connected to ${sv.name}` : `Switch to ${sv.name}`}
-                    >
-                      <View style={s.serverLine}>
-                        <View style={[s.miniDot, active && { backgroundColor: C.greenSoft }]} />
-                        <Text style={s.rowLabel} numberOfLines={1}>{sv.name}</Text>
-                        {active ? <Text style={s.activeTag}>connected</Text> : null}
-                      </View>
-                      <Text style={s.rowSub} numberOfLines={1}>{sv.tls ? 'WSS' : 'WS'} · {sv.host}</Text>
-                    </Pressable>
-                    <Pressable
-                      style={({ pressed }) => [s.serverForget, pressed && s.rowPressed]}
-                      hitSlop={8}
-                      onPress={() => showAlert('Forget this computer?', `Removes ${sv.name} from this device.`, [
-                        { text: 'Cancel', style: 'cancel' },
-                        { text: 'Forget', style: 'destructive', onPress: () => { void forgetServer(sv) } },
-                      ])}
-                      accessibilityLabel={`Forget ${sv.name}`}
-                    >
-                      <Icon name="trash-outline" size={16} color={C.red} />
-                    </Pressable>
-                  </View>
-                </React.Fragment>
-              )
-            })
-          )}
-          <Divider />
+        <Section title="THIS PHONE">
           <Row
-            icon="add-circle-outline"
-            label="Add computer"
-            sub="Pair with a computer — scan its pairing QR code"
-            chevron
-            onPress={() => router.push('/add-computer')}
+            icon="phone-portrait-outline"
+            label="Local agent only"
+            sub="This build runs the agent on your phone — no remote pairing"
           />
           <Divider />
           <Row
@@ -469,13 +394,6 @@ function SettingsInner() {
             label="Disconnect"
             danger
             onPress={() => { disconnect() }}
-          />
-          <Row
-            icon="trash-outline"
-            label="Forget this computer"
-            sub="Others stay saved"
-            danger
-            onPress={forgetCurrent}
           />
         </Section>
 
@@ -521,7 +439,7 @@ function SettingsInner() {
           <Row
             icon="information-circle-outline"
             label={`Moch v${appVersion()} (${appBuild()})`}
-            sub="Mobile client for your self-hosted Mochi agent. Pair from the Add computer screen or your PC's pairing tool."
+            sub="Local agent on this phone — embedded runtime, your data, no pairing."
             disabled
           />
         </Section>
