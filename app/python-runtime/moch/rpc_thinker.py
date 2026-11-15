@@ -79,13 +79,20 @@ def _refresh_agent(tg_server, sid: str, session: dict, agent, slug: str) -> tupl
                 "display_provider": provider,
             }
             return True, "deferred (turn running)"
-        from tui_gateway import prompt_turn
+        # The switch helper lives on the server namespace (bound module); calling
+        # the split module directly would use ITS globals, not server.py's.
+        apply_switch = getattr(tg_server, "_apply_model_switch", None)
+        if apply_switch is None:
+            from tui_gateway import prompt_turn
 
-        prompt_turn._apply_model_switch(sid, session, raw, confirm_expensive_model=True)
+            apply_switch = getattr(prompt_turn, "_apply_model_switch", None)
+        if apply_switch is None:
+            return False, "no switch helper"
+        apply_switch(sid, session, raw, confirm_expensive_model=True)
         with contextlib.suppress(Exception):
-            from tui_gateway import methods_config_set
-
-            methods_config_set._emit_session_info(sid, session)
+            emit = getattr(tg_server, "_emit_session_info", None)
+            if emit is not None:
+                emit(sid, session)
         return True, "rebuilt"
     except Exception as exc:  # noqa: BLE001 — a credential refresh must never break the RPC
         return False, f"{type(exc).__name__}: {exc}"
