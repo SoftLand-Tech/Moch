@@ -196,6 +196,51 @@ export function rosterRows(
 }
 
 /**
+ * Fill in what `profiles.list` cannot tell us from the session list the drawer
+ * already holds.
+ *
+ * `fleet.ts` maps only `canonical_session` (id / title / message count), so a
+ * roster row arrives without a preview and often without an age. The stored
+ * conversation rows DO carry both, so this overlays each profile's newest row:
+ * preview when the roster had none, and the newer of the two timestamps.
+ * Pure and idempotent — a row with its own preview/age wins.
+ */
+export interface RosterSessionInput {
+  id: string
+  profile?: string
+  preview?: string
+  started_at?: number
+  last_active?: number
+}
+
+export function withSessionPreviews(
+  rows: readonly RosterRow[],
+  sessions: readonly RosterSessionInput[] | null | undefined,
+): RosterRow[] {
+  if (!sessions?.length) return [...rows]
+  // Newest row per profile (the server orders by last activity, but the
+  // fallback rows are appended locally — take the max explicitly).
+  const newest = new Map<string, { ts: number; preview: string }>()
+  for (const s of sessions) {
+    const profile = s.profile || DEFAULT_PROFILE
+    const ts = toMs(s.last_active) || toMs(s.started_at)
+    const prev = newest.get(profile)
+    if (!prev || ts >= prev.ts) {
+      newest.set(profile, { ts, preview: str(s.preview) })
+    }
+  }
+  return rows.map((row) => {
+    const hit = newest.get(row.profile)
+    if (!hit) return row
+    return {
+      ...row,
+      lastActiveTs: Math.max(row.lastActiveTs, hit.ts),
+      preview: row.preview || botPreview(hit.preview),
+    }
+  })
+}
+
+/**
  * The row's status dot. Reuses the drawer's single dot policy (`rowStatus`):
  * an attention state (`input` / `done` / `error`) outranks the busy pulse, and
  * an unanswered question outranks everything.

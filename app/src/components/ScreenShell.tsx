@@ -35,6 +35,7 @@ import {
   activeProjectIdAtom,
   buildSessionOwnerIndex,
   identityAtom,
+  inboxNavItem,
   loadIdentity,
   projectIdForSession,
   projectSessionIdsAtom,
@@ -264,7 +265,8 @@ export function ScreenShell({
     void locale
     return [
       { key: 'chat', label: tr('sidebar.chats'), icon: 'chatbubble-outline' },
-      { key: 'inbox', label: tr('sidebar.inbox'), icon: 'mail-unread-outline', badge: inboxN },
+      // Slice C's row definition (workspace.inboxNavItem) — one owner.
+      inboxNavItem(inboxN),
       { key: 'browser', label: tr('sidebar.browser'), icon: 'globe-outline' },
       { key: 'terminal', label: tr('sidebar.terminal'), icon: 'terminal-outline' },
       { key: 'automations', label: tr('sidebar.automations'), icon: 'timer-outline', mochis: runningAuto },
@@ -421,15 +423,14 @@ export function ScreenShell({
   // via switchToSession. The extra navigate is the belt-and-braces the other
   // hand-offs use, so the tab is already up while the RPC runs.
   //
-  // `key === ''` is the DEFAULT agent: it has no `Bot Chat` (the canonical
-  // chat is a per-bot artifact, and minting one titled `Bot Chat` on
-  // `default` would put a second forever-chat beside the assistant) — so its
-  // row starts an ordinary chat instead.
+  // `key === ''` is the DEFAULT agent (the row reads "Moch"): it has no
+  // `Bot Chat` — the canonical chat is a per-bot artifact, and minting one on
+  // `default` would put a second forever-chat beside the assistant — so its
+  // row just returns to the chat the user was in.
   const openBot = useCallback(
     (key: string) => {
       if (!key) {
         router.navigate('/(tabs)/chat')
-        void newChat().catch(() => {})
         return
       }
       router.navigate('/(tabs)/chat')

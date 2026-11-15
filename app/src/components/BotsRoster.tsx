@@ -29,7 +29,6 @@ import { busyStoredKey, pendingStoredIds } from '../lib/chat'
 import { sessionRows } from '../lib/sessionList'
 import {
   activeBotAtom,
-  fleetProfiles,
   refreshFleet,
   setActiveBot,
   type FleetProfile,
@@ -42,6 +41,7 @@ import {
   botTintIndex,
   relativeAge,
   rosterRows,
+  withSessionPreviews,
   type RosterProfileLike,
   type RosterRow,
 } from '../lib/botRosterMeta'
@@ -57,23 +57,33 @@ export interface BotsRosterProps {
   onOpenBot: (key: string) => void
   /** Open the create flow (the Fleet screen). */
   onNewBot: () => void
+  /**
+   * Close the drawer before navigating (the Edit action pushes `/bot`; leaving
+   * the panel open would keep the drawer over the screen it just opened).
+   */
+  onCloseDrawer?: () => void
   /** False when the drawer is closed: drops any open sheet/dialog. */
   active?: boolean
 }
 
-/** Menu sheet state for one row. `armed` is the two-tap delete confirm. */
+/** Menu sheet state for one row. The two-tap delete confirm lives in `armed`. */
 interface SheetState {
   row: RosterRow
-  anchored: boolean
 }
 
-export function BotsRoster({ profiles, onOpenBot, onNewBot, active = true }: BotsRosterProps) {
+export function BotsRoster({ profiles, onOpenBot, onNewBot, onCloseDrawer, active = true }: BotsRosterProps) {
   const s = useStyles(makeS)
   // Locale switches must re-render the roster's own copy.
   useStore(localeAtom)
   const router = useRouter()
 
-  const rows = useMemo(() => rosterRows(profiles), [profiles])
+  const sessions = useStore(sessionRows)
+  // Rows: the roster overlaid with what the session list knows (preview/age),
+  // since `profiles.list` carries no preview for a bot's Bot Chat.
+  const rows = useMemo(
+    () => withSessionPreviews(rosterRows(profiles), sessions),
+    [profiles, sessions],
+  )
 
   // Per-bot status: every session id we can attribute to a profile, then the
   // drawer's single dot policy (an ask beats busy beats done/error).
@@ -82,7 +92,6 @@ export function BotsRoster({ profiles, onOpenBot, onNewBot, active = true }: Bot
   const attention = useStore(attentionById)
   const pendingList = useStore(pendingStoredIds)
   const pending = useMemo(() => new Set(pendingList), [pendingList])
-  const sessions = useStore(sessionRows)
   const myActiveBot = useStore(activeBotAtom)
   const idsByProfile = useMemo(() => {
     const map = new Map<string, string[]>()
@@ -118,7 +127,7 @@ export function BotsRoster({ profiles, onOpenBot, onNewBot, active = true }: Bot
   const openSheet = (row: RosterRow) => {
     setArmed(false)
     setError(null)
-    setSheet({ row, anchored: true })
+    setSheet({ row })
   }
 
   const openChat = (row: RosterRow) => {
@@ -128,6 +137,7 @@ export function BotsRoster({ profiles, onOpenBot, onNewBot, active = true }: Bot
 
   const editBot = (row: RosterRow) => {
     closeSheet()
+    onCloseDrawer?.()
     router.push({ pathname: '/bot', params: { name: row.profile } } as never)
   }
 
@@ -186,7 +196,11 @@ export function BotsRoster({ profiles, onOpenBot, onNewBot, active = true }: Bot
           ]
           const status = botStatusOf(row, ids, busy, attention, pending)
           const age = relativeAge(row.lastActiveTs)
-          const on = row.isDefault ? myActiveBot == null : myActiveBot === row.profile
+          // Highlight the bot whose identity new chats currently take. The
+          // default agent is never highlighted: `activeBot == null` is its
+          // resting state, so a permanent highlight on row 1 read as a
+          // selection the user never made.
+          const on = !row.isDefault && myActiveBot === row.profile
           const name = row.name
           const subtitle = row.preview
             || row.description
@@ -251,9 +265,11 @@ export function BotsRoster({ profiles, onOpenBot, onNewBot, active = true }: Bot
           />
           <View style={s.sheet}>
             <Text style={s.sheetTitle} numberOfLines={1}>{sheet.row.name}</Text>
+            {/* The default agent has no `Bot Chat` of its own, so its row says
+                "Chat" (the plain surface) instead of promising a Bot Chat. */}
             <SheetRow
               icon="chat-outline"
-              label={tr('bots.menu.open')}
+              label={sheet.row.isDefault ? tr('sidebar.chats') : tr('bots.menu.open')}
               onPress={() => openChat(sheet.row)}
             />
             {sheet.row.isDefault ? null : (

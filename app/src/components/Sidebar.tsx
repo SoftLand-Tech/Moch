@@ -803,6 +803,7 @@ export function Sidebar({
               onNewBot?.()
               onClose()
             }}
+            onCloseDrawer={onClose}
             active={open}
           />
         ) : null}
@@ -868,7 +869,9 @@ export function Sidebar({
           <View style={{ flex: 1 }} />
         ) : null}
 
-        {footer}
+        {/* The pending-questions note counts CHATS waiting on you; in Bots
+            mode the drawer shows no chats, so it would be unexplainable. */}
+        {identity === 'sessions' ? footer : null}
 
         {/* Bottom-docked nav (Settings) + primary action, pinned like
             ChatGPT's blue button at the panel's bottom edge. */}

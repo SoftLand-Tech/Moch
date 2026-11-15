@@ -263,6 +263,27 @@ function normalizePath(raw: string | null | undefined): string {
   return p
 }
 
+// ── Inbox nav row (contract merge point) ────────────────────────────────────
+// Slice C owns the Inbox body; the drawer row lives here so both slices agree
+// on one definition and ScreenShell just spreads it into `topNav`.
+export interface InboxNavItem {
+  key: 'inbox'
+  label: string
+  icon: 'mail-unread-outline'
+  badge?: number
+}
+
+/** The drawer's Inbox row. Badge only when something actually needs you. */
+export function inboxNavItem(count: number): InboxNavItem {
+  const n = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0
+  return {
+    key: 'inbox',
+    label: tr('sidebar.inbox'),
+    icon: 'mail-unread-outline',
+    ...(n > 0 ? { badge: n } : {}),
+  }
+}
+
 // ── Project mutations (the drawer's project sheet) ──────────────────────────
 // Each throws on failure so the dialog can render the reason (Alert.alert is a
 // web no-op) and refreshes the tree on success so the counts stay honest.
