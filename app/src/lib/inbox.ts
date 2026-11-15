@@ -234,7 +234,7 @@ let lastSig = ''
 function pendingSignature(map: Record<string, PendingRequest[]>): string {
   return Object.keys(map)
     .sort()
-    .map((id) => `${id}:${map[id].map((r) => r.id + r.method).join(',')}`)
+    .map((id) => `${id}:${map[id].map((r) => `${r.method}/${r.id}`).join(',')}`)
     .join('|')
 }
 

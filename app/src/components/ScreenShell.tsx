@@ -63,6 +63,9 @@ import { loadCatalog } from '../lib/slash'
 import { loadLastActive, loadSessions, lastActiveByStoredId, lastActiveFor, patchRowTitle, refreshRunningSessions, sessionRows, toMs } from '../lib/sessionList'
 import { forgetChatMarks, loadChatMarks, toggleArchive, togglePin } from '../lib/chatListState'
 import { inboxCount } from '../lib/inbox'
+import { openBotChat } from '../lib/botChat'
+import { fleetProfiles, refreshFleet } from '../lib/fleet'
+import { showAlert } from './AlertDialog'
 
 /**
  * ChatGPT-style shell: a compact top bar with a hamburger, the screen title,
@@ -217,6 +220,9 @@ export function ScreenShell({
   const identity = useStore(identityAtom)
   const projects = useStore(projectsAtom)
   const activeProjectId = useStore(activeProjectIdAtom)
+  // Bots mode's roster: `profiles.list` rows (the Fleet screen keeps this warm;
+  // the drawer refreshes it on open).
+  const profiles = useStore(fleetProfiles)
   // Membership map from projects.tree — session.list rows carry no cwd or
   // project id on the current gateway, so this is what makes the filter real.
   const projectSessionIds = useStore(projectSessionIdsAtom)
@@ -289,10 +295,10 @@ export function ScreenShell({
     const isBotRow = (profile?: string) => !!profile && profile !== 'default'
 
     // UI-1 project filter: only when a project is selected. Rows that carry
-    // the project id filter on it; rows without one fall back to the folder
-    // map (`projectForCwd`); rows with NO metadata at all are never hidden —
-    // an old row disappearing because the client couldn't classify it reads
-    // as data loss, not as a filter.
+    // the project id filter on it; rows without one resolve through the
+    // tree's membership map (or the folder map on `cwd`); rows with NO
+    // metadata at all are never hidden — an old row disappearing because the
+    // client couldn't classify it reads as data loss, not as a filter.
     // A selection that is no longer in the tree (archived on another device)
     // is not a filter either: it would blank the whole list.
     const selected = activeProjectId == null ? null : projects.find((p) => p.id === activeProjectId) ?? null
@@ -313,7 +319,7 @@ export function ScreenShell({
       .filter((r) => (identity === 'bots' ? isBotRow(r.profile) : !isBotRow(r.profile)))
       .filter(inProject)
       .map((r) => {
-      const rawTitle = r.title || r.preview?.slice(0, 60) || 'Untitled'
+      const rawTitle = r.title || r.preview?.slice(0, 60) || tr('sidebar.untitled')
       // BUG-112: a row from a bot profile identifies itself in the drawer even
       // when its title doesn't (chats started while a bot was active are
       // auto-titled). Fleet-created chats already carry "Bot · <name>", so the
@@ -408,6 +414,36 @@ export function ScreenShell({
     },
     [router],
   )
+
+  // ── Bots mode: open a bot's canonical Bot Chat ───────────────────────────
+  // `openBotChat` owns the whole identity story (exact-title lookup, create-
+  // if-absent, single-flight, adopt-on-race) and switches the screen itself
+  // via switchToSession. The extra navigate is the belt-and-braces the other
+  // hand-offs use, so the tab is already up while the RPC runs.
+  //
+  // `key === ''` is the DEFAULT agent: it has no `Bot Chat` (the canonical
+  // chat is a per-bot artifact, and minting one titled `Bot Chat` on
+  // `default` would put a second forever-chat beside the assistant) — so its
+  // row starts an ordinary chat instead.
+  const openBot = useCallback(
+    (key: string) => {
+      if (!key) {
+        router.navigate('/(tabs)/chat')
+        void newChat().catch(() => {})
+        return
+      }
+      router.navigate('/(tabs)/chat')
+      void openBotChat(key).catch((e) => {
+        // Same failure language as app/bot.tsx's hand-off.
+        showAlert(tr('bot.chat.failed', { why: e instanceof Error ? e.message : String(e) }))
+      })
+    },
+    [router],
+  )
+
+  const newBot = useCallback(() => {
+    router.navigate('/(tabs)/fleet' as never)
+  }, [router])
 
   // ── Per-chat actions (surfaced by the sidebar's long-press / ⋯ menu) ──────
   // Each returns an error message for the dialog, or null on success —
@@ -618,6 +654,12 @@ export function ScreenShell({
           // turn started on another device marks its row the moment the
           // drawer opens, not at the next 60s tick.
           void refreshRunningSessions()
+          // UI-1: project counts/labels are server state too (created on the
+          // desktop, archived elsewhere) — re-read them with the list.
+          void refreshProjects()
+          // Bots mode's roster: a bot created on another device, or a
+          // canonical `Bot Chat` that just appeared, must be there on open.
+          void refreshFleet()
         }}
         onClose={() => setOpen(false)}
         onRequestOpen={() => setOpen(true)}
@@ -629,6 +671,9 @@ export function ScreenShell({
         activeProjectId={activeProjectId}
         onProject={handleProject}
         onNewProject={handleNewProject}
+        profiles={profiles}
+        onOpenBot={openBot}
+        onNewBot={newBot}
         recent={recent}
         onNav={go}
         onNewChat={startNew}
@@ -642,7 +687,9 @@ export function ScreenShell({
             <View style={s.footerNote}>
               <Icon name="alert-circle" size={14} color={C.amber} />
               <Text style={s.footerText}>
-                {pendingN} conversation{pendingN > 1 ? 's' : ''} waiting on you
+                {pendingN > 1
+                  ? tr('sidebar.pending.many', { n: pendingN })
+                  : tr('sidebar.pending.one')}
               </Text>
             </View>
           ) : null

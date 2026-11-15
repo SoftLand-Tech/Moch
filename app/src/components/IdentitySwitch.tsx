@@ -3,9 +3,10 @@
  *
  * Two surfaces over one gateway: Sessions is every conversation, Bots is the
  * profile roster. The selected half takes the accent wash (`C.accentSoft`)
- * rather than a hard accent fill: the drawer's accent is reserved for the
- * primary New-chat action, and a full orange pill at the top of the panel
- * competed with it. Text/icon go `C.accent` on the wash, `C.textDim` off it.
+ * with `C.text` ink rather than a hard accent fill: the drawer's accent is
+ * reserved for the primary New-chat action, and a full orange pill at the top
+ * of the panel competed with it. `C.text` (not `C.accent`) keeps the label at
+ * full contrast on the wash in both themes.
  *
  * 44dp minimum targets (touch floor) and explicit accessibility labels: the
  * visible copy is localized, so the label is the localized word plus the mode.
@@ -77,5 +78,5 @@ const makeS = () => StyleSheet.create({
   segOn: { backgroundColor: C.accentSoft },
   segPressed: { backgroundColor: C.bgHover },
   label: { color: C.textDim, fontSize: 14, fontWeight: '600' },
-  labelOn: { color: C.accent, fontWeight: '700' },
+  labelOn: { color: C.text, fontWeight: '700' },
 })

@@ -56,7 +56,12 @@ export interface ProjectListProps {
 function usePopIn(visible: boolean, inMs = 140) {
   const anim = useRef(new Animated.Value(0)).current
   useEffect(() => {
-    if (!visible) return
+    if (!visible) {
+      // Park at 0 so the NEXT open starts from a hidden overlay instead of
+      // flashing the previous session's end state for one frame.
+      anim.setValue(0)
+      return
+    }
     anim.setValue(0)
     const a = Animated.timing(anim, {
       toValue: 1,
@@ -232,7 +237,7 @@ export function ProjectList({
 
       {rows.length ? (
         // Bounded: a machine with many projects must not push the chat list
-        // (and search) off the panel. Four rows tall, then it scrolls.
+        // (and search) off the panel. Three rows tall, then it scrolls.
         <ScrollView
           style={s.rowsScroll}
           contentContainerStyle={s.rowsContent}
@@ -460,7 +465,7 @@ const makeS = () => StyleSheet.create({
   },
   rowOn: { backgroundColor: C.accentSoft },
   rowPressed: { backgroundColor: C.bgHover },
-  rowsScroll: { maxHeight: 4 * 44 },
+  rowsScroll: { maxHeight: 3 * 44 },
   rowsContent: { paddingBottom: 2 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   name: { flex: 1, color: C.textDim, fontSize: 14.5, fontWeight: '500' },

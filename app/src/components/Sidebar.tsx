@@ -28,8 +28,10 @@ import { C, S, useStyles, useShape } from '../lib/theme'
 import { useReduceMotion } from './useReduceMotion'
 import { IdentitySwitch } from './IdentitySwitch'
 import { ProjectList } from './ProjectList'
+import { BotsRoster } from './BotsRoster'
 import { tr, localeAtom } from '../lib/strings'
 import type { Identity, ProjectRow } from '../lib/workspace'
+import type { FleetProfile } from '../lib/fleet'
 
 export interface NavItem {
   key: string
@@ -102,6 +104,15 @@ interface Props {
   onProject: (id: string | null) => void
   onNewProject: () => void
   onProjectMenu?: (p: ProjectRow) => void
+  /** Bots mode roster source (`profiles.list` via `fleetProfiles`). */
+  profiles?: readonly FleetProfile[]
+  /**
+   * Open a bot's canonical Bot Chat. `''` = the default agent (an ordinary
+   * chat — `default` has no `Bot Chat` of its own).
+   */
+  onOpenBot?: (key: string) => void
+  /** Open the bot create flow (the Fleet screen). */
+  onNewBot?: () => void
   recent: RecentChat[]
   onNav: (key: string) => void
   onNewChat: () => void
@@ -258,6 +269,9 @@ export function Sidebar({
   onProject,
   onNewProject,
   onProjectMenu,
+  profiles,
+  onOpenBot,
+  onNewBot,
   recent,
   onNav,
   onNewChat,
@@ -403,7 +417,11 @@ export function Sidebar({
         {item.mochis ? (
           <View
             style={s.mochiRunRow}
-            accessibilityLabel={`${item.mochis} running automation${item.mochis === 1 ? '' : 's'}`}
+            accessibilityLabel={
+              item.mochis === 1
+                ? tr('sidebar.running.one')
+                : tr('sidebar.running.many', { n: item.mochis })
+            }
           >
             {Array.from({ length: Math.min(item.mochis, 3) }).map((_, i) => (
               <Image key={i} source={MOCHI_RUN[i]} style={[s.mochiMini, i > 0 && s.mochiMiniOverlap]} />
@@ -760,8 +778,9 @@ export function Sidebar({
 
         <View>{renderNavRows(nav)}</View>
 
-        {/* Sessions mode owns the project rail; Bots mode leaves this slot
-            empty — the roster body is slice D's surface. */}
+        {/* Sessions mode owns the project rail; Bots mode replaces that whole
+            body with the roster (one row per bot, no per-bot chat list — a
+            bot IS one canonical `Bot Chat`). */}
         {identity === 'sessions' ? (
           <ProjectList
             projects={projects}
@@ -773,7 +792,22 @@ export function Sidebar({
           />
         ) : null}
 
-        {recent.length > 0 ? (
+        {identity === 'bots' ? (
+          <BotsRoster
+            profiles={profiles ?? []}
+            onOpenBot={(key) => {
+              onOpenBot?.(key)
+              onClose()
+            }}
+            onNewBot={() => {
+              onNewBot?.()
+              onClose()
+            }}
+            active={open}
+          />
+        ) : null}
+
+        {identity === 'sessions' && recent.length > 0 ? (
           <>
             <View style={s.searchWrap}>
               <Icon name="search" size={14} color={C.textFaint} />
@@ -830,26 +864,30 @@ export function Sidebar({
             />
             </RAnimated.View>
           </>
-        ) : (
+        ) : identity === 'sessions' ? (
           <View style={{ flex: 1 }} />
-        )}
+        ) : null}
 
         {footer}
 
         {/* Bottom-docked nav (Settings) + primary action, pinned like
             ChatGPT's blue button at the panel's bottom edge. */}
         {bottomNav?.length ? <View>{renderNavRows(bottomNav)}</View> : null}
-        <Pressable
-          style={({ pressed }) => [s.newChat, pressed && { opacity: 0.85 }]}
-          onPress={() => {
-            onNewChat()
-            onClose()
-          }}
-          accessibilityLabel={tr('sidebar.newChat')}
-        >
-          <Icon name="add" size={20} color={C.onAccent} />
-          <Text style={s.newChatText}>{tr('sidebar.newChat')}</Text>
-        </Pressable>
+        {/* Bots mode has no "New chat": its primary action is the roster's
+            `+ New bot` (which opens the Fleet create flow). */}
+        {identity === 'sessions' ? (
+          <Pressable
+            style={({ pressed }) => [s.newChat, pressed && { opacity: 0.85 }]}
+            onPress={() => {
+              onNewChat()
+              onClose()
+            }}
+            accessibilityLabel={tr('sidebar.newChat')}
+          >
+            <Icon name="add" size={20} color={C.onAccent} />
+            <Text style={s.newChatText}>{tr('sidebar.newChat')}</Text>
+          </Pressable>
+        ) : null}
       </Animated.View>
 
       {/* ── Per-chat popover, anchored where the row was pressed ──────────── */}
@@ -981,7 +1019,9 @@ export function StatusDot({ status }: { status?: RowStatus }) {
   const color = status === 'input' ? C.amber : status === 'done' ? C.greenSoft : status === 'error' ? C.red : C.accent
   return (
     <Animated.View
-      accessibilityLabel={status === 'input' ? 'Waiting for your input' : status === 'done' ? 'New reply' : status === 'error' ? 'Errored' : 'Working'}
+      accessibilityLabel={tr(
+        status === 'input' ? 'status.input' : status === 'done' ? 'status.done' : status === 'error' ? 'status.error' : 'status.busy',
+      )}
       style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color, opacity: status === 'busy' ? pulse : 1 }}
     />
   )
@@ -1121,8 +1161,16 @@ function makeDialogStyles() {
   } satisfies Record<string, ViewStyle | TextStyle>
 }
 
-/** Exported so ProjectList's dialogs reuse the exact same card/button styles. */
-export const makeDialogS = () => StyleSheet.create(makeDialogStyles())
+/**
+ * Exported so ProjectList's dialogs reuse the exact same card/button styles.
+ * A hoisted function declaration on purpose: ProjectList imports back from
+ * this module (sidebar → project list → dialog styles), and a hoisted binding
+ * is initialized at module instantiation, so the cycle can never observe a
+ * temporal dead zone.
+ */
+export function makeDialogS() {
+  return StyleSheet.create(makeDialogStyles())
+}
 
 const makeS = () => StyleSheet.create({
   // Explicit stacking floor: the drawer's subtree must paint above the chat

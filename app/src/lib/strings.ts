@@ -200,6 +200,15 @@ const EN: Catalog = {
   'sidebar.noMatch': 'No chats matching “{query}”',
   'sidebar.openChat': 'Open {title}',
   'sidebar.chatOptions': 'Options for {title}',
+  'sidebar.untitled': 'Untitled',
+  'sidebar.pending.one': '1 conversation waiting on you',
+  'sidebar.pending.many': '{n} conversations waiting on you',
+  'sidebar.running.one': '1 running automation',
+  'sidebar.running.many': '{n} running automations',
+  'status.input': 'Waiting for your input',
+  'status.done': 'New reply',
+  'status.error': 'Errored',
+  'status.busy': 'Working',
   'project.name.label': 'Project name',
   'project.name.placeholder': 'Project name',
   'project.folder.label': 'Folder path (optional)',
@@ -228,6 +237,20 @@ const EN: Catalog = {
   'inbox.age.minutes': '{n}m ago',
   'inbox.age.hours': '{n}h ago',
   'inbox.age.days': '{n}d ago',
+
+  // UI-1 slice D — the drawer's Bots roster. One row per bot (a profile with
+  // ONE canonical chat titled `Bot Chat`), not a per-bot chat list.
+  'bots.title': 'Bots',
+  'bots.new': 'New bot',
+  'bots.empty': 'No bots yet',
+  'bots.agent': 'Your agent',
+  'bots.menu.open': 'Open Bot Chat',
+  'bots.menu.hint': 'Long press for bot actions',
+  'bots.actions': 'Actions for {name}',
+  'bots.edit': 'Edit',
+  'bots.delete': 'Delete',
+  'bots.delete.title': 'Tap again to delete',
+  'bots.delete.failed': "Couldn't delete this bot: {why}",
 }
 
 const AR: Catalog = {
@@ -380,6 +403,15 @@ const AR: Catalog = {
   'sidebar.noMatch': 'لا محادثات تطابق «{query}»',
   'sidebar.openChat': 'افتح {title}',
   'sidebar.chatOptions': 'خيارات {title}',
+  'sidebar.untitled': 'بلا عنوان',
+  'sidebar.pending.one': 'محادثة واحدة بانتظارك',
+  'sidebar.pending.many': '{n} محادثات بانتظارك',
+  'sidebar.running.one': 'أتمتة واحدة تعمل',
+  'sidebar.running.many': '{n} أتمتات تعمل',
+  'status.input': 'بانتظار إجابتك',
+  'status.done': 'رد جديد',
+  'status.error': 'فشل',
+  'status.busy': 'يعمل',
   'project.name.label': 'اسم المشروع',
   'project.name.placeholder': 'اسم المشروع',
   'project.folder.label': 'مسار المجلد (اختياري)',
@@ -408,6 +440,19 @@ const AR: Catalog = {
   'inbox.age.minutes': 'قبل {n} د',
   'inbox.age.hours': 'قبل {n} س',
   'inbox.age.days': 'قبل {n} ي',
+
+  // UI-1 slice D — بوتات الدرج (صف واحد لكل بوت، لا قائمة محادثات لكل بوت).
+  'bots.title': 'البوتات',
+  'bots.new': 'بوت جديد',
+  'bots.empty': 'لا بوتات بعد',
+  'bots.agent': 'مساعدك',
+  'bots.menu.open': 'افتح محادثة البوت',
+  'bots.menu.hint': 'اضغط مطولًا لإجراءات البوت',
+  'bots.actions': 'إجراءات {name}',
+  'bots.edit': 'تعديل',
+  'bots.delete': 'حذف',
+  'bots.delete.title': 'اضغط مرة أخرى للحذف',
+  'bots.delete.failed': 'تعذّر حذف هذا البوت: {why}',
 }
 
 const CATALOGS: Record<Locale, Catalog> = { en: EN, ar: AR }
