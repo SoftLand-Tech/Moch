@@ -48,19 +48,24 @@ truth**; UI slices consume them, never re-implement the wire.
 
 ## OpenCode thinker = server mode OR one-shot mode
 
-ROOT CAUSE CORRECTED (2026-11-16, on-device A/B tests across five launch
-contexts): the server survives ONLY inside the user's real interactive
-terminal session. Dead at ~30 s with the identical futex abort:
-exec_in_guest (throwaway proot), a dedicated Popen'd proot (1.0.31), the
-pipe-only persistent shell (1.0.32), and a dedicated pty session cloned
-from terminal.py (1.0.33). Alive on the same phone: the same server
-started by hand in the interactive session — idle AND under full SSE +
-session + generation traffic. Fix (1.0.34): `ensure_server` TYPES the
-launch line into the user's terminal session via `terminal.write`
-(starting it first if the Terminal tab was never opened); the command is
-visible in the Terminal tab. Killing the terminal session kills the
-server (orphan → futex abort); the idempotent ensure re-injects next
-turn. `stop_server` never touches the terminal session.
+ROOT CAUSE CORRECTED (2026-11-16, final): TWO stacked defects.
+(1) The onboarding wizard's `startOpencodeServer` (src/lib/thinker.ts)
+launched via `guestRun` (nohup … &) — the orphaning launch — and NEVER
+called the python `ensure_server` the 1.0.31–1.0.34 fixes changed, so
+every wizard retry reproduced the original bug on every build.
+(2) Launch context: servers launched from the python RPC thread (any
+variant: throwaway proot, dedicated proot, persistent shell, hidden pty)
+futex-abort ~30 s in, while the same server under a session started by
+the TERMINAL TAB's bridge call survives idle, backgrounded, and under
+full SSE + generation traffic (user-verified on-device).
+Fix (1.0.35): ONE launch path — `ocEnsureServer` (opencodeClient.ts)
+probes the pty bridge, starts the terminal session (idempotent), and
+TYPES the launch line through `linuxTermWrite` — the exact path the
+Terminal tab uses, no tab needed. Python `moch.opencode.ensure` gains
+`launch:false` (health-wait only) for that call; its own injection stays
+as the no-bridge fallback. `startOpencodeServer` delegates to it.
+Killing the terminal session still kills the server; the idempotent
+ensure re-launches on the next call.
 
 One-shot stays as the fallback mode:
 

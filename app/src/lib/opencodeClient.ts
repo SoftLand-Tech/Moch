@@ -14,7 +14,8 @@
  */
 import { fetch as expoFetch } from 'expo/fetch'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { opencodePassword, opencodeBasicAuth } from './opencodeSecret'
+import { opencodePassword, opencodeBasicAuth, b64ascii, OC_PORT } from './opencodeSecret'
+import { linuxTermProbe, linuxTermStart, linuxTermWrite } from './mochiRuntime'
 import { guestRun } from './thinker'
 import { rpc } from './gateway'
 import { log } from './log'
@@ -250,12 +251,37 @@ export async function ocStream(
 }
 
 /**
- * Start (or re-attach to) the guest server through the embedded gateway.
- * Idempotent on the python side. Used by chat + onboarding.
+ * Start (or re-attach to) the guest server. THE single launch path.
+ *
+ * The launch goes through the TERMINAL BRIDGE (probe → start → type the
+ * command) — the one context proven on-device to keep the server alive:
+ * every launch from the python RPC thread (and the old `guestRun` nohup
+ * launch this function used to do — which onboarding kept calling, so the
+ * 1.0.31–1.0.34 python fixes never ran for it) futex-aborts ~30s in. The
+ * python RPC is then called with `launch: false` to health-wait only.
+ * Falls back to the python-side launch when there is no pty bridge
+ * (desktop tests / fakes).
  */
 export async function ocEnsureServer(): Promise<{ ok: boolean; error?: string }> {
   try {
     const password = await opencodePassword()
+    const probe = await linuxTermProbe()
+    if (probe?.pty) {
+      const started = await linuxTermStart(80, 24) // idempotent: alive stays alive
+      if (started?.ok) {
+        const cmd =
+          `cd /root && export OPENCODE_PASSWORD=${password} && ` +
+          `opencode serve --hostname 127.0.0.1 --port ${OC_PORT} ` +
+          `>/root/opencode.log 2>&1 &\n`
+        const wrote = await linuxTermWrite(b64ascii(cmd))
+        if (wrote) {
+          const r = await rpc<{ ok?: boolean; error?: string }>(
+            'moch.opencode.ensure', { password, launch: false }, 90_000)
+          return { ok: r?.ok !== false, error: r?.error }
+        }
+      }
+    }
+    // No bridge (or the write failed): the python-side launch remains.
     const r = await rpc<{ ok?: boolean; error?: string }>('moch.opencode.ensure', { password }, 90_000)
     return { ok: r?.ok !== false, error: r?.error }
   } catch (e) {

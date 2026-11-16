@@ -43,6 +43,7 @@ export async function setThinker(t: Thinker): Promise<void> {
 
 import { File, Directory, Paths } from 'expo-file-system'
 import { opencodePassword, opencodeBasicAuth, OC_PORT } from './opencodeSecret'
+import { ocEnsureServer } from './opencodeClient'
 
 export { opencodePassword }
 
@@ -167,8 +168,9 @@ export async function installOpencode(onProgress?: (pct: number) => void): Promi
 
 /** Health probe against the guest server, done FROM THE PHONE (RN fetch): proot
  * shares the phone's network namespace so the guest's loopback IS the phone's,
- * and a fresh rootfs has no curl to probe with. */
-async function ocHealthy(timeoutMs = 5000): Promise<boolean> {
+ * and a fresh rootfs has no curl to probe with. (Callers use ocAlive in
+ * opencodeClient.ts now; kept here only if the gateway path needs it.) */
+export async function ocHealthy(timeoutMs = 5000): Promise<boolean> {
   try {
     const auth = opencodeBasicAuth(await opencodePassword())
     const ctrl = new AbortController()
@@ -185,35 +187,20 @@ async function ocHealthy(timeoutMs = 5000): Promise<boolean> {
 }
 
 /**
- * Start (or re-attach to) the guest OpenCode server. Idempotent: a live,
- * healthy server is reused, so the wizard can call this after install without
- * spawning duplicates. Health is polled from the phone — no guest curl.
+ * Start (or re-attach to) the guest OpenCode server. Thin wrapper over
+ * ocEnsureServer — the ONE launch path (typed into the terminal session
+ * through the bridge, the only context proven on-device to keep the server
+ * alive). This function USED to launch via `guestRun` itself (nohup … &),
+ * which is exactly the orphaning launch that futex-aborts ~30s in — and
+ * since onboarding calls THIS, the python-side fixes in 1.0.31–1.0.34 were
+ * never exercised by the wizard's retries. Kept only for the onboarding
+ * wizard's GuestRunResult shape.
  */
 export async function startOpencodeServer(): Promise<GuestRunResult> {
-  const pw = await opencodePassword()
-  if (await ocHealthy()) return { ok: true, code: 0, stdout: 'already running', stderr: '' }
-  // NO pgrep guard: `pgrep -f "opencode serve"` matches the very shell that
-  // runs it (its own command line contains that string), so the "already
-  // running" branch always won and the server was NEVER started — the empty
-  // log + "did not answer" error. Health above is the idempotence check.
-  // Clear any stale server (e.g. one started with a different password that
-  // would hog port 4096). The bracket keeps pkill from matching its own
-  // shell's command line — the bug that broke the old pgrep guard.
-  await guestRun(`pkill -f '[o]pencode serve' >/dev/null 2>&1 || true`, 15_000)
-  const started = await guestRun(
-    `cd /root && OPENCODE_PASSWORD=${pw} nohup opencode serve --hostname 127.0.0.1 --port ${OC_PORT} >/root/opencode.log 2>&1 & echo started`,
-    30_000,
-  )
-  if (!started.ok) {
-    return { ok: false, code: 1, stdout: '', stderr: started.stderr || 'Could not start the OpenCode server.' }
-  }
-  for (let i = 0; i < 30; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    if (await ocHealthy()) return { ok: true, code: 0, stdout: 'ready', stderr: '' }
-  }
-  // If it still doesn't answer, bring the real evidence back: the server
-  // log, the binary's version output, and the matching processes (the
-  // bracket pattern avoids pgrep/pkill matching their own shell).
+  const r = await ocEnsureServer()
+  if (r.ok) return { ok: true, code: 0, stdout: 'ready', stderr: '' }
+  // Bring the real evidence back: the server log + version + processes
+  // (the bracket pattern avoids pgrep/pkill matching their own shell).
   const diag = await guestRun(
     `echo '--- log ---'; tail -n 15 /root/opencode.log 2>/dev/null; ` +
       `echo '--- version ---'; opencode --version 2>&1 | head -3; ` +
@@ -224,7 +211,7 @@ export async function startOpencodeServer(): Promise<GuestRunResult> {
     ok: false,
     code: 1,
     stdout: '',
-    stderr: (diag.stdout || '').trim() || 'The OpenCode server did not answer on the phone — try again, or reinstall it.',
+    stderr: (diag.stdout || '').trim() || r.error || 'The OpenCode server did not answer on the phone — try again, or reinstall it.',
   }
 }
 

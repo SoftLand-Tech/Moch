@@ -88,19 +88,16 @@ def _guest_alive(password: str) -> bool:
     return bool(info.get("ok"))
 
 
-def ensure_server(password: str) -> dict:
+def ensure_server(password: str, launch: bool = True) -> dict:
     """Start the guest server if it is not answering; idempotent.
 
-    The launch line is TYPED INTO THE USER'S TERMINAL SESSION (terminal.py)
-    — the one context proven on this phone to keep the server alive. Four
-    hidden launch contexts all died at ~30 s (throwaway proot; dedicated
-    Popen'd proot, 1.0.31; pipe-only persistent shell, 1.0.32; a dedicated
-    pty session cloned from terminal.py, 1.0.33), while the same server
-    started by hand in the interactive session survived idle AND under
-    full SSE + generation traffic. If the session is not up, it is started
-    here — the Terminal tab attaches to it when opened, and the launch
-    line is visible there. Killing the terminal session kills the server
-    (orphan → futex abort); this idempotent ensure re-injects next turn.
+    launch=False: HEALTH-WAIT ONLY — the RN side has already typed the
+    launch line into the terminal session through the bridge (the one
+    launch context proven on-device to keep the server alive; every
+    python-thread launch — the mterm injection below, the pty variants,
+    and the old `guestRun` nohup launch that onboarding used to call
+    directly — futex-aborts ~30 s in). Killing the terminal session kills
+    the server; this idempotent check re-launches on the next call.
     """
     if _guest_alive(password):
         return {"ok": True, "started": False}
@@ -109,21 +106,22 @@ def ensure_server(password: str) -> dict:
     which = _guest_exec("command -v opencode || true", timeout_s=15)
     if not (which.get("stdout") or "").strip():
         return {"ok": False, "error": "OpenCode is not installed in the Linux guest — install it in Onboarding → Environment."}
-    from moch import terminal as mterm
+    if launch:
+        from moch import terminal as mterm
 
-    if not mterm.is_running():
-        boot = mterm.start()
-        if not boot.get("ok"):
-            return {"ok": False, "error": (boot.get("error") or "the terminal session could not start").strip()}
-    typed = mterm.write(base64.b64encode(
-        (
-            f'cd /root && export OPENCODE_PASSWORD={shlex.quote(password)} && '
-            f'opencode serve --hostname 127.0.0.1 --port {OC_PORT} '
-            f'>/root/opencode.log 2>&1 &'
-        ).encode()
-    ).decode("ascii"))
-    if not typed.get("ok"):
-        return {"ok": False, "error": (typed.get("error") or "could not type the launch command").strip()}
+        if not mterm.is_running():
+            boot = mterm.start()
+            if not boot.get("ok"):
+                return {"ok": False, "error": (boot.get("error") or "the terminal session could not start").strip()}
+        typed = mterm.write(base64.b64encode(
+            (
+                f'cd /root && export OPENCODE_PASSWORD={shlex.quote(password)} && '
+                f'opencode serve --hostname 127.0.0.1 --port {OC_PORT} '
+                f'>/root/opencode.log 2>&1 &'
+            ).encode()
+        ).decode("ascii"))
+        if not typed.get("ok"):
+            return {"ok": False, "error": (typed.get("error") or "could not type the launch command").strip()}
     deadline = time.time() + 45
     while time.time() < deadline:
         if _guest_alive(password):
@@ -247,7 +245,8 @@ def install(tg_server) -> bool:
         pw = _password(params)
         if not pw:
             return _err(rid, 4061, "password required")
-        return _ok(rid, ensure_server(pw))
+        launch = params.get("launch", True)
+        return _ok(rid, ensure_server(pw, launch=bool(launch)))
 
     def oc_stop(rid, params):
         return _ok(rid, stop_server())
