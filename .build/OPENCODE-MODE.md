@@ -48,19 +48,19 @@ truth**; UI slices consume them, never re-implement the wire.
 
 ## OpenCode thinker = server mode OR one-shot mode
 
-ROOT CAUSE CORRECTED (2026-11-16, on-device A/B tests): proot TRACES
-every guest process, and the server only survives under a launch context
-that stays alive for the app's whole lifetime. Proven dead: exec_in_guest
-(throwaway proot orphans the server → futex abort ~30 s) AND a dedicated
-Popen'd proot with a live tracer under the RPC context (1.0.31 — still
-aborted ~30 s in). Proven alive on the same phone: the same server under
-an interactive terminal session (PTY or not — a job-control-less session
-kept it alive), idle AND under full SSE + session + generation traffic.
-Fix (1.0.32): `ensure_server` launches the server as a background job of
-the PERSISTENT guest shell (`linux_session`) — one proot-backed bash
-started at app boot that lives as long as the app, already field-proven
-by the agent command path. Known edge: a poisoned/respawned persistent
-shell orphans the server; the idempotent ensure restarts it.
+ROOT CAUSE CORRECTED (2026-11-16, on-device A/B tests across four launch
+contexts): the server survives ONLY with a real PTY on its stdio. Dead:
+exec_in_guest (throwaway proot → orphan → futex abort ~30 s), a dedicated
+Popen'd proot with a live tracer (1.0.31), and the pipe-only persistent
+shell (1.0.32) — all aborted ~30 s in, ~4 s CPU, identical signature.
+Alive on the same phone: the same server under the interactive terminal
+session — idle AND under full SSE + session + generation traffic,
+including a ctty-broken no-job-control session (stdin was still a tty).
+Fix (1.0.33): `ensure_server` starts the server on a hidden dedicated
+PTY session (`_oc_pty_start`) — terminal.py's proven shape (openpty +
+proot bash -i as session leader owning the ctty + drain thread), with
+the server backgrounded from that bash, stdin on the pty, stdout to
+/root/opencode.log. `stop_server` closes the pty session too.
 
 One-shot stays as the fallback mode:
 
