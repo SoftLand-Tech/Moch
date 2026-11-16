@@ -41,35 +41,19 @@ export async function setThinker(t: Thinker): Promise<void> {
   }
 }
 
+import { File, Directory, Paths } from 'expo-file-system'
+import { opencodePassword, OC_PORT } from './opencodeSecret'
+
+export { opencodePassword }
+
 /**
  * OpenCode in the guest. 127.0.0.1 + a fixed port; the password is generated
- * once and persisted so a restart of the app re-attaches instead of leaking a
- * new server per launch.
+ * once (opencodeSecret.ts, shared with the transport) and persisted so a
+ * restart of the app re-attaches instead of leaking a new server per launch.
  */
-const OC_PORT = 4096
-const OC_PASSWORD_KEY = 'hermes.opencode.password.v1'
 const OC_MODEL_KEY = 'hermes.opencode.model.v1'
 
 export const opencodeModelAtom = atom<string>('')
-
-function randomPassword(): string {
-  const bytes = new Uint8Array(24)
-  // globalThis.crypto is available in Hermes (and web); fall back to Math.
-  const c = (globalThis as { crypto?: Crypto }).crypto
-  if (c?.getRandomValues) c.getRandomValues(bytes)
-  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256)
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
-}
-
-export async function opencodePassword(): Promise<string> {
-  try {
-    const saved = await AsyncStorage.getItem(OC_PASSWORD_KEY)
-    if (saved) return saved
-  } catch {}
-  const pw = randomPassword()
-  try { await AsyncStorage.setItem(OC_PASSWORD_KEY, pw) } catch {}
-  return pw
-}
 
 export async function loadOpencodeModel(): Promise<void> {
   try {
@@ -104,41 +88,104 @@ export async function opencodeInstalled(): Promise<boolean> {
 }
 
 /**
- * Install OpenCode inside the guest from the official static build. ARM64 is
- * what the phone's Ubuntu rootfs runs; the tar contains a single binary.
+ * Install OpenCode inside the guest.
+ *
+ * Downloaded ON THE ANDROID SIDE straight into the guest's /tmp (through the
+ * app's own filesystem — Chaquopy HOME and Expo Paths.document are the same
+ * app-internal dir), then untarred in the guest. A freshly bootstrapped
+ * rootfs has NO curl/wget, so the guest can never fetch it itself — and the
+ * OpenCode choice must not depend on apt.
  */
-export async function installOpencode(): Promise<GuestRunResult> {
-  return guestRun(
+export async function installOpencode(onProgress?: (pct: number) => void): Promise<GuestRunResult> {
+  const hermesDir = new Directory(Paths.document, '.hermes')
+  const rootfs = new Directory(new Directory(hermesDir, 'linux'), 'rootfs')
+  if (!rootfs.exists) {
+    return { ok: false, code: 1, stdout: '', stderr: 'The Linux guest is not installed — install it in the previous step first.' }
+  }
+  const tmpDir = new Directory(rootfs, 'tmp')
+  if (!tmpDir.exists) {
+    return { ok: false, code: 1, stdout: '', stderr: 'The Linux guest looks broken (/tmp is missing) — reinstall it from the previous step.' }
+  }
+  const dest = new File(tmpDir, 'opencode-arm64.tgz')
+  try {
+    if (dest.exists) dest.delete()
+    const task = File.createDownloadTask(
+      'https://opencode.ai/update/api/latest/cli/opencode/opencode-linux-arm64.tar.gz',
+      dest,
+      {
+        onProgress: (p) => {
+          if (p.totalBytes > 0) onProgress?.(Math.min(99, Math.round((p.bytesWritten / p.totalBytes) * 100)))
+        },
+      },
+    )
+    const file = await task.downloadAsync()
+    if (!file) throw new Error('download stalled')
+  } catch (e) {
+    return { ok: false, code: 1, stdout: '', stderr: `Downloading OpenCode failed: ${e instanceof Error ? e.message : String(e)}` }
+  }
+  // Untar in the guest, then verify — the only shell the guest must run.
+  const r = await guestRun(
     [
       'set -e',
       'mkdir -p /usr/local/bin',
-      'curl -fsSL https://opencode.ai/update/api/latest/cli/opencode/opencode-linux-arm64.tar.gz -o /tmp/opencode.tgz',
-      'tar xzf /tmp/opencode.tgz -C /usr/local/bin opencode',
+      'tar xzf /tmp/opencode-arm64.tgz -C /usr/local/bin opencode',
       'chmod +x /usr/local/bin/opencode',
+      'rm -f /tmp/opencode-arm64.tgz',
       'opencode --version',
     ].join(' && '),
-    180_000,
+    240_000,
   )
+  try { if (dest.exists) dest.delete() } catch {}
+  return r
+}
+
+/** Health probe against the guest server, done FROM THE PHONE (RN fetch): proot
+ * shares the phone's network namespace so the guest's loopback IS the phone's,
+ * and a fresh rootfs has no curl to probe with. */
+async function ocHealthy(timeoutMs = 5000): Promise<boolean> {
+  try {
+    const auth = `Basic ${globalThis.btoa(`opencode:${await opencodePassword()}`)}`
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+    const res = await fetch(`http://127.0.0.1:${OC_PORT}/api/info`, {
+      headers: { Authorization: auth },
+      signal: ctrl.signal,
+    })
+    clearTimeout(timer)
+    return res.ok
+  } catch {
+    return false
+  }
 }
 
 /**
- * Start (or re-attach to) the guest OpenCode server. Idempotent: a live server
- * on the port is reused, so the wizard can call this after install without
- * spawning duplicates.
+ * Start (or re-attach to) the guest OpenCode server. Idempotent: a live,
+ * healthy server is reused, so the wizard can call this after install without
+ * spawning duplicates. Health is polled from the phone — no guest curl.
  */
 export async function startOpencodeServer(): Promise<GuestRunResult> {
   const pw = await opencodePassword()
-  const cmd = [
-    'set -e',
-    'if ! curl -fsS -u "opencode:' + pw + '" http://127.0.0.1:' + OC_PORT + '/api/info >/dev/null 2>&1; then',
-    '  if ! pgrep -f "opencode serve" >/dev/null 2>&1; then',
-    '    cd /root && OPENCODE_PASSWORD=' + pw + ' nohup opencode serve --hostname 127.0.0.1 --port ' + OC_PORT + ' >/root/opencode.log 2>&1 &',
-    '    for i in $(seq 1 30); do curl -fsS -u "opencode:' + pw + '" http://127.0.0.1:' + OC_PORT + '/api/info >/dev/null 2>&1 && break; sleep 1; done',
-    '  fi',
-    'fi',
-    'curl -fsS -u "opencode:' + pw + '" http://127.0.0.1:' + OC_PORT + '/api/info',
-  ].join('\n')
-  return guestRun(cmd, 120_000)
+  if (await ocHealthy()) return { ok: true, code: 0, stdout: 'already running', stderr: '' }
+  const started = await guestRun(
+    'if ! pgrep -f "opencode serve" >/dev/null 2>&1; then ' +
+      `cd /root && OPENCODE_PASSWORD=${pw} nohup opencode serve --hostname 127.0.0.1 --port ${OC_PORT} >/root/opencode.log 2>&1 & echo started; ` +
+      'else echo already; fi',
+    30_000,
+  )
+  if (!started.ok) {
+    return { ok: false, code: 1, stdout: '', stderr: started.stderr || 'Could not start the OpenCode server.' }
+  }
+  for (let i = 0; i < 30; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    if (await ocHealthy()) return { ok: true, code: 0, stdout: 'ready', stderr: '' }
+  }
+  const tail = await guestRun('tail -n 20 /root/opencode.log 2>/dev/null', 15_000)
+  return {
+    ok: false,
+    code: 1,
+    stdout: '',
+    stderr: tail.stdout.trim() || 'The OpenCode server did not answer on the phone — try again, or reinstall it.',
+  }
 }
 
 /** Stop the guest server (switching back to Moch). Best-effort. */

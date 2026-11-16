@@ -52,8 +52,8 @@ export default function ThinkerChoice() {
       setBusy(true)
       try {
         if (!ocReady) {
-          setLog('Installing OpenCode in the Linux guest…')
-          const inst = await installOpencode()
+          setLog('Downloading OpenCode…')
+          const inst = await installOpencode((pct) => setLog(`Downloading OpenCode… ${pct}%`))
           if (!inst.ok) {
             setErr(inst.stderr || 'OpenCode install failed.')
             return

@@ -11,6 +11,7 @@ import {
   defaultsPackageIds,
   installPackages,
   cancelPackageInstall,
+  readInstallLog,
   withRequirements,
   type PackageResult,
 } from '../../src/lib/linuxPackages'
@@ -54,6 +55,11 @@ export default function Environment() {
   const [selected, setSelected] = useState<string[]>(defaultsPackageIds())
   const [results, setResults] = useState<Record<string, PackageResult>>({})
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ languages: true, build: true })
+  // The installer log, on demand — a failure's one-line detail is often not
+  // enough, and re-running the whole install to see the error is wasteful.
+  const [showLog, setShowLog] = useState(false)
+  const [loadingLog, setLoadingLog] = useState(false)
+  const [logText, setLogText] = useState('')
   // The package runner polls a guest log for up to 30 minutes — leaving the
   // screen must stop that loop, and the user gets a visible Cancel too.
   const aliveRef = React.useRef(true)
@@ -259,9 +265,28 @@ export default function Environment() {
         ) : null}
         {error ? <Text style={s.error}>{error}</Text> : null}
         {failures.length ? (
-          <Text style={s.error} numberOfLines={3}>
-            {failures.length} package{failures.length > 1 ? 's' : ''} failed — you can retry from Settings.
-          </Text>
+          <View style={s.failBox}>
+            <Text style={s.error} numberOfLines={3}>
+              {failures.length} package{failures.length > 1 ? 's' : ''} failed — you can retry from Settings.
+            </Text>
+            <Pressable
+              style={({ pressed }) => [s.logBtn, pressed && s.pressed]}
+              onPress={() => {
+                if (showLog || loadingLog) { setShowLog(false); return }
+                setLoadingLog(true)
+                void readInstallLog().then((t) => { setLogText(t || 'No log yet.'); setShowLog(true) }).finally(() => setLoadingLog(false))
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={showLog ? 'Hide the install log' : 'Show the install log'}
+            >
+              <Text style={s.logBtnText}>{loadingLog ? 'Reading…' : showLog ? 'Hide install log' : 'Show install log'}</Text>
+            </Pressable>
+            {showLog ? (
+              <ScrollView style={s.logBox} nestedScrollEnabled>
+                <Text style={s.logText} selectable>{logText}</Text>
+              </ScrollView>
+            ) : null}
+          </View>
         ) : null}
 
         <Pressable
@@ -330,6 +355,11 @@ const makeS = () => StyleSheet.create({
   cancelBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, backgroundColor: C.bgHover },
   cancelText: { color: C.red, fontSize: 12.5, fontWeight: '800' },
   error: { color: C.red, fontSize: 12.5, lineHeight: 18, marginTop: 10 },
+  failBox: { marginTop: 10 },
+  logBtn: { alignSelf: 'flex-start', marginTop: 8, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, backgroundColor: C.bgHover },
+  logBtnText: { color: C.accent, fontSize: 12.5, fontWeight: '800' },
+  logBox: { maxHeight: 220, marginTop: 8, backgroundColor: C.bgCard, borderRadius: 12, borderWidth: 1, borderColor: C.borderSoft, padding: 10 },
+  logText: { color: C.textDim, fontSize: 11, lineHeight: 15, fontFamily: 'monospace' },
   btn: { backgroundColor: C.accent, borderRadius: 16, paddingVertical: 16, alignItems: 'center', marginTop: 18 },
   btnBusy: { opacity: 0.6 },
   btnText: { color: C.onAccent, fontSize: 15.5, fontWeight: '800' },

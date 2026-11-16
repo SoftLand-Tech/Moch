@@ -163,6 +163,7 @@ export function withRequirements(selected: string[]): string[] {
 const INSTALL_SCRIPT_PATH = '/root/.moch-install.sh'
 const INSTALL_LOG_PATH = '/root/.moch-install.log'
 const INSTALL_APT_LOG_PATH = '/root/.moch-install-apt.log'
+const INSTALL_UPDATE_LOG_PATH = '/root/.moch-install-update.log'
 
 /** Poll cadence, kick/poll bridge timeouts, and the 30-minute overall cap. */
 const INSTALL_POLL_MS = 2500
@@ -234,6 +235,26 @@ export async function cancelPackageInstall(): Promise<void> {
 }
 
 /**
+ * The last runner log, verbatim (main protocol log + the failing stages'
+ * side logs), for the wizard's "Show log" expander — a failure whose detail
+ * line isn't enough gets its evidence here, no second install needed.
+ */
+export async function readInstallLog(maxLines = 120): Promise<string> {
+  const parts: string[] = []
+  const tail = async (path: string, n: number): Promise<string> => {
+    const r = await linuxExec(`tail -n ${n} ${path} 2>/dev/null`, 10)
+    return r?.ok ? (r.stdout ?? '').trim() : ''
+  }
+  const main = await tail(INSTALL_LOG_PATH, Math.min(60, maxLines))
+  if (main) parts.push(`── installer log ──\n${main}`)
+  const update = await tail(INSTALL_UPDATE_LOG_PATH, 15)
+  if (update && !/Reading package lists\.* Done/.test(update)) parts.push(`── apt update ──\n${update}`)
+  const apt = await tail(INSTALL_APT_LOG_PATH, 15)
+  if (apt && !/Reading package lists\.* Done/.test(apt)) parts.push(`── apt install ──\n${apt}`)
+  return parts.join('\n\n').slice(-4000)
+}
+
+/**
  * The detached runner script. POSIX sh; `set +e` per stage (which is sh's
  * default, spelled out here on purpose) so one failure never stops the rest.
  * Stage output goes to side logs; only the `MOCH:*` protocol lands in the
@@ -255,8 +276,22 @@ function buildInstallScript(aptIds: string[], npmItems: PackageItem[], aptPkgs: 
       `apt_ids="${aptIds.join(' ')}"`,
       'if [ -n "$apt_pkgs" ]; then',
       '  echo "MOCH:STAGE:UPDATE:START"',
-      `  apt-get update -qq >${INSTALL_APT_LOG_PATH} 2>&1`,
+      // A stale/empty resolv.conf is the classic fresh-rootfs killer (DNS
+      // seeding is best-effort at bootstrap); re-seed defensively so an
+      // update failure can only be a network/apt problem, never DNS.
+      '  if ! grep -q "^nameserver" /etc/resolv.conf 2>/dev/null; then',
+      '    printf "nameserver 8.8.8.8\\nnameserver 1.1.1.1\\n" > /etc/resolv.conf 2>/dev/null || true',
+      '  fi',
+      // The first update right after bootstrap often loses a race with the
+      // network coming up — one retry before the items are marked failed.
+      `  apt-get update -qq >${INSTALL_UPDATE_LOG_PATH} 2>&1`,
       '  upd_rc=$?',
+      '  if [ "$upd_rc" -ne 0 ]; then',
+      '    sleep 5',
+      `    apt-get update -qq >>${INSTALL_UPDATE_LOG_PATH} 2>&1`,
+      '    upd_rc=$?',
+      '  fi',
+      `  upd_tail="$(tail -n 3 ${INSTALL_UPDATE_LOG_PATH} 2>/dev/null | tr '\\n' ' ' | cut -c1-260)"`,
       '  echo "MOCH:STAGE:APT:START"',
       `  apt-get install -y -qq --no-install-recommends $apt_pkgs >${INSTALL_APT_LOG_PATH} 2>&1`,
       '  apt_rc=$?',
@@ -264,8 +299,10 @@ function buildInstallScript(aptIds: string[], npmItems: PackageItem[], aptPkgs: 
       '  for id in $apt_ids; do',
       '    if [ "$upd_rc" -eq 0 ] && [ "$apt_rc" -eq 0 ]; then',
       '      echo "MOCH:ITEM:$id:OK"',
+      '    elif [ "$upd_rc" -ne 0 ]; then',
+      '      echo "MOCH:ITEM:$id:FAIL:update: $upd_tail"',
       '    else',
-      '      echo "MOCH:ITEM:$id:FAIL:$apt_tail"',
+      '      echo "MOCH:ITEM:$id:FAIL:install: $apt_tail"',
       '    fi',
       '  done',
       'fi',

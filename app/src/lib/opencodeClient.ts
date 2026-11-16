@@ -14,7 +14,7 @@
  */
 import { fetch as expoFetch } from 'expo/fetch'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { opencodePassword } from './thinker'
+import { opencodePassword } from './opencodeSecret'
 import { rpc } from './gateway'
 import { log } from './log'
 

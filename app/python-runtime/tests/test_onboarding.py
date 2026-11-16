@@ -74,17 +74,23 @@ class OpencodeTests(unittest.TestCase):
         run.assert_not_called()
 
     def test_install_command_targets_the_arm64_build(self):
-        captured = {}
-
-        def fake_exec(cmd, timeout_s=60):
-            captured["cmd"] = cmd
-            return {"ok": True, "stdout": "2.3.0\n", "stderr": ""}
-
-        with mock.patch.object(self.oc, "_guest_exec", side_effect=fake_exec):
+        # The install is phone-side now (RN downloads the tarball into the
+        # rootfs — a fresh guest has no curl). The RPC must refuse honestly,
+        # never attempt a guest download.
+        with mock.patch.object(self.oc, "_guest_exec") as run:
             out = self.oc.install_opencode()
-        self.assertTrue(out["ok"])
-        self.assertIn("opencode-linux-arm64.tar.gz", captured["cmd"])
-        self.assertIn("/usr/local/bin", captured["cmd"])
+        self.assertFalse(out["ok"])
+        self.assertIn("Thinker", out["error"])
+        run.assert_not_called()
+
+    def test_curl_uses_this_process_not_the_guest_shell(self):
+        # No guest shell involved: a refused connection surfaces as
+        # status 0 instead of a guest-curl blob. Port 1 is unlistenable,
+        # so this stays hermetic even with a dev server on 4096.
+        with mock.patch.object(self.oc, "OC_PORT", 1):
+            out = self.oc._curl("GET", "/api/info", password="x", timeout_s=2)
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["status"], 0)
 
 
 class ThinkerRefreshTests(unittest.TestCase):

@@ -1,10 +1,9 @@
 """OpenCode as the thinker (ONBOARDING-V2) — client + guest server control.
 
 OpenCode runs *inside the Moch Linux guest* (the only place a Linux ARM64
-binary can run on this phone) and listens on guest loopback. The app reaches it
-through the same proot bridge the terminal uses: `linuxExec` runs a command in
-the guest, so a small `curl`-based client is enough and no extra port has to be
-exposed.
+binary can run on this phone) and listens on guest loopback. proot shares the
+phone's network namespace, so the embedded interpreter reaches it directly
+over ITS OWN loopback with urllib — no guest curl/wget/apt needed, ever.
 
 The chat contract is OpenCode's HTTP API (verified against 2.3.0 on the box):
   POST /api/session                     -> {data:{id}}
@@ -22,11 +21,13 @@ parse it without a half-ported SDK.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shlex
-import subprocess
 import time
+import urllib.request
+import urllib.error
 from typing import Any, Optional
 
 OC_PORT = 4096
@@ -46,42 +47,44 @@ def _curl(
     password: str,
     body: Optional[dict] = None,
     timeout_s: int = 30,
-    max_time_s: int = 30,
 ) -> dict:
-    """One HTTP call from INSIDE the guest (so 127.0.0.1 is the guest's own)."""
+    """One HTTP call to the guest server, made IN THIS PROCESS (urllib).
+
+    The embedded interpreter shares the phone's loopback with the proot guest,
+    so 127.0.0.1 reaches the guest's `opencode serve` directly. This used to
+    shell `curl` inside the guest — a fresh rootfs has no curl, and the call
+    never needed the guest shell at all.
+    """
     url = f"http://127.0.0.1:{OC_PORT}{path}"
-    parts = [
-        "curl", "-sS", "--max-time", str(max_time_s),
-        "-u", f"{OC_USER}:{password}",
-        "-H", "Content-Type: application/json",
-        "-X", method,
-    ]
-    if body is not None:
-        parts += ["--data-binary", json.dumps(body)]
-    parts.append(url)
-    cmd = " ".join(shlex.quote(p) for p in parts)
-    # curl exit 22 = HTTP >=400; keep the body for the typed error.
-    cmd += " -w '\\n%{http_code}'"
-    out = _guest_exec(cmd, timeout_s=timeout_s)
-    stdout = (out.get("stdout") or "").rstrip("\n")
-    stderr = out.get("stderr") or ""
-    code = 0
-    payload = stdout
-    if "\n" in stdout:
-        payload, _, last = stdout.rpartition("\n")
-        try:
-            code = int(last.strip())
-        except ValueError:
-            code = 0
+    payload = json.dumps(body).encode() if body is not None else None
+    creds = base64.b64encode(f"{OC_USER}:{password}".encode()).decode()
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        method=method,
+        headers={"Authorization": f"Basic {creds}", "Content-Type": "application/json"},
+    )
     try:
-        data = json.loads(payload) if payload.strip() else None
-    except json.JSONDecodeError:
-        data = payload
-    return {"ok": 200 <= code < 300, "status": code, "data": data, "stderr": stderr}
+        with urllib.request.urlopen(req, timeout=timeout_s) as res:
+            code = res.status
+            raw = res.read()
+    except urllib.error.HTTPError as e:
+        code = e.code
+        try:
+            raw = e.read()
+        except Exception:
+            raw = b""
+    except Exception as e:
+        return {"ok": False, "status": 0, "data": None, "stderr": f"{type(e).__name__}: {e}"}
+    try:
+        data = json.loads(raw.decode() or "null") if raw else None
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        data = raw.decode(errors="replace") if raw else None
+    return {"ok": 200 <= code < 300, "status": code, "data": data, "stderr": ""}
 
 
 def _guest_alive(password: str) -> bool:
-    info = _curl("GET", "/api/info", password=password, timeout_s=10, max_time_s=10)
+    info = _curl("GET", "/api/info", password=password, timeout_s=10)
     return bool(info.get("ok"))
 
 
@@ -119,19 +122,12 @@ def stop_server() -> dict:
 
 
 def install_opencode() -> dict:
-    """Install the official Linux ARM64 build in the guest (one static binary)."""
-    cmd = (
-        "set -e; mkdir -p /usr/local/bin; "
-        "curl -fsSL https://opencode.ai/update/api/latest/cli/opencode/opencode-linux-arm64.tar.gz "
-        "-o /tmp/opencode.tgz; "
-        "tar xzf /tmp/opencode.tgz -C /usr/local/bin opencode; "
-        "chmod +x /usr/local/bin/opencode; opencode --version"
-    )
-    out = _guest_exec(cmd, timeout_s=240)
+    """The install happens phone-side now (RN downloads the tarball straight
+    into the rootfs — a fresh guest has no curl). This RPC stays registered
+    only to say so honestly instead of failing in the guest."""
     return {
-        "ok": bool(out.get("ok")),
-        "version": (out.get("stdout") or "").strip().splitlines()[-1] if out.get("stdout") else "",
-        "stderr": (out.get("stderr") or "")[-800:],
+        "ok": False,
+        "error": "Install OpenCode from the app (Onboarding → Thinker) — the download runs on the phone, not in the guest.",
     }
 
 
@@ -139,7 +135,7 @@ def install_opencode() -> dict:
 
 
 def create_session(password: str, title: str) -> dict:
-    return _curl("POST", "/api/session", password=password, body={"title": title}, max_time_s=30)
+    return _curl("POST", "/api/session", password=password, body={"title": title}, timeout_s=30)
 
 
 def send_prompt(password: str, session_id: str, text: str, *, directory: str = "") -> dict:
@@ -147,11 +143,11 @@ def send_prompt(password: str, session_id: str, text: str, *, directory: str = "
     path = f"/api/session/{session_id}/prompt"
     if directory:
         path += "?directory=" + _q(directory)
-    return _curl("POST", path, password=password, body=body, max_time_s=120)
+    return _curl("POST", path, password=password, body=body, timeout_s=120)
 
 
 def interrupt(password: str, session_id: str) -> dict:
-    return _curl("POST", f"/api/session/{session_id}/interrupt", password=password, max_time_s=30)
+    return _curl("POST", f"/api/session/{session_id}/interrupt", password=password, timeout_s=30)
 
 
 def reply_permission(password: str, session_id: str, request_id: str, reply: str) -> dict:
@@ -162,24 +158,24 @@ def reply_permission(password: str, session_id: str, request_id: str, reply: str
         f"/api/session/{session_id}/permission/{request_id}/reply",
         password=password,
         body={"reply": reply},
-        max_time_s=30,
+        timeout_s=30,
     )
 
 
 def history(password: str, session_id: str) -> dict:
-    return _curl("GET", f"/api/session/{session_id}/message", password=password, max_time_s=60)
+    return _curl("GET", f"/api/session/{session_id}/message", password=password, timeout_s=60)
 
 
 def models(password: str) -> dict:
-    return _curl("GET", "/api/model", password=password, max_time_s=60)
+    return _curl("GET", "/api/model", password=password, timeout_s=60)
 
 
 def pending_permissions(password: str) -> dict:
-    return _curl("GET", "/api/permission/request", password=password, max_time_s=30)
+    return _curl("GET", "/api/permission/request", password=password, timeout_s=30)
 
 
 def default_model(password: str) -> dict:
-    return _curl("GET", "/api/model/default", password=password, max_time_s=30)
+    return _curl("GET", "/api/model/default", password=password, timeout_s=30)
 
 
 def switch_model(password: str, session_id: str, provider_id: str, model_id: str) -> dict:
@@ -188,7 +184,7 @@ def switch_model(password: str, session_id: str, provider_id: str, model_id: str
         f"/api/session/{session_id}/model",
         password=password,
         body={"model": {"providerID": provider_id, "modelID": model_id}},
-        max_time_s=30,
+        timeout_s=30,
     )
 
 
