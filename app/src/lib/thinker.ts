@@ -213,7 +213,6 @@ export interface OcDiagnosis {
   /** Plain-text transcript — shown verbatim in the wizard's diagnostics view. */
   report: string
 }
-
 /**
  * Step-by-step probe of everything the server start needs, in one guest
  * shell. When the start fails on a real phone, guessing from the error line
@@ -233,6 +232,34 @@ export async function diagnoseOpencodeServer(): Promise<OcDiagnosis> {
   const r = await guestRun(probe, 45_000)
   const body = [r.stdout.trim(), r.stderr.trim()].filter(Boolean).join('\n').slice(-3500)
   return { ok: r.ok, report: body || '(the guest returned nothing — the bridge itself may be down)' }
+}
+
+export interface OcRunProbe {
+  ok: boolean
+  /** Did the model answer with the exact marker (Bun survived + model works)? */
+  marker: boolean
+  /** Verbatim transcript for the diagnostics view. */
+  report: string
+}
+
+/**
+ * One-shot smoke test: `opencode run` in the guest with no server involved.
+ * Answers the fork in the road — if the *server* crashes under proot but the
+ * one-shot CLI survives, chat can fall back to a session-pinned `run` per
+ * turn; if this crashes too, OpenCode cannot execute on this phone at all.
+ * Manual trigger only (it spends a real model call).
+ */
+export async function probeOpencodeRun(): Promise<OcRunProbe> {
+  const r = await guestRun('cd /root && opencode run "Reply with exactly: PROOT_OK"', 150_000)
+  const out = [r.stdout, r.stderr].filter(Boolean).join('\n').trim().slice(-2000)
+  const marker = out.includes('PROOT_OK')
+  const report = [
+    `exit: ${r.ok ? '0 (clean)' : `FAILED (code ${r.code})`}`,
+    `marker PROOT_OK: ${marker ? 'YES — one-shot works' : 'NO'}`,
+    '--- output ---',
+    out || '(empty)',
+  ].join('\n')
+  return { ok: r.ok, marker, report }
 }
 
 export function opencodeBaseUrl(): string {

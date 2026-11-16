@@ -9,6 +9,7 @@ import {
   opencodeInstalled,
   installOpencode,
   diagnoseOpencodeServer,
+  probeOpencodeRun,
   startOpencodeServer,
   setThinker,
   thinkerAtom,
@@ -37,6 +38,9 @@ export default function ThinkerChoice() {
   const [diag, setDiag] = useState<string | null>(null)
   const [showDiag, setShowDiag] = useState(false)
   const [diagBusy, setDiagBusy] = useState(false)
+  // One-shot probe state (manual trigger — spends a real model call).
+  const [runReport, setRunReport] = useState<string | null>(null)
+  const [runBusy, setRunBusy] = useState(false)
 
   const runDiagnostics = async () => {
     setDiagBusy(true)
@@ -47,6 +51,19 @@ export default function ThinkerChoice() {
       setDiag(`Diagnostics failed: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setDiagBusy(false)
+    }
+  }
+
+  const runOneShotProbe = async () => {
+    setRunBusy(true)
+    setRunReport(null)
+    try {
+      const p = await probeOpencodeRun()
+      setRunReport(p.report)
+    } catch (e) {
+      setRunReport(`Probe failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setRunBusy(false)
     }
   }
 
@@ -187,6 +204,19 @@ export default function ThinkerChoice() {
             {showDiag ? (
               <Text style={s.diagHint}>Long-press the text to copy it and send it back — it says exactly which step failed.</Text>
             ) : null}
+            <Pressable
+              style={({ pressed }) => [s.diagBtn, pressed && s.pressed]}
+              onPress={() => { if (!runBusy) void runOneShotProbe() }}
+              accessibilityRole="button"
+              accessibilityLabel="Test one-shot mode"
+            >
+              <Text style={s.diagBtnText}>{runBusy ? 'Asking the model (up to 2 min)…' : 'Test one-shot mode'}</Text>
+            </Pressable>
+            {runReport ? (
+              <View style={s.logBox}>
+                <Text style={s.logText} selectable>{runReport}</Text>
+              </View>
+            ) : null}
           </View>
         ) : null}
 
@@ -223,6 +253,8 @@ const makeS = () => StyleSheet.create({
   diagBtnText: { color: C.accent, fontSize: 12.5, fontWeight: '800' },
   diagScroll: { maxHeight: 240, marginTop: 8, backgroundColor: C.bgCard, borderRadius: 12, borderWidth: 1, borderColor: C.borderSoft, padding: 10 },
   diagText: { color: C.textDim, fontSize: 11, lineHeight: 15, fontFamily: 'monospace' },
+  logBox: { maxHeight: 220, marginTop: 8, backgroundColor: C.bgCard, borderRadius: 12, borderWidth: 1, borderColor: C.borderSoft, padding: 10 },
+  logText: { color: C.textDim, fontSize: 11, lineHeight: 15, fontFamily: 'monospace' },
   diagHint: { color: C.textFaint, fontSize: 11.5, lineHeight: 16, marginTop: 6 },
   ghost: { alignItems: 'center', paddingVertical: 16 },
   ghostText: { color: C.accent, fontSize: 14, fontWeight: '700' },
