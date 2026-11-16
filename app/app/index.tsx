@@ -38,6 +38,24 @@ export default function Onboarding() {
     return () => { mounted.current = false }
   }, [])
 
+  // Returning users never wait on this screen: the chat renders from local
+  // caches while the embedded runtime boots behind it (the native side
+  // starts CPython at process creation). The ONLY thing this path waits for
+  // is the persisted onboarded flag — not the agent. connectThisPhone is
+  // idempotent and the root layout's boot IIFE also dials, so a
+  // fire-and-forget here is just the fastest first attempt. First-run users
+  // keep the waiting surface — their next step is the environment wizard,
+  // which needs the runtime anyway.
+  useEffect(() => {
+    let alive = true
+    void loadOnboarded().then(() => {
+      if (!alive || !onboardedAtom.get()) return
+      router.replace('/(tabs)/chat')
+      void connectThisPhone().catch(() => {})
+    })
+    return () => { alive = false }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const openAgent = async () => {
     setPhase('starting')
     setDetail('')

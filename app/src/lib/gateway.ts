@@ -716,12 +716,18 @@ export async function connect(c: ConnConfig, opts?: { plaintextConfirmed?: boole
  */
 export async function connectThisPhone(opts?: { timeoutMs?: number; pollMs?: number }): Promise<void> {
   const timeoutMs = opts?.timeoutMs ?? 180_000
-  const pollMs = opts?.pollMs ?? 1_000
+  // 250ms, not 1s: the gate is a single cheap bridge call, and this is the
+  // difference between the UI going live on the first ready tick or up to a
+  // second later. Return users don't see this wait anymore (index.tsx
+  // routes straight to chat), so this is for the first-run wizard.
+  const pollMs = opts?.pollMs ?? 250
   const deadline = Date.now() + timeoutMs
+  const t0 = Date.now()
   let lastError = ''
   while (Date.now() < deadline) {
     const gw = await getEmbeddedGateway().catch(() => null)
     if (gw?.running && gw.ready && gw.port && gw.token) {
+      log('info', 'gateway', `embedded runtime ready in ${Date.now() - t0}ms`)
       await connect({ host: `127.0.0.1:${gw.port}`, token: gw.token, tls: false, name: 'This phone' })
       return
     }
