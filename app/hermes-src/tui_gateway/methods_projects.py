@@ -88,6 +88,70 @@ def _(rid, params, pdb, conn) -> dict:
     return _ok(rid, {"project": _require_project(pdb, conn, params).to_dict()})
 
 
+def _embedded_workspace() -> str | None:
+    """The HOST dir the guest binds at ``/workspace`` — embedded Moch gateway only, else ``None``.
+
+    ``MOCH_WORKSPACE`` is exported solely by the app's embedded gateway boot (moch/hermes_boot.py);
+    desktop/TUI/dashboard deployments never set it, so every workspace-folder synthesis below is a
+    no-op there. The Linux guest bind-mounts this exact host dir at ``/workspace`` AND at its own
+    host spelling (moch/linux_env.py build_guest_launch), so a plain HOST-side ``os.makedirs`` here
+    IS the guest's ``/workspace/<dir>`` — nothing needs to (or may) cross the boundary: this
+    process's filesystem is the Android host, so paths outside this dir must never be created.
+    """
+    ws = str(os.environ.get("MOCH_WORKSPACE") or "").strip()
+    return ws or None
+
+
+def _project_dir_slug(project) -> str:
+    """Dir name for a project's embedded workspace folder: the stored DB slug when slug-shaped.
+    The shape check keeps a corrupt ``../``-style slug from ever reaching ``os.makedirs``. A
+    NON-conforming slug (hand-edited / foreign-imported row) returns "" — adoption is SKIPPED
+    rather than falling back to a name-slug, because a name slug is not uniquified: two corrupt
+    rows named "Test" would silently share one folder. Legitimate creates always mint conforming
+    unique slugs (``projects_db._slugify`` + ``_unique_slug``), so the fallback path never runs
+    for them."""
+    import re
+    slug = str(project.slug or "").strip()
+    if re.fullmatch(r"[a-z0-9][a-z0-9\-_]{0,63}", slug):
+        return slug
+    return ""
+
+
+def _adopt_embedded_project_folder(pdb, conn, project) -> bool:
+    """Best-effort: give ONE folder-less project a real primary folder + directory under the
+    embedded workspace. No-op unless embedded (``MOCH_WORKSPACE`` set) and the project has neither
+    folders nor a primary path — so it fires at most once per project, and never touches projects
+    the caller pointed at their own paths.
+
+    WHY this exists: without it a project is a sidebar-only phantom — a sqlite row with no
+    directory. New chats then get the workspace root as cwd (never grouping), and a typed
+    ``/workspace/foo`` fails the host-side ``os.path.isdir`` check in session.create, silently
+    falling back to the gateway process cwd (``session_workdir._completion_cwd`` drops
+    non-existent dirs). The mkdir runs BEFORE the folder row is written — a folder pointing at a
+    missing dir is exactly the phantom this heals — and a failure leaves the project untouched
+    (folder-less, retried on the next tree read) instead of half-adopted.
+    """
+    ws = _embedded_workspace()
+    if not ws or project.folders or project.primary_path:
+        return False
+    slug = _project_dir_slug(project)
+    if not slug:
+        # Corrupt slug row: skip (never adopt under a colliding name-slug)
+        # and say so once per attempt — the project stays folder-less and
+        # heals if the row is ever fixed.
+        logger.warning("project %s has a non-conforming slug %r — skipping embedded folder adoption",
+                       project.id, project.slug)
+        return False
+    path = os.path.join(ws, slug)
+    try:
+        os.makedirs(path, exist_ok=True)  # host mkdir == guest /workspace/<slug> (the bind)
+        pdb.add_folder(conn, project.id, path, is_primary=True)
+    except Exception:
+        logger.debug("embedded project folder adoption failed for %s", project.id, exc_info=True)
+        return False
+    return True
+
+
 @_projects_method("projects.create")
 def _(rid, params, pdb, conn) -> dict:
     pid = pdb.create_project(
@@ -96,6 +160,13 @@ def _(rid, params, pdb, conn) -> dict:
     if params.get("use"):
         pdb.set_active(conn, pid)
     proj = pdb.get_project(conn, pid)
+    # Embedded gateway: a folder-less create would be a phantom (see
+    # _adopt_embedded_project_folder), so give it a real dir under the bound workspace. The
+    # helper self-guards: projects created WITH folders (or a primary_path) come back
+    # non-folder-less and are returned exactly as before — their caller paths are never
+    # mkdir'd, since this process's fs is the Android host, not the guest.
+    if proj is not None and _adopt_embedded_project_folder(pdb, conn, proj):
+        proj = pdb.get_project(conn, pid)  # adoption added the primary folder; re-read
     return _ok(rid, {"project": proj.to_dict() if proj else None})
 
 
@@ -354,7 +425,19 @@ def _project_tree_inputs(
         if include_discovered:
             pdb.reconcile_discovered_repos_policy(
                 conn, policy_key, preserve_unversioned=_repo_discovery_policy_is_default(policy))
-        projects = [p.to_dict() for p in pdb.list_projects(conn)]
+        rows = pdb.list_projects(conn)
+        # Heal phantom projects (embedded only — see _adopt_embedded_project_folder): pre-fix
+        # rows have no folder and no directory, so this adopts <workspace>/<slug> + mkdirs it
+        # on the next tree read. Adoption writes folder rows, so snapshot the dicts only after
+        # it ran; archived phantoms aren't listed and are healed on their first read after
+        # restore. Each adoption fires once — afterwards the project has a folder.
+        adopted = False
+        for row in rows:
+            if _adopt_embedded_project_folder(pdb, conn, row):
+                adopted = True
+        if adopted:
+            rows = pdb.list_projects(conn)
+        projects = [p.to_dict() for p in rows]
         active_id = pdb.get_active_id(conn)
         # backfill stays off the hot tree path — grouping uses the live resolver.
         discovered = []
