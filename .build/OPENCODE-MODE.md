@@ -9,7 +9,9 @@ truth**; UI slices consume them, never re-implement the wire.
 
 - `thinkerAtom.get() === 'opencode'` gates EVERY branch. Same theme, different
   data: in OpenCode mode nothing may call hermes-only surfaces (bots, crew,
-  rooms, automations, browser, hermes model options, hermes projects rail).
+  rooms, automations, browser, hermes model options). The projects rail is
+  SHARED: chats carry a project cwd in both thinkers, so projects show in
+  OpenCode mode too (oc-server-session grouping under projects is BUG-149).
 - A chat's thinker never changes mid-chat. New chats use the current thinker.
 - OpenCode server: guest loopback `http://127.0.0.1:4096`, HTTP Basic
   `opencode:<password>` (`opencodePassword()` from `src/lib/thinker.ts`).
@@ -125,8 +127,9 @@ One-shot stays as the fallback mode:
 - Permission card: reuse the pending-request card visual language; buttons
   Allow once / Always / Deny → `ocPermissionReply`.
 - Sidebar in OpenCode mode: rows = OpenCode sessions (title, time.updated);
-  hide bots/crew/automations/browser/library sections. Terminal + Settings
-  stay.
+  hide bots/crew/automations/browser/library sections; the PROJECTS rail
+  stays (shared — chats are created with a project cwd in both thinkers;
+  the oc list itself is not project-filtered until BUG-149).
 - Tabs: hide crew, fleet, browser, automations, skills, connectors, inbox,
   agent when thinker is opencode (`href: null` pattern).
 - Chat shows a persistent thinker chip: `OpenCode · <modelID>`.
