@@ -25,9 +25,13 @@ import {
   liveModel, liveProvider, modelOptions, modelOptionsLoading,
   type ProviderOption, type ModelScope,
 } from '../lib/modelState'
-import { ensureSession, activeLiveId, pushLocalMessage } from '../lib/chat'
-import { ocModels, ocModelsOneShot, ocDefaultModel, ocSetModel, OcError, type OcModel } from '../lib/opencodeClient'
-import { ocSessionFor } from '../lib/opencodeChat'
+import { ensureSession, activeLiveId, activeStoredId, activeTitle, pushLocalMessage } from '../lib/chat'
+import {
+  ocModels, ocModelsOneShot, ocDefaultModel, ocSetModel, ocCreateSession,
+  OcError, type OcModel,
+} from '../lib/opencodeClient'
+import { invalidateOcSessionsCache } from '../lib/ocSessionsCache'
+import { ocSessionFor, ocRememberSession } from '../lib/opencodeChat'
 import { slashLabel } from '../lib/slash'
 import { log } from '../lib/log'
 import { C, useStyles } from '../lib/theme'
@@ -195,23 +199,48 @@ export function ModelPickerSheet({
     return order.map((p) => ({ provider: p, models: byProvider.get(p) ?? [] }))
   }, [ocList, q])
 
-  /** Apply a model to this chat's OpenCode session. One-shot has no session
-   * to apply to — the pick is only recorded (chat passes `-m` per turn). */
+  /** Apply a model to this chat's OpenCode session, minting the session on
+   * demand — a pick in a brand-new chat is a "first real action" (same
+   * contract as the hermes apply path's ensureSession below). One-shot has
+   * no session to apply to — the pick is recorded as `provider/model`
+   * (SAFE_MODEL_RE in opencodeChat requires the slash; a bare modelID was
+   * silently dropped from `-m` and the pick never applied). */
   const pickOcModel = async (m: OcModel) => {
     if (applying) return
     setApplying(true)
     setOcErr('')
     try {
       if (ocOneShot) {
-        onPicked?.(m.modelID)
+        onPicked?.(`${m.providerID}/${m.modelID}`)
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
         setOcDefault(m)
         onClose()
         return
       }
-      const ocId = ocSessionId ? await ocSessionFor(ocSessionId) : null
-      if (!ocId) throw new Error('This chat has no OpenCode session yet — send a message first')
-      await ocSetModel(ocId, m.providerID, m.modelID)
+      let mapKey = ocSessionId
+      let ocId = mapKey ? await ocSessionFor(mapKey) : null
+      if (!ocId) {
+        // No OC session yet (new chat, or server mode enabled after the fact):
+        // mint one instead of bouncing the pick. A PROVISIONAL new-chat window
+        // must re-key first — its pseudo `new:` storedId is never the mapKey
+        // the first turn uses (sendPrompt resolves the real chat before
+        // runOpencodeTurn), so remembering under it would orphan the pick on
+        // an OC session no message ever lands in.
+        await ensureSession()
+        mapKey = activeStoredId.get() || mapKey
+        if (!mapKey) throw new Error('This chat is not ready — try again in a moment')
+        // The placeholder 'New chat' would name the OC session forever
+        // (chat.ts skips it when titling the first send for the same reason).
+        const t = activeTitle.get()
+        const created = await ocCreateSession(t && t !== 'New chat' ? t.slice(0, 80) : 'Moch chat')
+        if (!created?.id) throw new Error('OpenCode did not return a session id')
+        await ocRememberSession(mapKey, created.id)
+        // The drawer's oc list caches for 15s — a minted session must be
+        // visible immediately (runOcSubmit invalidates for the same reason).
+        invalidateOcSessionsCache()
+        ocId = created.id
+      }
+      await ocSetModel(ocId, m.providerID, m.id)
       onPicked?.(m.modelID)
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
       setOcDefault(m)

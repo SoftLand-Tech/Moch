@@ -109,6 +109,12 @@ export interface OcSession {
 }
 
 export interface OcModel {
+  /**
+   * Model.Ref id — the BARE model id GET /api/model carries beside `modelID`.
+   * POST /session/:id/model takes exactly this field (see ocSetModel), so it
+   * must survive the trip from the inventory to the apply call.
+   */
+  id: string
   providerID: string
   modelID: string
   name?: string
@@ -180,17 +186,26 @@ export async function ocModelsOneShot(): Promise<OcModel[]> {
     const slash = t.indexOf('/')
     const providerID = t.slice(0, slash)
     const modelID = t.slice(slash + 1).split(/\s/)[0]
-    if (providerID && modelID) out.push({ providerID, modelID, name: modelID })
+    if (providerID && modelID)
+      // Ref id of a `provider/model` line is the bare model id. One-shot
+      // never POSTs it (picks ride `-m provider/model`), but the field is
+      // required on OcModel so the row shapes stay interchangeable.
+      out.push({ id: modelID, providerID, modelID, name: modelID })
   }
   return out
 }
 
 export const ocDefaultModel = () => ocFetch<OcModel | null>('/api/model/default', { timeoutMs: 15_000 })
 
-export const ocSetModel = (id: string, providerID: string, modelID: string) =>
-  ocFetch<unknown>(`/api/session/${encodeURIComponent(id)}/model`, {
+export const ocSetModel = (sessionId: string, providerID: string, modelId: string) =>
+  ocFetch<unknown>(`/api/session/${encodeURIComponent(sessionId)}/model`, {
     method: 'POST',
-    body: { model: { providerID, modelID } },
+    // Verified against 2.3.0 (packages/protocol session.switchModel →
+    // Model.Ref): the payload is { model: { id, providerID, variant? } } and
+    // unknown keys are rejected — the old { providerID, modelID } body was
+    // refused with `missing key at ["ai"]["model"]`. The required `id` is
+    // Model.Info.id (the bare model id), NOT `modelID`.
+    body: { model: { id: modelId, providerID } },
   })
 
 export const ocIntegrations = () => ocFetch<OcIntegration[]>('/api/integration', { timeoutMs: 20_000 })
