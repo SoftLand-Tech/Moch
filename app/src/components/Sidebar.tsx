@@ -27,7 +27,7 @@ import { useStore } from '@nanostores/react'
 import { archivedIds, groupChats, pinnedIds } from '../lib/chatListState'
 import type { RowStatus } from '../lib/attention'
 import { thinkerAtom } from '../lib/thinker'
-import { ocListSessions, type OcSession } from '../lib/opencodeClient'
+import { ocListSessions, describeOcError, type OcSession } from '../lib/opencodeClient'
 import { ocSessionsCached, ocSessionsStore } from '../lib/ocSessionsCache'
 import { openOcChat } from '../lib/chat'
 import { C, S, useStyles, useShape } from '../lib/theme'
@@ -360,7 +360,9 @@ export function Sidebar({
       .catch((e: unknown) => {
         if (!alive) return
         setOcLoading(false)
-        setOcError(e instanceof Error ? e.message : 'Could not reach the OpenCode server')
+        // describeOcError keeps OPENCODE-MODE's "every catch renders the
+        // classifier" promise — a 403/500 must not read as a generic miss.
+        setOcError(describeOcError(e) || 'Could not reach the OpenCode server')
       })
     return () => { alive = false }
   }, [open, ocMode])

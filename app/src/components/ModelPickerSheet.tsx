@@ -28,7 +28,7 @@ import {
 import { ensureSession, activeLiveId, activeStoredId, activeTitle, pushLocalMessage } from '../lib/chat'
 import {
   ocModels, ocModelsOneShot, ocDefaultModel, ocSetModel, ocCreateSession,
-  OcError, type OcModel,
+  OcError, describeOcError, type OcModel,
 } from '../lib/opencodeClient'
 import { invalidateOcSessionsCache } from '../lib/ocSessionsCache'
 import { ocSessionFor, ocRememberSession } from '../lib/opencodeChat'
@@ -39,7 +39,7 @@ import { C, useStyles } from '../lib/theme'
 type Step = 'provider' | 'model' | 'scope'
 
 export function ModelPickerSheet({
-  open, onClose, initialSlug, ocMode = false, ocOneShot = false, ocSessionId = null, onPicked,
+  open, onClose, initialSlug, ocMode = false, ocOneShot = false, ocSessionId = null, ocCurrent = null, onPicked,
 }: {
   open: boolean
   onClose: () => void
@@ -57,6 +57,15 @@ export function ModelPickerSheet({
   ocOneShot?: boolean
   /** The chat's PERSISTENT id — resolved to an OC session via ocSessionFor. */
   ocSessionId?: string | null
+  /**
+   * The model THIS chat is on (its pick, else the default) — exactly what
+   * the chat's chip shows, passed by the caller. Per-session switches never
+   * touch GET /api/model/default, so the server default alone would check
+   * the wrong row after a switch. Bare modelID (server-mode pick) or
+   * `provider/model` (one-shot pick); null = fall back to the sheet's own
+   * default fetch.
+   */
+  ocCurrent?: string | null
   /** Fired after a session-scoped pick lands — the chip keeps this model. */
   onPicked?: (modelID: string) => void
 }) {
@@ -104,9 +113,11 @@ export function ModelPickerSheet({
         }
       } catch (err) {
         setOcList([])
+        // describeOcError: a 403 (quota/key) or 500 must never read as
+        // "not running" — only a status-0 (network) error means that.
         setOcErr(
           err instanceof OcError
-            ? 'OpenCode server not running'
+            ? describeOcError(err)
             : err instanceof Error
               ? err.message
               : 'Could not load models',
@@ -246,18 +257,59 @@ export function ModelPickerSheet({
       setOcDefault(m)
       onClose()
     } catch (err) {
-      setOcErr(err instanceof Error ? err.message : 'Model switch failed')
+      setOcErr(err instanceof OcError ? describeOcError(err) : err instanceof Error ? err.message : 'Model switch failed')
       log('warn', 'opencode', `model switch failed: ${String(err)}`)
     } finally {
       setApplying(false)
     }
   }
 
+  // ── OpenCode mode: which row is "current"? ────────────────────────────────
+  // The chat's own current model (ocCurrent — what its chip shows) wins;
+  // the server default below only covers chats that never picked. Picks
+  // are stored in TWO formats — server mode keeps the BARE modelID,
+  // one-shot keeps `provider/model`. But modelIDs THEMSELVES may contain
+  // slashes (OpenRouter-style `anthropic/claude-…`), so full-string matches
+  // are tried FIRST; the provider/model split is only a fallback for picks
+  // that genuinely carry a provider prefix. A bare pick matching more than
+  // one provider's row is constrained to the server default's provider
+  // when known (exactly one row checks, like the pre-ocCurrent behavior).
+  const ocCur = ocCurrent ?? (ocDefault ? `${ocDefault.providerID}/${ocDefault.modelID}` : null)
+  const ocCurBare = ocCur ? ocCur.slice(ocCur.indexOf('/') + 1) : ''
+  // Provider for the "Now:" line: from the pick when it carries one, else
+  // looked up in the inventory (bare picks don't record it).
+  const ocCurProvider = !ocCur
+    ? ''
+    : ocCur.includes('/')
+      ? ocCur.slice(0, ocCur.indexOf('/'))
+      : ocList?.find((m) => m.modelID === ocCur)?.providerID
+        ?? (ocDefault?.modelID === ocCur ? ocDefault.providerID : '')
+        ?? ''
+  const ocIsCurrent = (m: OcModel): boolean => {
+    if (!ocCur) return false
+    // Full-string matches first — handles slashed modelIDs verbatim.
+    if (m.modelID === ocCur || m.id === ocCur || `${m.providerID}/${m.modelID}` === ocCur) return true
+    // Prefixed pick (`provider/model`, one-shot format): bare part must
+    // match AND the provider must agree.
+    if (ocCur.includes('/') && ocCur.startsWith(`${m.providerID}/`)) return ocCurBare === m.modelID
+    // Bare pick: match the modelID, and when the default's provider is
+    // known and carries the same modelID, only that provider's row checks.
+    if (m.modelID === ocCur) {
+      if (ocDefault && !ocCur.includes('/') && ocDefault.modelID === ocCur) return m.providerID === ocDefault.providerID
+      return true
+    }
+    return false
+  }
+
   const headerTitle = ocMode
     ? 'Model'
     : step === 'provider' ? 'Model' : step === 'model' ? (provider?.name ?? 'Models') : model
   const headerSub = ocMode
-    ? (ocDefault ? `Now: ${ocDefault.modelID}${ocDefault.providerID ? ` · ${ocDefault.providerID}` : ''}` : 'OpenCode models')
+    ? (ocCur
+      // Show the MATCHED row's modelID when one matches (exact for slashed
+      // ids), else the split fallback.
+      ? `Now: ${ocList?.find(ocIsCurrent)?.modelID ?? ocCurBare}${ocCurProvider ? ` · ${ocCurProvider}` : ''}`
+      : 'OpenCode models')
     : (curModel ? `Now: ${curModel}${curProvider ? ` · ${curProvider}` : ''}` : 'Tap a provider, then a model')
 
   const pickProvider = (p: ProviderOption) => {
@@ -425,7 +477,7 @@ export function ModelPickerSheet({
                         <OcModelRow
                           key={`${m.providerID}/${m.modelID}`}
                           m={m}
-                          isCurrent={ocDefault?.providerID === m.providerID && ocDefault?.modelID === m.modelID}
+                          isCurrent={ocIsCurrent(m)}
                           disabled={applying}
                           onPress={() => { void pickOcModel(m) }}
                         />
