@@ -31,7 +31,8 @@ import { syncBackendIdentity } from '../src/lib/backendIdentity'
 import { pruneRelayMedia } from '../src/lib/mediaCache'
 import { C, loadTheme, useStyles } from '../src/lib/theme'
 import { loadActiveBot } from '../src/lib/fleet'
-import { loadThinker, loadOpencodeOneShot } from '../src/lib/thinker'
+import { loadThinker, loadOpencodeOneShot, thinkerAtom, ocOneShotAtom } from '../src/lib/thinker'
+import { ocEnsureServer } from '../src/lib/opencodeClient'
 import { loadOnboarded } from '../src/lib/aboutMe'
 
 // Keep the native splash up until the animated overlay is committed on top
@@ -61,6 +62,8 @@ export default function RootLayout() {
   const err = useStore(gatewayError)
   const attempt = useStore(reconnectAttempt)
   const online = useStore(isConnectedAtom)
+  const thinker = useStore(thinkerAtom)
+  const ocOneShot = useStore(ocOneShotAtom)
   // BUGFIX (launch crash: "Rendered more hooks than the previous render"):
   // this subscription MUST run on every render. It used to sit below the
   // `if (!cfg)` early return, so the first render (saved config still
@@ -247,6 +250,17 @@ export default function RootLayout() {
   // gateway is connected — switching needs a live RPC. Stale targets (the
   // connection never came up within a minute) are dropped so an old tap
   // can't yank the user out of a chat much later.
+  // OpenCode auto-start at boot: the model list and the thinker chip need
+  // the server before any message exists — a fresh launch used to leave it
+  // down until the first send, so the picker opened empty. Idempotent on
+  // the python side (health check first) and re-fires on reconnect;
+  // failures stay silent here because the picker and the send path both
+  // re-ensure on demand (and surface the real error if that fails too).
+  useEffect(() => {
+    if (!online || thinker !== 'opencode' || ocOneShot) return
+    void ocEnsureServer().catch(() => {})
+  }, [online, thinker, ocOneShot])
+
   useEffect(() => {
     if (!pendingOpen || !online) return
     pendingOpenStoredId.set(null)

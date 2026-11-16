@@ -27,7 +27,7 @@ import {
 } from '../lib/modelState'
 import { ensureSession, activeLiveId, activeStoredId, activeTitle, pushLocalMessage } from '../lib/chat'
 import {
-  ocModels, ocModelsOneShot, ocDefaultModel, ocSetModel, ocCreateSession,
+  ocModels, ocModelsOneShot, ocDefaultModel, ocSetModel, ocCreateSession, ocEnsureServer,
   OcError, describeOcError, type OcModel,
 } from '../lib/opencodeClient'
 import { invalidateOcSessionsCache } from '../lib/ocSessionsCache'
@@ -107,6 +107,11 @@ export function ModelPickerSheet({
           const list = await ocModelsOneShot()
           setOcList(list ?? [])
         } else {
+          // The server may be down on a fresh app open — the inventory
+          // lives behind it. ensure is idempotent and cheap when healthy;
+          // without this the picker showed an empty list until a message
+          // had started the server.
+          try { await ocEnsureServer() } catch {}
           const [list, def] = await Promise.all([ocModels(), ocDefaultModel()])
           setOcList(list ?? [])
           setOcDefault(def ?? null)
