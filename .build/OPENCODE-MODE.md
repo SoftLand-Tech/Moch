@@ -39,9 +39,11 @@ truth**; UI slices consume them, never re-implement the wire.
 - `GET  /api/session/:id/message` → `{data:[...]}` NEWEST FIRST (reverse).
   user: `{type:'user', payload:{text}}`; assistant: `{content:[{type:'text',text}|
   {type:'reasoning',text}|{type:'tool', id,name,state:{status},time}]}`.
-- `GET  /api/model` → `{data:[{providerID,modelID,name,capability?...}]}`;
+- `GET  /api/model` → `{data:[{id,providerID,modelID,name,capability?...}]}`;
   `GET /api/model/default` → current default; `POST /api/session/:id/model
-  {model:{providerID,modelID}}`.
+  {model:{id,providerID}}` — the body is a Model.Ref (`{id, providerID,
+  variant?}`, additionalProperties:false): `id` is the BARE model id (the
+  `id` field of a GET /api/model entry, no provider prefix), NOT modelID.
 - Integrations (provider auth): `GET /api/integration` → list;
   `POST /api/integration/{integrationID}/connect/key {key}` → connect.
   Free models (e.g. provider `opencode`, model `iceman-free`) need NO key.
@@ -89,7 +91,9 @@ One-shot stays as the fallback mode:
   `OcError {status, message}`; `OC_BASE` = `http://127.0.0.1:4096`.
 - `ocListSessions()`, `ocCreateSession(title)`, `ocHistory(id)`,
   `ocPrompt(id, text)`, `ocInterrupt(id)`, `ocPermissionReply(id, rid, reply)`,
-  `ocModels()`, `ocDefaultModel()`, `ocSetModel(id, providerID, modelID)`,
+  `ocModels()`, `ocDefaultModel()`, `ocSetModel(sessionId, providerID, modelId)` —
+  the third arg is the Model.Ref `id` (bare model id), and the body sent is
+  `{model:{id, providerID}}`,
   `ocIntegrations()`, `ocConnectKey(integrationID, key)`.
 - `ocStream(handler, signal?)` — SSE pump over `expo/fetch`; `handler(e)`
   with `e = {type, data}`; never throws on normal close, resolves when the

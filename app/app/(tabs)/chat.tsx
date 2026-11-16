@@ -1785,7 +1785,7 @@ export default function Chat() {
             ocMode={ocMode}
             ocOneShot={ocOneShot}
             ocSessionId={storedId || null}
-            onPicked={(modelID) => { if (storedId) { setOcPicks((p) => ({ ...p, [storedId]: modelID })); void rememberOcPick(storedId, modelID) } }}
+            onPicked={(modelID) => { const sid = activeStoredId.get(); if (sid) { setOcPicks((p) => ({ ...p, [sid]: modelID })); void rememberOcPick(sid, modelID) } }}
           />
           <CommandCatalogSheet
             open={catalogOpen}
