@@ -8,6 +8,7 @@ import {
   loadThinker,
   opencodeInstalled,
   installOpencode,
+  diagnoseOpencodeServer,
   startOpencodeServer,
   setThinker,
   thinkerAtom,
@@ -31,6 +32,23 @@ export default function ThinkerChoice() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [log, setLog] = useState<string>('')
+  // Last-failure evidence, collected automatically (see pick) — the user can
+  // expand it and send it back instead of another blind round-trip.
+  const [diag, setDiag] = useState<string | null>(null)
+  const [showDiag, setShowDiag] = useState(false)
+  const [diagBusy, setDiagBusy] = useState(false)
+
+  const runDiagnostics = async () => {
+    setDiagBusy(true)
+    try {
+      const d = await diagnoseOpencodeServer()
+      setDiag(d.report)
+    } catch (e) {
+      setDiag(`Diagnostics failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setDiagBusy(false)
+    }
+  }
 
   useEffect(() => {
     void loadThinker()
@@ -65,6 +83,11 @@ export default function ThinkerChoice() {
         const up = await startOpencodeServer()
         if (!up.ok) {
           setErr(up.stderr || 'The OpenCode server did not start.')
+          // Collect the evidence now, while the failure is fresh (stale log
+          // included) — the expander below shows it verbatim.
+          setDiag(null)
+          setShowDiag(false)
+          void runDiagnostics().then(() => setShowDiag(true))
           return
         }
         await setThinker('opencode')
@@ -143,6 +166,29 @@ export default function ThinkerChoice() {
           </View>
         ) : null}
         {err ? <Text style={s.error}>{err}</Text> : null}
+        {err && (diag || diagBusy) ? (
+          <View style={s.diagBox}>
+            <Pressable
+              style={({ pressed }) => [s.diagBtn, pressed && s.pressed]}
+              onPress={() => {
+                if (showDiag || diagBusy) { setShowDiag(false); return }
+                void runDiagnostics().then(() => setShowDiag(true))
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={showDiag ? 'Hide diagnostics' : 'Show diagnostics'}
+            >
+              <Text style={s.diagBtnText}>{diagBusy ? 'Collecting…' : showDiag ? 'Hide diagnostics' : 'Show diagnostics'}</Text>
+            </Pressable>
+            {showDiag && diag ? (
+              <ScrollView style={s.diagScroll} nestedScrollEnabled>
+                <Text style={s.diagText} selectable>{diag}</Text>
+              </ScrollView>
+            ) : null}
+            {showDiag ? (
+              <Text style={s.diagHint}>Long-press the text to copy it and send it back — it says exactly which step failed.</Text>
+            ) : null}
+          </View>
+        ) : null}
 
         {guest === false ? (
           <Pressable style={s.ghost} onPress={() => router.push('/onboarding/environment')} accessibilityRole="button">
@@ -172,6 +218,13 @@ const makeS = () => StyleSheet.create({
   progress: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
   progressText: { color: C.textDim, fontSize: 12.5, flex: 1 },
   error: { color: C.red, fontSize: 12.5, lineHeight: 18, marginTop: 12 },
+  diagBox: { marginTop: 10 },
+  diagBtn: { alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, backgroundColor: C.bgHover },
+  diagBtnText: { color: C.accent, fontSize: 12.5, fontWeight: '800' },
+  diagScroll: { maxHeight: 240, marginTop: 8, backgroundColor: C.bgCard, borderRadius: 12, borderWidth: 1, borderColor: C.borderSoft, padding: 10 },
+  diagText: { color: C.textDim, fontSize: 11, lineHeight: 15, fontFamily: 'monospace' },
+  diagHint: { color: C.textFaint, fontSize: 11.5, lineHeight: 16, marginTop: 6 },
   ghost: { alignItems: 'center', paddingVertical: 16 },
   ghostText: { color: C.accent, fontSize: 14, fontWeight: '700' },
+  pressed: { opacity: 0.75 },
 })

@@ -208,6 +208,33 @@ export async function stopOpencodeServer(): Promise<void> {
   await guestRun(`pkill -f '[o]pencode serve' >/dev/null 2>&1 || true`, 30_000)
 }
 
+export interface OcDiagnosis {
+  ok: boolean
+  /** Plain-text transcript — shown verbatim in the wizard's diagnostics view. */
+  report: string
+}
+
+/**
+ * Step-by-step probe of everything the server start needs, in one guest
+ * shell. When the start fails on a real phone, guessing from the error line
+ * is slow — this returns the raw evidence (binary, writability, tools,
+ * stale log, matching processes) so the next failure is an exact answer.
+ */
+export async function diagnoseOpencodeServer(): Promise<OcDiagnosis> {
+  const probe = [
+    `echo '--- user/home'; id; echo "HOME=$HOME"`,
+    `echo '--- opencode'; command -v opencode; opencode --version 2>&1 | head -3`,
+    `echo '--- binary'; ls -l /usr/local/bin/opencode 2>&1`,
+    `echo '--- root-writable'; touch /root/.moch-write-test 2>&1 && echo WRITABLE && rm -f /root/.moch-write-test`,
+    `echo '--- tools'; for t in nohup pgrep ss setsid sh; do command -v $t 2>/dev/null || echo "MISSING:$t"; done`,
+    `echo '--- server-log'; tail -n 20 /root/opencode.log 2>&1`,
+    `echo '--- processes'; ps -ef 2>/dev/null | grep '[o]pencode' | head -5; echo '(end)'`,
+  ].join('; ')
+  const r = await guestRun(probe, 45_000)
+  const body = [r.stdout.trim(), r.stderr.trim()].filter(Boolean).join('\n').slice(-3500)
+  return { ok: r.ok, report: body || '(the guest returned nothing — the bridge itself may be down)' }
+}
+
 export function opencodeBaseUrl(): string {
   return `http://127.0.0.1:${OC_PORT}`
 }
