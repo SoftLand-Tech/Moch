@@ -1541,6 +1541,18 @@ indicator (OPEN above), local start page.
 
 ## Wave 10 — deferred
 
+- [ ] **BUG-148 [MEDIUM] OpenCode mode: no browser MCP** — opencode thinker can't drive a page
+  Moch's hermes thinker has the agent browser; OpenCode mode has nothing. Wire a browser MCP server (the app already ships a CDP relay for the WebView pool) so `opencode` sessions can list it as an MCP tool source.
+  *Fix:* expose the existing browser relay as an MCP server reachable from the guest (stdio/socket), register it in the opencode config the app seeds.
+
+- [ ] **BUG-149 [MEDIUM] OpenCode sessions not listed under their projects**
+  The projects rail exists (see the 1.0.36 re-enable) but OpenCode sessions carry no project membership — the sidebar can't group them. opencode sessions have a directory/workspace identity server-side; map project → directory and filter `ocListSessions` by it.
+  *Fix:* pass `directory` (or `directoryID`) when creating oc sessions from a project context; group sidebar rows by it.
+
+- [ ] **BUG-150 [LOW] Duplicate model name: header shows it and the chip under the header shows it too**
+  The OpenCode chat header renders the model name and the thinker chip right below renders `OpenCode · <modelID>` — same value twice in a row.
+  *Fix:* drop the model name from the header row; keep the chip as the single owner.
+
 - [ ] **BUG-147 [HIGH] Guest tools installer never completes — ENOSYS (38) on basic syscalls** — `/root/.moch-install.sh` (staged `MOCH:STAGE:UPDATE:START`), Onboarding → Environment flow
   The staged update run fails everywhere at once: apt warns `Problem unlinking … TransItem::TransactionCommit (38: Function not implemented)` on the list files, dies fatally on `flAbsPath on /var/lib/dpkg/status failed - realpath (38: Function not implemented)`, then the script itself loses `sleep` (`Function not implemented`), cannot create `/root/.moch-install-update.log` (`Function not implemented`), and finally `Pipe call failed`. unlink/realpath/nanosleep/open/pipe ALL returning ENOSYS in one context, on kernel 6.17 + glibc 2.39 + proot 5.1.107, is a syscall-translation gap, not filesystem damage. Key clue from the same day: `apt-get update && apt-get install curl` ran CLEAN in the interactive terminal session on the same guest — so the gap is context-dependent (script launch path vs interactive session; check which proot argv/env/-k personality the installer runs under, and whether glibc 2.39's newer syscalls (`faccessat2`, `clone3`, `statx`-family) are the ones missing). User deferred: fix later, not scheduled.
   *Fix:* TBD — compare the installer's launch context (exec path, proot flags, kernel personality) against the interactive session that works; likely align the installer with the working context or patch the proot syscall gap.
