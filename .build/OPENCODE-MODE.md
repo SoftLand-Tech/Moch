@@ -48,19 +48,19 @@ truth**; UI slices consume them, never re-implement the wire.
 
 ## OpenCode thinker = server mode OR one-shot mode
 
-ROOT CAUSE CORRECTED (2026-11-16, on-device A/B tests across four launch
-contexts): the server survives ONLY with a real PTY on its stdio. Dead:
-exec_in_guest (throwaway proot → orphan → futex abort ~30 s), a dedicated
-Popen'd proot with a live tracer (1.0.31), and the pipe-only persistent
-shell (1.0.32) — all aborted ~30 s in, ~4 s CPU, identical signature.
-Alive on the same phone: the same server under the interactive terminal
-session — idle AND under full SSE + session + generation traffic,
-including a ctty-broken no-job-control session (stdin was still a tty).
-Fix (1.0.33): `ensure_server` starts the server on a hidden dedicated
-PTY session (`_oc_pty_start`) — terminal.py's proven shape (openpty +
-proot bash -i as session leader owning the ctty + drain thread), with
-the server backgrounded from that bash, stdin on the pty, stdout to
-/root/opencode.log. `stop_server` closes the pty session too.
+ROOT CAUSE CORRECTED (2026-11-16, on-device A/B tests across five launch
+contexts): the server survives ONLY inside the user's real interactive
+terminal session. Dead at ~30 s with the identical futex abort:
+exec_in_guest (throwaway proot), a dedicated Popen'd proot (1.0.31), the
+pipe-only persistent shell (1.0.32), and a dedicated pty session cloned
+from terminal.py (1.0.33). Alive on the same phone: the same server
+started by hand in the interactive session — idle AND under full SSE +
+session + generation traffic. Fix (1.0.34): `ensure_server` TYPES the
+launch line into the user's terminal session via `terminal.write`
+(starting it first if the Terminal tab was never opened); the command is
+visible in the Terminal tab. Killing the terminal session kills the
+server (orphan → futex abort); the idempotent ensure re-injects next
+turn. `stop_server` never touches the terminal session.
 
 One-shot stays as the fallback mode:
 

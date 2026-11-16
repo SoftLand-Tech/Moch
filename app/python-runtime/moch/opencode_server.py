@@ -24,9 +24,7 @@ from __future__ import annotations
 import base64
 import json
 import os
-import select
 import shlex
-import threading
 import time
 import urllib.request
 import urllib.error
@@ -90,105 +88,20 @@ def _guest_alive(password: str) -> bool:
     return bool(info.get("ok"))
 
 
-# ── pty-backed server session ────────────────────────────────────────────────
-# The server survives ONLY with a real PTY on its stdio (proven on-device
-# 2026-11-16 across four launch contexts: throwaway proot, dedicated Popen
-# proot, and the pipe-only persistent shell ALL futex-aborted ~30s in —
-# 1.0.31/1.0.32 — while the SAME binary under the interactive terminal
-# session survived idle AND under full SSE + generation traffic, including
-# a ctty-broken no-job-control session. The pty is the one common factor).
-# This is terminal.py's proven pattern on a hidden dedicated session:
-# openpty + proot bash -i (session leader, owns the ctty) + the server
-# backgrounded from it with stdin on the pty and stdout to the log file —
-# the exact surviving configuration the user verified by hand.
-_oc_state: dict = {"proc": None, "master": None, "lock": threading.Lock(), "gen": 0}
-
-
-def _oc_drain(master_fd: int, proc, gen: int) -> None:
-    """Keep the pty readable forever: bash prompts/echo would otherwise
-    fill the kernel buffer and block the shell. Output is discarded."""
-    while True:
-        with _oc_state["lock"]:
-            if gen != _oc_state["gen"]:
-                return
-        try:
-            r, _, _ = select.select([master_fd], [], [], 0.5)
-        except (OSError, ValueError):
-            return
-        if not r:
-            if proc.poll() is not None:
-                return
-            continue
-        try:
-            if not os.read(master_fd, 65536):
-                return
-        except OSError:
-            return
-
-
-def _oc_pty_start(command: str) -> dict:
-    import pty as _pty
-    import subprocess
-
-    from moch import linux_env
-
-    with _oc_state["lock"]:
-        # One hidden session: close any previous first.
-        _oc_pty_close_locked()
-        argv, env = linux_env.build_guest_launch(["/bin/bash", "-i"])
-        env = dict(env)
-        env["TERM"] = "xterm-256color"
-        master, slave = _pty.openpty()
-        try:
-            import fcntl
-            import struct
-            import termios
-
-            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
-        except Exception:  # noqa: BLE001 — best effort (mirrors terminal.py)
-            pass
-        try:
-            proc = subprocess.Popen(
-                argv,
-                stdin=slave,
-                stdout=slave,
-                stderr=slave,
-                env=env,
-                close_fds=True,
-                preexec_fn=os.setsid,  # session leader: bash owns the ctty
-            )
-        finally:
-            os.close(slave)  # parent keeps the master only
-        _oc_state["gen"] += 1
-        _oc_state["proc"] = proc
-        _oc_state["master"] = master
-        threading.Thread(
-            target=_oc_drain, args=(master, proc, _oc_state["gen"]), daemon=True
-        ).start()
-        os.write(master, command.encode() + b"\n")
-        return {"ok": True}
-
-
-def _oc_pty_close_locked() -> None:
-    proc = _oc_state.get("proc")
-    master = _oc_state.get("master")
-    _oc_state["gen"] += 1  # retire the drain thread first
-    if proc is not None and proc.poll() is None:
-        try:
-            proc.kill()
-        except Exception:  # noqa: BLE001
-            pass
-    if master is not None:
-        try:
-            os.close(master)
-        except OSError:
-            pass
-    _oc_state["proc"] = None
-    _oc_state["master"] = None
-
-
 def ensure_server(password: str) -> dict:
-    """Start the guest server if it is not answering; idempotent."""
+    """Start the guest server if it is not answering; idempotent.
+
+    The launch line is TYPED INTO THE USER'S TERMINAL SESSION (terminal.py)
+    — the one context proven on this phone to keep the server alive. Four
+    hidden launch contexts all died at ~30 s (throwaway proot; dedicated
+    Popen'd proot, 1.0.31; pipe-only persistent shell, 1.0.32; a dedicated
+    pty session cloned from terminal.py, 1.0.33), while the same server
+    started by hand in the interactive session survived idle AND under
+    full SSE + generation traffic. If the session is not up, it is started
+    here — the Terminal tab attaches to it when opened, and the launch
+    line is visible there. Killing the terminal session kills the server
+    (orphan → futex abort); this idempotent ensure re-injects next turn.
+    """
     if _guest_alive(password):
         return {"ok": True, "started": False}
     # Double-check the binary exists so the error is honest rather than a
@@ -196,13 +109,21 @@ def ensure_server(password: str) -> dict:
     which = _guest_exec("command -v opencode || true", timeout_s=15)
     if not (which.get("stdout") or "").strip():
         return {"ok": False, "error": "OpenCode is not installed in the Linux guest — install it in Onboarding → Environment."}
-    start = _oc_pty_start(
-        f'cd /root && export OPENCODE_PASSWORD={shlex.quote(password)} && '
-        f'opencode serve --hostname 127.0.0.1 --port {OC_PORT} '
-        f'>/root/opencode.log 2>&1 &'
-    )
-    if not start.get("ok"):
-        return {"ok": False, "error": (start.get("error") or "could not start opencode").strip()}
+    from moch import terminal as mterm
+
+    if not mterm.is_running():
+        boot = mterm.start()
+        if not boot.get("ok"):
+            return {"ok": False, "error": (boot.get("error") or "the terminal session could not start").strip()}
+    typed = mterm.write(base64.b64encode(
+        (
+            f'cd /root && export OPENCODE_PASSWORD={shlex.quote(password)} && '
+            f'opencode serve --hostname 127.0.0.1 --port {OC_PORT} '
+            f'>/root/opencode.log 2>&1 &'
+        ).encode()
+    ).decode("ascii"))
+    if not typed.get("ok"):
+        return {"ok": False, "error": (typed.get("error") or "could not type the launch command").strip()}
     deadline = time.time() + 45
     while time.time() < deadline:
         if _guest_alive(password):
@@ -215,8 +136,7 @@ def ensure_server(password: str) -> dict:
 
 def stop_server() -> dict:
     out = _guest_exec("pkill -f '[o]pencode serve' >/dev/null 2>&1 || true", timeout_s=20)
-    with _oc_state["lock"]:
-        _oc_pty_close_locked()
+    # The terminal session belongs to the user — never touched here.
     return {"ok": True, "detail": (out.get("stdout") or "").strip()}
 
 
