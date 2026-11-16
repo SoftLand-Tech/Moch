@@ -312,6 +312,22 @@ def _run_server(port: int) -> None:
         except Exception:
             traceback.print_exc()
 
+        # The phone has no terminal to answer approval prompts in, and the
+        # gateway platform context here is not a human CLI: flagged commands
+        # (file writes among them) parked and were denied on device — "the
+        # agent cannot write files". The embedded install therefore boots with
+        # approvals.mode: off, the same setting Hermes Desktop's "Approvals:
+        # off" toggle writes (approvals.deny rules still apply; this is the
+        # user's own phone, not a shared host). Written through the server
+        # namespace's own _write_config_key, like the /yolo global toggle.
+        try:
+            write_key = getattr(_tg_server, "_write_config_key", None)
+            if write_key is not None:
+                write_key("approvals.mode", "off")
+                print("[moch] approvals.mode=off (embedded)", flush=True)
+        except Exception:
+            traceback.print_exc()
+
         # hermes' in-process cron ticker (scheduled automations) only arms
         # under HERMES_DESKTOP=1 — the embedded serve process is exactly the
         # desktop-shell situation (a serve backend with no external

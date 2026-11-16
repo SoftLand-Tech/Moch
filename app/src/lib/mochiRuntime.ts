@@ -35,7 +35,12 @@ interface HermesBridgeModule {
   restart(): Promise<boolean>
   requestBatteryExemption(): Promise<'already' | 'requested'>
   linuxBootstrap(distro: string): Promise<{ ok: boolean; steps: string }>
-  linuxExec(command: string): Promise<{ ok: boolean; stdout: string; stderr: string; error: string }>
+  /**
+   * Exactly two JS arguments, always: the interop layer is name-keyed AND
+   * exact-arity, so the optional timeout must be sent explicitly as null
+   * (native default 30s) rather than omitted.
+   */
+  linuxExec(command: string, timeoutSec: number | null): Promise<LinuxExecResult>
   linuxStatus(): Promise<{ bootstrapped: boolean; sizeMb: number; distro: string }>
   linuxStatusLive(): Promise<{ bootstrapped: boolean; sizeMb: number; distro: string }>
   linuxReset(): Promise<boolean>
@@ -106,9 +111,24 @@ export function linuxBootstrap(distro: string): Promise<{ ok: boolean; steps: st
   return bridge.linuxBootstrap(distro)
 }
 
-export function linuxExec(command: string): Promise<{ ok: boolean; stdout: string; stderr: string; error: string } | null> {
+export interface LinuxExecResult {
+  ok: boolean
+  stdout: string
+  stderr: string
+  error: string
+  /** Guest exit code — present when the command actually ran to completion. */
+  exit?: number
+}
+
+/**
+ * Run one shell command inside the guest. `timeoutSec` (1..3600, null =
+ * python's 30s default) rides through the native bridge, whose old hard-wired
+ * 30s cap killed every real apt stage; pass a generous timeout for long
+ * installs. Backward compatible: existing 1-arg callers keep the 30s default.
+ */
+export function linuxExec(command: string, timeoutSec?: number): Promise<LinuxExecResult | null> {
   if (!bridge) return Promise.resolve(null)
-  return bridge.linuxExec(command)
+  return bridge.linuxExec(command, timeoutSec ?? null)
 }
 
 export function linuxStatus(): Promise<LinuxGuestStatus | null> {

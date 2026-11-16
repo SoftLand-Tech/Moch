@@ -17,11 +17,11 @@ import { linuxStatus } from '../../src/lib/mochiRuntime'
 import { useStore } from '@nanostores/react'
 
 /**
- * Onboarding step 1 — whose brain answers.
+ * Onboarding step 2 — whose brain answers.
  *
  * Moch (hermes, full feature set) or OpenCode (free models, chat + terminal).
- * OpenCode requires the Linux guest, so choosing it with no guest sends the
- * user to the environment step first and comes back here.
+ * OpenCode requires the Linux guest; the environment step (step 1, before this
+ * one) installs it — choosing OpenCode with no guest points back there.
  */
 export default function ThinkerChoice() {
   const s = useStyles(makeS)
@@ -68,7 +68,7 @@ export default function ThinkerChoice() {
           return
         }
         await setThinker('opencode')
-        router.push('/onboarding/environment')
+        router.push('/onboarding/providers')
       } finally {
         setBusy(false)
         setLog('')
@@ -76,13 +76,13 @@ export default function ThinkerChoice() {
       return
     }
     await setThinker('moch')
-    router.push('/onboarding/environment')
+    router.push('/onboarding/providers')
   }
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
       <ScrollView style={s.root} contentContainerStyle={s.content}>
-        <Text style={s.kicker}>STEP 1 OF 3</Text>
+        <Text style={s.kicker}>STEP 2 OF 4</Text>
         <Text style={s.title}>Who's thinking?</Text>
         <Text style={s.sub}>
           Moch ships its own agent. OpenCode is an alternative brain for people who just want
@@ -133,7 +133,7 @@ export default function ThinkerChoice() {
             Installed in the Linux guest and paired with Moch. No subscription needed for its free
             models. Bots, crew, automations and the agent browser are hidden while this is active.
           </Text>
-          {guest === false ? <Text style={s.warn}>Needs the Linux guest — you can install it in the next step, then come back.</Text> : null}
+          {guest === false ? <Text style={s.warn}>Needs the Linux guest — go back a step to install it first, then come back here.</Text> : null}
         </Pressable>
 
         {busy ? (

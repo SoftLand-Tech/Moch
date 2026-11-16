@@ -92,7 +92,7 @@ export interface GuestRunResult {
 
 /** Run one shell command inside the Moch Linux guest. */
 export async function guestRun(command: string, timeoutMs = 60_000): Promise<GuestRunResult> {
-  const r = await linuxExec(command)
+  const r = await linuxExec(command, Math.max(1, Math.min(3600, Math.ceil(timeoutMs / 1000))))
   if (!r) return { ok: false, code: -1, stdout: '', stderr: 'guest bridge unavailable' }
   return { ok: !!r.ok, code: r.ok ? 0 : 1, stdout: r.stdout ?? '', stderr: r.stderr ?? (r.error ?? '') }
 }

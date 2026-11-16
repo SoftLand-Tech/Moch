@@ -10,6 +10,8 @@ import {
   Image,
   PanResponder,
   Platform,
+  ActivityIndicator,
+  ScrollView,
   SectionList,
   TextInput,
   useWindowDimensions,
@@ -24,6 +26,10 @@ import { usePathname } from 'expo-router'
 import { useStore } from '@nanostores/react'
 import { archivedIds, groupChats, pinnedIds } from '../lib/chatListState'
 import type { RowStatus } from '../lib/attention'
+import { thinkerAtom } from '../lib/thinker'
+import { ocListSessions, type OcSession } from '../lib/opencodeClient'
+import { ocSessionsCached, ocSessionsStore } from '../lib/ocSessionsCache'
+import { openOcChat } from '../lib/chat'
 import { C, S, useStyles, useShape } from '../lib/theme'
 import { useReduceMotion } from './useReduceMotion'
 import { IdentitySwitch } from './IdentitySwitch'
@@ -32,6 +38,24 @@ import { BotsRoster } from './BotsRoster'
 import { tr, localeAtom } from '../lib/strings'
 import type { Identity, ProjectRow } from '../lib/workspace'
 import type { FleetProfile } from '../lib/fleet'
+
+// ── OpenCode sessions drawer list (OPENCODE-MODE contract) ──────────────────
+// In OpenCode mode the drawer's chat list is the OpenCode server's session
+// list, not hermes session.rows. Fetched when the drawer opens; the 15s
+// cache lives in src/lib/ocSessionsCache.ts so the chat transport can
+// invalidate it the moment a turn creates/renames a session.
+
+function formatOcTime(ms?: number): string {
+  if (!ms) return ''
+  const d = new Date(ms)
+  const sameDay = d.toDateString() === new Date().toDateString()
+  return sameDay
+    ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
+
+/** Drawer rows that are hermes-only surfaces — dropped in OpenCode mode. */
+const OC_HIDDEN_NAV_KEYS = new Set(['inbox', 'browser', 'automations', 'library'])
 
 export interface NavItem {
   key: string
@@ -291,6 +315,55 @@ export function Sidebar({
   // A row can own a route whose slug differs from its key (Library currently
   // opens the connectors screen); highlight by that slug when present.
   const activeKey = nav.find((n) => pathname?.endsWith(n.activeFor ?? n.key))?.key
+
+  // ── OpenCode mode ── read from the atom directly: this component is mounted
+  // by ScreenShell (not thinker-aware), so threading an ocMode prop through
+  // would touch a file outside this slice. Same theme, different data.
+  const thinker = useStore(thinkerAtom)
+  const ocMode = thinker === 'opencode'
+  // Hermes-only nav rows drop; Chats, Terminal (and the docked Settings) stay.
+  const shownNav = useMemo(
+    () => (ocMode ? nav.filter((n) => !OC_HIDDEN_NAV_KEYS.has(n.key)) : nav),
+    [nav, ocMode],
+  )
+  const shownBottomNav = useMemo(
+    () => (ocMode ? (bottomNav ?? []).filter((n) => !OC_HIDDEN_NAV_KEYS.has(n.key)) : bottomNav),
+    [bottomNav, ocMode],
+  )
+  // The OpenCode server's session list — the drawer's chat list in oc mode.
+  const [ocSessions, setOcSessions] = useState<OcSession[]>([])
+  const [ocLoading, setOcLoading] = useState(false)
+  const [ocError, setOcError] = useState('')
+  useEffect(() => {
+    if (!ocMode || !open) return
+    const cached = ocSessionsCached()
+    if (cached) {
+      setOcSessions(cached)
+      setOcError('')
+      return
+    }
+    let alive = true
+    setOcLoading(true)
+    setOcError('')
+    ocListSessions()
+      .then((rows) => {
+        if (!alive) return
+        // Newest activity first (ordering is the caller's job per the wire
+        // contract), capped at 30 rows.
+        const sorted = [...(rows ?? [])]
+          .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
+          .slice(0, 30)
+        ocSessionsStore(sorted)
+        setOcSessions(sorted)
+        setOcLoading(false)
+      })
+      .catch((e: unknown) => {
+        if (!alive) return
+        setOcLoading(false)
+        setOcError(e instanceof Error ? e.message : 'Could not reach the OpenCode server')
+      })
+    return () => { alive = false }
+  }, [open, ocMode])
   const { width, height } = useWindowDimensions()
   const insets = useSafeAreaInsets()
   const anim = progress
@@ -317,6 +390,13 @@ export function Sidebar({
   // exported helper so both map finger pixels to the same 0→1 progress.
   const panelWidth = drawerPanelWidth(width)
   const [query, setQuery] = useState('')
+  // The drawer's search filters OpenCode sessions by title too (declared here
+  // because it reads `query`).
+  const ocFiltered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return ocSessions
+    return ocSessions.filter((c) => (c.title ?? '').toLowerCase().includes(q))
+  }, [ocSessions, query])
   const [archOpen, setArchOpen] = useState(false)
 
   // Per-chat action state. The three overlays are mutually exclusive.
@@ -773,15 +853,18 @@ export function Sidebar({
           </Pressable>
         </View>
 
-        {/* Identity (Sessions | Bots) — the drawer's top-level switch. */}
-        <IdentitySwitch identity={identity} onChange={onIdentity} />
+        {/* Identity (Sessions | Bots) — the drawer's top-level switch. OpenCode
+            mode has no Bots surface: the switch stays on Sessions and the
+            Bots segment is inert (no dead tap). */}
+        <IdentitySwitch identity={ocMode ? 'sessions' : identity} onChange={ocMode ? () => {} : onIdentity} />
 
-        <View>{renderNavRows(nav)}</View>
+        <View>{renderNavRows(shownNav)}</View>
 
         {/* Sessions mode owns the project rail; Bots mode replaces that whole
             body with the roster (one row per bot, no per-bot chat list — a
-            bot IS one canonical `Bot Chat`). */}
-        {identity === 'sessions' ? (
+            bot IS one canonical `Bot Chat`). OpenCode mode owns neither —
+            projects are hermes cwd buckets, bots are hermes profiles. */}
+        {!ocMode && identity === 'sessions' ? (
           <ProjectList
             projects={projects}
             activeProjectId={activeProjectId}
@@ -792,7 +875,7 @@ export function Sidebar({
           />
         ) : null}
 
-        {identity === 'bots' ? (
+        {!ocMode && identity === 'bots' ? (
           <BotsRoster
             profiles={profiles ?? []}
             onOpenBot={(key) => {
@@ -808,7 +891,7 @@ export function Sidebar({
           />
         ) : null}
 
-        {identity === 'sessions' && recent.length > 0 ? (
+        {(ocMode || identity === 'sessions') && (ocMode || recent.length > 0) ? (
           <>
             <View style={s.searchWrap}>
               <Icon name="search" size={14} color={C.textFaint} />
@@ -822,7 +905,7 @@ export function Sidebar({
                 autoCorrect={false}
                 autoCapitalize="none"
                 editable={open}
-                accessibilityLabel={tr('sidebar.searchChats')}
+                accessibilityLabel={ocMode ? 'Search OpenCode chats' : tr('sidebar.searchChats')}
                 onFocus={() => {
                   searchFocusRef.current = true
                 }}
@@ -845,7 +928,47 @@ export function Sidebar({
                 search field stays at the panel top while chat results render
                 above the keys instead of behind them. */}
             <RAnimated.View style={[{ flex: 1 }, drawerListKbPad]}>
-            <SectionList<RecentChat, Section>
+            {ocMode ? (
+              // OpenCode sessions: rows come from the OpenCode server, keyed
+              // by oc id. Tapping opens a fresh chat window bound to that
+              // session and hydrates its transcript.
+              <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
+                <View style={s.sectionLabelRow}>
+                  <Text style={s.sectionLabel}>OpenCode sessions</Text>
+                </View>
+                {ocLoading ? (
+                  <View style={s.ocState}>
+                    <ActivityIndicator color={C.accent} />
+                  </View>
+                ) : ocError ? (
+                  <Text style={s.ocStateText}>{ocError}</Text>
+                ) : ocFiltered.length ? (
+                  ocFiltered.map((c) => (
+                    <Pressable
+                      key={c.id}
+                      style={({ pressed }) => [s.recentRow, pressed && s.recentRowPressed]}
+                      onPress={() => {
+                        onClose()
+                        void openOcChat(c.id).catch(() => {})
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Open OpenCode chat ${c.title || 'Untitled'}`}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.recentTitle} numberOfLines={1}>{c.title || 'Untitled'}</Text>
+                        {c.time?.updated ? (
+                          <Text style={s.ocRowSub} numberOfLines={1}>{formatOcTime(c.time.updated)}</Text>
+                        ) : null}
+                      </View>
+                    </Pressable>
+                  ))
+                ) : (
+                  <Text style={s.ocStateText}>No OpenCode sessions yet</Text>
+                )}
+                <View style={{ height: 12 }} />
+              </ScrollView>
+            ) : (
+              <SectionList<RecentChat, Section>
               sections={sections}
               keyExtractor={chatKey}
               style={{ flex: 1 }}
@@ -863,22 +986,26 @@ export function Sidebar({
               renderSectionFooter={renderSectionFooter}
               ListEmptyComponent={listEmpty}
             />
+            )}
             </RAnimated.View>
           </>
-        ) : identity === 'sessions' ? (
+        ) : (ocMode || identity === 'sessions') ? (
           <View style={{ flex: 1 }} />
         ) : null}
 
         {/* The pending-questions note counts CHATS waiting on you; in Bots
-            mode the drawer shows no chats, so it would be unexplainable. */}
-        {identity === 'sessions' ? footer : null}
+            mode the drawer shows no chats, so it would be unexplainable.
+            Hermes-only: OpenCode questions render in the chat itself. */}
+        {!ocMode && identity === 'sessions' ? footer : null}
 
         {/* Bottom-docked nav (Settings) + primary action, pinned like
             ChatGPT's blue button at the panel's bottom edge. */}
-        {bottomNav?.length ? <View>{renderNavRows(bottomNav)}</View> : null}
+        {shownBottomNav?.length ? <View>{renderNavRows(shownBottomNav)}</View> : null}
         {/* Bots mode has no "New chat": its primary action is the roster's
-            `+ New bot` (which opens the Fleet create flow). */}
-        {identity === 'sessions' ? (
+            `+ New bot` (which opens the Fleet create flow). OpenCode mode
+            starts chats like Sessions — newChat is the local window the OC
+            session binds to. */}
+        {ocMode || identity === 'sessions' ? (
           <Pressable
             style={({ pressed }) => [s.newChat, pressed && { opacity: 0.85 }]}
             onPress={() => {
@@ -1298,6 +1425,11 @@ const makeS = () => StyleSheet.create({
     justifyContent: 'center',
   },
   noMatch: { color: C.textFaint, fontSize: 13, paddingHorizontal: 16, paddingVertical: 12 },
+  // OpenCode sessions list — same row language as RecentRow, plus a time
+  // subtitle and honest loading/error/empty states.
+  ocRowSub: { color: C.textFaint, fontSize: 11.5, marginTop: 1 },
+  ocState: { paddingVertical: 28, alignItems: 'center' },
+  ocStateText: { color: C.textFaint, fontSize: 13, paddingHorizontal: 16, paddingVertical: 12 },
   newChat: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -6,16 +6,18 @@ import { Icon } from '../../src/components/Icon'
 import { C, useStyles } from '../../src/lib/theme'
 import { tr } from '../../src/lib/strings'
 import {
+  ALL_PACKAGES,
   PACKAGE_CATEGORIES,
   defaultsPackageIds,
   installPackages,
+  cancelPackageInstall,
   withRequirements,
   type PackageResult,
 } from '../../src/lib/linuxPackages'
 import { linuxBootstrap, linuxStatus, type LinuxGuestStatus } from '../../src/lib/mochiRuntime'
 
 /**
- * Onboarding step 2 — the environment.
+ * Onboarding step 1 — the environment.
  *
  * The Linux guest is optional but it is the only place OpenCode (and real
  * package work) can run. When the user installs it, this screen offers a
@@ -23,6 +25,24 @@ import { linuxBootstrap, linuxStatus, type LinuxGuestStatus } from '../../src/li
  * Nothing here is fatal: a failed package is reported per-item and the user
  * can continue.
  */
+
+/** Human step text for a runner stage token, using the item catalogue. */
+function installStageText(stage: string, wanted: string[], done: Record<string, PackageResult>): string {
+  if (stage === 'update') return 'apt-get update…'
+  const want = new Set(wanted)
+  if (stage === 'apt') {
+    // One apt command installs all apt items at once; naming the first one
+    // that has not reported yet keeps the step text concrete and moving.
+    const item = ALL_PACKAGES.find((i) => i.kind === 'apt' && want.has(i.id) && !done[i.id])
+    return item ? `installing ${item.name}…` : 'installing apt packages…'
+  }
+  if (stage.startsWith('npm:')) {
+    const item = ALL_PACKAGES.find((i) => i.id === stage.slice(4))
+    return item ? `installing ${item.name}…` : 'installing npm packages…'
+  }
+  return 'Installing the packages you picked…'
+}
+
 export default function Environment() {
   const s = useStyles(makeS)
   const [distro, setDistro] = useState<'ubuntu-24.04' | 'debian-12' | 'none'>('ubuntu-24.04')
@@ -34,6 +54,16 @@ export default function Environment() {
   const [selected, setSelected] = useState<string[]>(defaultsPackageIds())
   const [results, setResults] = useState<Record<string, PackageResult>>({})
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ languages: true, build: true })
+  // The package runner polls a guest log for up to 30 minutes — leaving the
+  // screen must stop that loop, and the user gets a visible Cancel too.
+  const aliveRef = React.useRef(true)
+  useEffect(() => {
+    aliveRef.current = true
+    return () => {
+      aliveRef.current = false
+      cancelPackageInstall()
+    }
+  }, [])
 
   useEffect(() => {
     void linuxStatus().then(setInstalled).catch(() => {})
@@ -42,6 +72,38 @@ export default function Environment() {
   const guestReady = !!installed?.bootstrapped
   const toggle = (id: string) => {
     setSelected((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]))
+  }
+
+  /**
+   * The ONE package-install path — both the button after a fresh bootstrap
+   * and the continue-on-ready-guest click land here. The step text follows
+   * the runner's real events (stage tokens + per-item outcomes), never a
+   * fake "Installed N of M" counter over stale state.
+   */
+  const installSelected = async (): Promise<void> => {
+    const list = withRequirements(selected)
+    const seen: Record<string, PackageResult> = {}
+    setInstallingPackages(true)
+    setResults({})
+    setStep('Installing the packages you picked…')
+    try {
+      await installPackages(
+        list,
+        (res) => {
+          seen[res.id] = res
+          setResults((cur) => ({ ...cur, [res.id]: res }))
+        },
+        (stage) => setStep(installStageText(stage, list, seen)),
+      )
+    } catch {
+      // The runner reports failures as per-item results; a throw here is a
+      // bridge-level surprise — swallow so the screen stays usable.
+    } finally {
+      if (aliveRef.current) {
+        setInstallingPackages(false)
+        setStep('')
+      }
+    }
   }
 
   const runInstall = async () => {
@@ -58,18 +120,7 @@ export default function Environment() {
       }
       const st = await linuxStatus().catch(() => null)
       setInstalled(st)
-      if (distro !== 'none' && selected.length) {
-        setInstallingPackages(true)
-        setStep('Installing the packages you picked…')
-        const list = withRequirements(selected)
-        let n = 0
-        await installPackages(list, (res) => {
-          n += 1
-          setResults((cur) => ({ ...cur, [res.id]: res }))
-          setStep(`Installed ${n} of ${list.length}…`)
-        })
-        setInstallingPackages(false)
-      }
+      if (distro !== 'none' && selected.length) await installSelected()
       setStep('')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -85,23 +136,12 @@ export default function Environment() {
     // guest with newly ticked packages installs just those, then advances.
     if (installing) return
     if (guestReady && selected.length) {
-      setInstallingPackages(true)
-      setResults({})
-      setStep('Installing the packages you picked…')
-      let n = 0
-      const list = withRequirements(selected)
-      await installPackages(list, (res) => {
-        n += 1
-        setResults((cur) => ({ ...cur, [res.id]: res }))
-        setStep(`Installed ${n} of ${list.length}…`)
-      }).catch(() => {})
-      setInstallingPackages(false)
-      setStep('')
+      await installSelected()
     } else if (distro !== 'none' && !guestReady) {
       await runInstall()
       return
     }
-    router.push('/onboarding/about')
+    router.push('/onboarding/thinker')
   }
 
   const failures = Object.values(results).filter((r) => r.id !== 'apt' && !r.ok)
@@ -109,7 +149,7 @@ export default function Environment() {
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
       <ScrollView style={s.root} contentContainerStyle={s.content}>
-        <Text style={s.kicker}>STEP 2 OF 3</Text>
+        <Text style={s.kicker}>STEP 1 OF 4</Text>
         <Text style={s.title}>Give Moch a computer</Text>
         <Text style={s.sub}>
           A real Ubuntu userspace on your phone. Optional — but it gives the agent apt,
@@ -205,6 +245,16 @@ export default function Environment() {
           <View style={s.progress}>
             <ActivityIndicator size="small" color={C.accent} />
             <Text style={s.progressText}>{step}</Text>
+            {installingPackages ? (
+              <Pressable
+                style={({ pressed }) => [s.cancelBtn, pressed && s.pressed]}
+                onPress={() => { cancelPackageInstall(); setStep('Cancelling…') }}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel the package install"
+              >
+                <Text style={s.cancelText}>Cancel</Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : null}
         {error ? <Text style={s.error}>{error}</Text> : null}
@@ -230,8 +280,16 @@ export default function Environment() {
                   : 'Install environment'}
           </Text>
         </Pressable>
-        <Pressable style={s.skip} onPress={() => router.push('/onboarding/about')} accessibilityRole="button">
-          <Text style={s.skipText}>Skip this step</Text>
+        <Pressable
+          style={[s.skip, (installing || installingPackages) && s.pressed]}
+          onPress={() => { if (!installing && !installingPackages) router.push('/onboarding/thinker') }}
+          disabled={installing || installingPackages}
+          accessibilityRole="button"
+          accessibilityLabel="Skip this step"
+        >
+          <Text style={[s.skipText, (installing || installingPackages) && { color: C.textFaint }]}>
+            {installing || installingPackages ? 'Installing — cancel or wait' : 'Skip this step'}
+          </Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
@@ -269,6 +327,8 @@ const makeS = () => StyleSheet.create({
   warnTag: { color: C.amber, fontSize: 10.5, fontWeight: '700', marginTop: 2 },
   progress: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
   progressText: { color: C.textDim, fontSize: 12.5, flex: 1 },
+  cancelBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, backgroundColor: C.bgHover },
+  cancelText: { color: C.red, fontSize: 12.5, fontWeight: '800' },
   error: { color: C.red, fontSize: 12.5, lineHeight: 18, marginTop: 10 },
   btn: { backgroundColor: C.accent, borderRadius: 16, paddingVertical: 16, alignItems: 'center', marginTop: 18 },
   btnBusy: { opacity: 0.6 },

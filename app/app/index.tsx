@@ -13,7 +13,8 @@ import { useStore } from '@nanostores/react'
  * Entry screen — local only (2026-11-15).
  *
  * Boots the embedded runtime and then either resumes chat (returning user) or
- * starts the three-step onboarding: thinker → environment → about you.
+ * starts the four-step onboarding: environment → thinker → providers → about
+ * you.
  *
  * No remote pairing: a saved config from the remote era may still be on disk,
  * but it is never dialed. A one-time notice names it so it can be forgotten.
@@ -43,9 +44,9 @@ export default function Onboarding() {
     try {
       await connectThisPhone()
       if (!mounted.current) return
-      // Returning user → chat. First run → the three-step wizard.
+      // Returning user → chat. First run → the four-step wizard.
       if (onboardedAtom.get()) router.replace('/(tabs)/chat')
-      else router.replace('/onboarding/thinker')
+      else router.replace('/onboarding/environment')
     } catch (e) {
       if (!mounted.current) return
       setDetail(e instanceof Error ? e.message : String(e))
@@ -64,7 +65,7 @@ export default function Onboarding() {
         await connect({ host: `127.0.0.1:${gw.port}`, token: gw.token, tls: false, name: 'This phone' })
         if (mounted.current) {
           if (onboardedAtom.get()) router.replace('/(tabs)/chat')
-          else router.replace('/onboarding/thinker')
+          else router.replace('/onboarding/environment')
         }
         return
       } catch (e) {

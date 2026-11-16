@@ -388,6 +388,12 @@ function SettingsInner() {
           />
           <Divider />
           <Row
+            icon="shield-checkmark-outline"
+            label="Agent approvals: off"
+            sub="Files and commands run without asking — this is your own phone. 'approvals.deny' rules still apply."
+          />
+          <Divider />
+          <Row
             icon="refresh"
             label="Reconnect now"
             chevron
@@ -432,6 +438,14 @@ function SettingsInner() {
                 })() },
               },
             ])}
+          />
+          <Divider />
+          <Row
+            icon="key-outline"
+            label="Providers"
+            sub="Add or change a provider key"
+            chevron
+            onPress={() => router.push('/onboarding/providers')}
           />
         </Section>
 

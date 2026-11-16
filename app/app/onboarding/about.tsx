@@ -11,7 +11,7 @@ import { requestBatteryExemption } from '../../src/lib/mochiRuntime'
 import { thinkerAtom } from '../../src/lib/thinker'
 
 /**
- * Onboarding step 3 — about you, then the two permissions that keep the runtime
+ * Onboarding step 4 — about you, then the two permissions that keep the runtime
  * alive. The answers go into the launch profile's USER.md through MemoryStore,
  * so the agent has them from its first turn.
  */
@@ -43,7 +43,7 @@ export default function About() {
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
       <KeyboardAwareScrollView style={s.root} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
-        <Text style={s.kicker}>STEP 3 OF 3</Text>
+        <Text style={s.kicker}>STEP 4 OF 4</Text>
         <Text style={s.title}>A little about you</Text>
         <Text style={s.sub}>
           This becomes Moch's memory of you — it is stored on this phone, in the agent's own

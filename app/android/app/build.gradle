@@ -132,8 +132,8 @@ android {
         // See embedded/EXEC-DESIGN.md §1/§4.2. The raise and the loader
         // fix ship together in this versionCode.
         targetSdkVersion 36
-        versionCode 27
-        versionName "1.0.24-onboarding"
+        versionCode 28
+        versionName "1.0.25-opencodemode"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }

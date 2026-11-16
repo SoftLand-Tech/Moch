@@ -26,6 +26,8 @@ import {
   type ProviderOption, type ModelScope,
 } from '../lib/modelState'
 import { ensureSession, activeLiveId, pushLocalMessage } from '../lib/chat'
+import { ocModels, ocDefaultModel, ocSetModel, OcError, type OcModel } from '../lib/opencodeClient'
+import { ocSessionFor } from '../lib/opencodeChat'
 import { slashLabel } from '../lib/slash'
 import { log } from '../lib/log'
 import { C, useStyles } from '../lib/theme'
@@ -33,8 +35,22 @@ import { C, useStyles } from '../lib/theme'
 type Step = 'provider' | 'model' | 'scope'
 
 export function ModelPickerSheet({
-  open, onClose, initialSlug,
-}: { open: boolean; onClose: () => void; initialSlug?: string | null }) {
+  open, onClose, initialSlug, ocMode = false, ocSessionId = null, onPicked,
+}: {
+  open: boolean
+  onClose: () => void
+  initialSlug?: string | null
+  /**
+   * OpenCode mode (OPENCODE-MODE): the inventory and the apply path go to
+   * the OpenCode server (ocModels / ocSetModel), never the gateway's
+   * model.* RPCs. The hermes path below is untouched.
+   */
+  ocMode?: boolean
+  /** The chat's PERSISTENT id — resolved to an OC session via ocSessionFor. */
+  ocSessionId?: string | null
+  /** Fired after a session-scoped pick lands — the chip keeps this model. */
+  onPicked?: (modelID: string) => void
+}) {
   const s = useStyles(makeS)
   const options = useStore(modelOptions)
   const loading = useStore(modelOptionsLoading)
@@ -51,6 +67,40 @@ export function ModelPickerSheet({
   /** Set when the open-path refresh fails — surfaced in the sheet, not just the log. */
   const [loadError, setLoadError] = useState('')
   const seq = useRef(0)
+  // ── OpenCode mode state (ocMode only) ──
+  const [ocList, setOcList] = useState<OcModel[] | null>(null)
+  const [ocLoading, setOcLoading] = useState(false)
+  const [ocErr, setOcErr] = useState('')
+  const [ocDefault, setOcDefault] = useState<OcModel | null>(null)
+
+  // OpenCode open-path: inventory + current default in one go. Loading and
+  // errors render in-sheet with honest copy.
+  useEffect(() => {
+    if (!open || !ocMode) return
+    setQuery('')
+    setOcErr('')
+    setOcList(null)
+    setOcLoading(true)
+    void (async () => {
+      try {
+        const [list, def] = await Promise.all([ocModels(), ocDefaultModel()])
+        setOcList(list ?? [])
+        setOcDefault(def ?? null)
+      } catch (err) {
+        setOcList([])
+        setOcErr(
+          err instanceof OcError
+            ? 'OpenCode server not running'
+            : err instanceof Error
+              ? err.message
+              : 'Could not load models',
+        )
+        log('warn', 'opencode', `model list failed: ${String(err)}`)
+      } finally {
+        setOcLoading(false)
+      }
+    })()
+  }, [open, ocMode])
 
   // Fresh inventory each time the sheet opens (cheap; also re-layers the
   // session's live provider after resumes). Cached rows render instantly —
@@ -63,7 +113,7 @@ export function ModelPickerSheet({
   // initialSlug (Providers section → "pick a model") skips the provider
   // list and lands directly on that provider's models when it's usable.
   useEffect(() => {
-    if (!open) return
+    if (!open || ocMode) return // OpenCode mode has its own open-path above
     setStep('provider')
     setProvider(null)
     setModel('')
@@ -89,7 +139,7 @@ export function ModelPickerSheet({
         log('warn', 'model', `model.options failed: ${String(err)}`)
       }
     })()
-  }, [open, initialSlug])
+  }, [open, initialSlug, ocMode])
 
   const providers = useMemo(() => rankProviders(options?.providers ?? []), [options])
   const configured = useMemo(() => providers.filter((p) => p.authenticated), [providers])
@@ -110,6 +160,56 @@ export function ModelPickerSheet({
     if (!provider) return []
     return rankModels(provider).filter((m) => match(m))
   }, [provider, q])
+
+  // ── OpenCode mode: provider-grouped inventory + apply path ────────────────
+  const ocGroups = useMemo(() => {
+    const list = ocList ?? []
+    const matchOc = (m: OcModel) =>
+      !q ||
+      m.modelID.toLowerCase().includes(q) ||
+      m.providerID.toLowerCase().includes(q) ||
+      (m.name ?? '').toLowerCase().includes(q)
+    const order: string[] = []
+    const byProvider = new Map<string, OcModel[]>()
+    for (const m of list) {
+      if (!matchOc(m)) continue
+      const arr = byProvider.get(m.providerID)
+      if (arr) arr.push(m)
+      else {
+        byProvider.set(m.providerID, [m])
+        order.push(m.providerID)
+      }
+    }
+    return order.map((p) => ({ provider: p, models: byProvider.get(p) ?? [] }))
+  }, [ocList, q])
+
+  /** Apply a model to this chat's OpenCode session. */
+  const pickOcModel = async (m: OcModel) => {
+    if (applying) return
+    setApplying(true)
+    setOcErr('')
+    try {
+      const ocId = ocSessionId ? await ocSessionFor(ocSessionId) : null
+      if (!ocId) throw new Error('This chat has no OpenCode session yet — send a message first')
+      await ocSetModel(ocId, m.providerID, m.modelID)
+      onPicked?.(m.modelID)
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      setOcDefault(m)
+      onClose()
+    } catch (err) {
+      setOcErr(err instanceof Error ? err.message : 'Model switch failed')
+      log('warn', 'opencode', `model switch failed: ${String(err)}`)
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  const headerTitle = ocMode
+    ? 'Model'
+    : step === 'provider' ? 'Model' : step === 'model' ? (provider?.name ?? 'Models') : model
+  const headerSub = ocMode
+    ? (ocDefault ? `Now: ${ocDefault.modelID}${ocDefault.providerID ? ` · ${ocDefault.providerID}` : ''}` : 'OpenCode models')
+    : (curModel ? `Now: ${curModel}${curProvider ? ` · ${curProvider}` : ''}` : 'Tap a provider, then a model')
 
   const pickProvider = (p: ProviderOption) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
@@ -197,8 +297,6 @@ export function ModelPickerSheet({
     }
   }
 
-  const headerTitle = step === 'provider' ? 'Model' : step === 'model' ? (provider?.name ?? 'Models') : model
-
   return (
     <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView style={s.flex} behavior="padding">
@@ -219,7 +317,7 @@ export function ModelPickerSheet({
             <View style={{ flex: 1 }}>
               <Text style={s.headTitle} numberOfLines={1}>{headerTitle}</Text>
               <Text style={s.headSub} numberOfLines={1}>
-                {curModel ? `Now: ${curModel}${curProvider ? ` · ${curProvider}` : ''}` : 'Tap a provider, then a model'}
+                {headerSub}
               </Text>
             </View>
             <Pressable
@@ -232,23 +330,23 @@ export function ModelPickerSheet({
             </Pressable>
           </View>
 
-          {loadError ? (
+          {!ocMode && loadError ? (
             <Text style={s.loadWarning}>
               Couldn't refresh the model inventory ({loadError}). Showing the last known list.
             </Text>
           ) : null}
 
           {/* Search (provider + model steps) */}
-          {step !== 'scope' && !keyFor ? (
+          {ocMode || (step !== 'scope' && !keyFor) ? (
             <View style={s.searchWrap}>
               <Icon name="search" size={15} color={C.textFaint} />
               <TextInput
                 style={s.search}
                 value={query}
                 onChangeText={setQuery}
-                placeholder={step === 'provider' ? 'Filter providers…' : 'Filter models…'}
+                placeholder={ocMode ? 'Filter models…' : step === 'provider' ? 'Filter providers…' : 'Filter models…'}
                 placeholderTextColor={C.textFaint}
-                accessibilityLabel={step === 'provider' ? 'Filter providers' : 'Filter models'}
+                accessibilityLabel={step === 'provider' && !ocMode ? 'Filter providers' : 'Filter models'}
               />
               {query ? (
                 <Pressable
@@ -263,7 +361,40 @@ export function ModelPickerSheet({
             </View>
           ) : null}
 
-          {loading && !options ? (
+          {ocMode ? (
+            // ── OpenCode mode: provider-grouped model list, one tap applies ──
+            ocLoading ? (
+              <View style={s.center}><ActivityIndicator color={C.accent} /></View>
+            ) : (
+              <>
+                {ocErr ? <Text style={s.loadWarning}>{ocErr}</Text> : null}
+                <ScrollView style={s.list} keyboardShouldPersistTaps="handled">
+                  {ocGroups.map((g) => (
+                    <View key={g.provider}>
+                      <Text style={s.sectionLabel}>{g.provider}</Text>
+                      {g.models.map((m) => (
+                        <OcModelRow
+                          key={`${m.providerID}/${m.modelID}`}
+                          m={m}
+                          isCurrent={ocDefault?.providerID === m.providerID && ocDefault?.modelID === m.modelID}
+                          disabled={applying}
+                          onPress={() => { void pickOcModel(m) }}
+                        />
+                      ))}
+                    </View>
+                  ))}
+                  {!ocGroups.length ? <Text style={s.empty}>No models match “{query}”.</Text> : null}
+                  <View style={{ height: 24 }} />
+                </ScrollView>
+                {applying ? (
+                  <View style={s.applying}>
+                    <ActivityIndicator size="small" color={C.accent} />
+                    <Text style={s.applyingText}>Switching…</Text>
+                  </View>
+                ) : null}
+              </>
+            )
+          ) : loading && !options ? (
             <View style={s.center}><ActivityIndicator color={C.accent} /></View>
           ) : step === 'provider' ? (
             <ScrollView style={s.list} keyboardShouldPersistTaps="handled">
@@ -361,8 +492,7 @@ function ProviderRow({ p, onPress, currentModel }: { p: ProviderOption; onPress:
 
 function ModelRow({
   m, p, isCurrent, disabled, onPress,
-}: { m: string; p: ProviderOption; isCurrent: boolean; disabled: boolean; onPress: () => void }) {
-  const s = useStyles(makeS)
+}: { m: string; p: ProviderOption; isCurrent: boolean; disabled: boolean; onPress: () => void }) {  const s = useStyles(makeS)
   const cap = p.capabilities?.[m]
   const price = p.pricing?.[m]
   const priceText = price
@@ -390,6 +520,32 @@ function ModelRow({
         <Text style={s.rowSub} numberOfLines={1}>
           {[priceText, disabled ? 'currently unavailable' : ''].filter(Boolean).join(' · ')}
         </Text>
+      </View>
+      {isCurrent ? <Icon name="checkmark" size={17} color={C.accent} /> : null}
+    </Pressable>
+  )
+}
+
+/** One OpenCode model row — same visual language as ModelRow, OC data. */
+function OcModelRow({
+  m, isCurrent, disabled, onPress,
+}: { m: OcModel; isCurrent: boolean; disabled: boolean; onPress: () => void }) {
+  const s = useStyles(makeS)
+  return (
+    <Pressable
+      style={({ pressed }) => [s.row, pressed && s.rowPressed, disabled && s.rowDisabled]}
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={`Model ${m.modelID}${isCurrent ? ', current' : ''}`}
+    >
+      <View style={{ flex: 1 }}>
+        <View style={s.rowTitleLine}>
+          <Text style={[s.rowTitle, isCurrent && { color: C.accent }]} numberOfLines={1}>{m.modelID}</Text>
+        </View>
+        {m.name && m.name !== m.modelID ? (
+          <Text style={s.rowSub} numberOfLines={1}>{m.name}</Text>
+        ) : null}
       </View>
       {isCurrent ? <Icon name="checkmark" size={17} color={C.accent} /> : null}
     </Pressable>

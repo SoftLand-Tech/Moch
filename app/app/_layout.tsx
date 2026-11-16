@@ -337,6 +337,7 @@ export default function RootLayout() {
         <Stack.Screen name="setup" options={{ headerShown: false, presentation: 'modal' }} />
         <Stack.Screen name="onboarding/thinker" options={{ headerShown: false }} />
         <Stack.Screen name="onboarding/environment" options={{ headerShown: false }} />
+        <Stack.Screen name="onboarding/providers" options={{ headerShown: false }} />
         <Stack.Screen name="onboarding/about" options={{ headerShown: false }} />
       </Stack>
       {!online && state !== 'idle' && bootStruggling ? (
