@@ -48,18 +48,19 @@ truth**; UI slices consume them, never re-implement the wire.
 
 ## OpenCode thinker = server mode OR one-shot mode
 
-ROOT CAUSE CORRECTED (2026-11-16, on-device A/B tests): the server was
-launched via `exec_in_guest` — a THROWAWAY proot per command whose shell
-exits right after backgrounding the server. proot traces every guest
-process; when the tracer dies, the orphaned tracee's futex syscalls come
-back broken and Bun aborts ~30 s later (`The futex facility returned an
-unexpected error code`). Proof: the same `opencode serve` survives
-indefinitely under a live tracer (an interactive terminal session) and
-futex-crashes ~30 s after that session is killed; the one-shot CLI never
-orphaned itself, which is why it survived. Earlier "Bun's loop crashes
-under proot" testing only ever exercised the throwaway launch. Fix:
-`linux_env.spawn_in_guest` starts the server under its own persistent
-proot (tracer lifetime == server lifetime, like a terminal session).
+ROOT CAUSE CORRECTED (2026-11-16, on-device A/B tests): proot TRACES
+every guest process, and the server only survives under a launch context
+that stays alive for the app's whole lifetime. Proven dead: exec_in_guest
+(throwaway proot orphans the server → futex abort ~30 s) AND a dedicated
+Popen'd proot with a live tracer under the RPC context (1.0.31 — still
+aborted ~30 s in). Proven alive on the same phone: the same server under
+an interactive terminal session (PTY or not — a job-control-less session
+kept it alive), idle AND under full SSE + session + generation traffic.
+Fix (1.0.32): `ensure_server` launches the server as a background job of
+the PERSISTENT guest shell (`linux_session`) — one proot-backed bash
+started at app boot that lives as long as the app, already field-proven
+by the agent command path. Known edge: a poisoned/respawned persistent
+shell orphans the server; the idempotent ensure restarts it.
 
 One-shot stays as the fallback mode:
 

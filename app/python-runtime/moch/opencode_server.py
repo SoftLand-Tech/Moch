@@ -97,24 +97,30 @@ def ensure_server(password: str) -> dict:
     which = _guest_exec("command -v opencode || true", timeout_s=15)
     if not (which.get("stdout") or "").strip():
         return {"ok": False, "error": "OpenCode is not installed in the Linux guest — install it in Onboarding → Environment."}
-    # PERSISTENT proot, foreground server. The old launch went through
-    # exec_in_guest: its throwaway proot exited right after the shell
-    # backgrounded the server, and an orphaned proot tracee futex-aborts
-    # ~30s later (verified on-device — the same server survives under a
-    # live tracer). spawn_in_guest ties the tracer's lifetime to the
-    # server's, exactly like an interactive terminal session.
-    from moch import linux_env
+    # Ride the PERSISTENT guest shell (linux_session): ONE proot-backed
+    # bash started at app boot that lives as long as the app — the
+    # field-proven launch context on this hardware. Two dedicated-proot
+    # attempts both futex-aborted ~30s in (exec_in_guest's throwaway proot
+    # orphaned the server; even a dedicated Popen'd proot with a live
+    # tracer died under the RPC context — 1.0.31, verified on-device),
+    # while the same server survives indefinitely under the interactive
+    # terminal session, PTY or not, idle or under full SSE + generation
+    # traffic. Known edge: a poisoned/respawned persistent shell orphans
+    # the server; the next ensure restarts it (this check is idempotent).
+    from moch import linux_session
 
-    start = linux_env.spawn_in_guest(
+    start = linux_session.run(
         f'cd /root && export OPENCODE_PASSWORD={shlex.quote(password)} && '
-        f'exec opencode serve --hostname 127.0.0.1 --port {OC_PORT} >/root/opencode.log 2>&1'
+        f'nohup opencode serve --hostname 127.0.0.1 --port {OC_PORT} '
+        f'>/root/opencode.log 2>&1 & echo $!',
+        timeout_s=25,
     )
     if not start.get("ok"):
         return {"ok": False, "error": (start.get("error") or "could not start opencode").strip()}
     deadline = time.time() + 45
     while time.time() < deadline:
         if _guest_alive(password):
-            return {"ok": True, "started": True, "pid": start.get("pid")}
+            return {"ok": True, "started": True, "pid": (start.get("stdout") or "").strip()}
         time.sleep(1.5)
     tail = _guest_exec("tail -20 /root/opencode.log 2>/dev/null || true", timeout_s=15)
     return {"ok": False, "error": "OpenCode did not answer on 127.0.0.1:%d" % OC_PORT,
