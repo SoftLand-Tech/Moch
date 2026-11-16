@@ -675,6 +675,50 @@ def exec_in_guest(command: str, timeout_s: int = 30) -> dict:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
+# Long-lived guest daemons (spawn_in_guest). proot TRACES every guest
+# process, so a daemon's proot must stay alive for as long as the daemon
+# runs: if the tracer exits first, the orphaned tracee's futex syscalls
+# come back broken and Bun aborts ~30s later (verified on-device: an
+# `opencode serve` kept under a live terminal session survives
+# indefinitely, the same binary futex-crashes ~30s after that session is
+# killed). exec_in_guest's proot exits the moment its command returns —
+# fine for one-shot commands, fatal for daemons. Handles are kept so
+# exits get reaped instead of zombieing.
+_GUEST_DAEMONS: "list[subprocess.Popen]" = []
+
+
+def spawn_in_guest(command: str) -> dict:
+    """Run a LONG-LIVED command in the guest under its own persistent proot.
+
+    The proot lives exactly as long as the command (the same shape as an
+    interactive terminal session), so traced daemons keep a live tracer.
+    For servers and monitors; use exec_in_guest for anything that returns.
+    """
+    linux_dir = _linux_dir()
+    if not (linux_dir / "bin" / "proot").exists() or not (linux_dir / "rootfs").exists():
+        return {"ok": False, "error": "guest not bootstrapped"}
+    for p in list(_GUEST_DAEMONS):
+        if p.poll() is not None:
+            _GUEST_DAEMONS.remove(p)
+    try:
+        argv, env = build_guest_launch(["/bin/sh", "-c", command])
+    except Exception as exc:  # noqa: BLE001 — e.g. java bridge unavailable
+        return {"ok": False, "error": f"guest launch unavailable: {type(exc).__name__}: {exc}"}
+    try:
+        proc = subprocess.Popen(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,  # survive this call returning
+            env=env,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    _GUEST_DAEMONS.append(proc)
+    return {"ok": True, "pid": proc.pid}
+
+
 def _rootfs_size_mb(rootfs: Path) -> float:
     """Full walk of the rootfs — expensive (stat() per file); cache callers."""
     if not rootfs.exists():
