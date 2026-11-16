@@ -31,6 +31,27 @@ export class OcError extends Error {
   }
 }
 
+/**
+ * THE user-facing OcError classifier (contract: .build/OPENCODE-MODE.md).
+ * Every catch that shows a failure to the user renders THIS — status code
+ * plus a short human class (403/quota, 404, 5xx, network), never a raw
+ * body dump. Non-OcError throws pass their message through untouched.
+ */
+export function describeOcError(e: unknown): string {
+  if (e instanceof OcError) {
+    if (e.status === 0) return `OpenCode server not responding (network) — ${e.message}`
+    if (e.status === 401) return 'HTTP 401 — auth rejected'
+    if (e.status === 403) return 'HTTP 403 — auth/quota (key rejected or quota exhausted)'
+    if (e.status === 404) return 'HTTP 404 — not found (model/session)'
+    if (e.status >= 500) {
+      const tail = e.message.trim().slice(-120)
+      return `HTTP ${e.status} — OpenCode server error${tail ? `: ${tail}` : ''}`
+    }
+    return `HTTP ${e.status}${e.message ? `: ${e.message}` : ''}`
+  }
+  return e instanceof Error ? e.message : String(e)
+}
+
 let cachedAuth: string | null = null
 
 async function authHeader(): Promise<string> {
@@ -87,10 +108,13 @@ export async function ocFetch<T = unknown>(
     data = text
   }
   if (!res.ok) {
+    // Prefer the server's own `message`; otherwise the body's TAIL — even
+    // raw JSON/HTML scraps say more than a bare "HTTP 500" (describeOcError
+    // shows this text to the user).
     const msg =
       data && typeof data === 'object' && 'message' in (data as Record<string, unknown>)
         ? String((data as Record<string, unknown>).message)
-        : `HTTP ${res.status}`
+        : text.trim().slice(-120) || `HTTP ${res.status}`
     throw new OcError(res.status, msg)
   }
   // Envelopes: {data: …} on most routes; raw arrays/objects elsewhere.
@@ -235,7 +259,17 @@ export async function ocStream(
   } catch (e) {
     throw new OcError(0, `event stream unreachable (${e instanceof Error ? e.message : String(e)})`)
   }
-  if (!res.ok || !res.body) throw new OcError(res.status, 'event stream unavailable')
+  if (!res.ok || !res.body) {
+    // Best-effort body read: a 401/403/500 on the stream connect must carry
+    // its reason (auth/quota/server error) into the thrown error, not just
+    // "unavailable" — the turn runner surfaces this via describeOcError.
+    let detail = ''
+    try { detail = (await res.text()).trim().slice(0, 200) } catch {}
+    throw new OcError(
+      res.status,
+      `event stream unavailable (HTTP ${res.status}${detail ? `: ${detail}` : ''})`,
+    )
+  }
   const reader = (res.body as ReadableStream<Uint8Array>).getReader()
   const dec = new TextDecoder()
   let buf = ''

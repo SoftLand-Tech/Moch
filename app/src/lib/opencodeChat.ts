@@ -14,6 +14,7 @@ import {
   ocHistory,
   ocPrompt,
   ocStream,
+  describeOcError,
   type OcEvent,
   type OcHistoryMessage,
 } from './opencodeClient'
@@ -282,7 +283,15 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
       case 'session.execution.failed':
         turnDone = true
         failed = true
-        errorMsg = typeof d.error === 'string' ? d.error : 'The turn failed'
+        // `error` is usually a string, but the server also ships objects/
+        // arrays — stringify those (tail) so the actual reason survives
+        // instead of collapsing to the generic 'The turn failed'.
+        errorMsg =
+          typeof d.error === 'string'
+            ? d.error
+            : d.error !== null && d.error !== undefined
+              ? JSON.stringify(d.error).slice(-160)
+              : 'The turn failed'
         break
       case 'session.error':
         // Field-level model error: keep streaming (a retry may follow), but
@@ -306,10 +315,16 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
   }
 
   // Watchdogs: a prompt whose stream dies mid-turn must not spin busy forever.
+  // The rejection reason is KEPT — a stream that drops without a terminal
+  // frame reports WHY it died (403/quota, 5xx, network) via describeOcError.
+  let streamErr: unknown = null
   const streamDropped = new Promise<'dropped'>((resolve) => {
     ocStream(onEvent, controller.signal)
       .then(() => resolve('dropped'))
-      .catch(() => resolve('dropped'))
+      .catch((e: unknown) => {
+        streamErr = e
+        resolve('dropped')
+      })
   })
   // isCancelled poll (stop button) + silence (armSilence, per event) + an
   // absolute 15-minute cap: with no terminal frame by then the turn is dead.
@@ -342,11 +357,14 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
   }
   if (!turnDone) {
     // No terminal frame: the SSE connection died mid-turn (or went silent
-    // for 15 s — a wedged relay). The turn is dead either way.
+    // for 15 s — a wedged relay). The turn is dead either way; the message
+    // says which, with the drop reason when the stream rejected.
     failed = true
     errorMsg = errorMsg ?? (winner === 'silent'
-      ? 'The model stopped responding'
-      : 'The OpenCode connection dropped mid-turn')
+      ? `The model stopped responding (no events for 15s, ${hasActivity ? 'mid-answer' : 'before any output'})`
+      : streamErr
+        ? `The OpenCode connection dropped mid-turn — ${describeOcError(streamErr)}`
+        : 'The OpenCode connection dropped mid-turn')
   }
   hooks.complete(finalText, failed, failed ? errorMsg : undefined)
 }
@@ -466,18 +484,25 @@ export async function runOneShotTurn(opts: OcOneShotOptions): Promise<OcOneShotR
     if (opts.isCancelled?.()) {
       return { text: '', thinking: '', sessionId: existing, tools: [], failed: true, error: 'Stopped.' }
     }
-    throw new Error((r.stderr || 'The one-shot run failed.').trim().slice(-300) || 'The one-shot run failed.')
+    // Exit code + output tail: the CLI prints its real reason (auth, quota,
+    // model not found) on stderr, stdout is the fallback channel. The
+    // bridge maps ok→code 0/1 (thinker.ts) — coarse, but honest next to it.
+    const tail = (r.stderr.trim() || r.stdout.trim()).slice(-300)
+    throw new Error(`one-shot run failed (exit ${r.code}): ${tail || 'no output'}`)
   }
   const parsed = parseRunJsonl(r.stdout)
   const sessionId = parsed.sessionId ?? existing
   if (sessionId) await ocRememberSession(opts.mapKey, sessionId)
   if (!parsed.text && !parsed.thinking) {
     // No JSONL text (permission refusal, empty answer): show the raw tail
-    // so the failure is visible instead of an empty bubble.
+    // so the failure is visible instead of an empty bubble — plus stderr,
+    // where the CLI explains WHY nothing came back.
     const raw = cleanRunText(r.stdout).slice(-800)
+    const errTail = r.stderr.trim().slice(-300)
     return {
       text: '', thinking: '', sessionId, tools: parsed.tools,
-      failed: true, error: raw || 'The model returned nothing.',
+      failed: true,
+      error: errTail ? `${raw || 'The model returned nothing.'}\n${errTail}` : raw || 'The model returned nothing.',
     }
   }
   return { ...parsed, sessionId, failed: false }

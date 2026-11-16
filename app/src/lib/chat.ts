@@ -38,7 +38,7 @@ import {
   type OcPermissionInfo,
   type OcHistoryRow,
 } from './opencodeChat'
-import { ocInterrupt, ocPermissionReply, OcError } from './opencodeClient'
+import { ocInterrupt, ocPermissionReply, OcError, describeOcError } from './opencodeClient'
 import { invalidateOcSessionsCache } from './ocSessionsCache'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -2404,12 +2404,20 @@ export async function sendPrompt(
         // and has no cancellation), so the turn may be running remotely.
         // Distinct copy + status; the retry affordance stays (rendered like
         // a failed row), but nothing retries automatically.
+        // OcError: render the classifier's status + human class (403/quota,
+        // 404, 5xx) — a status-0 OcError keeps 'unconfirmed' as its status
+        // and its message names the real cause WHILE keeping the
+        // "may have gone through" guidance (the row is ambiguous, not dead).
         list[real] = {
           ...list[real],
           status: submitUnconfirmed ? 'unconfirmed' : 'failed',
-          error: submitUnconfirmed
-            ? UNCONFIRMED_SEND_TEXT
-            : err instanceof Error ? err.message : 'Send failed',
+          error: err instanceof OcError
+            ? submitUnconfirmed
+              ? `${UNCONFIRMED_SEND_TEXT} (${describeOcError(err)})`
+              : describeOcError(err)
+            : submitUnconfirmed
+              ? UNCONFIRMED_SEND_TEXT
+              : err instanceof Error ? err.message : 'Send failed',
         }
         patchSession(sid, { messages: list })
       }

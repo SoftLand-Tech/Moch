@@ -1785,6 +1785,9 @@ export default function Chat() {
             ocMode={ocMode}
             ocOneShot={ocOneShot}
             ocSessionId={storedId || null}
+            // The chip's label is the sheet's checked row — per-session picks
+            // never reach /api/model/default, so the sheet must be told.
+            ocCurrent={ocModelForChip || null}
             onPicked={(modelID) => { const sid = activeStoredId.get(); if (sid) { setOcPicks((p) => ({ ...p, [sid]: modelID })); void rememberOcPick(sid, modelID) } }}
           />
           <CommandCatalogSheet

@@ -96,7 +96,10 @@ One-shot stays as the fallback mode:
   `ocModels()`, `ocDefaultModel()`, `ocSetModel(sessionId, providerID, modelId)` —
   the third arg is the Model.Ref `id` (bare model id), and the body sent is
   `{model:{id, providerID}}`,
-  `ocIntegrations()`, `ocConnectKey(integrationID, key)`.
+  `ocIntegrations()`, `ocConnectKey(integrationID, key)`,
+  `describeOcError(e)` — the ONE error classifier (status → human class:
+  0 network / 401 / 403 auth-quota / 404 / 5xx); every catch renders it,
+  never a bare message.
 - `ocStream(handler, signal?)` — SSE pump over `expo/fetch`; `handler(e)`
   with `e = {type, data}`; never throws on normal close, resolves when the
   stream drops (callers own retries/idle timeouts).
@@ -124,6 +127,9 @@ One-shot stays as the fallback mode:
   SessionState atoms via chat.ts's internal reducers passed as hooks.
 - Model chip in OpenCode mode: `ocDefaultModel()`/`ocModels()`; picking calls
   `ocSetModel` for the active oc session. NEVER hermes `model.*` RPCs.
+  The picker sheet's checked/"Now" row reflects the CHAT's pick
+  (`ocCurrent` prop = the chip label), not the server default — per-session
+  switches never touch `GET /api/model/default`.
 - Permission card: reuse the pending-request card visual language; buttons
   Allow once / Always / Deny → `ocPermissionReply`.
 - Sidebar in OpenCode mode: rows = OpenCode sessions (title, time.updated);
