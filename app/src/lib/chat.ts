@@ -3211,6 +3211,15 @@ export function hookChatEvents() {
         const msg = String(p.message ?? p.error ?? 'Gateway error')
         const cur = sessionsById.get()[eSid]
         if (!cur) break
+        // OPENCODE-MODE: gateway errors land on the hermes spine that every
+        // chat still mints for identity — session.create pre-warms a hermes
+        // AIAgent, which cannot start on an opencode-only phone (no hermes
+        // model configured). That failure is spine noise, not this chat's
+        // turn: OpenCode turns own their own failure surface (the OC hooks'
+        // complete()), so the failed bubble, attention flag, mascot error
+        // and queue flush are all skipped. flushStreams() above STILL runs
+        // on purpose — it lands buffered OC answer text, not error state.
+        if (thinkerForChat(cur.storedId) === 'opencode') break
         const list = [...cur.messages]
         const last = list[list.length - 1]
         if (last?.streaming) {
