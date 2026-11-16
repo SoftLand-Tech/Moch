@@ -12,6 +12,7 @@ Check off `- [ ]` as you fix. All findings were adversarially verified against s
 **Wave 7 (BUG-104):** on-device 1.0.11-browser (2026-10-10): with the Browser screen open and tools advertised, EVERY agent browser tool returns "No browser page…" — the per-page (WebView) attach auto-detect could never engage. Root-caused in source and adversarially verified with a live relay + Chromium reproduction.
 **Wave 8 (BUG-105):** user report (2026-10-11, on the post-BUG-104 source): "the agent sees the tools but cannot access the browser — it says something like the browser is dead." Same verbatim tool error as BUG-104, different cause: the BOOT gate arms from a relay.json that outlives the process.
 **Wave 9 (BUG-106–122):** first full-surface on-device pass on 1.0.15-browser (versionCode 18), 2026-10-11 — browser, terminal, bots/fleet, crew, automations, connectors, share-in, settings, search. Every entry carries device evidence; the run matrix, pass/fail per documented runbook step and the two root causes proven on the device (IPv6-only relay bind; fleet flag never armed) are in `TEST-REPORT-1.0.15-device.md`. Standing result: **the browser cannot drive a page, and the M9 fleet runtime is not active, on the shipped APK.**
+**Wave 10 (BUG-147):** user-reported on-device 1.0.32-ocsession (2026-11-16): the Onboarding → Environment tools installer dies with ENOSYS (38) on basic syscalls. Deferred by the user ("will fix in the future") — recorded, not scheduled.
 
 **Fix-order warnings baked in below:**
 - BUG-001 (reconnect) must ship together with BUG-007 (stale timer) — fixing one alone exposes the other.
@@ -1535,3 +1536,11 @@ strips, full-size stacked pool (kills switch reflow), renderer-priority demotion
 upstream-list memo, tab-strip layout animations, supervisor self-heal, schema-valid warming
 indicator (OPEN above), local start page.
 
+
+---
+
+## Wave 10 — deferred
+
+- [ ] **BUG-147 [HIGH] Guest tools installer never completes — ENOSYS (38) on basic syscalls** — `/root/.moch-install.sh` (staged `MOCH:STAGE:UPDATE:START`), Onboarding → Environment flow
+  The staged update run fails everywhere at once: apt warns `Problem unlinking … TransItem::TransactionCommit (38: Function not implemented)` on the list files, dies fatally on `flAbsPath on /var/lib/dpkg/status failed - realpath (38: Function not implemented)`, then the script itself loses `sleep` (`Function not implemented`), cannot create `/root/.moch-install-update.log` (`Function not implemented`), and finally `Pipe call failed`. unlink/realpath/nanosleep/open/pipe ALL returning ENOSYS in one context, on kernel 6.17 + glibc 2.39 + proot 5.1.107, is a syscall-translation gap, not filesystem damage. Key clue from the same day: `apt-get update && apt-get install curl` ran CLEAN in the interactive terminal session on the same guest — so the gap is context-dependent (script launch path vs interactive session; check which proot argv/env/-k personality the installer runs under, and whether glibc 2.39's newer syscalls (`faccessat2`, `clone3`, `statx`-family) are the ones missing). User deferred: fix later, not scheduled.
+  *Fix:* TBD — compare the installer's launch context (exec path, proot flags, kernel personality) against the interactive session that works; likely align the installer with the working context or patch the proot syscall gap.
