@@ -117,7 +117,7 @@ def ensure_server(password: str) -> dict:
 
 
 def stop_server() -> dict:
-    out = _guest_exec('pkill -f "opencode serve" >/dev/null 2>&1 || true', timeout_s=20)
+    out = _guest_exec("pkill -f '[o]pencode serve' >/dev/null 2>&1 || true", timeout_s=20)
     return {"ok": True, "detail": (out.get("stdout") or "").strip()}
 
 

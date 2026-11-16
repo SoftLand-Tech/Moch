@@ -14,7 +14,7 @@
  */
 import { fetch as expoFetch } from 'expo/fetch'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { opencodePassword } from './opencodeSecret'
+import { opencodePassword, opencodeBasicAuth } from './opencodeSecret'
 import { rpc } from './gateway'
 import { log } from './log'
 
@@ -34,7 +34,7 @@ let cachedAuth: string | null = null
 async function authHeader(): Promise<string> {
   if (cachedAuth) return cachedAuth
   const pw = await opencodePassword()
-  cachedAuth = `Basic ${globalThis.btoa(`opencode:${pw}`)}`
+  cachedAuth = opencodeBasicAuth(pw)
   return cachedAuth
 }
 

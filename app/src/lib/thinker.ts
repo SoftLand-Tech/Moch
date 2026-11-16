@@ -42,7 +42,7 @@ export async function setThinker(t: Thinker): Promise<void> {
 }
 
 import { File, Directory, Paths } from 'expo-file-system'
-import { opencodePassword, OC_PORT } from './opencodeSecret'
+import { opencodePassword, opencodeBasicAuth, OC_PORT } from './opencodeSecret'
 
 export { opencodePassword }
 
@@ -144,7 +144,7 @@ export async function installOpencode(onProgress?: (pct: number) => void): Promi
  * and a fresh rootfs has no curl to probe with. */
 async function ocHealthy(timeoutMs = 5000): Promise<boolean> {
   try {
-    const auth = `Basic ${globalThis.btoa(`opencode:${await opencodePassword()}`)}`
+    const auth = opencodeBasicAuth(await opencodePassword())
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), timeoutMs)
     const res = await fetch(`http://127.0.0.1:${OC_PORT}/api/info`, {
@@ -166,10 +166,16 @@ async function ocHealthy(timeoutMs = 5000): Promise<boolean> {
 export async function startOpencodeServer(): Promise<GuestRunResult> {
   const pw = await opencodePassword()
   if (await ocHealthy()) return { ok: true, code: 0, stdout: 'already running', stderr: '' }
+  // NO pgrep guard: `pgrep -f "opencode serve"` matches the very shell that
+  // runs it (its own command line contains that string), so the "already
+  // running" branch always won and the server was NEVER started — the empty
+  // log + "did not answer" error. Health above is the idempotence check.
+  // Clear any stale server (e.g. one started with a different password that
+  // would hog port 4096). The bracket keeps pkill from matching its own
+  // shell's command line — the bug that broke the old pgrep guard.
+  await guestRun(`pkill -f '[o]pencode serve' >/dev/null 2>&1 || true`, 15_000)
   const started = await guestRun(
-    'if ! pgrep -f "opencode serve" >/dev/null 2>&1; then ' +
-      `cd /root && OPENCODE_PASSWORD=${pw} nohup opencode serve --hostname 127.0.0.1 --port ${OC_PORT} >/root/opencode.log 2>&1 & echo started; ` +
-      'else echo already; fi',
+    `cd /root && OPENCODE_PASSWORD=${pw} nohup opencode serve --hostname 127.0.0.1 --port ${OC_PORT} >/root/opencode.log 2>&1 & echo started`,
     30_000,
   )
   if (!started.ok) {
@@ -179,18 +185,27 @@ export async function startOpencodeServer(): Promise<GuestRunResult> {
     await new Promise((resolve) => setTimeout(resolve, 1000))
     if (await ocHealthy()) return { ok: true, code: 0, stdout: 'ready', stderr: '' }
   }
-  const tail = await guestRun('tail -n 20 /root/opencode.log 2>/dev/null', 15_000)
+  // If it still doesn't answer, bring the real evidence back: the server
+  // log, the binary's version output, and the matching processes (the
+  // bracket pattern avoids pgrep/pkill matching their own shell).
+  const diag = await guestRun(
+    `echo '--- log ---'; tail -n 15 /root/opencode.log 2>/dev/null; ` +
+      `echo '--- version ---'; opencode --version 2>&1 | head -3; ` +
+      `echo '--- processes ---'; ps -ef 2>/dev/null | grep '[o]pencode' | head -5`,
+    30_000,
+  )
   return {
     ok: false,
     code: 1,
     stdout: '',
-    stderr: tail.stdout.trim() || 'The OpenCode server did not answer on the phone — try again, or reinstall it.',
+    stderr: (diag.stdout || '').trim() || 'The OpenCode server did not answer on the phone — try again, or reinstall it.',
   }
 }
 
 /** Stop the guest server (switching back to Moch). Best-effort. */
 export async function stopOpencodeServer(): Promise<void> {
-  await guestRun('pkill -f "opencode serve" >/dev/null 2>&1 || true', 30_000)
+  // The bracket keeps the pattern from matching the killing shell itself.
+  await guestRun(`pkill -f '[o]pencode serve' >/dev/null 2>&1 || true`, 30_000)
 }
 
 export function opencodeBaseUrl(): string {
