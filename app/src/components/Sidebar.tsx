@@ -862,9 +862,16 @@ export function Sidebar({
 
         {/* Sessions mode owns the project rail; Bots mode replaces that whole
             body with the roster (one row per bot, no per-bot chat list — a
-            bot IS one canonical `Bot Chat`). OpenCode mode owns neither —
-            projects are hermes cwd buckets, bots are hermes profiles. */}
-        {!ocMode && identity === 'sessions' ? (
+            bot IS one canonical `Bot Chat`) and stays hidden in OpenCode mode
+            — bots are hermes profiles. Projects, though, organize this app's
+            own chats in BOTH thinkers: every chat is created with a project
+            cwd (lib/chat, mode-agnostic) and the embedded gateway serves
+            `projects.tree` regardless of thinker, so the rail shows in
+            OpenCode mode too. `ocMode ||` mirrors the switch's locked
+            Sessions segment above (a persisted 'bots' identity must not hide
+            the rail while the oc chat list renders). Grouping the OpenCode
+            server's own session list under projects is BUG-149. */}
+        {ocMode || identity === 'sessions' ? (
           <ProjectList
             projects={projects}
             activeProjectId={activeProjectId}
@@ -931,7 +938,12 @@ export function Sidebar({
             {ocMode ? (
               // OpenCode sessions: rows come from the OpenCode server, keyed
               // by oc id. Tapping opens a fresh chat window bound to that
-              // session and hydrates its transcript.
+              // session and hydrates its transcript. Deliberately NOT
+              // project-filtered: /api/session rows carry no cwd or project
+              // id, and oc ids never appear in the hermes tree's membership
+              // map — nothing client-side classifies them (grouping them is
+              // BUG-149). Selecting a project still matters here: new chats
+              // pick up its cwd at creation.
               <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
                 <View style={s.sectionLabelRow}>
                   <Text style={s.sectionLabel}>OpenCode sessions</Text>
