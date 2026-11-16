@@ -10,6 +10,7 @@ import {
   installOpencode,
   diagnoseOpencodeServer,
   probeOpencodeRun,
+  setOpencodeOneShot,
   startOpencodeServer,
   setThinker,
   thinkerAtom,
@@ -41,6 +42,8 @@ export default function ThinkerChoice() {
   // One-shot probe state (manual trigger — spends a real model call).
   const [runReport, setRunReport] = useState<string | null>(null)
   const [runBusy, setRunBusy] = useState(false)
+  // Offered after a server start failure: continue with one-shot instead.
+  const [oneShotOffer, setOneShotOffer] = useState(false)
 
   const runDiagnostics = async () => {
     setDiagBusy(true)
@@ -79,6 +82,7 @@ export default function ThinkerChoice() {
 
   const pick = async (t: Thinker) => {
     setErr(null)
+    setOneShotOffer(false)
     if (t === 'opencode') {
       if (!guest) {
         setErr('OpenCode runs inside the Linux guest — install it first.')
@@ -99,14 +103,19 @@ export default function ThinkerChoice() {
         setLog('Starting the OpenCode server…')
         const up = await startOpencodeServer()
         if (!up.ok) {
-          setErr(up.stderr || 'The OpenCode server did not start.')
+          // Server mode failed — but one-shot mode (no server) may still
+          // work. Offer it right here instead of a dead end: the pick below
+          // records the fallback and continues onboarding normally.
+          setErr('The OpenCode server could not start on this phone. You can still use OpenCode in one-shot mode — same models, answers arrive whole instead of streaming.')
           // Collect the evidence now, while the failure is fresh (stale log
           // included) — the expander below shows it verbatim.
           setDiag(null)
           setShowDiag(false)
+          setOneShotOffer(true)
           void runDiagnostics().then(() => setShowDiag(true))
           return
         }
+        await setOpencodeOneShot(false)
         await setThinker('opencode')
         router.push('/onboarding/providers')
       } finally {
@@ -219,6 +228,25 @@ export default function ThinkerChoice() {
             ) : null}
           </View>
         ) : null}
+        {oneShotOffer && !busy ? (
+          <Pressable
+            style={({ pressed }) => [s.cta, pressed && s.pressed]}
+            onPress={() => void (async () => {
+              setBusy(true)
+              try {
+                await setOpencodeOneShot(true)
+                await setThinker('opencode')
+                router.push('/onboarding/providers')
+              } finally {
+                setBusy(false)
+              }
+            })()}
+            accessibilityRole="button"
+            accessibilityLabel="Continue in one-shot mode"
+          >
+            <Text style={s.ctaText}>Continue in one-shot mode →</Text>
+          </Pressable>
+        ) : null}
 
         {guest === false ? (
           <Pressable style={s.ghost} onPress={() => router.push('/onboarding/environment')} accessibilityRole="button">
@@ -259,4 +287,6 @@ const makeS = () => StyleSheet.create({
   ghost: { alignItems: 'center', paddingVertical: 16 },
   ghostText: { color: C.accent, fontSize: 14, fontWeight: '700' },
   pressed: { opacity: 0.75 },
+  cta: { backgroundColor: C.accent, borderRadius: 16, paddingVertical: 15, alignItems: 'center', marginTop: 14 },
+  ctaText: { color: C.onAccent, fontSize: 15, fontWeight: '800' },
 })

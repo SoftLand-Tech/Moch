@@ -20,7 +20,7 @@ import { C, useStyles, setTheme, THEME_OPTIONS, themeId, type ThemeId } from '..
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { localeAtom, setLocale, tr } from '../../src/lib/strings'
 import { showAlert } from '../../src/components/AlertDialog'
-import { thinkerAtom, setThinker, stopOpencodeServer, type Thinker } from '../../src/lib/thinker'
+import { thinkerAtom, ocOneShotAtom, setThinker, setOpencodeOneShot, stopOpencodeServer, type Thinker } from '../../src/lib/thinker'
 import { readAbout, saveAbout } from '../../src/lib/aboutMe'
 
 export default function Settings() {
@@ -287,6 +287,7 @@ function SettingsInner() {
   const msgCount = useStore(useMemo(() => computed(messages, (m) => m.length), []))
   const notifOn = useStore(notificationsEnabled)
   const thinker = useStore(thinkerAtom)
+  const ocOneShot = useStore(ocOneShotAtom)
   const [aboutBusy, setAboutBusy] = React.useState(false)
 
   const stateColor = state === 'open' ? C.greenSoft : state === 'connecting' ? C.amber : C.red
@@ -410,12 +411,29 @@ function SettingsInner() {
         <Section title="THINKER">
           <Row
             icon="sparkles-outline"
-            label={thinker === 'moch' ? 'Moch (hermes) — active' : 'OpenCode — active'}
+            label={thinker === 'moch' ? 'Moch (hermes) — active' : ocOneShot ? 'OpenCode · one-shot — active' : 'OpenCode · server — active'}
             sub={thinker === 'moch'
               ? 'The full agent on this phone. Everything is available.'
-              : 'Free-model brain in the Linux guest. Bots, crew, automations and the agent browser are hidden.'}
+              : ocOneShot
+                ? 'Same free models, no server: each message runs once and the answer lands whole. No streaming, no tool approvals.'
+                : 'Free-model brain in the Linux guest. Bots, crew, automations and the agent browser are hidden.'}
           />
           <Divider />
+          {thinker === 'opencode' && ocOneShot ? (
+            <>
+              <Row
+                icon="refresh-outline"
+                label="Retry server mode"
+                sub="Try the streaming server again (needs a working Linux guest)"
+                chevron
+                onPress={() => { void (async () => {
+                  await setOpencodeOneShot(false)
+                  showAlert('Server mode selected', 'Open a new chat — Moch will try starting the OpenCode server again.')
+                })() }}
+              />
+              <Divider />
+            </>
+          ) : null}
           <Row
             icon="swap-horizontal-outline"
             label="Switch thinker"
@@ -426,6 +444,7 @@ function SettingsInner() {
               {
                 text: 'OpenCode',
                 onPress: () => { void (async () => {
+                  await setOpencodeOneShot(false)
                   await setThinker('opencode')
                   showAlert('OpenCode selected', 'Open a new chat — Moch will start the OpenCode server in the Linux guest. If it fails, install the guest under RUNTIME.')
                 })() },
@@ -434,6 +453,7 @@ function SettingsInner() {
                 text: 'Moch',
                 onPress: () => { void (async () => {
                   await stopOpencodeServer()
+                  await setOpencodeOneShot(false)
                   await setThinker('moch')
                 })() },
               },

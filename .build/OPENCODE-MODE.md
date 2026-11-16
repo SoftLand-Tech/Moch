@@ -46,7 +46,27 @@ truth**; UI slices consume them, never re-implement the wire.
   `POST /api/integration/{integrationID}/connect/key {key}` → connect.
   Free models (e.g. provider `opencode`, model `iceman-free`) need NO key.
 
-## Module contracts
+## OpenCode thinker = server mode OR one-shot mode
+
+The guest server (Bun's long-lived HTTP loop) crashes under proot on ARM
+(`The futex facility returned an unexpected error code` → abort; verified on
+real ARM hardware against proot 5.4 and upstream 5.5.0, with and without a
+faked older kernel). The one-shot CLI survives: same binary, same models.
+
+- `ocOneShotAtom` (persisted `hermes.opencode.oneshot.v1`) selects the mode.
+  Server start failure in onboarding offers "Continue in one-shot mode";
+  Settings shows the active mode and can retry server mode.
+- Server mode: `runOpencodeTurn` (SSE streaming, permissions, tools).
+- One-shot mode: `runOneShotTurn` — one `opencode run --format json [-s id]
+  [-m provider/model]` per turn, stdin prompt (base64 pipe, UTF-8 safe).
+  JSONL parsed for text/reasoning/session/tools; session id remembered into
+  the same AsyncStorage map so `-s` resumes the conversation. No streaming
+  (answer lands whole), no interactive permissions, no server history load
+  (local transcript persists as usual). Model inventory is `opencode models`
+  (CLI); picks persist per chat and ride `-m`.
+- Cancellation: flag + guest `pkill -f '[o]pencode run'`; runner owns busy.
+
+## Module contracts (addition)
 
 ### `src/lib/opencodeClient.ts` (transport, no UI)
 - `ocFetch<T>(path, opts?)` — JSON call, Basic auth, typed error

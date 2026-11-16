@@ -26,11 +26,13 @@ import type { CommandMeta } from './slash'
 // runOpencodeTurn (prompt + SSE pump) instead of hermes prompt.submit, and the
 // drawer's OpenCode sessions hydrate through loadOcHistory. The hermes paths
 // below are untouched.
-import { thinkerAtom, type Thinker } from './thinker'
+import { thinkerAtom, ocOneShotAtom, guestRun, type Thinker } from './thinker'
 import {
   runOpencodeTurn,
+  runOneShotTurn,
   ocSessionFor,
   ocRememberSession,
+  ocPickFor,
   loadOcHistory,
   type OcTurnHooks,
   type OcPermissionInfo,
@@ -1701,6 +1703,8 @@ export async function resetSessionCaches(): Promise<void> {
   // permission ask and hydration marks keyed by them.
   for (const cancel of ocTurns.values()) cancel()
   ocTurns.clear()
+  for (const c of ocOneShotCancel.values()) c.current = true
+  ocOneShotCancel.clear()
   ocPermissions.clear()
   ocPermissionLive.set(null)
   ocHydrated.clear()
@@ -2027,6 +2031,9 @@ function ocHooksFor(sid: string): OcTurnHooks {
   }
 }
 
+/** One-shot cancellers (one CLI per chat at most). The pump owns busy/queue. */
+const ocOneShotCancel = new Map<string, { current: boolean }>()
+
 /** The OpenCode submit leg of sendPrompt: prompt + SSE pump, cancellable. */
 async function runOcSubmit(sid: string, text: string, title: string | undefined): Promise<void> {
   const stored = sessionsById.get()[sid]?.storedId ?? ''
@@ -2050,6 +2057,35 @@ async function runOcSubmit(sid: string, text: string, title: string | undefined)
     // The turn may have created or renamed the OC session — the drawer's
     // 15s cache is now stale by definition.
     invalidateOcSessionsCache()
+  }
+}
+
+/** One-shot submit leg: one `opencode run` per turn, whole answer at once. */
+async function runOcOneShot(sid: string, text: string): Promise<void> {
+  const stored = sessionsById.get()[sid]?.storedId ?? ''
+  const mapKey = stored || sid
+  const cancel = { current: false }
+  ocOneShotCancel.set(sid, cancel)
+  try {
+    const hooks = ocHooksFor(sid)
+    hooks.start()
+    const model = await ocPickFor(stored || '').catch(() => null)
+    const out = await runOneShotTurn({
+      mapKey,
+      text,
+      model: model ?? undefined,
+      isCancelled: () => cancel.current,
+    })
+    // Tool usage renders as finished rows (same reducers, no fake stream).
+    for (const t of out.tools) {
+      hooks.tool(t.id, t.name, t.ok ? 'done' : 'failed', undefined, undefined)
+    }
+    if (out.thinking) hooks.thinking(out.thinking)
+    if (out.text) hooks.text(out.text)
+    hooks.complete(out.text, out.failed, out.error)
+    invalidateOcSessionsCache()
+  } finally {
+    ocOneShotCancel.delete(sid)
   }
 }
 
@@ -2307,11 +2343,12 @@ export async function sendPrompt(
         throw err
       })
     if (thinkerForChat(s?.storedId ?? null) === 'opencode') {
-      // OpenCode mode: the submit leg is the OC turn runner (ensure server →
-      // prompt → SSE pump → the shared reducers via hooks). Setup failures
-      // (server down, session create failed) propagate into sendPrompt's
+      // OpenCode mode: server turns stream over SSE; one-shot turns run the
+      // CLI once and land whole. Setup failures propagate into sendPrompt's
       // catch below — the user row fails honestly with the message.
-      try {
+      if (ocOneShotAtom.get()) {
+        await runOcOneShot(sid, submitText)
+      } else try {
         await runOcSubmit(sid, submitText, s?.title)
       } catch (err) {
         // OcError(0): the POST frame was already on the wire when the local
@@ -2428,6 +2465,17 @@ export async function stopRun() {
   const sid = activeSession.get()
   if (!sid) return
   if (thinkerForChat(sessionsById.get()[sid]?.storedId) === 'opencode') {
+    if (ocOneShotAtom.get()) {
+      // One-shot: flag the runner + kill the guest CLI. The runner's
+      // complete hook owns busy/queue (same no-early-patch rule as server
+      // mode) — pkill just hurries the blocked guest call to its grave.
+      const c = ocOneShotCancel.get(sid)
+      if (c) c.current = true
+      void guestRun(`pkill -f '[o]pencode run' >/dev/null 2>&1 || true`, 15_000)
+      flushStreams()
+      mochiMoment.set({ kind: 'apologetic', sid, at: Date.now() })
+      return
+    }
     // OpenCode mode: cancel the local SSE pump AND tell the server to stop
     // the turn. The hermes session.interrupt RPC does not apply to an
     // OpenCode chat. busy + the queued follow-up are owned by the cancelled

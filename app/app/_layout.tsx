@@ -31,7 +31,7 @@ import { syncBackendIdentity } from '../src/lib/backendIdentity'
 import { pruneRelayMedia } from '../src/lib/mediaCache'
 import { C, loadTheme, useStyles } from '../src/lib/theme'
 import { loadActiveBot } from '../src/lib/fleet'
-import { loadThinker } from '../src/lib/thinker'
+import { loadThinker, loadOpencodeOneShot } from '../src/lib/thinker'
 import { loadOnboarded } from '../src/lib/aboutMe'
 
 // Keep the native splash up until the animated overlay is committed on top
@@ -93,6 +93,7 @@ export default function RootLayout() {
     void loadTheme()
     void loadActiveBot()
     void loadThinker()
+    void loadOpencodeOneShot()
     void loadOnboarded()
     // Captured, not fired-and-forgotten: the boot IIFE below awaits this
     // BEFORE its first dial. initPush restores the saved push token into the

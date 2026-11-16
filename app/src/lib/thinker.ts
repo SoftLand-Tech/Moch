@@ -52,6 +52,32 @@ export { opencodePassword }
  * restart of the app re-attaches instead of leaking a new server per launch.
  */
 const OC_MODEL_KEY = 'hermes.opencode.model.v1'
+const OC_ONESHOT_KEY = 'hermes.opencode.oneshot.v1'
+
+/**
+ * One-shot mode: the guest server cannot run on this phone (Bun crashes
+ * under proot), so chat drives `opencode run` per turn instead. No server,
+ * no streaming, no interactive permissions — same models, whole answers.
+ * Decided once (server start failed) and persisted; Settings can retry.
+ */
+export const ocOneShotAtom = atom<boolean>(false)
+
+export async function loadOpencodeOneShot(): Promise<void> {
+  try {
+    ocOneShotAtom.set((await AsyncStorage.getItem(OC_ONESHOT_KEY)) === '1')
+  } catch {
+    ocOneShotAtom.set(false)
+  }
+}
+
+export async function setOpencodeOneShot(v: boolean): Promise<void> {
+  ocOneShotAtom.set(v)
+  try {
+    await AsyncStorage.setItem(OC_ONESHOT_KEY, v ? '1' : '0')
+  } catch {
+    // apply for this run
+  }
+}
 
 export const opencodeModelAtom = atom<string>('')
 

@@ -15,6 +15,7 @@
 import { fetch as expoFetch } from 'expo/fetch'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { opencodePassword, opencodeBasicAuth } from './opencodeSecret'
+import { guestRun } from './thinker'
 import { rpc } from './gateway'
 import { log } from './log'
 
@@ -163,6 +164,25 @@ export const ocPermissionReply = (id: string, requestID: string, reply: OcPermis
   )
 
 export const ocModels = () => ocFetch<OcModel[]>('/api/model', { timeoutMs: 30_000 })
+
+/**
+ * Model inventory without a server: `opencode models` prints
+ * `providerID/modelID` per line. Used in one-shot mode (and only there).
+ */
+export async function ocModelsOneShot(): Promise<OcModel[]> {
+  const r = await guestRun('opencode models 2>/dev/null', 60_000)
+  if (!r.ok) throw new OcError(0, (r.stderr || 'Could not list OpenCode models.').trim().slice(-200))
+  const out: OcModel[] = []
+  for (const line of r.stdout.split('\n')) {
+    const t = line.trim()
+    if (!t || t.startsWith(' ') || !t.includes('/')) continue
+    const slash = t.indexOf('/')
+    const providerID = t.slice(0, slash)
+    const modelID = t.slice(slash + 1).split(/\s/)[0]
+    if (providerID && modelID) out.push({ providerID, modelID, name: modelID })
+  }
+  return out
+}
 
 export const ocDefaultModel = () => ocFetch<OcModel | null>('/api/model/default', { timeoutMs: 15_000 })
 

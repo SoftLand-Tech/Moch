@@ -26,7 +26,7 @@ import {
   type ProviderOption, type ModelScope,
 } from '../lib/modelState'
 import { ensureSession, activeLiveId, pushLocalMessage } from '../lib/chat'
-import { ocModels, ocDefaultModel, ocSetModel, OcError, type OcModel } from '../lib/opencodeClient'
+import { ocModels, ocModelsOneShot, ocDefaultModel, ocSetModel, OcError, type OcModel } from '../lib/opencodeClient'
 import { ocSessionFor } from '../lib/opencodeChat'
 import { slashLabel } from '../lib/slash'
 import { log } from '../lib/log'
@@ -35,7 +35,7 @@ import { C, useStyles } from '../lib/theme'
 type Step = 'provider' | 'model' | 'scope'
 
 export function ModelPickerSheet({
-  open, onClose, initialSlug, ocMode = false, ocSessionId = null, onPicked,
+  open, onClose, initialSlug, ocMode = false, ocOneShot = false, ocSessionId = null, onPicked,
 }: {
   open: boolean
   onClose: () => void
@@ -46,6 +46,11 @@ export function ModelPickerSheet({
    * model.* RPCs. The hermes path below is untouched.
    */
   ocMode?: boolean
+  /**
+   * One-shot flavor: no server exists, so the inventory is the `opencode
+   * models` CLI and a pick is only recorded (applied per turn via `-m`).
+   */
+  ocOneShot?: boolean
   /** The chat's PERSISTENT id — resolved to an OC session via ocSessionFor. */
   ocSessionId?: string | null
   /** Fired after a session-scoped pick lands — the chip keeps this model. */
@@ -74,18 +79,25 @@ export function ModelPickerSheet({
   const [ocDefault, setOcDefault] = useState<OcModel | null>(null)
 
   // OpenCode open-path: inventory + current default in one go. Loading and
-  // errors render in-sheet with honest copy.
+  // errors render in-sheet with honest copy. One-shot has no server: the
+  // inventory is the CLI and there is no default to fetch.
   useEffect(() => {
     if (!open || !ocMode) return
     setQuery('')
     setOcErr('')
     setOcList(null)
+    setOcDefault(null)
     setOcLoading(true)
     void (async () => {
       try {
-        const [list, def] = await Promise.all([ocModels(), ocDefaultModel()])
-        setOcList(list ?? [])
-        setOcDefault(def ?? null)
+        if (ocOneShot) {
+          const list = await ocModelsOneShot()
+          setOcList(list ?? [])
+        } else {
+          const [list, def] = await Promise.all([ocModels(), ocDefaultModel()])
+          setOcList(list ?? [])
+          setOcDefault(def ?? null)
+        }
       } catch (err) {
         setOcList([])
         setOcErr(
@@ -100,7 +112,7 @@ export function ModelPickerSheet({
         setOcLoading(false)
       }
     })()
-  }, [open, ocMode])
+  }, [open, ocMode, ocOneShot])
 
   // Fresh inventory each time the sheet opens (cheap; also re-layers the
   // session's live provider after resumes). Cached rows render instantly —
@@ -183,12 +195,20 @@ export function ModelPickerSheet({
     return order.map((p) => ({ provider: p, models: byProvider.get(p) ?? [] }))
   }, [ocList, q])
 
-  /** Apply a model to this chat's OpenCode session. */
+  /** Apply a model to this chat's OpenCode session. One-shot has no session
+   * to apply to — the pick is only recorded (chat passes `-m` per turn). */
   const pickOcModel = async (m: OcModel) => {
     if (applying) return
     setApplying(true)
     setOcErr('')
     try {
+      if (ocOneShot) {
+        onPicked?.(m.modelID)
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+        setOcDefault(m)
+        onClose()
+        return
+      }
       const ocId = ocSessionId ? await ocSessionFor(ocSessionId) : null
       if (!ocId) throw new Error('This chat has no OpenCode session yet — send a message first')
       await ocSetModel(ocId, m.providerID, m.modelID)

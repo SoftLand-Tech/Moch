@@ -17,6 +17,7 @@ import {
   type OcEvent,
   type OcHistoryMessage,
 } from './opencodeClient'
+import { guestRun } from './thinker'
 import { log } from './log'
 
 const MAP_KEY = 'hermes.opencode.map.v1'
@@ -56,6 +57,41 @@ export async function ocForgetSession(mapKey: string): Promise<void> {
   const map = await readMap()
   delete map[mapKey]
   await writeMap(map)
+}
+
+// ── per-chat model picks (one-shot mode has no server to remember them) ────
+// Server mode applies picks live via ocSetModel; one-shot passes `-m` per
+// turn, so the pick must survive restarts here. Same AsyncStorage, own key.
+
+const PICK_KEY = 'hermes.opencode.picks.v1'
+
+async function readPicks(): Promise<Record<string, string>> {
+  try {
+    const raw = await AsyncStorage.getItem(PICK_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+
+/** The model picked for a chat (storedId-keyed), or null. */
+export async function ocPickFor(storedId: string): Promise<string | null> {
+  if (!storedId) return null
+  try {
+    const map = await readPicks()
+    return map[storedId] ?? null
+  } catch {
+    return null
+  }
+}
+
+export async function rememberOcPick(storedId: string, modelID: string): Promise<void> {
+  if (!storedId || !modelID) return
+  try {
+    const map = await readPicks()
+    map[storedId] = modelID
+    await AsyncStorage.setItem(PICK_KEY, JSON.stringify(map))
+  } catch {}
 }
 
 async function ensureOcSession(mapKey: string, title: string): Promise<string> {
@@ -313,6 +349,138 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
       : 'The OpenCode connection dropped mid-turn')
   }
   hooks.complete(finalText, failed, failed ? errorMsg : undefined)
+}
+
+// ── one-shot mode (no server): `opencode run` per turn ──────────────────────
+// The guest server (Bun's long-lived HTTP loop) crashes under proot, but the
+// one-shot CLI survives: same binary, same models, no server needed. One
+// turn = one `run` invocation; session continuity comes from `-s`, models
+// from `-m`, output from `--format json` (JSONL). No streaming, no
+// interactive permissions — the answer arrives whole.
+
+const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g
+/** `> build · big-pickle`-style header lines the CLI prints above the answer. */
+const RUN_HEADER_RE = /^>\s.*$/
+const SAFE_ID_RE = /^[A-Za-z0-9_-]+$/
+const SAFE_MODEL_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(#[A-Za-z0-9_.-]+)?$/
+
+/** UTF-8 → base64 with surrogate-pair support (emoji must survive the pipe). */
+function utf8ToB64(input: string): string {
+  const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+  const bytes: number[] = []
+  for (let i = 0; i < input.length; i++) {
+    let cp = input.codePointAt(i) ?? 0
+    if (cp > 0xffff) i++
+    if (cp < 0x80) bytes.push(cp)
+    else if (cp < 0x800) bytes.push(0xc0 | (cp >> 6), 0x80 | (cp & 0x3f))
+    else if (cp < 0x10000) bytes.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f))
+    else bytes.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f))
+  }
+  let out = ''
+  for (let i = 0; i < bytes.length; i += 3) {
+    const a = bytes[i] ?? 0
+    const b = i + 1 < bytes.length ? bytes[i + 1] : -1
+    const c = i + 2 < bytes.length ? bytes[i + 2] : -1
+    const n = (a << 16) | ((b < 0 ? 0 : b) << 8) | (c < 0 ? 0 : c)
+    out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (b < 0 ? '=' : B64[(n >> 6) & 63]) + (c < 0 ? '=' : B64[n & 63])
+  }
+  return out
+}
+
+export interface OcRunPart {
+  text: string
+  thinking: string
+  sessionId: string | null
+  tools: Array<{ id: string; name: string; ok: boolean }>
+}
+
+/** Parse `opencode run --format json` (JSONL): text/reasoning/session/tools. */
+export function parseRunJsonl(stdout: string): OcRunPart {
+  let text = ''
+  let thinking = ''
+  let sessionId: string | null = null
+  const tools: Array<{ id: string; name: string; ok: boolean }> = []
+  for (const line of stdout.split('\n')) {
+    const t = line.trim()
+    if (!t || !t.startsWith('{')) continue
+    try {
+      const e = JSON.parse(t) as {
+        sessionID?: unknown
+        part?: { type?: unknown; text?: unknown; name?: unknown; id?: unknown; state?: { status?: unknown } }
+      }
+      if (typeof e.sessionID === 'string' && !sessionId) sessionId = e.sessionID
+      const p = e.part
+      if (!p || typeof p !== 'object') continue
+      if (p.type === 'text' && typeof p.text === 'string') text += p.text
+      else if (p.type === 'reasoning' && typeof p.text === 'string') thinking += p.text
+      else if (p.type === 'tool' && typeof p.name === 'string') {
+        tools.push({ id: String(p.id ?? p.name), name: p.name, ok: String(p.state?.status ?? 'done') !== 'error' })
+      }
+    } catch {
+      // Non-JSON line (banners go to stderr anyway) — skipped, never fatal.
+    }
+  }
+  return { text: text.trim(), thinking: thinking.trim(), sessionId, tools }
+}
+
+/** Strip ANSI + CLI header lines from default-format output (fallback path). */
+export function cleanRunText(raw: string): string {
+  return raw
+    .replace(ANSI_RE, '')
+    .split('\n')
+    .filter((l) => !RUN_HEADER_RE.test(l.trim()))
+    .join('\n')
+    .trim()
+}
+
+export interface OcOneShotOptions {
+  /** The chat's PERSISTENT handle (hermes storedId) — keys the session map. */
+  mapKey: string
+  text: string
+  /** `provider/model` the user picked (omitted = server default). */
+  model?: string
+  isCancelled?: () => boolean
+}
+
+export interface OcOneShotResult extends OcRunPart {
+  failed: boolean
+  error?: string
+}
+
+/**
+ * One turn without a server. Throws only on bridge/guest failures (the
+ * caller marks the row failed); model-level problems arrive as
+ * `{failed:true, error}` with whatever text did come back.
+ */
+export async function runOneShotTurn(opts: OcOneShotOptions): Promise<OcOneShotResult> {
+  const existing = await ocSessionFor(opts.mapKey)
+  const idPart =
+    existing && SAFE_ID_RE.test(existing) ? ` -s '${existing}'` : ''
+  const modelPart =
+    opts.model && SAFE_MODEL_RE.test(opts.model) ? ` -m '${opts.model}'` : ''
+  // Prompt via stdin (base64 pipe): arbitrary user text can never break the
+  // shell line, and emoji survive through the correct UTF-8 encoder above.
+  const cmd = `echo ${utf8ToB64(opts.text)} | base64 -d | opencode run --format json${idPart}${modelPart}`
+  const r = await guestRun(cmd, 300_000)
+  if (!r.ok) {
+    if (opts.isCancelled?.()) {
+      return { text: '', thinking: '', sessionId: existing, tools: [], failed: true, error: 'Stopped.' }
+    }
+    throw new Error((r.stderr || 'The one-shot run failed.').trim().slice(-300) || 'The one-shot run failed.')
+  }
+  const parsed = parseRunJsonl(r.stdout)
+  const sessionId = parsed.sessionId ?? existing
+  if (sessionId) await ocRememberSession(opts.mapKey, sessionId)
+  if (!parsed.text && !parsed.thinking) {
+    // No JSONL text (permission refusal, empty answer): show the raw tail
+    // so the failure is visible instead of an empty bubble.
+    const raw = cleanRunText(r.stdout).slice(-800)
+    return {
+      text: '', thinking: '', sessionId, tools: parsed.tools,
+      failed: true, error: raw || 'The model returned nothing.',
+    }
+  }
+  return { ...parsed, sessionId, failed: false }
 }
 
 // ── history hydration ────────────────────────────────────────────────────────

@@ -73,7 +73,8 @@ import { shareInInbox, ackShareIn, applySharedToDraft, type SharedFile } from '.
 import { isConnected as isConnectedAtom, connectionState, gatewayError, retryNow } from '../../src/lib/gateway'
 import { completeSlash, loadCatalog, runCommand, parseSlashCommand, canonicalName, interactiveTarget, describeCommand, subsFor, argumentModeFor, slashLabel, localCompleteSync, resolveSlashRoute, type CompletionItem, type SlashOutcome } from '../../src/lib/slash'
 import { liveModel, liveReasoning, liveReasoningDisplay, fetchReasoningDisplay } from '../../src/lib/modelState'
-import { thinkerAtom } from '../../src/lib/thinker'
+import { thinkerAtom, ocOneShotAtom } from '../../src/lib/thinker'
+import { ocPickFor, rememberOcPick } from '../../src/lib/opencodeChat'
 import { ocDefaultModel } from '../../src/lib/opencodeClient'
 import { ModelPickerSheet } from '../../src/components/ModelPickerSheet'
 import { CommandOptionsSheet } from '../../src/components/CommandOptionsSheet'
@@ -152,6 +153,9 @@ export default function Chat() {
   // places.
   const thinker = useStore(thinkerAtom)
   const ocMode = thinker === 'opencode'
+  // One-shot mode (no server): chip says so, the sheet lists CLI models and
+  // picks are passed per turn (see rememberOcPick).
+  const ocOneShot = useStore(ocOneShotAtom)
   // The OpenCode permission ask blocking the ACTIVE chat (reactive mirror in
   // chat.ts; the sync accessor is ocActivePermission).
   const ocPerm = useStore(ocPermissionLive)
@@ -175,16 +179,27 @@ export default function Chat() {
   const [ocModel, setOcModel] = useState('')
   // Session-scoped picks: the chip must keep showing what THIS chat picked —
   // the server default would clobber it right after the sheet closes.
+  // In one-shot mode there IS no server default: hydrate from the persisted
+  // pick store so the chip survives restarts.
   const [ocPicks, setOcPicks] = useState<Record<string, string>>({})
   const ocModelForChip = (storedId && ocPicks[storedId]) || ocModel
   useEffect(() => {
     if (!ocMode) return
     let alive = true
+    if (ocOneShot) {
+      setOcModel('')
+      if (storedId) {
+        ocPickFor(storedId)
+          .then((m) => { if (alive && m) setOcPicks((p) => ({ ...p, [storedId]: m })) })
+          .catch(() => {})
+      }
+      return () => { alive = false }
+    }
     ocDefaultModel()
       .then((m) => { if (alive) setOcModel(m?.modelID ?? '') })
       .catch(() => {})
     return () => { alive = false }
-  }, [ocMode, modelPickerOpen])
+  }, [ocMode, ocOneShot, modelPickerOpen, storedId])
   const [catalogOpen, setCatalogOpen] = useState(false)
   const [optionSheet, setOptionSheet] = useState<{ command: string; allowText: boolean } | null>(null)
   const listRef = useRef<FlatList>(null)
@@ -1138,10 +1153,10 @@ export default function Chat() {
                 onPress={() => setModelPickerOpen(true)}
                 hitSlop={6}
                 accessibilityRole="button"
-                accessibilityLabel={`OpenCode thinker, model ${ocModelForChip || 'default'}. Tap to change`}
+                accessibilityLabel={ocOneShot ? `OpenCode one-shot${ocModelForChip ? `, model ${ocModelForChip}` : ''}. Tap to change` : `OpenCode thinker, model ${ocModelForChip || 'default'}. Tap to change`}
               >
                 <Icon name="cube-outline" size={12} color={C.accent} />
-                <Text style={s.modelChipText} numberOfLines={1}>OpenCode{ocModelForChip ? ` · ${ocModelForChip}` : ''}</Text>
+                <Text style={s.modelChipText} numberOfLines={1}>{ocOneShot ? `One-shot${ocModelForChip ? ` · ${ocModelForChip}` : ''}` : `OpenCode${ocModelForChip ? ` · ${ocModelForChip}` : ''}`}</Text>
               </Pressable>
             ) : null}
             {!ocMode && !S.trayHeader && curModel ? (
@@ -1227,10 +1242,10 @@ export default function Chat() {
               onPress={() => setModelPickerOpen(true)}
               hitSlop={6}
               accessibilityRole="button"
-              accessibilityLabel={`OpenCode thinker, model ${ocModelForChip || 'default'}. Tap to change`}
+              accessibilityLabel={ocOneShot ? `OpenCode one-shot${ocModelForChip ? `, model ${ocModelForChip}` : ''}. Tap to change` : `OpenCode thinker, model ${ocModelForChip || 'default'}. Tap to change`}
             >
               <Icon name="cube-outline" size={12} color={C.accent} />
-              <Text style={s.modelChipText} numberOfLines={1}>OpenCode{ocModelForChip ? ` · ${ocModelForChip}` : ''}</Text>
+              <Text style={s.modelChipText} numberOfLines={1}>{ocOneShot ? `One-shot${ocModelForChip ? ` · ${ocModelForChip}` : ''}` : `OpenCode${ocModelForChip ? ` · ${ocModelForChip}` : ''}`}</Text>
             </Pressable>
           ) : S.trayHeader && !ocMode && curModel ? (
             // Tray keeps a single symmetric row (menu | centered title |
@@ -1768,8 +1783,9 @@ export default function Chat() {
             open={modelPickerOpen}
             onClose={() => setModelPickerOpen(false)}
             ocMode={ocMode}
+            ocOneShot={ocOneShot}
             ocSessionId={storedId || null}
-            onPicked={(modelID) => { if (storedId) setOcPicks((p) => ({ ...p, [storedId]: modelID })) }}
+            onPicked={(modelID) => { if (storedId) { setOcPicks((p) => ({ ...p, [storedId]: modelID })); void rememberOcPick(storedId, modelID) } }}
           />
           <CommandCatalogSheet
             open={catalogOpen}
