@@ -10,6 +10,7 @@ import { useStore } from '@nanostores/react'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
 import { C, useStyles } from '../../src/lib/theme'
+import { tr } from '../../src/lib/strings'
 import { connConfig, isConnected as isConnectedAtom } from '../../src/lib/gateway'
 import {
   mcpServers, mcpRuntime, mcpCatalog, mcpUnsupported, mcpLoading, catalogLoading, mcpListError,
@@ -117,10 +118,20 @@ export default function Connectors() {
   const [keyFor, setKeyFor] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null) // installing catalog entry name
 
+  // BUG-118: mcpState has no fetch dedup, so collapse concurrent refresh()
+  // callers (mount effect, focus effect, pull-to-refresh, error Retry) into
+  // one in-flight pass instead of stacking duplicate catalog/server fetches.
+  const refreshingRef = useRef(false)
   const refresh = useCallback(() => {
-    if (!online) return
-    void loadMcpServers()
-    void loadMcpCatalog()
+    if (!online || refreshingRef.current) return
+    refreshingRef.current = true
+    void (async () => {
+      try {
+        await Promise.all([loadMcpServers(), loadMcpCatalog()])
+      } finally {
+        refreshingRef.current = false
+      }
+    })()
   }, [online])
 
   // Refresh on mount and whenever the gateway (re)connects — `online`
@@ -135,10 +146,15 @@ export default function Connectors() {
   useFocusEffect(
     useCallback(() => {
       if (!online) return
+      // BUG-118: tabs stay mounted (BUG-055), so the mount effect above never
+      // re-runs after the first visit — refetch catalog + servers on every
+      // focus too, or the screen shows stale state on return. The in-flight
+      // guard in `refresh` collapses the double call on the first focus.
+      refresh()
       void refreshMcpRuntime()
       const id = setInterval(() => { void refreshMcpRuntime() }, 5_000)
       return () => clearInterval(id)
-    }, [online]),
+    }, [online, refresh]),
   )
 
   const serverList = useMemo(() => {
@@ -308,7 +324,7 @@ export default function Connectors() {
             keyboardShouldPersistTaps="handled"
             refreshing={catLoading && online}
             onRefresh={refresh}
-            ListEmptyComponent={<Text style={s.empty}>{catLoading ? '' : online ? (query ? 'No matches' : 'Catalog is empty') : 'Offline'}</Text>}
+            ListEmptyComponent={<Text style={s.empty}>{catLoading ? '' : online ? (query ? tr('connectors.empty.matches') : tr('connectors.browse.empty')) : tr('connectors.offline')}</Text>}
             renderItem={({ item }) => (
               <View style={s.gridCard}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
