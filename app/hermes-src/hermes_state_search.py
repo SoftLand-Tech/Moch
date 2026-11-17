@@ -106,6 +106,15 @@ def _like_params(term: str) -> List[str]:
     return [f"%{_escape_like(term)}%"] * 3
 
 
+def _fts_syntax_rejected(exc: Exception) -> bool:
+    """True when an fts5 OperationalError is QUERY SYNTAX (the LIKE fallback can answer it),
+    False for transient/environmental failures (lock contention, disk I/O) where the
+    historical empty answer is the honest one (BUG-114 residual review)."""
+    msg = str(exc).lower()
+    return ("syntax" in msg or "malformed match" in msg
+            or "no such column" in msg or "fts5" in msg)
+
+
 def _flatten_text(decoded: Any) -> str:
     """Multimodal part list -> joined text (or the placeholder); str passes through; else ''."""
     if isinstance(decoded, list):
@@ -1112,8 +1121,22 @@ class SessionSearchMixin:
             sql, params = self._fts_match_sql("messages_fts", query, **route)
             try:
                 matches = [dict(row) for row in self._read_all(sql, params)]
-            except sqlite3.OperationalError:
-                return []  # FTS5 syntax error despite sanitization
+            except sqlite3.OperationalError as exc:
+                # BUG-114 residual: a query that survives sanitization yet still raises at
+                # MATCH (e.g. ``a OR OR b`` — an empty side of a boolean) used to answer
+                # [] with no retry, the same "search looks empty" miss the no-fts path
+                # fixed. The LIKE fallback compiles the boolean subset itself and cannot
+                # raise on FTS5 syntax, so route SYNTAX-shaped rejections there instead of
+                # swallowing the error. Transient OperationalErrors (a "database is locked"
+                # contention window) are NOT syntax — falling back would scan the whole
+                # table mid-lock and could raise out of search_messages, so keep the old
+                # empty answer (the caller's own retry/refresh owns those).
+                if _fts_syntax_rejected(exc):
+                    logger.warning("messages_fts MATCH rejected query (%s); retrying via canonical LIKE fallback.", exc)
+                    matches = self._search_messages_like_fallback(query, limit=limit, offset=offset, sort=sort, **filters)
+                else:
+                    logger.debug("messages_fts MATCH transient failure (%s); answering empty.", exc)
+                    matches = []
             except sqlite3.DatabaseError as exc:
                 # Corruption parent class: detach the derived indexes and answer from
                 # canonical rows; repair paths own the rebuild.
