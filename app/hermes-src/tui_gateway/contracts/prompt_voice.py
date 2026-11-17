@@ -43,6 +43,12 @@ class PromptSubmitParams(SessionParams):
     confirm_truncate: bool | None = None
     confirm_empty_truncate: bool | None = None
     rebind_survivor_row_ids: list[int] | None = None
+    # Idempotency key (BUG-036): the client mints one per logical composer submit and
+    # attaches it to prompt.submit (reusing it across the session-not-found re-fire, which
+    # is definitive NOT-started); the gateway replays the stored reply — re-stamped with
+    # the CALLER's JSON-RPC id — instead of starting a second turn / enqueueing a
+    # duplicate. Optional, so older clients are unaffected.
+    client_request_id: str | None = None
     # In-process only: injected by the hosted-room / bot-relay handlers, never accepted from a
     # client (a client dict for ``_turn_author`` answers 4124). Excluded from the rendered wire.
     hosted_task: JsonValue | None = Field(default=None, exclude=True, alias="_hosted_task")
