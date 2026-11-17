@@ -20,6 +20,11 @@ import {
 } from './opencodeClient'
 import { guestRun } from './thinker'
 import { log } from './log'
+// BUG-149: session mints carry the active project's cwd, exactly like
+// createSession does for hermes chats (chat.ts is mode-agnostic here —
+// workspace's atoms are the same source the hermes create reads).
+import { activeProjectIdAtom, projectsAtom } from './workspace'
+import { pickProjectCwd } from './projectScope'
 
 const MAP_KEY = 'hermes.opencode.map.v1'
 
@@ -95,10 +100,22 @@ export async function rememberOcPick(storedId: string, modelID: string): Promise
   } catch {}
 }
 
+/** The drawer's selected project's folder, or undefined (Personal bucket /
+ *  folderless project — minting in an arbitrary cwd would file the session
+ *  under the wrong project, the same rule pickProjectCwd encodes). */
+function currentProjectCwd(): string | undefined {
+  return pickProjectCwd(
+    projectsAtom.get().map((p) => ({ id: p.id, path: p.primaryPath, isNoProject: p.isNoProject })),
+    activeProjectIdAtom.get(),
+  )
+}
+
 async function ensureOcSession(mapKey: string, title: string): Promise<string> {
   const existing = await ocSessionFor(mapKey)
   if (existing) return existing
-  const created = await ocCreateSession(title.slice(0, 80) || 'Moch chat')
+  // BUG-149: the mint files the session under the selected project so the
+  // drawer can group it (projectIdForCwd(row.directory)).
+  const created = await ocCreateSession(title.slice(0, 80) || 'Moch chat', currentProjectCwd())
   if (!created?.id) throw new Error('OpenCode did not return a session id')
   await ocRememberSession(mapKey, created.id)
   return created.id

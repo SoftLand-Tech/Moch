@@ -30,6 +30,7 @@ import { thinkerAtom } from '../lib/thinker'
 import { ocListSessions, describeOcError, type OcSession } from '../lib/opencodeClient'
 import { ocSessionsCached, ocSessionsStore } from '../lib/ocSessionsCache'
 import { openOcChat } from '../lib/chat'
+import { projectIdForCwd } from '../lib/projectScope'
 import { C, S, useStyles, useShape } from '../lib/theme'
 import { useReduceMotion } from './useReduceMotion'
 import { IdentitySwitch } from './IdentitySwitch'
@@ -411,6 +412,31 @@ export function Sidebar({
     if (!q) return ocSessions
     return ocSessions.filter((c) => (c.title ?? '').toLowerCase().includes(q))
   }, [ocSessions, query])
+  // BUG-149: bucket the oc rows under their project via each row's
+  // `directory` (mints carry the selected project's cwd). Same labeled-group
+  // shape as the hermes list's section headers; rows without a directory
+  // (pre-BUG-149 sessions) or whose folder matches no project stay in the
+  // flat tail, ungrouped. The list is still NOT project-filtered — selecting
+  // a project changes where NEW sessions are created, not what is listed.
+  const ocGroups = useMemo(() => {
+    const projRows = projects.map((p) => ({ id: p.id, path: p.primaryPath, isNoProject: p.isNoProject }))
+    const byProject = new Map<string, OcSession[]>()
+    const flat: OcSession[] = []
+    for (const c of ocFiltered) {
+      const pid = projectIdForCwd(projRows, c.directory)
+      if (!pid) {
+        flat.push(c)
+        continue
+      }
+      const arr = byProject.get(pid)
+      if (arr) arr.push(c)
+      else byProject.set(pid, [c])
+    }
+    const groups = projects
+      .filter((p) => !p.isNoProject && byProject.has(p.id))
+      .map((p) => ({ id: p.id, name: p.name, rows: byProject.get(p.id) ?? [] }))
+    return { groups, flat }
+  }, [ocFiltered, projects])
   const [archOpen, setArchOpen] = useState(false)
 
   // Per-chat action state. The three overlays are mutually exclusive.
@@ -579,6 +605,28 @@ export function Sidebar({
     })
     return () => sub.remove()
   }, [open])
+
+  // One oc row — shared by the project groups and the flat tail so both
+  // render the exact same row language (BUG-149 grouping).
+  const renderOcRow = (c: OcSession) => (
+    <Pressable
+      key={c.id}
+      style={({ pressed }) => [s.recentRow, pressed && s.recentRowPressed]}
+      onPress={() => {
+        onClose()
+        void openOcChat(c.id).catch(() => {})
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={`Open OpenCode chat ${c.title || 'Untitled'}`}
+    >
+      <View style={{ flex: 1 }}>
+        <Text style={s.recentTitle} numberOfLines={1}>{c.title || 'Untitled'}</Text>
+        {c.time?.updated ? (
+          <Text style={s.ocRowSub} numberOfLines={1}>{formatOcTime(c.time.updated)}</Text>
+        ) : null}
+      </View>
+    </Pressable>
+  )
 
   const searching = query.trim().length > 0
 
@@ -953,11 +1001,10 @@ export function Sidebar({
               // OpenCode sessions: rows come from the OpenCode server, keyed
               // by oc id. Tapping opens a fresh chat window bound to that
               // session and hydrates its transcript. Deliberately NOT
-              // project-filtered: /api/session rows carry no cwd or project
-              // id, and oc ids never appear in the hermes tree's membership
-              // map — nothing client-side classifies them (grouping them is
-              // BUG-149). Selecting a project still matters here: new chats
-              // pick up its cwd at creation.
+              // project-filtered — but BUG-149 GROUPS them: rows whose
+              // `directory` lands inside a project folder render under that
+              // project's name (same section shape as the hermes list);
+              // everything else stays flat below.
               <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
                 <View style={s.sectionLabelRow}>
                   <Text style={s.sectionLabel}>OpenCode sessions</Text>
@@ -979,25 +1026,26 @@ export function Sidebar({
                 ) : ocError ? (
                   <Text style={s.ocStateText}>{ocError}</Text>
                 ) : ocFiltered.length ? (
-                  ocFiltered.map((c) => (
-                    <Pressable
-                      key={c.id}
-                      style={({ pressed }) => [s.recentRow, pressed && s.recentRowPressed]}
-                      onPress={() => {
-                        onClose()
-                        void openOcChat(c.id).catch(() => {})
-                      }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Open OpenCode chat ${c.title || 'Untitled'}`}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.recentTitle} numberOfLines={1}>{c.title || 'Untitled'}</Text>
-                        {c.time?.updated ? (
-                          <Text style={s.ocRowSub} numberOfLines={1}>{formatOcTime(c.time.updated)}</Text>
-                        ) : null}
+                  <>
+                    {ocGroups.groups.map((g) => (
+                      <View key={g.id}>
+                        <View style={s.sectionLabelRow}>
+                          <Text style={s.sectionLabel}>{g.name}</Text>
+                        </View>
+                        {g.rows.map(renderOcRow)}
                       </View>
-                    </Pressable>
-                  ))
+                    ))}
+                    {ocGroups.flat.length ? (
+                      <View>
+                        {ocGroups.groups.length ? (
+                          <View style={s.sectionLabelRow}>
+                            <Text style={s.sectionLabel}>{tr('oc.otherSessions')}</Text>
+                          </View>
+                        ) : null}
+                        {ocGroups.flat.map(renderOcRow)}
+                      </View>
+                    ) : null}
+                  </>
                 ) : (
                   <Text style={s.ocStateText}>No OpenCode sessions yet</Text>
                 )}

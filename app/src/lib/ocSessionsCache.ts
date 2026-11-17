@@ -24,6 +24,12 @@ export function invalidateOcSessionsCache(): void {
   at = 0
 }
 
+/**
+ * Rows are stored WHOLE — never re-picked. BUG-149: `directory` rides every
+ * row and the Sidebar's project grouping reads it from the cache exactly as
+ * from a fresh fetch; dropping "unused" fields here would silently flatten
+ * the groups for 15s at a time.
+ */
 export function ocSessionsStore(next: OcSession[]): void {
   rows = next
   at = Date.now()

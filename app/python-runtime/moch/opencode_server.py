@@ -151,8 +151,14 @@ def install_opencode() -> dict:
 # ── chat surface ─────────────────────────────────────────────────────────────
 
 
-def create_session(password: str, title: str) -> dict:
-    return _curl("POST", "/api/session", password=password, body={"title": title}, timeout_s=30)
+def create_session(password: str, title: str, directory: str = "") -> dict:
+    # BUG-149: directory rides the QUERY STRING — the same mechanism
+    # send_prompt already uses (the 2.3.0 server reads `directory` from the
+    # query params; a body key would be rejected with the unknown-key error).
+    path = "/api/session"
+    if directory:
+        path += "?directory=" + _q(directory)
+    return _curl("POST", path, password=password, body={"title": title}, timeout_s=30)
 
 
 def send_prompt(password: str, session_id: str, text: str, *, directory: str = "") -> dict:
@@ -259,7 +265,13 @@ def install(tg_server) -> bool:
         pw = _password(params)
         if not pw:
             return _err(rid, 4061, "password required")
-        return _ok(rid, create_session(pw, str(params.get("title") or "Moch")))
+        # BUG-149: optional project cwd — forwarded as the query param the
+        # oc server expects (see create_session).
+        return _ok(rid, create_session(
+            pw,
+            str(params.get("title") or "Moch"),
+            directory=str(params.get("directory") or ""),
+        ))
 
     def oc_prompt(rid, params):
         pw = _password(params)

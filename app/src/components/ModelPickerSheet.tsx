@@ -32,6 +32,8 @@ import {
 } from '../lib/opencodeClient'
 import { invalidateOcSessionsCache } from '../lib/ocSessionsCache'
 import { ocSessionFor, ocRememberSession } from '../lib/opencodeChat'
+import { activeProjectIdAtom, projectsAtom } from '../lib/workspace'
+import { pickProjectCwd } from '../lib/projectScope'
 import { slashLabel } from '../lib/slash'
 import { log } from '../lib/log'
 import { C, useStyles } from '../lib/theme'
@@ -248,7 +250,16 @@ export function ModelPickerSheet({
         // The placeholder 'New chat' would name the OC session forever
         // (chat.ts skips it when titling the first send for the same reason).
         const t = activeTitle.get()
-        const created = await ocCreateSession(t && t !== 'New chat' ? t.slice(0, 80) : 'Moch chat')
+        // BUG-149: file the minted session under the selected project (same
+        // resolution rule as createSession / the turn mint in opencodeChat).
+        const projectCwd = pickProjectCwd(
+          projectsAtom.get().map((p) => ({ id: p.id, path: p.primaryPath, isNoProject: p.isNoProject })),
+          activeProjectIdAtom.get(),
+        )
+        const created = await ocCreateSession(
+          t && t !== 'New chat' ? t.slice(0, 80) : 'Moch chat',
+          projectCwd,
+        )
         if (!created?.id) throw new Error('OpenCode did not return a session id')
         await ocRememberSession(mapKey, created.id)
         // The drawer's oc list caches for 15s — a minted session must be
