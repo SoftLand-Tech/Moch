@@ -334,7 +334,10 @@ export class TerminalController {
   }
 
   private stopPoll() {
-    clearInterval(this.timer)
+    // `?? undefined`: node's clearInterval overloads accept Timeout|undefined
+    // or number|null|undefined — never Timeout|null — which broke the
+    // scripts typecheck (TS2769) under tsconfig.scripts.json.
+    clearInterval(this.timer ?? undefined)
     this.timer = null
   }
 
