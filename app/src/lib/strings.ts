@@ -254,6 +254,7 @@ const EN: Catalog = {
   'connectors.browse.empty': 'No servers bundled in this build — add one manually',
   'connectors.empty.matches': 'No matches',
   'connectors.offline': 'Offline',
+  'oc.otherSessions': 'Other sessions',
 }
 
 const AR: Catalog = {
@@ -459,6 +460,7 @@ const AR: Catalog = {
   'connectors.browse.empty': 'لا توجد خوادم مضمّنة في هذا الإصدار — أضف واحدة يدويًا',
   'connectors.empty.matches': 'لا توجد نتائج مطابقة',
   'connectors.offline': 'غير متصل',
+  'oc.otherSessions': 'جلسات أخرى',
 }
 
 const CATALOGS: Record<Locale, Catalog> = { en: EN, ar: AR }

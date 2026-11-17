@@ -129,6 +129,14 @@ export async function ocFetch<T = unknown>(
 export interface OcSession {
   id: string
   title?: string
+  /**
+   * The folder the session was created in (BUG-149). oc 2.3.0 takes
+   * `directory` as a QUERY param on POST /api/session (the python twin's
+   * send_prompt proves the mechanism) and echoes it on session rows; the
+   * Sidebar buckets rows into the projects rail with it. Optional: sessions
+   * minted before BUG-149 (and rows from a server that omits it) stay flat.
+   */
+  directory?: string
   time?: { created?: number; updated?: number }
 }
 
@@ -174,8 +182,17 @@ export interface OcEvent {
 
 export const ocListSessions = () => ocFetch<OcSession[]>('/api/session', { timeoutMs: 15_000 })
 
-export const ocCreateSession = (title: string) =>
-  ocFetch<OcSession>('/api/session', { method: 'POST', body: { title } })
+/**
+ * Create a session. `directory` (BUG-149) files the session under a project:
+ * it goes in the QUERY STRING exactly like the python twin's send_prompt
+ * forwards it (`?directory=` — the 2.3.0 server reads query params, not a
+ * body key; an unknown body key is rejected).
+ */
+export const ocCreateSession = (title: string, directory?: string) =>
+  ocFetch<OcSession>(
+    directory ? `/api/session?directory=${encodeURIComponent(directory)}` : '/api/session',
+    { method: 'POST', body: { title } },
+  )
 
 export const ocHistory = (id: string) =>
   ocFetch<OcHistoryMessage[]>(`/api/session/${encodeURIComponent(id)}/message`, { timeoutMs: 30_000 })
