@@ -88,6 +88,25 @@ def _guest_alive(password: str) -> bool:
     return bool(info.get("ok"))
 
 
+def _start_browser_stack() -> dict:
+    """BUG-148: lazily start the host-side browser MCP adapter and seed the
+    guest's opencode.json with the moch-browser entry. Best-effort — an oc
+    chat must keep working when the relay is down, the guest lacks the
+    config dir, or anything here throws. Lives on the ensure path because
+    that is ONLY invoked from oc surfaces (turn runner, drawer list, model
+    sheet): hermes-only users never start the adapter thread.
+    """
+    try:
+        from moch import oc_browser_mcp
+
+        started = oc_browser_mcp.ensure_started()
+        if started.get("ok") and started.get("port"):
+            started["seed"] = oc_browser_mcp.seed_opencode_config(int(started["port"]))
+        return {"browser_mcp": started}
+    except Exception as e:  # noqa: BLE001 — never break the oc ensure for this
+        return {"browser_mcp": {"ok": False, "error": f"{type(e).__name__}: {e}"}}
+
+
 def ensure_server(password: str, launch: bool = True) -> dict:
     """Start the guest server if it is not answering; idempotent.
 
@@ -100,13 +119,20 @@ def ensure_server(password: str, launch: bool = True) -> dict:
     the server; this idempotent check re-launches on the next call.
     """
     if _guest_alive(password):
-        return {"ok": True, "started": False}
+        return {"ok": True, "started": False, **_start_browser_stack()}
     # Double-check the binary exists so the error is honest rather than a
     # silent 30 s wait.
     which = _guest_exec("command -v opencode || true", timeout_s=15)
     if not (which.get("stdout") or "").strip():
         return {"ok": False, "error": "OpenCode is not installed in the Linux guest — install it in Onboarding → Environment."}
     if launch:
+        # BUG-148: start the adapter + seed the oc MCP config BEFORE typing
+        # the launch line — opencode reads its config at startup, so a seed
+        # typed first is picked up by THIS boot. (The health-wait-only path
+        # below seeds after the fact instead: the RN side typed the launch
+        # already, so that config lands on the next boot — one boot of lag
+        # on a cold first oc use, no clobber risk.)
+        _browser = _start_browser_stack()
         from moch import terminal as mterm
 
         if not mterm.is_running():
@@ -122,10 +148,14 @@ def ensure_server(password: str, launch: bool = True) -> dict:
         ).decode("ascii"))
         if not typed.get("ok"):
             return {"ok": False, "error": (typed.get("error") or "could not type the launch command").strip()}
+    else:
+        _browser = {}
     deadline = time.time() + 45
     while time.time() < deadline:
         if _guest_alive(password):
-            return {"ok": True, "started": True}
+            if not _browser:
+                _browser = _start_browser_stack()
+            return {"ok": True, "started": True, **_browser}
         time.sleep(1.5)
     tail = _guest_exec("tail -20 /root/opencode.log 2>/dev/null || true", timeout_s=15)
     return {"ok": False, "error": "OpenCode did not answer on 127.0.0.1:%d" % OC_PORT,
