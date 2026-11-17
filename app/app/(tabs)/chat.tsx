@@ -1152,8 +1152,11 @@ export default function Chat() {
             </Pressable>
             {/* OpenCode thinker chip — replaces the hermes model chip in
                 OpenCode mode (never hermes provider state on an OC chat).
-                Tapping opens the model sheet, which talks to the OC server. */}
-            {ocMode ? (
+                Tapping opens the model sheet, which talks to the OC server.
+                Tray-header themes skip this: the floating tray chip below
+                (S.trayHeader && ocMode) is the owner there — rendering both
+                would duplicate the label. */}
+            {ocMode && !S.trayHeader ? (
               <Pressable
                 style={({ pressed }) => [s.modelChip, pressed && s.btnPressed]}
                 onPress={() => setModelPickerOpen(true)}
