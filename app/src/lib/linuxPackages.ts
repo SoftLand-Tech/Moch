@@ -12,13 +12,26 @@
  *
  * HOW THE RUNNER WORKS: a package install cannot be one blocking RPC —
  * apt-get update + build-essential outlive any sane bridge timeout. So
- * installPackages writes ONE shell script into the guest, detaches it with
- * nohup, and tails its log on a short poll, parsing a `MOCH:*` line protocol.
- * Every bridge call stays short; the guest does the waiting. `parseInstallLog`
- * is pure so the protocol handling is reviewable in isolation.
+ * installPackages writes ONE shell script into the guest and starts it under
+ * a WATCHER command (buildInstallWatcherCommand in ./installWatcher, BUG-147):
+ * one long-lived bridge RPC that starts the installer and stays alive —
+ * polling its liveness and the `MOCH:DONE` marker — until the installer is
+ * reaped, so the proot tracer never dies ahead of it (an orphaned tracee's
+ * syscalls come back broken; installs used to abort mid-apt). Progress still
+ * rides a `MOCH:*` line protocol that the RN side tails on a short poll —
+ * every UI-facing bridge call stays short; the watcher is the one
+ * deliberately long call, and nothing reads its result. `parseInstallLog` is
+ * pure so the protocol handling is reviewable in isolation; the watcher
+ * command builder is pure and node-safe so scripts/test-install-watcher.ts
+ * pins its exact shell.
  */
 import { linuxExec } from './mochiRuntime'
 import { b64encodeText } from './terminal'
+import {
+  buildInstallWatcherCommand,
+  INSTALL_DONE_MARKER,
+  INSTALL_WATCHER_TIMEOUT_S,
+} from './installWatcher'
 
 export type PackageKind = 'apt' | 'npm'
 
@@ -165,13 +178,19 @@ const INSTALL_LOG_PATH = '/root/.moch-install.log'
 const INSTALL_APT_LOG_PATH = '/root/.moch-install-apt.log'
 const INSTALL_UPDATE_LOG_PATH = '/root/.moch-install-update.log'
 
-/** Poll cadence, kick/poll bridge timeouts, and the 30-minute overall cap. */
+/** Poll cadence, poll-RPC timeout, and the 30-minute overall cap. */
 const INSTALL_POLL_MS = 2500
-const INSTALL_KICK_TIMEOUT_S = 20
 const INSTALL_POLL_TIMEOUT_S = 10
 const INSTALL_CAP_MS = 30 * 60 * 1000
+// The watcher RPC's timeout lives in ./installWatcher (INSTALL_WATCHER_TIMEOUT_S,
+// 1860 s = the 30-minute watch window + grace, under the bridge's 3600 s cap) so
+// the tsx battery can pin it against the bridge ceiling next to the shell it
+// belongs to.
 /** FAIL lines carry a short stderr tail — never a wall of apt noise. */
 const INSTALL_DETAIL_MAX = 300
+/** After the poll loop ends, how long we wait for the in-guest watcher to see
+ * DONE, reap the installer, and exit so the tracer never outlives nothing. */
+const INSTALL_WATCHER_SETTLE_MS = 15_000
 
 export interface InstallItemState {
   ok: boolean
@@ -255,17 +274,18 @@ export async function readInstallLog(maxLines = 120): Promise<string> {
 }
 
 /**
- * The detached runner script. POSIX sh; `set +e` per stage (which is sh's
- * default, spelled out here on purpose) so one failure never stops the rest.
- * Stage output goes to side logs; only the `MOCH:*` protocol lands in the
- * main log the RN side tails.
+ * The runner script. POSIX sh; `set +e` per stage (which is sh's default,
+ * spelled out here on purpose) so one failure never stops the rest. Stage
+ * output goes to side logs; only the `MOCH:*` protocol lands in the main log
+ * the RN side tails. Started by the WATCHER command (./installWatcher), which
+ * keeps a live proot tracer on it until it exits — BUG-147.
  */
 function buildInstallScript(aptIds: string[], npmItems: PackageItem[], aptPkgs: string | null): string {
   const lines: string[] = [
     '#!/bin/sh',
-    '# Moch guest installer — written by the onboarding wizard, run detached',
-    '# (nohup) so no single bridge RPC has to outlive apt-get. Progress is a',
-    '# MOCH:* line protocol on stdout; the RN side tails this log.',
+    '# Moch guest installer — written by the onboarding wizard, started by the',
+    '# in-guest watcher so a live proot tracer covers the whole run. Progress',
+    '# is a MOCH:* line protocol on stdout; the RN side tails this log.',
     'set +e',
     'export DEBIAN_FRONTEND=noninteractive',
     '',
@@ -320,17 +340,18 @@ function buildInstallScript(aptIds: string[], npmItems: PackageItem[], aptPkgs: 
       '',
     )
   }
-  lines.push('echo "MOCH:DONE"')
+  lines.push(`echo "${INSTALL_DONE_MARKER}"`)
   return lines.join('\n')
 }
 
 /**
- * Install the selection: ONE detached script in the guest (apt stage first —
+ * Install the selection: ONE runner script in the guest (apt stage first —
  * one update + one install, apt items sharing its outcome — then each npm
- * global individually), polled over a short-timeout tail so no bridge RPC
- * outlives apt-get. Returns one result per selected item; onStage reports
- * the runner's stage tokens as they change. Failures are per item, never
- * fatal to the set; the whole run is capped at 30 minutes.
+ * global individually), started under the in-guest WATCHER command so a live
+ * proot tracer covers the whole run (BUG-147), with UI progress still riding
+ * short-timeout log tails. Returns one result per selected item; onStage
+ * reports the runner's stage tokens as they change. Failures are per item,
+ * never fatal to the set; the whole run is capped at 30 minutes.
  */
 export async function installPackages(
   selected: string[],
@@ -353,25 +374,39 @@ export async function installPackages(
   const npmItems = ALL_PACKAGES.filter((i) => i.kind === 'npm' && wanted.includes(i.id))
   const ids = [...aptIds, ...npmItems.map((i) => i.id)]
 
-  // Write the script (base64 — no quoting hell) and detach it in ONE short
-  // RPC. `& echo started` answers before apt does any real work; nohup keeps
-  // the script running after proot's sh exits.
+  // Write the script and start it under the WATCHER command in ONE RPC
+  // (BUG-147): the watcher starts the installer, then polls its liveness and
+  // the done marker in-guest until the installer is reaped — so the proot
+  // that traces the whole command stays alive across the entire install
+  // window. The old shape (`nohup … & echo started`) returned instantly,
+  // proot exited, and the orphaned installer's syscalls came back broken
+  // mid-apt. The watcher RPC settles only when the install is over (or the
+  // 30-minute window lapsed); a FAILURE settles quickly and is surfaced
+  // through the poll loop below so the UI fails fast, same as before.
   const script = buildInstallScript(aptIds, npmItems, aptCommand(wanted))
-  const kick = await linuxExec(
-    `echo ${b64encodeText(script)} | base64 -d > ${INSTALL_SCRIPT_PATH} && sh -c 'nohup sh ${INSTALL_SCRIPT_PATH} >${INSTALL_LOG_PATH} 2>&1 & echo started'`,
-    INSTALL_KICK_TIMEOUT_S,
+  let watcherError: string | null = null
+  const watcher: Promise<void> = linuxExec(
+    buildInstallWatcherCommand(b64encodeText(script), {
+      scriptPath: INSTALL_SCRIPT_PATH,
+      logPath: INSTALL_LOG_PATH,
+    }),
+    INSTALL_WATCHER_TIMEOUT_S,
   )
-  if (!kick || !kick.ok) {
-    const detail =
-      (kick ? `${kick.stderr || kick.error || kick.stdout}`.replace(/\s+/g, ' ').trim().slice(-INSTALL_DETAIL_MAX) : '') ||
-      'could not start the installer'
-    for (const id of ids) emit({ id, ok: false, detail })
-    return results
-  }
+    .then((r) => {
+      if (!r || !r.ok) {
+        watcherError =
+          (r ? `${r.stderr || r.error || r.stdout}`.replace(/\s+/g, ' ').trim().slice(-INSTALL_DETAIL_MAX) : '') ||
+          'could not start the installer'
+      }
+    })
+    .catch(() => {
+      watcherError = 'could not start the installer'
+    })
 
-  // Poll the log every 2.5s until MOCH:DONE, the 30-minute cap, or a cancel.
-  // A failed tail (log not written yet, or one bridge hiccup) is not fatal —
-  // keep polling; the cap catches a truly dead guest.
+  // Tail the runner log every 2.5s until MOCH:DONE, the 30-minute cap, a
+  // watcher failure, or a cancel. A failed tail (log not written yet, or one
+  // bridge hiccup) is not fatal — keep polling; the cap catches a truly dead
+  // guest.
   const started = Date.now()
   let stage = ''
   let cancelled = false
@@ -381,6 +416,7 @@ export async function installPackages(
       cancelled = true
       break
     }
+    if (watcherError) break
     if (Date.now() - started >= INSTALL_CAP_MS) break
     const r = await linuxExec(`tail -n 40 ${INSTALL_LOG_PATH} 2>/dev/null`, INSTALL_POLL_TIMEOUT_S)
     if (!r || !r.ok) continue
@@ -396,9 +432,24 @@ export async function installPackages(
     if (st.done) break
   }
 
-  // Anything the log never reported gets an explicit failure — the cap ran
-  // out ('timed out') or the script was killed ('cancelled').
-  const reason = cancelled ? 'cancelled' : Date.now() - started >= INSTALL_CAP_MS ? 'timed out' : 'no result reported'
+  // Anything the log never reported gets an explicit failure — cancelled,
+  // the watcher never got the installer going, the cap ran out ('timed
+  // out'), or the script simply reported nothing ('no result reported').
+  const timedOut = Date.now() - started >= INSTALL_CAP_MS
+  const reason = cancelled
+    ? 'cancelled'
+    : watcherError
+      ? watcherError
+      : timedOut
+        ? 'timed out'
+        : 'no result reported'
   for (const id of ids) emit({ id, ok: false, detail: reason })
+
+  // Give the in-guest watcher a moment to observe DONE, reap the installer
+  // and exit, so the tracer is alive for every syscall the installer made.
+  // On the happy path this resolves within one watcher poll of the loop
+  // breaking; if it somehow hangs, the bridge timeout is the backstop and
+  // the promise already has its rejection handler attached.
+  await Promise.race([watcher, new Promise<void>((resolve) => setTimeout(resolve, INSTALL_WATCHER_SETTLE_MS))])
   return results
 }
