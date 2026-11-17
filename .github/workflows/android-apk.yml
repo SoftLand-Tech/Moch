@@ -28,6 +28,12 @@ jobs:
           java-version: 17
           cache: gradle
 
+      # Chaquopy requires a real Python 3.11 (buildPython) to prepare the
+      # embedded runtime; runner images don't ship python3.11 on PATH.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Install JS dependencies
         working-directory: app
         run: npm ci
