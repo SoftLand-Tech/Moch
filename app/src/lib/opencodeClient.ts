@@ -329,6 +329,19 @@ export async function ocStream(
  * (desktop tests / fakes).
  */
 export async function ocEnsureServer(): Promise<{ ok: boolean; error?: string }> {
+  /** BUG-148: the python ensure path now also starts the host-side browser
+   * MCP adapter and seeds the guest's opencode.json (mcp → moch-browser).
+   * The port comes back here only for the LOG — the guest already has the
+   * config; TS never handles the relay token. */
+  const logBrowserMcp = (r?: { browser_mcp?: { ok?: boolean; port?: number; error?: string } } | null) => {
+    const m = r?.browser_mcp
+    if (m?.port) {
+      log('info', 'opencode',
+        m.ok === false
+          ? `browser MCP adapter unavailable (${m.error ?? 'unknown reason'})`
+          : `browser MCP adapter on 127.0.0.1:${m.port}`)
+    }
+  }
   try {
     const password = await opencodePassword()
     const probe = await linuxTermProbe()
@@ -341,14 +354,17 @@ export async function ocEnsureServer(): Promise<{ ok: boolean; error?: string }>
           `>/root/opencode.log 2>&1 &\n`
         const wrote = await linuxTermWrite(b64ascii(cmd))
         if (wrote) {
-          const r = await rpc<{ ok?: boolean; error?: string }>(
+          const r = await rpc<{ ok?: boolean; error?: string; browser_mcp?: { ok?: boolean; port?: number; error?: string } }>(
             'moch.opencode.ensure', { password, launch: false }, 90_000)
+          logBrowserMcp(r)
           return { ok: r?.ok !== false, error: r?.error }
         }
       }
     }
     // No bridge (or the write failed): the python-side launch remains.
-    const r = await rpc<{ ok?: boolean; error?: string }>('moch.opencode.ensure', { password }, 90_000)
+    const r = await rpc<{ ok?: boolean; error?: string; browser_mcp?: { ok?: boolean; port?: number; error?: string } }>(
+      'moch.opencode.ensure', { password }, 90_000)
+    logBrowserMcp(r)
     return { ok: r?.ok !== false, error: r?.error }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
