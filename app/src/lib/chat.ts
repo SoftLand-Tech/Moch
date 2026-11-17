@@ -17,6 +17,7 @@ import { extractMedia, isDataUrlPath, joinedTextOf, appendRefText, stripMediaFro
 import { processAttachments, detachImages, type PendingAttachment } from './mediaSend'
 import { isGatewayTimeout, isUnconfirmedSubmit, outboxPinFor, outboxTargetFor, shouldAutoRetry, UnconfirmedSubmitError } from './rpcRetry'
 import { migrateV1TranscriptWith } from './transcriptMigrate'
+import { isTerminalComplete } from './turnComplete'
 // Type-only: erased at runtime, so chat.ts stays free of slash.ts's atom graph
 // (chat.ts already cannot load in plain node — react-native/AsyncStorage at
 // import time — and this keeps it that way).
@@ -408,6 +409,22 @@ export const chatBanner = atom<{ text: string; retry?: () => void } | null>(null
 
 let uid = 0
 const nid = () => `m${Date.now()}_${uid++}`
+
+/** BUG-036 (client half): one uuid v4 per LOGICAL composer submit, attached
+ *  to prompt.submit so the server can dedupe replays of an ambiguous frame.
+ *  crypto.randomUUID when Web Crypto exists; an RFC-4122-shaped v4 fallback
+ *  otherwise (Hermes ships no crypto global, and chat.ts must stay loadable
+ *  in plain node for the tsx suites). */
+function mintRequestId(): string {
+  const c = globalThis.crypto
+  if (c && typeof c.randomUUID === 'function') return c.randomUUID()
+  const b = new Uint8Array(16)
+  for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256)
+  b[6] = (b[6] & 0x0f) | 0x40
+  b[8] = (b[8] & 0x3f) | 0x80
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0'))
+  return `${h.slice(0, 4).join('')}-${h.slice(4, 6).join('')}-${h.slice(6, 8).join('')}-${h.slice(8, 10).join('')}-${h.slice(10, 16).join('')}`
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -2337,8 +2354,17 @@ export async function sendPrompt(
     // deliberate single re-fire (that error is a definitive NOT-delivered
     // answer, so resubmitting cannot duplicate the text). Both legs flag a
     // timeout as unconfirmed.
+    // BUG-036 (client half): both legs share ONE client_request_id minted for
+    // this logical submit. The server (once its half ships) uses it to dedupe
+    // a frame that was delivered but whose ack was lost. The session-not-found
+    // leg deliberately reuses the id (that error means nothing was started, so
+    // replay is safe); a 4009 truncation/busy refusal is a deliberate NEW
+    // submit and must mint a fresh id — no such leg reuses this call site
+    // today. The pending map's client-local `r<n>` ids change per retry leg
+    // and are useless as dedupe keys, hence the explicit id.
+    const clientRequestId = mintRequestId()
     const submitRpc = () =>
-      rpc('prompt.submit', { session_id: sid, text: submitText }).catch((err: unknown) => {
+      rpc('prompt.submit', { session_id: sid, text: submitText, client_request_id: clientRequestId }).catch((err: unknown) => {
         if (isGatewayTimeout(err)) submitUnconfirmed = true
         throw err
       })
@@ -3120,6 +3146,17 @@ export function hookChatEvents() {
           })
         }
         if (list.length) patchSession(eSid, { messages: list })
+        // BUG-130: ONLY a genuinely terminal payload may end the turn. The
+        // gateway emits `message.complete` from four sites (see
+        // turnComplete.ts) — the subagent mirror sends `text` only and can
+        // land mid-turn; the finalize above still updates the transcript, but
+        // the turn-end side effects below must not run or the composer goes
+        // idle while the parent turn is still running (Stop/Steer disappear).
+        // Known tradeoff: a future genuinely-text-only completion would leave
+        // a stuck Stop button — mitigated by resume's `res.running` trust
+        // (runResume, ~chat.ts:1205) and the existing terminal-event paths
+        // (request.cancel / reconnect resync).
+        if (!isTerminalComplete(p)) break
         patchSession(eSid, {
           tools: cur.tools.map((t) => (t.status === 'running' ? { ...t, status: 'done' as const } : t)),
           busy: false,
