@@ -14,10 +14,8 @@ import { SessionToasts } from '../src/components/SessionToasts'
 import { MochiStage } from '../src/components/Mascot'
 import {
   isConnected as isConnectedAtom, connectionState, connConfig, loadSavedConfig,
-  connect, gatewayError, retryNow, disconnect, reconnectAttempt, onForeground, redactedUrl,
-  servers as serversStore, activeServerId, refreshServers, switchToServer,
-  forgetActiveServer, mostRecentServer, onDialConfig, type SavedServer,
-  everConnected,
+  connectThisPhone, gatewayError, retryNow, disconnect, reconnectAttempt, onForeground, redactedUrl,
+  onDialConfig, everConnected,
 } from '../src/lib/gateway'
 import { loadSessions, refreshRunningSessions } from '../src/lib/sessionList'
 import { refreshRunningAutomations } from '../src/lib/automationsState'
@@ -30,11 +28,12 @@ import { loadLocale, tr } from '../src/lib/strings'
 import { linkToast } from '../src/lib/linkToast'
 import { AgentBrowserHost } from '../src/components/AgentBrowserHost'
 import { syncBackendIdentity } from '../src/lib/backendIdentity'
-import { parseConnectUrl } from '../src/lib/pairing'
-import { needsPlaintextConfirm } from '../src/lib/transportGate'
 import { pruneRelayMedia } from '../src/lib/mediaCache'
 import { C, loadTheme, useStyles } from '../src/lib/theme'
 import { loadActiveBot } from '../src/lib/fleet'
+import { loadThinker, loadOpencodeOneShot, thinkerAtom, ocOneShotAtom } from '../src/lib/thinker'
+import { ocEnsureServer } from '../src/lib/opencodeClient'
+import { loadOnboarded } from '../src/lib/aboutMe'
 
 // Keep the native splash up until the animated overlay is committed on top
 // of the app — global scope, un-awaited, per the SDK 57 docs.
@@ -63,6 +62,8 @@ export default function RootLayout() {
   const err = useStore(gatewayError)
   const attempt = useStore(reconnectAttempt)
   const online = useStore(isConnectedAtom)
+  const thinker = useStore(thinkerAtom)
+  const ocOneShot = useStore(ocOneShotAtom)
   // BUGFIX (launch crash: "Rendered more hooks than the previous render"):
   // this subscription MUST run on every render. It used to sit below the
   // `if (!cfg)` early return, so the first render (saved config still
@@ -71,9 +72,6 @@ export default function RootLayout() {
   // React invariant, app dead at cold open for every paired user.
   const everOpen = useStore(everConnected)
   const [linkMsg, setLinkMsg] = useState<string | null>(null)
-  const [showServers, setShowServers] = useState(false)
-  const savedServers = useStore(serversStore)
-  const activeId = useStore(activeServerId)
   const pendingOpen = useStore(pendingOpenStoredId)
   const sharedIn = useStore(shareInInbox)
   const [splashGone, setSplashGone] = useState(false)
@@ -81,15 +79,6 @@ export default function RootLayout() {
   // branch switch (saved config loading in) never remounts it mid-animation.
   const splash = !splashGone ? <AnimatedSplash onDone={() => setSplashGone(true)} /> : null
 
-  const forgetAndFallBack = async () => {
-    disconnect()
-    const remaining = await forgetActiveServer()
-    const next = mostRecentServer(remaining)
-    if (next) {
-      try { await switchToServer(next.id); return } catch {}
-    }
-    router.replace('/')
-  }
 
   useEffect(() => {
     // First commit has the overlay (a pixel-match of the native splash) on
@@ -106,12 +95,14 @@ export default function RootLayout() {
     const offDial = onDialConfig(syncBackendIdentity)
     void loadTheme()
     void loadActiveBot()
+    void loadThinker()
+    void loadOpencodeOneShot()
+    void loadOnboarded()
     // Captured, not fired-and-forgotten: the boot IIFE below awaits this
     // BEFORE its first dial. initPush restores the saved push token into the
     // atom, and dial→wsUrl() reads it — without the await, the first dial of
     // a launch can race ahead of the restore and carry no &push=.
     const pushReady = initPush()
-    void refreshServers()
     // Remote push, SILENT at boot: returning users (permission already
     // granted) re-register their token on the next dial; fresh installs are
     // asked on their FIRST MESSAGE instead (armPushOnFirstSend in chat.ts) —
@@ -135,25 +126,24 @@ export default function RootLayout() {
     let cancelled = false
     ;(async () => {
       await pushReady // token restored before the first dial's wsUrl() runs
-      const saved = await loadSavedConfig()
-      // Scope the device caches to this backend BEFORE they hydrate: a
-      // missing/different fingerprint purges once, then the loaders below
-      // read a clean slate.
-      if (saved) {
-        try { await syncBackendIdentity(saved) } catch {}
-      }
-      if (cancelled) return
+      // Local-only (2026-11-15): the agent is the embedded runtime on this
+      // phone. A remote-era config may still be on disk; it is never dialed —
+      // `connectThisPhone` always targets the loopback gateway. The cache
+      // fingerprint still scopes device state to this backend before hydrate.
       void loadOutbox()
       void loadDrafts()
       void loadSendQueue()
       void loadAttention()
+      const saved = await loadSavedConfig().catch(() => null)
       if (saved) {
-        // Seed the UI with the saved pairing BEFORE the dial lands: the tabs
-        // render instantly (chat shows its connecting state) instead of the
-        // bare boot screen, and no saved computer ever needs re-pairing to
-        // look connected — the last connected one is simply resumed.
-        connConfig.set(saved)
-        try { await connect(saved) } catch {}
+        try { await syncBackendIdentity(saved) } catch {}
+      }
+      if (cancelled) return
+      try {
+        await connectThisPhone()
+      } catch {
+        // The onboarding screen owns the retry surface; a failed boot leaves
+        // connConfig null and renders it there.
       }
     })()
 
@@ -172,39 +162,14 @@ export default function RootLayout() {
         router.push('/(tabs)/chat')
         return
       }
-      try {
-        const p = parseConnectUrl(url)
-        // C-05 (#95): a deep link NEVER auto-dials plaintext to a public
-        // host — the QR/link used to hand the token to the gateway in the
-        // clear with zero interaction. Non-private plaintext links stop at
-        // this confirmation dialog; only "Connect anyway" dials. (Public
-        // hosts without an explicit tls= now parse as TLS by default, so
-        // this only fires for links that explicitly asked for plaintext.)
-        const plain = needsPlaintextConfirm(p.host, p.tls)
-        if (plain) {
-          const btn = await showAlert({
-            title: tr('pair.plain.title'),
-            message: tr('pair.plain.body', { host: p.host }),
-            buttons: [
-              { text: tr('pair.plain.cancel'), style: 'cancel' },
-              { text: tr('pair.plain.confirm'), style: 'destructive' },
-            ],
-          })
-          if (btn.style !== 'destructive') return // declined — nothing dials
-        }
-        await connect({
-          host: p.host, token: p.token, tls: p.tls,
-          ...(p.name ? { name: p.name } : {}),
-          ...(plain ? { plaintextConfirmed: true } : {}),
-        })
-        // GH #109: success clears any error toast this dial's earlier
-        // attempts (or the previous link) put up.
-        setLinkMsg((m) => linkToast(m, { type: 'reset' }))
-        router.replace('/(tabs)/chat')
-      } catch (e) {
-        setLinkMsg((m) =>
-          linkToast(m, { type: 'error', message: e instanceof Error ? e.message : '' }))
-      }
+      // Local-only build: `hermes://connect` pairing links are retired. Any
+      // other hermes:// link is an in-app route (handled above); an old
+      // pairing link gets one honest toast instead of silently nothing.
+      setLinkMsg((m) =>
+        linkToast(m, {
+          type: 'error',
+          message: 'Pairing to a computer is no longer supported — this build runs the agent on your phone.',
+        }))
     }
     void Linking.getInitialURL().then((u) => { if (!cancelled && u) void handleUrl(u) })
     const sub = Linking.addEventListener('url', (ev) => { void handleUrl(ev.url) })
@@ -285,6 +250,17 @@ export default function RootLayout() {
   // gateway is connected — switching needs a live RPC. Stale targets (the
   // connection never came up within a minute) are dropped so an old tap
   // can't yank the user out of a chat much later.
+  // OpenCode auto-start at boot: the model list and the thinker chip need
+  // the server before any message exists — a fresh launch used to leave it
+  // down until the first send, so the picker opened empty. Idempotent on
+  // the python side (health check first) and re-fires on reconnect;
+  // failures stay silent here because the picker and the send path both
+  // re-ensure on demand (and surface the real error if that fails too).
+  useEffect(() => {
+    if (!online || thinker !== 'opencode' || ocOneShot) return
+    void ocEnsureServer().catch(() => {})
+  }, [online, thinker, ocOneShot])
+
   useEffect(() => {
     if (!pendingOpen || !online) return
     pendingOpenStoredId.set(null)
@@ -327,14 +303,11 @@ export default function RootLayout() {
   if (!cfg) {
     return (
       <>
-      {/* BUG-132 (cause 5): child 0 under the SAME Fragment root in BOTH
-          returns, so the agent tab never unmounts across the cfg transition —
-          present during onboarding, and survives "Forget this computer". */}
+      {/* Local-only boot (2026-11-15): no config is not "unpaired" anymore —
+          it is the first frame before the embedded runtime answers. The
+          onboarding screen owns the waiting/retry surface; the runtime is
+          starting in the background either way. */}
       <AgentBrowserHost />
-      {/* BUG-133: KeyboardProvider must wrap BOTH root branches. The onboarding
-          screens (index / add-computer / setup) host PairForm/ProviderKeyForm
-          inputs; without a provider every keyboard-controller consumer there
-          reads a dead context (shared values stuck at 0) and silently no-ops. */}
       <KeyboardProvider>
       <View style={{ flex: 1, backgroundColor: C.bg }}>
         <StatusBar style="light" />
@@ -375,9 +348,12 @@ export default function RootLayout() {
       >
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="add-computer" options={{ headerShown: false, presentation: 'modal' }} />
         <Stack.Screen name="bot" options={{ headerShown: false, presentation: 'modal' }} />
         <Stack.Screen name="setup" options={{ headerShown: false, presentation: 'modal' }} />
+        <Stack.Screen name="onboarding/thinker" options={{ headerShown: false }} />
+        <Stack.Screen name="onboarding/environment" options={{ headerShown: false }} />
+        <Stack.Screen name="onboarding/providers" options={{ headerShown: false }} />
+        <Stack.Screen name="onboarding/about" options={{ headerShown: false }} />
       </Stack>
       {!online && state !== 'idle' && bootStruggling ? (
         <View style={s.overlay}>
@@ -402,15 +378,7 @@ export default function RootLayout() {
                 <Pressable style={({ pressed }) => [s.btn, pressed && s.pressed]} onPress={() => { void retryNow().catch(() => {}) }}>
                   <Text style={s.btnText}>Retry</Text>
                 </Pressable>
-                {savedServers.length > 1 ? (
-                  <Pressable style={({ pressed }) => [s.ghostBtn, pressed && s.pressed]} onPress={() => setShowServers(true)}>
-                    <Text style={s.ghostText}>Computers…</Text>
-                  </Pressable>
-                ) : null}
               </View>
-              <Pressable style={({ pressed }) => [s.ghostBtn, pressed && s.pressed]} onPress={() => { void forgetAndFallBack() }}>
-                <Text style={s.ghostText}>Forget this computer</Text>
-              </Pressable>
             </>
           ) : connecting ? (
             <>
@@ -423,36 +391,6 @@ export default function RootLayout() {
         </View>
       ) : null}
       {linkMsg ? <LinkToast msg={linkMsg} onDismiss={dismissLinkMsg} /> : null}
-
-      <Modal visible={showServers} transparent animationType="fade" onRequestClose={() => setShowServers(false)}>
-        <View style={s.pickerScrim}>
-          <View style={s.pickerCard}>
-            <Text style={s.pickerTitle}>Your computers</Text>
-            {savedServers.length === 0 ? (
-              <Text style={s.pickerEmpty}>No other computers saved.</Text>
-            ) : (
-              savedServers.slice().sort((a, b) => b.lastUsedAt - a.lastUsedAt).map((sv) => (
-                <Pressable
-                  key={sv.id}
-                  style={({ pressed }) => [s.pickerRow, sv.id === activeId && s.pickerRowActive, pressed && s.pressed]}
-                  onPress={() => { setShowServers(false); void switchToServer(sv.id).catch(() => {}) }}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Switch to ${sv.name}`}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.pickerName} numberOfLines={1}>{sv.name}</Text>
-                    <Text style={s.pickerHost} numberOfLines={1}>{sv.tls ? 'WSS' : 'WS'} · {sv.host}</Text>
-                  </View>
-                  {sv.id === activeId ? <Text style={s.pickerActive}>current</Text> : null}
-                </Pressable>
-              ))
-            )}
-            <Pressable style={({ pressed }) => [s.ghostBtn, pressed && s.pressed]} onPress={() => setShowServers(false)}>
-              <Text style={s.ghostText}>Cancel</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
 
       {/* Attention toasts — above every screen, under nothing but the
           (transient) splash. Tapping one deep-links to its chat. */}
@@ -508,13 +446,4 @@ const makeS = () => StyleSheet.create({
   connecting: { color: C.textDim, marginTop: 2, marginBottom: 8 },
   toast: { position: 'absolute', bottom: 40, left: 20, right: 20, backgroundColor: C.bgElev, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: C.border },
   toastText: { color: C.text, fontSize: 13.5, textAlign: 'center' },
-  pickerScrim: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  pickerCard: { width: '100%', maxWidth: 420, backgroundColor: C.bgElev, borderRadius: 16, padding: 18, borderWidth: 1, borderColor: C.border, gap: 8 },
-  pickerTitle: { color: C.text, fontSize: 16, fontWeight: '800', marginBottom: 4 },
-  pickerEmpty: { color: C.textDim, fontSize: 14, paddingVertical: 10 },
-  pickerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.inputBg, borderRadius: 12, borderWidth: 1, borderColor: C.border, paddingHorizontal: 14, paddingVertical: 12, minHeight: 56 },
-  pickerRowActive: { borderColor: C.accent },
-  pickerName: { color: C.text, fontSize: 14.5, fontWeight: '700' },
-  pickerHost: { color: C.textFaint, fontSize: 12, marginTop: 2 },
-  pickerActive: { color: C.accent, fontSize: 12, fontWeight: '700' },
 })

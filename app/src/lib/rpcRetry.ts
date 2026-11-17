@@ -59,6 +59,10 @@ export function isUnconfirmedSubmit(err: unknown): err is UnconfirmedSubmitError
  */
 export function shouldAutoRetry(phase: RpcPhase, error: unknown): boolean {
   if (isUnconfirmedSubmit(error)) return false
+  // OpenCode submit failures are ambiguous the same way: the prompt frame
+  // was on the wire when the local deadline or the connection gave up, so
+  // the turn may be running (the transport sets the row 'unconfirmed').
+  if (phase === 'submit' && error instanceof Error && error.name === 'OcError') return false
   return !(phase === 'submit' && isGatewayTimeout(error))
 }
 

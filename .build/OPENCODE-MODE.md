@@ -1,0 +1,153 @@
+# OPENCODE-MODE — OpenCode as a first-class thinker (v2 contract)
+
+Build contract for the "OpenCode is a different app surface" slice. Read this
+before touching any file listed here. The two transport modules
+(`src/lib/opencodeClient.ts`, `src/lib/opencodeChat.ts`) are the **source of
+truth**; UI slices consume them, never re-implement the wire.
+
+## Thinker rules
+
+- `thinkerAtom.get() === 'opencode'` gates EVERY branch. Same theme, different
+  data: in OpenCode mode nothing may call hermes-only surfaces (bots, crew,
+  rooms, automations, browser, hermes model options). The projects rail is
+  SHARED: chats carry a project cwd in both thinkers, so projects show in
+  OpenCode mode too (oc-server-session grouping under projects is BUG-149).
+- A chat's thinker never changes mid-chat. New chats use the current thinker.
+- OpenCode server: guest loopback `http://127.0.0.1:4096`, HTTP Basic
+  `opencode:<password>` (`opencodePassword()` from `src/lib/thinker.ts`).
+  The phone's RN runtime CAN reach it directly (proot shares the network
+  namespace; `usesCleartextTraffic="true"` is set). JSON calls use plain
+  `fetch`; the SSE stream uses `fetch` from `'expo/fetch'` (streaming body).
+
+## Wire contract (verified live against opencode 2.3.0)
+
+- `POST /api/session {title}` → `{data:{id,title,...}}`
+- `GET  /api/session` → `{data:[{id,title,time:{created,updated},...}]}`
+  (newest activity ordering is the caller's job; `time.updated` desc)
+- `POST /api/session/:id/prompt {text}` → returns immediately (user message);
+  output arrives over SSE.
+- `GET  /api/event` → SSE `data: {type, data}` frames. Filter by
+  `data.sessionID === ocSessionId`. Event order for one tool call:
+  `session.tool.input.started` (has `name`!) → `session.tool.input.ended`
+  → `session.tool.called` (`input` object) → `session.tool.progress` (opt)
+  → `session.tool.success|failed`. The UI row starts at `input.started`
+  (first signal a tool exists — waiting for `.called` hid long tools for
+  their whole input phase); `.called` adds the input preview; `.success/
+  .failed` finishes it. Track tool NAMES from `input.started` keyed by
+  `data.id`. Silence watchdog: 15 s with NO frames when idle; 300 s while
+  a tool is in flight (a long write/build is legitimately silent — the
+  15 s rule killed healthy turns mid-write). Text: `session.text.delta
+  {delta}`. Reasoning: `session.reasoning.delta {delta}`. Turn end:
+  `session.execution.succeeded` / `session.execution.failed {error}` /
+  `session.idle`. Permission: `permission.asked {id, action, resources,
+  message?}`.
+- `POST /api/session/:id/interrupt` → stop.
+- `POST /api/session/:id/permission/:requestID/reply {reply:'once'|'always'|'reject'}`
+- `GET  /api/session/:id/message` → `{data:[...]}` NEWEST FIRST (reverse).
+  user: `{type:'user', payload:{text}}`; assistant: `{content:[{type:'text',text}|
+  {type:'reasoning',text}|{type:'tool', id,name,state:{status},time}]}`.
+- `GET  /api/model` → `{data:[{id,providerID,modelID,name,capability?...}]}`;
+  `GET /api/model/default` → current default; `POST /api/session/:id/model
+  {model:{id,providerID}}` — the body is a Model.Ref (`{id, providerID,
+  variant?}`, additionalProperties:false): `id` is the BARE model id (the
+  `id` field of a GET /api/model entry, no provider prefix), NOT modelID.
+- Integrations (provider auth): `GET /api/integration` → list;
+  `POST /api/integration/{integrationID}/connect/key {key}` → connect.
+  Free models (e.g. provider `opencode`, model `iceman-free`) need NO key.
+
+## OpenCode thinker = server mode OR one-shot mode
+
+ROOT CAUSE CORRECTED (2026-11-16, final): TWO stacked defects.
+(1) The onboarding wizard's `startOpencodeServer` (src/lib/thinker.ts)
+launched via `guestRun` (nohup … &) — the orphaning launch — and NEVER
+called the python `ensure_server` the 1.0.31–1.0.34 fixes changed, so
+every wizard retry reproduced the original bug on every build.
+(2) Launch context: servers launched from the python RPC thread (any
+variant: throwaway proot, dedicated proot, persistent shell, hidden pty)
+futex-abort ~30 s in, while the same server under a session started by
+the TERMINAL TAB's bridge call survives idle, backgrounded, and under
+full SSE + generation traffic (user-verified on-device).
+Fix (1.0.35): ONE launch path — `ocEnsureServer` (opencodeClient.ts)
+probes the pty bridge, starts the terminal session (idempotent), and
+TYPES the launch line through `linuxTermWrite` — the exact path the
+Terminal tab uses, no tab needed. Python `moch.opencode.ensure` gains
+`launch:false` (health-wait only) for that call; its own injection stays
+as the no-bridge fallback. `startOpencodeServer` delegates to it.
+Killing the terminal session still kills the server; the idempotent
+ensure re-launches on the next call.
+
+One-shot stays as the fallback mode:
+
+- `ocOneShotAtom` (persisted `hermes.opencode.oneshot.v1`) selects the mode.
+  Server start failure in onboarding offers "Continue in one-shot mode";
+  Settings shows the active mode and can retry server mode.
+- Server mode: `runOpencodeTurn` (SSE streaming, permissions, tools).
+- One-shot mode: `runOneShotTurn` — one `opencode run --format json [-s id]
+  [-m provider/model]` per turn, stdin prompt (base64 pipe, UTF-8 safe).
+  JSONL parsed for text/reasoning/session/tools; session id remembered into
+  the same AsyncStorage map so `-s` resumes the conversation. No streaming
+  (answer lands whole), no interactive permissions, no server history load
+  (local transcript persists as usual). Model inventory is `opencode models`
+  (CLI); picks persist per chat and ride `-m`.
+- Cancellation: flag + guest `pkill -f '[o]pencode run'`; runner owns busy.
+
+## Module contracts (addition)
+
+### `src/lib/opencodeClient.ts` (transport, no UI)
+- `ocFetch<T>(path, opts?)` — JSON call, Basic auth, typed error
+  `OcError {status, message}`; `OC_BASE` = `http://127.0.0.1:4096`.
+- `ocListSessions()`, `ocCreateSession(title)`, `ocHistory(id)`,
+  `ocPrompt(id, text)`, `ocInterrupt(id)`, `ocPermissionReply(id, rid, reply)`,
+  `ocModels()`, `ocDefaultModel()`, `ocSetModel(sessionId, providerID, modelId)` —
+  the third arg is the Model.Ref `id` (bare model id), and the body sent is
+  `{model:{id, providerID}}`,
+  `ocIntegrations()`, `ocConnectKey(integrationID, key)`,
+  `describeOcError(e)` — the ONE error classifier (status → human class:
+  0 network / 401 / 403 auth-quota / 404 / 5xx); every catch renders it,
+  never a bare message.
+- `ocStream(handler, signal?)` — SSE pump over `expo/fetch`; `handler(e)`
+  with `e = {type, data}`; never throws on normal close, resolves when the
+  stream drops (callers own retries/idle timeouts).
+- `ocEnsureServer()` — RPC `moch.opencode.ensure` wrapper (gateway rpc).
+
+### `src/lib/opencodeChat.ts` (turn runner + persistence)
+- `ocSessionFor(mapKey, title?)` / `ocRememberSession(mapKey, ocId)` /
+  `ocForgetSession(mapKey)` — AsyncStorage map `hermes.opencode.map.v1`
+  (mapKey = the chat's PERSISTENT handle, hermes storedId in chat.ts, never
+  the volatile live sid).
+- `runOpencodeTurn({ mapKey, title, text, hooks, isCancelled })`:
+  ensures server → ensures oc session → prompt → pump SSE → hooks.
+  Resolves when the turn ends (execution.* / idle) or the stream drops
+  after a turn-end; a dropped stream WITHOUT a turn-end resolves after a
+  15s silence timeout (watchdog) with `complete('', true, 'connection lost')`.
+- Hooks (`OcTurnHooks`): `start()`, `text(delta)`, `thinking(delta)`,
+  `tool(id, name, phase:'running'|'done'|'failed', preview?, durationS?)`,
+  `permission(req)`, `complete(text, failed, error?)`.
+- `mapOcHistory(messages)` → `{role,text,ts,tool?}[]` rows for hydration.
+
+## UI slice rules
+
+- chat.tsx: branch the TRANSPORT ONLY. All rendering keeps the existing
+  components/atmosphere. OpenCode turns stream through the same
+  SessionState atoms via chat.ts's internal reducers passed as hooks.
+- Model chip in OpenCode mode: `ocDefaultModel()`/`ocModels()`; picking calls
+  `ocSetModel` for the active oc session. NEVER hermes `model.*` RPCs.
+  The picker sheet's checked/"Now" row reflects the CHAT's pick
+  (`ocCurrent` prop = the chip label), not the server default — per-session
+  switches never touch `GET /api/model/default`.
+- Permission card: reuse the pending-request card visual language; buttons
+  Allow once / Always / Deny → `ocPermissionReply`.
+- Sidebar in OpenCode mode: rows = OpenCode sessions (title, time.updated);
+  hide bots/crew/automations/browser/library sections; the PROJECTS rail
+  stays (shared — chats are created with a project cwd in both thinkers;
+  the oc list itself is not project-filtered until BUG-149).
+- Tabs: hide crew, fleet, browser, automations, skills, connectors, inbox,
+  agent when thinker is opencode (`href: null` pattern).
+- Chat shows a persistent thinker chip: `OpenCode · <modelID>`.
+
+## Copy rules
+
+- "OpenCode" is the product name, always. No "tunnel" wording anywhere.
+- Feature reduction is stated positively in onboarding: "Bots, automations
+  and the agent browser come with the Moch thinker; OpenCode keeps chat,
+  the Linux terminal and its own model picker."

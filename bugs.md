@@ -12,6 +12,8 @@ Check off `- [ ]` as you fix. All findings were adversarially verified against s
 **Wave 7 (BUG-104):** on-device 1.0.11-browser (2026-10-10): with the Browser screen open and tools advertised, EVERY agent browser tool returns "No browser page…" — the per-page (WebView) attach auto-detect could never engage. Root-caused in source and adversarially verified with a live relay + Chromium reproduction.
 **Wave 8 (BUG-105):** user report (2026-10-11, on the post-BUG-104 source): "the agent sees the tools but cannot access the browser — it says something like the browser is dead." Same verbatim tool error as BUG-104, different cause: the BOOT gate arms from a relay.json that outlives the process.
 **Wave 9 (BUG-106–122):** first full-surface on-device pass on 1.0.15-browser (versionCode 18), 2026-10-11 — browser, terminal, bots/fleet, crew, automations, connectors, share-in, settings, search. Every entry carries device evidence; the run matrix, pass/fail per documented runbook step and the two root causes proven on the device (IPv6-only relay bind; fleet flag never armed) are in `TEST-REPORT-1.0.15-device.md`. Standing result: **the browser cannot drive a page, and the M9 fleet runtime is not active, on the shipped APK.**
+**Wave 10 (BUG-147):** user-reported on-device 1.0.32-ocsession (2026-11-16): the Onboarding → Environment tools installer dies with ENOSYS (38) on basic syscalls. Deferred by the user ("will fix in the future") — recorded, not scheduled.
+**Wave 11 (PRs #159–#168, 2026-11-17):** the ten open items verified at HEAD f704db7 and fixed in one reviewed batch — BUG-130 (Stop/Steer unreachable mid-run), BUG-036 (server dedupe + client idempotency key), BUG-147 (installer ENOSYS root cause: the kick orphaned the installer tracee), BUG-132 residual (prewarm 15-min silent cap), BUG-114 residual (FTS syntax rejections silently empty), BUG-118 (catalog never refetches), BUG-149/150 (OpenCode project sessions + duplicate chip), BUG-148 (browser MCP for OpenCode mode). One PR per unit + a base typecheck fix; PC gates: tsc 0 errors, full tsx chain green, python battery OK (skipped=2) with server deps in a venv. Review gate: 9 MERGE / 1 FIX-FIRST (the FIX-FIRST P1 — replay id re-stamping — was fixed pre-merge); the two flagged conflicts (#162/#161 package.json, #167/#165 strings.ts) were re-cut on the merged base.
 
 **Fix-order warnings baked in below:**
 - BUG-001 (reconnect) must ship together with BUG-007 (stale timer) — fixing one alone exposes the other.
@@ -233,7 +235,7 @@ Check off `- [ ]` as you fix. All findings were adversarially verified against s
 - [x] **BUG-033 [MEDIUM] `resetSessionCaches` leaves residue** — `src/lib/chat.ts:1424-1445`. Skips `chatBanner` (:326 — stale retry against a dead stored id), `streamBufs` (:404 — never `.delete`d anywhere), `queuedAttachments` (:806 — also skipped by `forgetSession`), `mochiMoment` (:304).
 - [x] **BUG-034 [MEDIUM] "Forget this computer" never closes the socket** — `src/lib/gateway.ts:377-385` + `app/(tabs)/settings.tsx:283-295`. `clearConfig` has no `client.close()`/state write; Settings forgets without `disconnect()` (unlike `_layout.tsx:53-55`) → revoked machine stays connected, hero shows green "Connected".
 - [x] **BUG-035 [MEDIUM] Debounced queue/draft writes lost on a quick kill** — `src/lib/sendQueue.ts:28,52-63` + `src/lib/drafts.ts:18,41-54` + `src/lib/chat.ts:534,547-559`. 400-500ms debounces; `flushSendQueue`/`flushDrafts` have ZERO production callers; no AppState 'background' flush (`_layout.tsx:150-160` handles only 'active'). Queue loss = message lost.
-- [x] **BUG-036 [MEDIUM] 120s request timeout → 2-minute hangs + double-submitted prompts** *(partially — client half fixed in PR #132: typed timeouts, no auto-resubmit after submit-phase timeout, unconfirmed row status; SERVER dedupe deferred: needs client_request_id in vendored contracts (extra=forbid) — protocol decision)* — `src/protocol/json-rpc-channel.ts:135,241-249` + `src/lib/chat.ts:1655`. Timeout only rejects; `prompt.submit` has no idempotency key so timed-out-but-delivered + retry double-submits. *(Client-side half; server dedupe is the real fix.)*
+- [x] **BUG-036 [MEDIUM] 120s request timeout → 2-minute hangs + double-submitted prompts** *(partially — client half fixed in PR #132: typed timeouts, no auto-resubmit after submit-phase timeout, unconfirmed row status; SERVER dedupe + idempotency key completed 2026-11-17: PR #160 vendored `client_request_id` (optional; extra=forbid intact) + per-session receipts checked BEFORE the busy path so a replay can never steer/queue, TTL 300s honored at lookup and insert-prune, replays re-stamped with the caller's JSON-RPC id (review round); PR #161 client half — one uuid minted per composer submit, reused across the session-not-found re-fire; `test_prompt_submit_dedupe.py` 7/7 — on-device check pending)* — `src/protocol/json-rpc-channel.ts:135,241-249` + `src/lib/chat.ts:1655`. Timeout only rejects; `prompt.submit` has no idempotency key so timed-out-but-delivered + retry double-submits. *(Client-side half; server dedupe is the real fix.)*
 
 - [x] **BUG-089 [MEDIUM] Server requests can be misfiled onto the wrong chat or a dead key (unmarked + unanswerable)** *(fixed in PR #31: live ids rebind through storedIdFor before filing)*  — `src/lib/chat.ts:1867,2002-2003,1012`
   A request missing `session_id` is filed under WHATEVER chat is active (`:1867`) — the wrong row gets the amber dot + composer block while the origin shows nothing; a request emitted under the old live id during resume rotation lands under a dead key — `flagAttention` early-returns and `pendingRequest` can never match. Timing-narrow but silently permanent when hit.
@@ -380,7 +382,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   `Couldn't refresh the model inventory (New chat is not ready). Showing the last known list.` The cached list still renders, but an internal precondition leaks into a Settings screen and the inventory can stay stale for anyone who never opens the picker from a chat.
   *Fix:* refresh the inventory without a live chat (gateway `models.*`), or phrase/scope the fallback so it never surfaces raw state.
 
-- [x] **BUG-118 [MEDIUM] [PLUMBING FIXED + VERIFIED on device — shipping curated manifests stays a content decision] The MCP catalog is empty in the shipped APK** — `hermes-src/hermes_cli/mcp_catalog.py:126` (`optional-mcps/`) *(PR #56)*
+- [x] **BUG-118 [MEDIUM] [PLUMBING FIXED + VERIFIED on device — shipping curated manifests stays a content decision] The MCP catalog is empty in the shipped APK** — `hermes-src/hermes_cli/mcp_catalog.py:126` (`optional-mcps/`) *(PR #56; CLIENT remainder fixed in PR #165 — the catalog refetches on every screen focus (one screen-side in-flight guard shared by mount/focus/pull-to-refresh) and the Browse empty/offline literals are honest + localized: `connectors.browse.empty` / `connectors.empty.matches` / `connectors.offline`, EN+AR. Bundling curated manifests remains a content decision.)*
   Connectors → Browse: `Catalog is empty`; `GET /api/mcp/catalog` → `{"entries":[],"diagnostics":[]}`; RPC `mcp.catalog` → `{"servers":[]}`; `…/AssetFinder/app/optional-mcps` does not exist. The screen invites browsing a catalog that never ships.
   *Fix:* bundle `optional-mcps/` in the Python sources, or replace the empty state with an honest "catalog not bundled in this build" + the manual add-server path.
 
@@ -526,7 +528,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   - The same tree updates elsewhere (transcript bubbles, `Thought · Ns`), so it is the composer subtree that goes stale.
 
   Impact: screen-reader users cannot reach the two busy-only controls (Stop, Steer), and any accessibility-driven automation — including the on-device harness used for this campaign — reads an "idle" composer with the wrong contents. My first BUG-130 report is exactly the false positive that produces.
-  *Fix:* re-announce the composer subtree when `busy` flips (`accessibilityLiveRegion`, explicit `importantForAccessibility` on the chip, a keyed re-render or `accessibilityValue` for the input) so the new controls and the live text reach the tree.
+  *(fixed in PR #161 — client-side `isTerminalComplete` gate: only a payload carrying usage/status (real turn end, auto-continue terminal error, compute-host end) clears busy / finalizes tools / marks done / flushes the queue; the subagent-mirror `{text}`-only emission no longer flips the composer to idle mid-turn, so Stop/Steer stay reachable. The streaming-row finalize stays ungated (mirror text still lands in the transcript). Known documented tradeoff: a future text-only genuine completion would leave a stuck Stop button — mitigated by resume's `res.running` trust; `scripts/test-turn-complete.ts` pins all four emitter shapes, 11 checks in the verify chain. On-device check pending.)*
 
 - [x] **BUG-131 [MEDIUM] Session list rows carry no running marker** — `hermes_cli/web_routers/sessions.py` (list rows), `app/src/lib/sessionList.ts`
   `/api/sessions` rows return `running: null` (also `active`/`busy`: null) for a session that is demonstrably mid-turn — its own detail endpoint says `last_activity_description: "receiving stream response"` at the same moment. The client can therefore never learn "this chat is working" from a list refresh (`chat.ts:1095` has a `res.running` branch no list payload can satisfy), which is the recovery path a reconnect, a chat switch or a second device needs.
@@ -718,6 +720,11 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
 
   Known nit in the same path: a hyphenated query misses (`q=GATE-OK` → 0) — the FTS5 query
   sanitizer treats `-` specially and the LIKE path inherits the mangled terms. Worth a follow-up.
+  *(Follow-up closed 2026-11-17, PR #164 — re-verified at HEAD the hyphen miss was ALREADY fixed
+  by the sanitizer's hyphenated-term quoting (end-to-end on both routes; pinned in
+  test_search_no_fts.py), and the residual silent-empty path is gone: FTS syntax rejections
+  retry via the canonical LIKE fallback, gated to syntax-shaped errors (`_fts_syntax_rejected`)
+  so a transient `database is locked` keeps the historical empty answer.)*
 
   **Still open (client half):** nothing in the app calls session search at all — `grep` for
   `sessions/search`/`session.search` over `src/` and `app/` returns nothing; the drawer
@@ -742,7 +749,7 @@ sockets, `ps` for guest processes. Full evidence and per-step results:
   Small polish left (not a defect): the matched row renders its usual meta line
   (`0 msgs · started 6h ago`) rather than the returned `snippet`, because the row only falls back to
   `preview` when the title is empty. Showing "why it matched" under the title is a follow-up.
-  Also still open in this area: the hyphen nit above (`q=GATE-OK` → 0).
+  Also still open in this area: the hyphen nit above (`q=GATE-OK` → 0). *(closed — see the PR #164 note on the `Known nit` block above; PR #164 also routes FTS syntax rejections through the LIKE fallback instead of the silent `[]`.)*
 
   **[FIXED 2026-10-11, verified on device]** Root cause: `mcp_catalog._catalog_root()` calls
   `get_optional_mcps_dir(<source-checkout>/optional-mcps)`, and `hermes_constants._packaged_dir`
@@ -1512,6 +1519,11 @@ OPEN (fresh installs only): the cold-kit window stretched >15 min on the fresh-i
 ~2.5 min and heals a running turn in ~30 s. Fresh-install logs were wiped by the reinstall; needs a
 focused repro (logs before any reinstall) — suspect first-boot Chaquopy extraction + onboarding
 I/O contention, or a provider-dependent check. Self-healing in all observed cases.
+*(Hardening shipped in PR #163 — the prewarm loop's silent 15-min cap (`range(60)`) replaced by an
+unbounded loop with an injectable 15→60s backoff ladder, a cheap toolset-level readiness probe per
+pass (zero full-catalog builds, proven by a counting fake), and one quiet full kit build at boot
+inside the import-prewarm thread; `test_prewarm_loop.py` 12 tests. The exact first-boot timing
+split (extraction vs gate) still wants one on-device log of the `agent kit` lines.)*
 
 ## Browser speed & native pass (2026-10-13) — 13-agent fleet audit, BUG-140..146, PR #149
 
@@ -1535,3 +1547,23 @@ strips, full-size stacked pool (kills switch reflow), renderer-priority demotion
 upstream-list memo, tab-strip layout animations, supervisor self-heal, schema-valid warming
 indicator (OPEN above), local start page.
 
+
+---
+
+## Wave 10 — deferred
+
+- [x] **BUG-149 [MEDIUM] OpenCode sessions not listed under their projects** *(fixed in PR #167 — `OcSession.directory`; `ocCreateSession(title, directory?)` forwards it as the QUERY param the oc 2.3.0 server reads (the mechanism the python twin's `send_prompt` already proves; the twin's create handler accepts + forwards it too); mint sites (`ModelPickerSheet`, `opencodeChat`) resolve the project cwd via `pickProjectCwd`; the Sidebar buckets oc rows into the projects rail via `projectIdForCwd(row.directory)` with a localized flat tail (`oc.otherSessions`, EN/AR); `ocSessionsCache` preserves rows whole. On-device check pending: confirm session rows echo `directory`.)*
+  The projects rail exists (see the 1.0.36 re-enable) but OpenCode sessions carry no project membership — the sidebar can't group them. opencode sessions have a directory/workspace identity server-side; map project → directory and filter `ocListSessions` by it.
+  *Fix:* pass `directory` (or `directoryID`) when creating oc sessions from a project context; group sidebar rows by it.
+
+- [x] **BUG-150 [LOW] Duplicate model name: header shows it and the chip under the header shows it too** *(fixed in PR #166 — the header-row oc chip now carries the `!S.trayHeader` guard its hermes twin always had; the floating tray chip remains the tray-theme owner.)*
+  The OpenCode chat header renders the model name and the thinker chip right below renders `OpenCode · <modelID>` — same value twice in a row.
+  *Fix:* drop the model name from the header row; keep the chip as the single owner.
+
+- [x] **BUG-148 [MEDIUM] OpenCode mode: no browser MCP** *(fixed in PR #168 — `moch/oc_browser_mcp.py`: a stdlib-only MCP streamable-HTTP adapter fronting the CDP relay (`browser_navigate/snapshot/click/type/console` mapped onto browser_webview.py's exact relay wire calls; hand-rolled RFC6455 CDP client; the relay token never enters the guest — read host-side from the pid-gated `relay.json`), lifecycle-hooked on `moch.opencode.ensure` so hermes-only users never start it, and the guest's `opencode.json` seeded with a MERGED `mcp.moch-browser` remote entry (never clobbers). `tests/test_oc_browser_mcp.py` 16 tests over a fake relay + fake WS. On-device check pending (oc listing/using the tools against the real relay; config-schema confidence medium — from opencode's public docs). Deferred P2 from review: the adapter rebinds an EPHEMERAL port after an app restart while a surviving guest opencode still holds the old in-memory URL — browser tools fail until the guest opencode restarts; follow-up is a persisted/fixed port or a re-seed nudge on mismatch.)*
+  Moch's hermes thinker has the agent browser; OpenCode mode has nothing. Wire a browser MCP server (the app already ships a CDP relay for the WebView pool) so `opencode` sessions can list it as an MCP tool source.
+  *Fix:* expose the existing browser relay as an MCP server reachable from the guest (stdio/socket), register it in the opencode config the app seeds.
+
+- [x] **BUG-147 [HIGH] Guest tools installer never completes — ENOSYS (38) on basic syscalls** — `/root/.moch-install.sh` (staged `MOCH:STAGE:UPDATE:START`), Onboarding → Environment flow *(ROOT CAUSE found in source 2026-11-17, fixed in PR #162 — it was never glibc/syscall-translation: the kick (`nohup sh … &` inside a short `exec_in_guest`) returned instantly, the proot TRACER exited, and the orphaned installer tracee's syscalls came back broken — the exact mechanism documented in `linux_env.py:678-686` (`spawn_in_guest` docstring; on-device Bun futex precedent). `installPackages` now launches a self-polling watcher (`src/lib/installWatcher.ts`, pure `buildInstallWatcherCommand`): decode script → `nohup sh … &` → poll `kill -0` + the `MOCH:DONE` marker every 2s up to 900 passes (1800s = the wizard's 30-min cap; bridge timeout window+60s, < 3600s ceiling) → `wait` → exit — the tracer outlives the installer. Zero Kotlin changes; the existing 2.5s tail-poll UI loop and cancel semantics untouched; fast-fail restores the old kick-failure behavior. `scripts/test-install-watcher.ts` 24 checks (old `& echo started` shape asserted banned). On-device check pending: happy path, cancel mid-apt, >30-min apt.)*
+  The staged update run fails everywhere at once: apt warns `Problem unlinking … TransItem::TransactionCommit (38: Function not implemented)` on the list files, dies fatally on `flAbsPath on /var/lib/dpkg/status failed - realpath (38: Function not implemented)`, then the script itself loses `sleep` (`Function not implemented`), cannot create `/root/.moch-install-update.log` (`Function not implemented`), and finally `Pipe call failed`. unlink/realpath/nanosleep/open/pipe ALL returning ENOSYS in one context, on kernel 6.17 + glibc 2.39 + proot 5.1.107, is a syscall-translation gap, not filesystem damage. Key clue from the same day: `apt-get update && apt-get install curl` ran CLEAN in the interactive terminal session on the same guest — so the gap is context-dependent (script launch path vs interactive session; check which proot argv/env/-k personality the installer runs under, and whether glibc 2.39's newer syscalls (`faccessat2`, `clone3`, `statx`-family) are the ones missing). User deferred: fix later, not scheduled.
+  *Fix:* TBD — compare the installer's launch context (exec path, proot flags, kernel personality) against the interactive session that works; likely align the installer with the working context or patch the proot syscall gap.

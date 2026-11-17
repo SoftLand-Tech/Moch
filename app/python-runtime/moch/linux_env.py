@@ -35,7 +35,7 @@ import urllib.request
 from pathlib import Path
 
 TERMUX_BASE = "https://packages.termux.dev/apt/termux-main/pool/main"
-PROOT_URL = f"{TERMUX_BASE}/p/proot/proot_5.1.107.96_aarch64.deb"
+PROOT_URL = f"{TERMUX_BASE}/p/proot/proot_5.1.107.102_aarch64.deb"
 LIBTALLOC_URL = f"{TERMUX_BASE}/libt/libtalloc/libtalloc_2.5.0_aarch64.deb"
 SHMEM_URL = f"{TERMUX_BASE}/liba/libandroid-shmem/libandroid-shmem_0.7_aarch64.deb"
 
@@ -69,7 +69,7 @@ ROOTFS_URLS = {
 # artifact legitimately changes (e.g. debuerreotype rebuilds bookworm), the
 # mismatch refusal is the deliberate tripwire — update the pin consciously.
 _SHA256_PINS: dict[str, str] = {
-    PROOT_URL: "8199dca06dccb693ec09fb1759e3e1ad08b4863f0c11c612f89c20bd9ecdc1a0",
+    PROOT_URL: "10a394b585c2fc2b2c8502544f4e5f1be581dc8bfff79e8ba62f16207423e030",
     LIBTALLOC_URL: "556591f43bb773ad8777e1a29522640866a55f95dab71914418b94a8c58ad5a7",
     SHMEM_URL: "0da3a24d558b93c92bcf8d611e0826a99ff96e396b148e6cdf33b47c47c57ff6",
     ROOTFS_URLS["ubuntu-24.04"]: "04207713ece899c3740823d33690441ad3a7f0ded1101aca744e2b0f37ac7ff2",
@@ -673,6 +673,50 @@ def exec_in_guest(command: str, timeout_s: int = 30) -> dict:
         return {"ok": False, "error": "timeout"}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+# Long-lived guest daemons (spawn_in_guest). proot TRACES every guest
+# process, so a daemon's proot must stay alive for as long as the daemon
+# runs: if the tracer exits first, the orphaned tracee's futex syscalls
+# come back broken and Bun aborts ~30s later (verified on-device: an
+# `opencode serve` kept under a live terminal session survives
+# indefinitely, the same binary futex-crashes ~30s after that session is
+# killed). exec_in_guest's proot exits the moment its command returns —
+# fine for one-shot commands, fatal for daemons. Handles are kept so
+# exits get reaped instead of zombieing.
+_GUEST_DAEMONS: "list[subprocess.Popen]" = []
+
+
+def spawn_in_guest(command: str) -> dict:
+    """Run a LONG-LIVED command in the guest under its own persistent proot.
+
+    The proot lives exactly as long as the command (the same shape as an
+    interactive terminal session), so traced daemons keep a live tracer.
+    For servers and monitors; use exec_in_guest for anything that returns.
+    """
+    linux_dir = _linux_dir()
+    if not (linux_dir / "bin" / "proot").exists() or not (linux_dir / "rootfs").exists():
+        return {"ok": False, "error": "guest not bootstrapped"}
+    for p in list(_GUEST_DAEMONS):
+        if p.poll() is not None:
+            _GUEST_DAEMONS.remove(p)
+    try:
+        argv, env = build_guest_launch(["/bin/sh", "-c", command])
+    except Exception as exc:  # noqa: BLE001 — e.g. java bridge unavailable
+        return {"ok": False, "error": f"guest launch unavailable: {type(exc).__name__}: {exc}"}
+    try:
+        proc = subprocess.Popen(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,  # survive this call returning
+            env=env,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    _GUEST_DAEMONS.append(proc)
+    return {"ok": True, "pid": proc.pid}
 
 
 def _rootfs_size_mb(rootfs: Path) -> float:

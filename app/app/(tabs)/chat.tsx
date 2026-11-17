@@ -53,6 +53,9 @@ import {
   flushOutbox,
   newChat,
   pushLocalMessage,
+  hydrateOcHistory,
+  ocPermissionLive,
+  ocReplyPermission,
   type ToolItem,
   type ChatMessage,
   type PendingRequest,
@@ -67,9 +70,12 @@ import { chatTabFocused } from '../../src/lib/attention'
 import { draftFor, setDraft } from '../../src/lib/drafts'
 import { activeBotAtom, setActiveBot } from '../../src/lib/fleet'
 import { shareInInbox, ackShareIn, applySharedToDraft, type SharedFile } from '../../src/lib/shareIn'
-import { isConnected as isConnectedAtom, connectionState, gatewayError, retryNow } from '../../src/lib/gateway'
+import { isConnected as isConnectedAtom, everConnected, connectionState, gatewayError, retryNow } from '../../src/lib/gateway'
 import { completeSlash, loadCatalog, runCommand, parseSlashCommand, canonicalName, interactiveTarget, describeCommand, subsFor, argumentModeFor, slashLabel, localCompleteSync, resolveSlashRoute, type CompletionItem, type SlashOutcome } from '../../src/lib/slash'
 import { liveModel, liveReasoning, liveReasoningDisplay, fetchReasoningDisplay } from '../../src/lib/modelState'
+import { thinkerAtom, ocOneShotAtom } from '../../src/lib/thinker'
+import { ocPickFor, rememberOcPick } from '../../src/lib/opencodeChat'
+import { ocDefaultModel, ocEnsureServer } from '../../src/lib/opencodeClient'
 import { ModelPickerSheet } from '../../src/components/ModelPickerSheet'
 import { CommandOptionsSheet } from '../../src/components/CommandOptionsSheet'
 import { CommandCatalogSheet } from '../../src/components/CommandCatalogSheet'
@@ -121,6 +127,10 @@ export default function Chat() {
   // only appears when the outage outlasts this grace window.
   const [offlineGrace, setOfflineGrace] = useState(false)
   const connState = useStore(connectionState)
+  // Never connected yet THIS run = booting, not offline. The banner must not
+  // tell a phone with full signal that it is "Offline" while the embedded
+  // agent is still coming up (1.0.39 routes straight to chat during boot).
+  const everOpen = useStore(everConnected)
   useEffect(() => {
     if (online) { setOfflineGrace(false); return }
     setOfflineGrace(true)
@@ -140,6 +150,19 @@ export default function Chat() {
   const curModel = useStore(liveModel)
   const curEffort = useStore(liveReasoning)
   const showThinking = useStore(liveReasoningDisplay) !== 'hide'
+  // ── OpenCode mode (OPENCODE-MODE contract) ── same transcript atoms, a
+  // different wire. Everything hermes-specific on this screen (model chip,
+  // bot chip, steer chip, gateway question cards) is gated off; the OpenCode
+  // thinker chip, its model sheet and the OC permission card take their
+  // places.
+  const thinker = useStore(thinkerAtom)
+  const ocMode = thinker === 'opencode'
+  // One-shot mode (no server): chip says so, the sheet lists CLI models and
+  // picks are passed per turn (see rememberOcPick).
+  const ocOneShot = useStore(ocOneShotAtom)
+  // The OpenCode permission ask blocking the ACTIVE chat (reactive mirror in
+  // chat.ts; the sync accessor is ocActivePermission).
+  const ocPerm = useStore(ocPermissionLive)
   // Live id — only used to scope the reasoning-display config read; the
   // screen itself keys off storedId.
   const sid = useStore(activeSession)
@@ -154,6 +177,35 @@ export default function Chat() {
   const [toolsOpen, setToolsOpen] = useState(false)
   const [slashItems, setSlashItems] = useState<CompletionItem[] | null>(null)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
+  // Current OpenCode default model — the thinker chip's label. Refreshed on
+  // mount in oc mode and whenever the model sheet closes (a pick updates the
+  // server's default).
+  const [ocModel, setOcModel] = useState('')
+  // Session-scoped picks: the chip must keep showing what THIS chat picked —
+  // the server default would clobber it right after the sheet closes.
+  // In one-shot mode there IS no server default: hydrate from the persisted
+  // pick store so the chip survives restarts.
+  const [ocPicks, setOcPicks] = useState<Record<string, string>>({})
+  const ocModelForChip = (storedId && ocPicks[storedId]) || ocModel
+  useEffect(() => {
+    if (!ocMode) return
+    let alive = true
+    if (ocOneShot) {
+      setOcModel('')
+      if (storedId) {
+        ocPickFor(storedId)
+          .then((m) => { if (alive && m) setOcPicks((p) => ({ ...p, [storedId]: m })) })
+          .catch(() => {})
+      }
+      return () => { alive = false }
+    }
+    ocEnsureServer()
+      .catch(() => {})
+      .then(() => ocDefaultModel())
+      .then((m) => { if (alive) setOcModel(m?.modelID ?? '') })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [ocMode, ocOneShot, modelPickerOpen, storedId, online])
   const [catalogOpen, setCatalogOpen] = useState(false)
   const [optionSheet, setOptionSheet] = useState<{ command: string; allowText: boolean } | null>(null)
   const listRef = useRef<FlatList>(null)
@@ -285,6 +337,16 @@ export default function Chat() {
   }, [sid])
   // ^ sidValue rides the deps so a purge (device switch) that blanks the
   // screen re-opens the window, while a landing resume (sid set) does not.
+
+  // OpenCode hydration: an OC-backed chat's transcript lives on the OpenCode
+  // server, not in the gateway's resume payload. When the active chat is
+  // empty and idle, pull its history once per stored chat (chat.ts owns the
+  // guard set and the row mapping).
+  useEffect(() => {
+    if (!ocMode || !sid || !storedId) return
+    if (busy) return // never fight the streaming path
+    void hydrateOcHistory(sid).catch(() => {})
+  }, [ocMode, sid, storedId, busy, msgs.length])
 
   useEffect(() => {
     if (!online) return
@@ -479,7 +541,7 @@ export default function Chat() {
   // kB/s link otherwise), images ride the JPEG ladder inside the send (an
   // over-cap ORIGINAL still shrinks to the 1.8 MB auto-approve budget), and
   // processAttachments re-checks the cap defensively before uploading.
-  const canAttach = online && !recording && !(steerMode && busy) // steer is text-only
+  const canAttach = online && !recording && !(steerMode && busy) && !ocMode // steer is text-only; OpenCode prompts are text-only too
   const addAttachment = (att: PendingAttachment) => {
     if (att.kind !== 'image' && att.size != null && att.size > ATTACH_MAX_BYTES) {
       showAlert(
@@ -1088,7 +1150,25 @@ export default function Chat() {
             >
               <Icon name="add" size={18} color={C.text} />
             </Pressable>
-            {!S.trayHeader && curModel ? (
+            {/* OpenCode thinker chip — replaces the hermes model chip in
+                OpenCode mode (never hermes provider state on an OC chat).
+                Tapping opens the model sheet, which talks to the OC server.
+                Tray-header themes skip this: the floating tray chip below
+                (S.trayHeader && ocMode) is the owner there — rendering both
+                would duplicate the label. */}
+            {ocMode && !S.trayHeader ? (
+              <Pressable
+                style={({ pressed }) => [s.modelChip, pressed && s.btnPressed]}
+                onPress={() => setModelPickerOpen(true)}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={ocOneShot ? `OpenCode one-shot${ocModelForChip ? `, model ${ocModelForChip}` : ''}. Tap to change` : `OpenCode thinker, model ${ocModelForChip || 'default'}. Tap to change`}
+              >
+                <Icon name="cube-outline" size={12} color={C.accent} />
+                <Text style={s.modelChipText} numberOfLines={1}>{ocOneShot ? `One-shot${ocModelForChip ? ` · ${ocModelForChip}` : ''}` : `OpenCode${ocModelForChip ? ` · ${ocModelForChip}` : ''}`}</Text>
+              </Pressable>
+            ) : null}
+            {!ocMode && !S.trayHeader && curModel ? (
               <Pressable
                 style={({ pressed }) => [s.modelChip, pressed && s.btnPressed]}
                 onPress={() => setModelPickerOpen(true)}
@@ -1101,8 +1181,9 @@ export default function Chat() {
             ) : null}
             {/* BUG-111: an active bot silently scoped every NEW chat to its
                 profile — same UI, different memory/skills/credentials/routing.
-                Make the scoping visible and give it one obvious way back. */}
-            {activeBot ? (
+                Make the scoping visible and give it one obvious way back.
+                (Hermes-only: bots don't exist in OpenCode mode.) */}
+            {!ocMode && activeBot ? (
               <Pressable
                 style={({ pressed }) => [s.botChip, pressed && s.btnPressed]}
                 onPress={() =>
@@ -1135,7 +1216,9 @@ export default function Chat() {
               accessibilityLabel="Reconnect"
             >
               <Text style={s.bannerText}>
-                {conn === 'connecting' ? 'Connecting…' : `Offline${gerr ? ' — tap to retry' : ''}`}
+                {conn === 'connecting' ? 'Connecting…'
+                  : !everOpen ? 'Starting your agent…'
+                  : `Offline${gerr ? ' — tap to retry' : ''}`}
                 {qb.length ? ` · ${qb.length} queued` : ''}
               </Text>
             </Pressable>
@@ -1159,7 +1242,23 @@ export default function Chat() {
               flows underneath him while scrolling, and the paddingTop reserve
               below keeps the oldest messages clear of him at the top rest. */}
           <View style={s.listWrap}>
-          {S.trayHeader && curModel ? (
+          {S.trayHeader && ocMode ? (
+            // Tray keeps a single symmetric row (menu | centered title |
+            // status), so the thinker chip floats here in OpenCode mode —
+            // mirrored from Moch, who owns the right corner. Messages scroll
+            // under it like they do under him; the list's top reserve keeps
+            // both clear at rest.
+            <Pressable
+              style={({ pressed }) => [s.modelChip, s.modelFloatChip, pressed && s.btnPressed]}
+              onPress={() => setModelPickerOpen(true)}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={ocOneShot ? `OpenCode one-shot${ocModelForChip ? `, model ${ocModelForChip}` : ''}. Tap to change` : `OpenCode thinker, model ${ocModelForChip || 'default'}. Tap to change`}
+            >
+              <Icon name="cube-outline" size={12} color={C.accent} />
+              <Text style={s.modelChipText} numberOfLines={1}>{ocOneShot ? `One-shot${ocModelForChip ? ` · ${ocModelForChip}` : ''}` : `OpenCode${ocModelForChip ? ` · ${ocModelForChip}` : ''}`}</Text>
+            </Pressable>
+          ) : S.trayHeader && !ocMode && curModel ? (
             // Tray keeps a single symmetric row (menu | centered title |
             // status), so the model chip floats here — mirrored from Moch,
             // who owns the right corner. Messages scroll under it like they
@@ -1388,14 +1487,15 @@ export default function Chat() {
             </View>
           ) : null}
 
-          {/* Question cards */}
-          {req ? questionCard(req) : null}
+          {/* Question cards (hermes gateway questions — none in OpenCode
+              mode; the OC ask renders its own card below) */}
+          {!ocMode && req ? questionCard(req) : null}
 
           {/* BUG-086: ONE aggregate card for questions from sessions this
               app isn't tracking (automation/CLI on the host) — collapsed it
               only announces; expanded, each request renders through the same
               answer machinery as the active chat's question above. */}
-          {foreign.length > 0 ? (
+          {!ocMode && foreign.length > 0 ? (
             <View>
               <View style={s.sheet}>
                 <Pressable
@@ -1413,6 +1513,62 @@ export default function Chat() {
                 {!foreignOpen ? <Text style={s.sheetDesc}>{tr('chat.foreign.hint')}</Text> : null}
               </View>
               {foreignOpen ? foreign.map((f) => <View key={f.id}>{questionCard(f)}</View>) : null}
+            </View>
+          ) : null}
+
+          {/* OpenCode permission ask — the same card language as the hermes
+              question cards, answered through the OC server. Keyed to the
+              chat it blocks, so a quick switch away hides it. */}
+          {ocMode && ocPerm && ocPerm.sid === sid ? (
+            <View style={s.sheet}>
+              <View style={s.sheetHead}>
+                <Icon name="shield-checkmark-outline" size={15} color={C.amber} />
+                <Text style={s.sheetTitle}>OpenCode wants to run</Text>
+              </View>
+              <ScrollView style={s.sheetScroll} nestedScrollEnabled>
+                {ocPerm.req.message ? <Text style={s.sheetKicker}>{ocPerm.req.message}</Text> : null}
+                <Text style={s.sheetBody} selectable>{ocPerm.req.action || 'a tool'}</Text>
+                {ocPerm.req.resources.length ? (
+                  <Text style={s.sheetDesc}>{ocPerm.req.resources.join(', ')}</Text>
+                ) : null}
+              </ScrollView>
+              <View style={s.sheetRow}>
+                <Pressable
+                  style={({ pressed }) => [s.sheetBtn, { backgroundColor: C.accent }, pressed && s.btnPressed]}
+                  onPress={() => {
+                    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+                    void ocReplyPermission(ocPerm.sid, 'once')
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Allow once"
+                >
+                  <Text style={[s.sheetBtnText, { color: C.onAccent }]}>Allow once</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [s.sheetBtn, { backgroundColor: C.accentDark }, pressed && s.btnPressed]}
+                  onPress={() => {
+                    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+                    void ocReplyPermission(ocPerm.sid, 'always')
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Always allow"
+                >
+                  <Text style={[s.sheetBtnText, { color: C.onAccent }]}>Always allow</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [s.sheetBtn, s.denyBtn, pressed && s.btnPressed]}
+                  onPress={() => {
+                    // Refusing the agent is a warning, not a success — same
+                    // haptic language as the hermes Deny (BUG-050).
+                    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+                    void ocReplyPermission(ocPerm.sid, 'reject')
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Deny"
+                >
+                  <Text style={[s.sheetBtnText, { color: C.red }]}>Deny</Text>
+                </Pressable>
+              </View>
             </View>
           ) : null}
 
@@ -1528,8 +1684,10 @@ export default function Chat() {
 
             {/* Steer toggle lives ABOVE the pill: below it, its appearance
                 pushed the composer up (input "floating high" off the bottom)
-                while the safe-area pad stayed under the chip. */}
-            {busy ? (
+                while the safe-area pad stayed under the chip. Hermes-only —
+                session.redirect/steer are gateway RPCs an OpenCode chat never
+                speaks. */}
+            {busy && !ocMode ? (
               <Pressable
                 style={({ pressed }) => [s.steerChip, steerMode && s.steerChipOn, pressed && s.btnPressed]}
                 onPress={() => setSteerMode(!steerMode)}
@@ -1632,7 +1790,17 @@ export default function Chat() {
             onCamera={() => void takePhoto()}
             onFile={() => void pickFile()}
           />
-          <ModelPickerSheet open={modelPickerOpen} onClose={() => setModelPickerOpen(false)} />
+          <ModelPickerSheet
+            open={modelPickerOpen}
+            onClose={() => setModelPickerOpen(false)}
+            ocMode={ocMode}
+            ocOneShot={ocOneShot}
+            ocSessionId={storedId || null}
+            // The chip's label is the sheet's checked row — per-session picks
+            // never reach /api/model/default, so the sheet must be told.
+            ocCurrent={ocModelForChip || null}
+            onPicked={(modelID) => { const sid = activeStoredId.get(); if (sid) { setOcPicks((p) => ({ ...p, [sid]: modelID })); void rememberOcPick(sid, modelID) } }}
+          />
           <CommandCatalogSheet
             open={catalogOpen}
             onClose={() => setCatalogOpen(false)}

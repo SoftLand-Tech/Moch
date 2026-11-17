@@ -20,10 +20,12 @@ Local, stdlib-only, self-contained: expect exit 0 with ``OK``.
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 _TESTS_DIR = Path(__file__).resolve().parent
 _APP = _TESTS_DIR.parents[1]  # app/python-runtime/tests -> app
@@ -72,6 +74,7 @@ class SearchWithoutFts5Test(unittest.TestCase):
         self.db.create_session("s1", "mobile")
         self.db.append_message("s1", "assistant", PHRASE)
         self.db.append_message("s1", "user", "an unrelated line about lunch")
+        self.db.append_message("s1", "user", "wire the chat-send button to the settings page")
 
     def tearDown(self):
         try:
@@ -102,6 +105,69 @@ class SearchWithoutFts5Test(unittest.TestCase):
     def test_a_real_miss_stays_empty(self):
         self._force_no_fts()
         self.assertEqual(self.db.search_messages("zzqqxx-no-such-thing"), [])
+
+    def test_hyphenated_term_hits_on_both_routes(self):
+        """BUG-114 pin: ``chat-send`` must match on BOTH routes — the LIKE fallback
+        (substring, no index) and the indexed route, where the sanitizer quotes the
+        hyphenated term into a phrase so MATCH can't choke on the bare token."""
+        if not self.db._fts_enabled:  # pragma: no cover — fts5-less desktop python
+            self.skipTest("this interpreter has no fts5; only the fallback route is testable")
+        self._force_no_fts()
+        hits = self.db.search_messages("chat-send")
+        self.assertTrue(hits, "the no-FTS route must find a hyphenated term via LIKE")
+        self.assertIn("chat-send", json.dumps(hits, default=str).lower())
+        self.db._fts_enabled = True
+        self.db._fts_stale = False
+        hits = self.db.search_messages("chat-send")
+        self.assertTrue(hits, "the indexed route must find the quoted hyphenated phrase")
+        self.assertIn("chat-send", json.dumps(hits, default=str).lower())
+
+    def test_fts_rejected_query_falls_back_to_like_not_empty(self):
+        """BUG-114 residual: a query that survives sanitization yet still raises at
+        MATCH — ``a OR OR b`` leaves an empty side on the boolean, and real sqlite
+        raises ``fts5: syntax error near "OR"`` — used to hit
+        ``except sqlite3.OperationalError: return []`` and silently answer the
+        empty-set. The LIKE fallback (which compiles the boolean subset itself)
+        must answer instead."""
+        if not self.db._fts_enabled:  # pragma: no cover — fts5-less desktop python
+            self.skipTest("this interpreter has no fts5; the rejected-MATCH arm is unreachable")
+        self._force_no_fts()
+        hits = self.db.search_messages("reachable OR OR lunch")
+        self.assertTrue(hits, "the no-FTS route already LIKE-falls-back; keep it honest")
+        self.db._fts_enabled = True
+        self.db._fts_stale = False
+        hits = self.db.search_messages("reachable OR OR lunch")
+        self.assertTrue(
+            hits,
+            "BUG-114: an FTS-rejected query must retry via the LIKE fallback, not return []")
+        self.assertIn("reachable", json.dumps(hits, default=str).lower())
+
+    def test_transient_operational_error_answers_empty_without_fallback(self):
+        """BUG-114 residual review: the LIKE fallback is for SYNTAX rejections only.
+        A transient OperationalError (``database is locked`` contention window) must
+        keep the historical empty answer — routing it to the full-table LIKE scan
+        mid-lock could raise out of search_messages."""
+        if not self.db._fts_enabled:  # pragma: no cover — fts5-less desktop python
+            self.skipTest("this interpreter has no fts5; the MATCH arm is unreachable")
+        self.db._fts_stale = False
+        fallback_calls = []
+        original = type(self.db)._search_messages_like_fallback
+        real_read_all = type(self.db)._read_all
+
+        def locked_on_match(db, sql, params=None):
+            if "MATCH" in sql:  # only the FTS MATCH read — earlier reads stay real
+                raise sqlite3.OperationalError("database is locked")
+            return real_read_all(db, sql, params)
+
+        def counting_fallback(db, *a, **k):
+            fallback_calls.append(1)
+            return original(db, *a, **k)
+
+        with mock.patch.object(type(self.db), "_search_messages_like_fallback", counting_fallback), \
+                mock.patch.object(type(self.db), "_read_all", locked_on_match):
+            hits = self.db.search_messages("reachable")
+        self.assertEqual(hits, [], "a transient lock answers empty — no LIKE scan mid-lock")
+        self.assertEqual(fallback_calls, [], "the fallback must NOT run for a non-syntax error")
 
     def test_indexed_path_agrees_when_fts5_is_available(self):
         """Guard the normal route too: when the interpreter HAS fts5 the index is

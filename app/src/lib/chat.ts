@@ -10,15 +10,37 @@ import { hookModelState, noteSessionInfo } from './modelState'
 import { markAttention, clearAttention, pushToast, chatTabFocused, pendingOpenStoredId, type AttentionKind } from './attention'
 import { clearDraft, draftFor, setDraft } from './drafts'
 import { getActiveBot } from './fleet'
+import { activeProjectIdAtom, projectsAtom } from './workspace'
+import { pickProjectCwd } from './projectScope'
 import { sendQueue, peekQueued, removeQueued, clearSendQueue, queueFor, enqueueSend, type QueuedSend } from './sendQueue'
 import { extractMedia, isDataUrlPath, joinedTextOf, appendRefText, stripMediaFromText, mediaSegment } from './media'
 import { processAttachments, detachImages, type PendingAttachment } from './mediaSend'
 import { isGatewayTimeout, isUnconfirmedSubmit, outboxPinFor, outboxTargetFor, shouldAutoRetry, UnconfirmedSubmitError } from './rpcRetry'
 import { migrateV1TranscriptWith } from './transcriptMigrate'
+import { isTerminalComplete } from './turnComplete'
 // Type-only: erased at runtime, so chat.ts stays free of slash.ts's atom graph
 // (chat.ts already cannot load in plain node — react-native/AsyncStorage at
 // import time — and this keeps it that way).
 import type { CommandMeta } from './slash'
+// OpenCode mode transport (OPENCODE-MODE contract — .build/OPENCODE-MODE.md):
+// when the thinker is `opencode`, sendPrompt's submit leg routes through
+// runOpencodeTurn (prompt + SSE pump) instead of hermes prompt.submit, and the
+// drawer's OpenCode sessions hydrate through loadOcHistory. The hermes paths
+// below are untouched.
+import { thinkerAtom, ocOneShotAtom, guestRun, type Thinker } from './thinker'
+import {
+  runOpencodeTurn,
+  runOneShotTurn,
+  ocSessionFor,
+  ocRememberSession,
+  ocPickFor,
+  loadOcHistory,
+  type OcTurnHooks,
+  type OcPermissionInfo,
+  type OcHistoryRow,
+} from './opencodeChat'
+import { ocInterrupt, ocPermissionReply, OcError, describeOcError } from './opencodeClient'
+import { invalidateOcSessionsCache } from './ocSessionsCache'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -275,6 +297,27 @@ export const pendingStoredIds = computed([sessionsById, pendingBySession], (map,
   return out
 })
 
+/**
+ * Read-only re-key of `pendingBySession` into STORED ids — the Inbox's source
+ * (lib/inbox). Mirrors `pendingStoredIds`'s live→stored mapping, but keeps the
+ * requests themselves so the row can say WHAT is being asked. Requests filed
+ * under a live id no `sessionsById` entry tracks (BUG-086: sessions started on
+ * the host by an automation/CLI) have no stored id to file them under, so they
+ * stay out — the chat screen's aggregate card owns those.
+ *
+ * Read-only by construction: the map's arrays are shared, never copied, and
+ * nothing here mutates them.
+ */
+export const pendingByStoredId = computed([sessionsById, pendingBySession], (map, pend): Record<string, PendingRequest[]> => {
+  const out: Record<string, PendingRequest[]> = {}
+  for (const [liveId, list] of Object.entries(pend)) {
+    if (!list?.length) continue
+    const stored = map[liveId]?.storedId
+    if (stored) out[stored] = list
+  }
+  return out
+})
+
 /** BUG-086: pendingBySession keys that no sessionsById entry tracks — the
  *  raw live id of a session started elsewhere (automation/CLI on the host).
  *  These questions are perfectly answerable (the answer is a JSON-RPC
@@ -366,6 +409,22 @@ export const chatBanner = atom<{ text: string; retry?: () => void } | null>(null
 
 let uid = 0
 const nid = () => `m${Date.now()}_${uid++}`
+
+/** BUG-036 (client half): one uuid v4 per LOGICAL composer submit, attached
+ *  to prompt.submit so the server can dedupe replays of an ambiguous frame.
+ *  crypto.randomUUID when Web Crypto exists; an RFC-4122-shaped v4 fallback
+ *  otherwise (Hermes ships no crypto global, and chat.ts must stay loadable
+ *  in plain node for the tsx suites). */
+function mintRequestId(): string {
+  const c = globalThis.crypto
+  if (c && typeof c.randomUUID === 'function') return c.randomUUID()
+  const b = new Uint8Array(16)
+  for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256)
+  b[6] = (b[6] & 0x0f) | 0x40
+  b[8] = (b[8] & 0x3f) | 0x80
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0'))
+  return `${h.slice(0, 4).join('')}-${h.slice(4, 6).join('')}-${h.slice(6, 8).join('')}-${h.slice(8, 10).join('')}-${h.slice(10, 16).join('')}`
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -1061,6 +1120,14 @@ export async function createSession(title?: string): Promise<ResumeResult> {
   // carries its identity as a manual title so the sidebar shows who it is.
   const bot = getActiveBot()
   const botParams = bot ? { profile: bot, ...(title ? {} : { title: `Bot · ${bot}` }) } : {}
+  // UI-2: a chat belongs to a project by its `cwd` (session.create has no
+  // project field). The drawer's selected project wins; Personal falls
+  // through to the runtime workspace below.
+  const projectCwd = pickProjectCwd(
+    projectsAtom.get().map((p) => ({ id: p.id, path: p.primaryPath, isNoProject: p.isNoProject })),
+    activeProjectIdAtom.get(),
+  )
+  const embedded = await embeddedSessionCwd()
   const res = await createSessionRpc<{ session_id?: string; stored_session_id?: string; messages?: Array<Record<string, unknown>>; info?: { model?: string; provider?: string; reasoning_effort?: string } }>(
     // A create-time title is MANUAL authority server-side: it is applied at
     // the end of turn 1, clobbering the auto-title and permanently blocking
@@ -1069,12 +1136,16 @@ export async function createSession(title?: string): Promise<ResumeResult> {
     // Embedded runtime: root the session in the on-phone workspace
     // (files/Moch/workspace) so file tools operate there (M5). Remote
     // machines keep their own cwd semantics.
-    { ...(title ? { title } : {}), ...botParams, cols: CREATE_COLS, source: 'mobile', ...(await embeddedSessionCwd()) },
+    { ...(title ? { title } : {}), ...botParams, cols: CREATE_COLS, source: 'mobile', ...(projectCwd ? { cwd: projectCwd } : embedded) },
   )
   const id = res?.session_id
   if (!id) throw new Error('session.create returned no id')
   noteSessionInfo(res.info)
   const storedId = res.stored_session_id ?? id
+  // OPENCODE-MODE: a chat's brain is fixed at creation — stamp it once with
+  // the thinker active right now (never re-stamped; unstamped legacy chats
+  // are moch).
+  stampChatThinker(storedId, thinkerAtom.get())
   // Fire-and-forget: rememberStoredId's in-memory map update runs
   // synchronously; only the AsyncStorage write is async, and the visible
   // swap must not wait on it.
@@ -1644,6 +1715,16 @@ export async function resetSessionCaches(): Promise<void> {
   mochiMoment.set(null)
   streamBufs.clear()
   queuedAttachments.clear()
+  // OpenCode mode residue: cancellers for turns whose chat entries just died
+  // (their pumps must not keep writing into the wiped map), plus the
+  // permission ask and hydration marks keyed by them.
+  for (const cancel of ocTurns.values()) cancel()
+  ocTurns.clear()
+  for (const c of ocOneShotCancel.values()) c.current = true
+  ocOneShotCancel.clear()
+  ocPermissions.clear()
+  ocPermissionLive.set(null)
+  ocHydrated.clear()
   // storedIdMapLoaded stays true: the map is genuinely empty now, and
   // rememberStoredId repopulates it on the next create/resume/info event.
   try {
@@ -1781,6 +1862,331 @@ export const isSessionNotFound = (err: unknown): boolean =>
  *  honest about the ambiguity, unlike a plain 'failed' marker. */
 const UNCONFIRMED_SEND_TEXT =
   'Sent — no confirmation from the computer; it may have gone through. Retry only if it did not.'
+
+// ── OpenCode mode (transport branch) ───────────────────────────────────────
+//
+// `thinkerAtom.get() === 'opencode'` swaps sendPrompt's submit leg for
+// runOpencodeTurn: the SSE events are written through the SAME internal
+// reducers the gateway event handlers use (queueStream / upsertToolIn /
+// patchSession), so the transcript renders identically — only the wire
+// differs. The canceller and the permission ask ride module maps keyed by the
+// chat's LIVE id; the mapKey handed to opencodeChat is always the chat's
+// PERSISTENT storedId (ocSessionFor's contract).
+
+/** Live sid → canceller for the OpenCode turn in flight on that chat. */
+const ocTurns = new Map<string, () => void>()
+
+// ── per-chat thinker (OPENCODE-MODE: a chat's brain is fixed at creation) ───
+// The Settings switch is for NEW chats. Existing chats keep the brain they
+// were created under — a chat never silently swaps brains mid-history.
+// Legacy chats (pre-OpenCode builds) were all hermes chats, so an absent
+// stamp means 'moch'.
+const CHAT_THINKER_KEY = 'hermes.chat.thinker.v1'
+const chatThinkers = new Map<string, Thinker>()
+let chatThinkersFlushPending = false
+void (async () => {
+  try {
+    const raw = await AsyncStorage.getItem(CHAT_THINKER_KEY)
+    if (raw) {
+      for (const [k, v] of Object.entries(JSON.parse(raw) as Record<string, string>)) {
+        if (v === 'moch' || v === 'opencode') chatThinkers.set(k, v)
+      }
+    }
+  } catch {}
+})()
+
+function persistChatThinkers(): void {
+  if (chatThinkersFlushPending) return
+  chatThinkersFlushPending = true
+  setTimeout(() => {
+    chatThinkersFlushPending = false
+    void AsyncStorage.setItem(CHAT_THINKER_KEY, JSON.stringify(Object.fromEntries(chatThinkers))).catch(() => {})
+  }, 300)
+}
+
+/** The brain a chat answers with. `moch` for anything unstamped (legacy). */
+export function thinkerForChat(storedId: string | null | undefined): Thinker {
+  if (!storedId) return thinkerAtom.get()
+  return chatThinkers.get(storedId) ?? 'moch'
+}
+
+/** Stamp a chat's brain once, at creation. Later calls are no-ops. */
+export function stampChatThinker(storedId: string, thinker: Thinker): void {
+  if (!storedId || chatThinkers.has(storedId)) return
+  chatThinkers.set(storedId, thinker)
+  persistChatThinkers()
+}
+/** Live sid → the OpenCode permission ask blocking that chat's turn. */
+const ocPermissions = new Map<string, OcPermissionInfo>()
+
+/** Reactive mirror of the OpenCode permission ask — the chat screen renders
+ *  its card from this; `ocActivePermission` stays the sync accessor. */
+export const ocPermissionLive = atom<{ sid: string; req: OcPermissionInfo } | null>(null)
+
+/** The OpenCode permission ask pending on a chat, if any. */
+export function ocActivePermission(sid: string): OcPermissionInfo | null {
+  return ocPermissions.get(sid) ?? null
+}
+
+// The reactive mirror follows the screen: a permission that arrived while
+// another chat was on screen renders when that chat is opened.
+activeSession.subscribe((id) => {
+  const req = id ? ocPermissions.get(id) : undefined
+  ocPermissionLive.set(id && req ? { sid: id, req } : null)
+})
+
+/** Answer the OpenCode permission ask pending on a chat. */
+export async function ocReplyPermission(sid: string, reply: 'once' | 'always' | 'reject'): Promise<void> {
+  const req = ocPermissions.get(sid)
+  if (!req) return
+  ocPermissions.delete(sid)
+  if (ocPermissionLive.get()?.sid === sid) ocPermissionLive.set(null)
+  const stored = sessionsById.get()[sid]?.storedId ?? ''
+  const ocId = stored ? await ocSessionFor(stored) : null
+  if (!ocId) return
+  try {
+    await ocPermissionReply(ocId, req.id, reply)
+  } catch (err) {
+    log('warn', 'opencode', `permission reply failed: ${err instanceof Error ? err.message : String(err)}`)
+    // Put the ask back: a failed reply must not strand the server-blocked
+    // turn with no card to answer.
+    ocPermissions.set(sid, req)
+    if (activeSession.get() === sid) ocPermissionLive.set({ sid, req })
+  }
+}
+
+/** Build the OcTurnHooks that write chat.ts's own atoms for one chat. */
+function ocHooksFor(sid: string): OcTurnHooks {
+  return {
+    // Same body as the 'message.start' event case: flush, revive-to-top,
+    // stale-tail finalize, append the streaming assistant row.
+    start: () => {
+      flushStreams()
+      const startStored = sessionsById.get()[sid]?.storedId
+      if (startStored) bumpSessionActivity(startStored)
+      clearAttentionLive(sid)
+      const cur = sessionsById.get()[sid]
+      if (!cur) return
+      const list = cur.messages
+      const last = list[list.length - 1]
+      if (last?.role === 'assistant' && last.streaming) {
+        // BUG-060: a STALE streaming tail (its turn died without a terminal
+        // event) would swallow this new row — finalize it first.
+        const list2 = [...cur.messages]
+        list2[list2.length - 1] = freezeThoughts({ ...last, streaming: false })
+        patchSession(sid, { messages: list2 })
+      }
+      const cur2 = sessionsById.get()[sid]
+      patchSession(sid, {
+        messages: [...(cur2?.messages ?? []), { id: nid(), role: 'assistant', text: '', streaming: true, ts: Date.now() }],
+      })
+    },
+    text: (delta) => queueStream(sid, 'text', delta),
+    thinking: (delta) => queueStream(sid, 'thinking', delta),
+    tool: (id, name, phase, preview, durationS) =>
+      upsertToolIn(sid, { id, name, preview, status: phase, durationS }),
+    permission: (req) => {
+      ocPermissions.set(sid, req)
+      if (activeSession.get() === sid) ocPermissionLive.set({ sid, req })
+    },
+    // Same body as the 'message.complete' event case, minus the server-text
+    // supersede (the OC final text IS the streamed text).
+    complete: (text, failed, error) => {
+      flushStreams()
+      const doneStored = sessionsById.get()[sid]?.storedId
+      if (doneStored) bumpSessionActivity(doneStored)
+      const cur = sessionsById.get()[sid]
+      if (!cur) return
+      const list = [...cur.messages]
+      let finalJoined = ''
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (list[i].role !== 'assistant' || !list[i].streaming) continue
+        const done: ChatMessage = {
+          ...list[i],
+          streaming: false,
+          status: failed ? 'failed' : 'ok',
+          error: failed ? (error ?? 'Turn failed') : undefined,
+        }
+        // Media extraction runs in place, exactly like message.complete.
+        const base: ChatSegment[] = done.segments ?? (done.text ? [{ kind: 'text', text: done.text }] : [])
+        const extracted = extractMedia(base)
+        finalJoined = joinedTextOf(extracted).slice(0, 32000)
+        list[i] = freezeThoughts({ ...done, segments: extracted, text: finalJoined })
+        break
+      }
+      // BUG-061 parity: the finalize loop only updates an EXISTING streaming
+      // row — a missed start appends instead of discarding the answer.
+      if (!finalJoined && text) {
+        list.push({
+          id: nid(),
+          role: 'assistant',
+          text: stripMediaFromText(text).slice(0, 32000),
+          ts: Date.now(),
+          ...(failed ? { status: 'failed' as const, error: error ?? 'Turn failed' } : {}),
+        })
+      }
+      if (list.length) patchSession(sid, { messages: list })
+      patchSession(sid, {
+        tools: cur.tools.map((t) => (t.status === 'running' ? { ...t, status: 'done' as const } : t)),
+        busy: false,
+      })
+      schedulePersist(sid)
+      maybeFlushQueue(sid)
+      const finalText = finalJoined || stripMediaFromText(text)
+      flagAttention(
+        sid,
+        failed ? 'error' : 'done',
+        {
+          title: failed ? 'Turn failed' : 'Agent replied',
+          body: failed ? (error ?? 'Turn failed') : finalText,
+        },
+      )
+      // Mascot: error on a failed turn; success is promoted to a celebration
+      // by the hook when its own busy-start says the turn ran ≥30s.
+      mochiMoment.set({ kind: failed ? 'error' : 'success', sid, at: Date.now() })
+    },
+  }
+}
+
+/** One-shot cancellers (one CLI per chat at most). The pump owns busy/queue. */
+const ocOneShotCancel = new Map<string, { current: boolean }>()
+
+/** The OpenCode submit leg of sendPrompt: prompt + SSE pump, cancellable. */
+async function runOcSubmit(sid: string, text: string, title: string | undefined): Promise<void> {
+  const stored = sessionsById.get()[sid]?.storedId ?? ''
+  const cancel = { current: false }
+  ocTurns.set(sid, () => { cancel.current = true })
+  try {
+    await runOpencodeTurn({
+      mapKey: stored || sid,
+      // The placeholder 'New chat' would name the OC session forever — the
+      // first message titles it instead.
+      title: title && title !== 'New chat' ? title : text,
+      text,
+      hooks: ocHooksFor(sid),
+      isCancelled: () => cancel.current,
+    })
+  } finally {
+    ocTurns.delete(sid)
+    // The ask belongs to the turn — a turn that ended (any way) leaves no
+    // card behind.
+    if (ocPermissions.delete(sid) && ocPermissionLive.get()?.sid === sid) ocPermissionLive.set(null)
+    // The turn may have created or renamed the OC session — the drawer's
+    // 15s cache is now stale by definition.
+    invalidateOcSessionsCache()
+  }
+}
+
+/** One-shot submit leg: one `opencode run` per turn, whole answer at once. */
+async function runOcOneShot(sid: string, text: string): Promise<void> {
+  const stored = sessionsById.get()[sid]?.storedId ?? ''
+  const mapKey = stored || sid
+  const cancel = { current: false }
+  ocOneShotCancel.set(sid, cancel)
+  try {
+    const hooks = ocHooksFor(sid)
+    hooks.start()
+    const model = await ocPickFor(stored || '').catch(() => null)
+    const out = await runOneShotTurn({
+      mapKey,
+      text,
+      model: model ?? undefined,
+      isCancelled: () => cancel.current,
+    })
+    // Tool usage renders as finished rows (same reducers, no fake stream).
+    for (const t of out.tools) {
+      hooks.tool(t.id, t.name, t.ok ? 'done' : 'failed', undefined, undefined)
+    }
+    if (out.thinking) hooks.thinking(out.thinking)
+    if (out.text) hooks.text(out.text)
+    hooks.complete(out.text, out.failed, out.error)
+    invalidateOcSessionsCache()
+  } finally {
+    ocOneShotCancel.delete(sid)
+  }
+}
+
+// ── OpenCode history hydration (shared with the drawer's openOcChat) ───────
+
+/** Stored ids whose OpenCode history landed this run. Only SUCCESSFUL loads
+ *  are marked, so a failed fetch (server still booting) retries later. */
+const ocHydrated = new Set<string>()
+
+/** Map OpenCode history rows into this app's ChatMessage/ToolItem shapes. */
+function ocRowsToMessages(rows: OcHistoryRow[]): { messages: ChatMessage[]; tools: ToolItem[] } {
+  const msgs: ChatMessage[] = []
+  const tools: ToolItem[] = []
+  for (const r of rows) {
+    if (r.role === 'user') {
+      msgs.push({ id: nid(), role: 'user', text: r.text.slice(0, 8000), ts: r.ts })
+      continue
+    }
+    // Same ordered-segments contract as the live stream: thinking precedes
+    // its text; `text` stays the joined text segments.
+    const segments: ChatSegment[] = []
+    if (r.thinking) segments.push({ kind: 'thinking', text: r.thinking.slice(0, 8000), startedAt: r.ts })
+    if (r.text) segments.push({ kind: 'text', text: r.text.slice(0, 8000) })
+    msgs.push({
+      id: nid(),
+      role: 'assistant',
+      text: r.text.slice(0, 8000),
+      ts: r.ts,
+      ...(segments.length ? { segments } : {}),
+    })
+    for (const t of r.tools ?? []) {
+      tools.push({ id: `${r.ts}_${t.id}`, name: t.name, status: t.ok ? 'done' : 'failed' })
+    }
+  }
+  return { messages: msgs, tools }
+}
+
+/** Hydrate an OpenCode-backed chat from the OC server, once per stored chat. */
+export async function hydrateOcHistory(liveId: string): Promise<void> {
+  const s = sessionsById.get()[liveId]
+  const stored = s?.storedId ?? ''
+  if (!s || !stored || isPseudoStoredId(stored)) return
+  if (s.messages.length || ocHydrated.has(stored)) return
+  const rows = await loadOcHistory(stored)
+  if (!rows) return // error or no mapping yet — leave unmarked so it retries
+  ocHydrated.add(stored)
+  if (!rows.length) return
+  // Re-read after the await: a turn may have started (or the chat re-keyed)
+  // meanwhile — never fight live state.
+  const cur = sessionsById.get()[liveId]
+  if (!cur || cur.messages.length) return
+  const { messages: mapped, tools: mappedTools } = ocRowsToMessages(rows)
+  patchSession(liveId, {
+    messages: [...cur.messages, ...mapped].slice(-MAX_MESSAGES),
+    tools: [...cur.tools, ...mappedTools].slice(-MAX_TOOLS),
+  })
+  schedulePersist(liveId)
+}
+
+/**
+ * Open a chat backed by an existing OpenCode session (drawer row tap). The
+ * local identity is a fresh hermes chat window — the persistent handle the
+ * ocSessionFor map keys off — and its transcript hydrates from the OpenCode
+ * server. Mirrors the drawer's recent-chat open: the screen is already on
+ * the target when this resolves.
+ */
+export async function openOcChat(ocId: string): Promise<void> {
+  const cur = activeSession.get()
+  const curState = cur ? sessionsById.get()[cur] : undefined
+  let sid: string
+  if (curState && !curState.provisional && !curState.busy && curState.messages.length === 0) {
+    // An empty current window is reused — opening a chat from the drawer
+    // shouldn't stack a throwaway 'New chat' underneath.
+    sid = cur!
+  } else {
+    sid = await newChat()
+  }
+  if (sessionsById.get()[sid]?.provisional) sid = await ensureSession()
+  const stored = sessionsById.get()[sid]?.storedId ?? ''
+  if (!stored) return
+  await ocRememberSession(stored, ocId)
+  ocHydrated.delete(stored)
+  await hydrateOcHistory(sid)
+}
 
 export async function sendPrompt(
   rawText: string,
@@ -1948,33 +2354,60 @@ export async function sendPrompt(
     // deliberate single re-fire (that error is a definitive NOT-delivered
     // answer, so resubmitting cannot duplicate the text). Both legs flag a
     // timeout as unconfirmed.
+    // BUG-036 (client half): both legs share ONE client_request_id minted for
+    // this logical submit. The server (once its half ships) uses it to dedupe
+    // a frame that was delivered but whose ack was lost. The session-not-found
+    // leg deliberately reuses the id (that error means nothing was started, so
+    // replay is safe); a 4009 truncation/busy refusal is a deliberate NEW
+    // submit and must mint a fresh id — no such leg reuses this call site
+    // today. The pending map's client-local `r<n>` ids change per retry leg
+    // and are useless as dedupe keys, hence the explicit id.
+    const clientRequestId = mintRequestId()
     const submitRpc = () =>
-      rpc('prompt.submit', { session_id: sid, text: submitText }).catch((err: unknown) => {
+      rpc('prompt.submit', { session_id: sid, text: submitText, client_request_id: clientRequestId }).catch((err: unknown) => {
         if (isGatewayTimeout(err)) submitUnconfirmed = true
         throw err
       })
-    try {
-      try {
-        await submitRpc()
+    if (thinkerForChat(s?.storedId ?? null) === 'opencode') {
+      // OpenCode mode: server turns stream over SSE; one-shot turns run the
+      // CLI once and land whole. Setup failures propagate into sendPrompt's
+      // catch below — the user row fails honestly with the message.
+      if (ocOneShotAtom.get()) {
+        await runOcOneShot(sid, submitText)
+      } else try {
+        await runOcSubmit(sid, submitText, s?.title)
       } catch (err) {
-        if (!isSessionNotFound(err)) throw err
-        // The live handle died server-side (serve restart / reinstall) while
-        // the chat looked perfectly open. Re-resume by the stored id — that
-        // mints a fresh live id, and runResume's merge carries the user row
-        // we already appended onto the new entry — then retry once. Desktop
-        // parity: withSessionNotFoundResume.
-        const stored = sessionsById.get()[sid]?.storedId
-        if (!stored) throw err
-        log('warn', 'chat', `session not found (${sid}) — re-resuming ${stored} and retrying the send`)
-        const fresh = await resumeShared(stored)
-        sid = fresh.sessionId
-        await submitRpc()
+        // OcError(0): the POST frame was already on the wire when the local
+        // deadline or the connection gave up — the turn may be running. Same
+        // BUG-036 treatment as a gateway timeout: the row goes 'unconfirmed'
+        // and rpcRetry refuses to auto-resubmit a maybe-delivered prompt.
+        if (err instanceof OcError && err.status === 0) submitUnconfirmed = true
+        throw err
       }
-    } catch (err) {
-      // Detach only when the submit definitively did NOT land — a delivered
-      // (unconfirmed) turn is still using those images server-side.
-      if (attachedImagePaths.length && !submitUnconfirmed) void detachImages(sid, attachedImagePaths)
-      throw err
+    } else {
+      try {
+        try {
+          await submitRpc()
+        } catch (err) {
+          if (!isSessionNotFound(err)) throw err
+          // The live handle died server-side (serve restart / reinstall) while
+          // the chat looked perfectly open. Re-resume by the stored id — that
+          // mints a fresh live id, and runResume's merge carries the user row
+          // we already appended onto the new entry — then retry once. Desktop
+          // parity: withSessionNotFoundResume.
+          const stored = sessionsById.get()[sid]?.storedId
+          if (!stored) throw err
+          log('warn', 'chat', `session not found (${sid}) — re-resuming ${stored} and retrying the send`)
+          const fresh = await resumeShared(stored)
+          sid = fresh.sessionId
+          await submitRpc()
+        }
+      } catch (err) {
+        // Detach only when the submit definitively did NOT land — a delivered
+        // (unconfirmed) turn is still using those images server-side.
+        if (attachedImagePaths.length && !submitUnconfirmed) void detachImages(sid, attachedImagePaths)
+        throw err
+      }
     }
     // Revive-to-top: the send just made this chat the most recently active
     // one — bump its local timestamp and move its list row to the front so
@@ -1997,12 +2430,20 @@ export async function sendPrompt(
         // and has no cancellation), so the turn may be running remotely.
         // Distinct copy + status; the retry affordance stays (rendered like
         // a failed row), but nothing retries automatically.
+        // OcError: render the classifier's status + human class (403/quota,
+        // 404, 5xx) — a status-0 OcError keeps 'unconfirmed' as its status
+        // and its message names the real cause WHILE keeping the
+        // "may have gone through" guidance (the row is ambiguous, not dead).
         list[real] = {
           ...list[real],
           status: submitUnconfirmed ? 'unconfirmed' : 'failed',
-          error: submitUnconfirmed
-            ? UNCONFIRMED_SEND_TEXT
-            : err instanceof Error ? err.message : 'Send failed',
+          error: err instanceof OcError
+            ? submitUnconfirmed
+              ? `${UNCONFIRMED_SEND_TEXT} (${describeOcError(err)})`
+              : describeOcError(err)
+            : submitUnconfirmed
+              ? UNCONFIRMED_SEND_TEXT
+              : err instanceof Error ? err.message : 'Send failed',
         }
         patchSession(sid, { messages: list })
       }
@@ -2057,6 +2498,35 @@ export async function retryMessage(id: string) {
 export async function stopRun() {
   const sid = activeSession.get()
   if (!sid) return
+  if (thinkerForChat(sessionsById.get()[sid]?.storedId) === 'opencode') {
+    if (ocOneShotAtom.get()) {
+      // One-shot: flag the runner + kill the guest CLI. The runner's
+      // complete hook owns busy/queue (same no-early-patch rule as server
+      // mode) — pkill just hurries the blocked guest call to its grave.
+      const c = ocOneShotCancel.get(sid)
+      if (c) c.current = true
+      void guestRun(`pkill -f '[o]pencode run' >/dev/null 2>&1 || true`, 15_000)
+      flushStreams()
+      mochiMoment.set({ kind: 'apologetic', sid, at: Date.now() })
+      return
+    }
+    // OpenCode mode: cancel the local SSE pump AND tell the server to stop
+    // the turn. The hermes session.interrupt RPC does not apply to an
+    // OpenCode chat. busy + the queued follow-up are owned by the cancelled
+    // runner's complete hook — patching them HERE races the next queued
+    // turn (its sendPrompt sets busy:true, then the cancelled runner's
+    // complete flips it false under a live prompt and unlocks the composer).
+    ocTurns.get(sid)?.()
+    const stored = sessionsById.get()[sid]?.storedId
+    if (stored) {
+      void ocSessionFor(stored)
+        .then((ocId) => (ocId ? ocInterrupt(ocId) : undefined))
+        .catch(() => {})
+    }
+    flushStreams()
+    mochiMoment.set({ kind: 'apologetic', sid, at: Date.now() })
+    return
+  }
   let stopped = false
   try {
     await rpc('session.interrupt', { session_id: sid })
@@ -2676,6 +3146,17 @@ export function hookChatEvents() {
           })
         }
         if (list.length) patchSession(eSid, { messages: list })
+        // BUG-130: ONLY a genuinely terminal payload may end the turn. The
+        // gateway emits `message.complete` from four sites (see
+        // turnComplete.ts) — the subagent mirror sends `text` only and can
+        // land mid-turn; the finalize above still updates the transcript, but
+        // the turn-end side effects below must not run or the composer goes
+        // idle while the parent turn is still running (Stop/Steer disappear).
+        // Known tradeoff: a future genuinely-text-only completion would leave
+        // a stuck Stop button — mitigated by resume's `res.running` trust
+        // (runResume, ~chat.ts:1205) and the existing terminal-event paths
+        // (request.cancel / reconnect resync).
+        if (!isTerminalComplete(p)) break
         patchSession(eSid, {
           tools: cur.tools.map((t) => (t.status === 'running' ? { ...t, status: 'done' as const } : t)),
           busy: false,
@@ -2775,6 +3256,15 @@ export function hookChatEvents() {
         const msg = String(p.message ?? p.error ?? 'Gateway error')
         const cur = sessionsById.get()[eSid]
         if (!cur) break
+        // OPENCODE-MODE: gateway errors land on the hermes spine that every
+        // chat still mints for identity — session.create pre-warms a hermes
+        // AIAgent, which cannot start on an opencode-only phone (no hermes
+        // model configured). That failure is spine noise, not this chat's
+        // turn: OpenCode turns own their own failure surface (the OC hooks'
+        // complete()), so the failed bubble, attention flag, mascot error
+        // and queue flush are all skipped. flushStreams() above STILL runs
+        // on purpose — it lands buffered OC answer text, not error state.
+        if (thinkerForChat(cur.storedId) === 'opencode') break
         const list = [...cur.messages]
         const last = list[list.length - 1]
         if (last?.streaming) {

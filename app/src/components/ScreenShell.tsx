@@ -32,6 +32,21 @@ import { runningAutomationCount, refreshRunningAutomations } from '../lib/automa
 import { attentionById, rowStatus } from '../lib/attention'
 import { isConnected as isConnectedAtom, connectionState, retryNow, rpc } from '../lib/gateway'
 import {
+  activeProjectIdAtom,
+  buildSessionOwnerIndex,
+  identityAtom,
+  inboxNavItem,
+  loadIdentity,
+  projectIdForSession,
+  projectSessionIdsAtom,
+  projectsAtom,
+  refreshProjects,
+  setActiveProject,
+  setIdentity,
+} from '../lib/workspace'
+import type { Identity } from '../lib/workspace'
+import { tr, localeAtom } from '../lib/strings'
+import {
   activeStoredId,
   busyStoredKey,
   pendingCount,
@@ -48,6 +63,10 @@ import {
 import { loadCatalog } from '../lib/slash'
 import { loadLastActive, loadSessions, lastActiveByStoredId, lastActiveFor, patchRowTitle, refreshRunningSessions, sessionRows, toMs } from '../lib/sessionList'
 import { forgetChatMarks, loadChatMarks, toggleArchive, togglePin } from '../lib/chatListState'
+import { inboxCount } from '../lib/inbox'
+import { openBotChat } from '../lib/botChat'
+import { fleetProfiles, refreshFleet } from '../lib/fleet'
+import { showAlert } from './AlertDialog'
 
 /**
  * ChatGPT-style shell: a compact top bar with a hamburger, the screen title,
@@ -194,25 +213,71 @@ export function ScreenShell({
     void loadLastActive()
   }, [])
 
+  // Locale switches must re-render the drawer's copy (nav labels are tr()).
+  const locale = useStore(localeAtom)
   const runningAuto = useStore(runningAutomationCount)
+
+  // ── UI-1: identity (Sessions | Bots) + project rail ──────────────────────
+  const identity = useStore(identityAtom)
+  const projects = useStore(projectsAtom)
+  const activeProjectId = useStore(activeProjectIdAtom)
+  // Bots mode's roster: `profiles.list` rows (the Fleet screen keeps this warm;
+  // the drawer refreshes it on open).
+  const profiles = useStore(fleetProfiles)
+  // Membership map from projects.tree — session.list rows carry no cwd or
+  // project id on the current gateway, so this is what makes the filter real.
+  const projectSessionIds = useStore(projectSessionIdsAtom)
+  // Restore the persisted identity once; refresh the project tree on mount and
+  // whenever the connection comes back (offline keeps the last tree).
+  React.useEffect(() => {
+    void loadIdentity()
+  }, [])
+  React.useEffect(() => {
+    if (online) void refreshProjects()
+  }, [online])
+  // Inbox badge (slice C's module). It exists now, so this is a plain
+  // subscription; the badge is a count of `ask` items only.
+  const inboxN = useStore(inboxCount)
+
+  const handleIdentity = useCallback((i: Identity) => {
+    void setIdentity(i)
+    if (i === 'sessions') void refreshProjects()
+  }, [])
+
+  const handleProject = useCallback((id: string | null) => {
+    void setActiveProject(id)
+  }, [])
+
+  // "New project" lives in the drawer's ProjectList (its own dialog); the
+  // shell only needs to re-read the tree + sessions after one is created.
+  const handleNewProject = useCallback(() => {
+    void refreshProjects()
+    void loadSessions()
+  }, [])
 
   // ── Drawer nav (ChatGPT-style): top block + Settings docked at the bottom ─
   // The Chats screen stays reachable via the chat header's search icon; the
-  // drawer's own grouped chat list is the richer surface. Skills and Models
-  // moved into Settings' AGENT section.
-  const topNav = useMemo<NavItem[]>(() => [
-    { key: 'chat', label: 'Chat', icon: 'chatbubble-outline' },
-    { key: 'fleet', label: 'Fleet', icon: 'people-outline' },
-    { key: 'crew', label: 'Crew', icon: 'grid-outline' },
-    { key: 'browser', label: 'Browser', icon: 'globe-outline' },
-    { key: 'terminal', label: 'Terminal', icon: 'terminal-outline' },
-    { key: 'automations', label: 'Automations', icon: 'timer-outline', mochis: runningAuto },
-    { key: 'connectors', label: 'Connectors', icon: 'extension-puzzle-outline' },
-  ], [runningAuto])
+  // drawer's own grouped chat list is the richer surface. Fleet/Crew are
+  // hidden from the drawer (bots are profiles now, not a separate board) —
+  // their routes and screens stay put for deep links and legacy surfaces.
+  const topNav = useMemo<NavItem[]>(() => {
+    // `locale` is read so tr() copy refreshes on a language switch.
+    void locale
+    return [
+      { key: 'chat', label: tr('sidebar.chats'), icon: 'chatbubble-outline' },
+      // Slice C's row definition (workspace.inboxNavItem) — one owner.
+      inboxNavItem(inboxN),
+      { key: 'browser', label: tr('sidebar.browser'), icon: 'globe-outline' },
+      { key: 'terminal', label: tr('sidebar.terminal'), icon: 'terminal-outline' },
+      { key: 'automations', label: tr('sidebar.automations'), icon: 'timer-outline', mochis: runningAuto },
+      { key: 'library', label: tr('sidebar.library'), icon: 'library-outline', activeFor: 'connectors' },
+    ]
+  }, [runningAuto, inboxN, locale])
 
-  const bottomNav = useMemo<NavItem[]>(() => [
-    { key: 'settings', label: 'Settings', icon: 'settings-outline' },
-  ], [])
+  const bottomNav = useMemo<NavItem[]>(() => {
+    void locale
+    return [{ key: 'settings', label: tr('sidebar.settings'), icon: 'settings-outline' }]
+  }, [locale])
 
   const recent = useMemo<RecentChat[]>(() => {
     // The server list is the source of truth: it covers every stored
@@ -222,9 +287,41 @@ export function ScreenShell({
     // BUG-085: unanswered questions keep the amber dot even after the chat
     // was opened (opening clears the event-driven mark; the question still
     // blocks) — derived from pendingBySession, the source of truth.
+    void locale // tr() copy below re-reads on a language switch
     const statusOf = (id: string) => rowStatus(busy.includes(id), attention[id], pendingStored.includes(id))
-    const fromServer = rows.map((r) => {
-      const rawTitle = r.title || r.preview?.slice(0, 60) || 'Untitled'
+
+    // UI-1 identity split: bots are profiles, so a row carrying a real
+    // profile name is a bot chat. `default` is the assistant itself, not a
+    // bot — counting it as one would hide every ordinary chat in Bots mode
+    // and show nothing in Sessions.
+    const isBotRow = (profile?: string) => !!profile && profile !== 'default'
+
+    // UI-1 project filter: only when a project is selected. Rows that carry
+    // the project id filter on it; rows without one resolve through the
+    // tree's membership map (or the folder map on `cwd`); rows with NO
+    // metadata at all are never hidden — an old row disappearing because the
+    // client couldn't classify it reads as data loss, not as a filter.
+    // A selection that is no longer in the tree (archived on another device)
+    // is not a filter either: it would blank the whole list.
+    const selected = activeProjectId == null ? null : projects.find((p) => p.id === activeProjectId) ?? null
+    // Reverse index of the tree's membership map: session id → project id.
+    // Built here so the filter below stays O(rows) and re-runs only when the
+    // tree actually changes.
+    const ownerIndex = buildSessionOwnerIndex(projectSessionIds)
+
+    const inProject = (r: { id?: string; project_id?: string; cwd?: string }) => {
+      if (!selected) return true
+      const owner = projectIdForSession(r, ownerIndex)
+      // undefined = nothing classifies the row → never hide it.
+      if (owner === undefined) return true
+      return owner === selected.id
+    }
+
+    const fromServer = rows
+      .filter((r) => (identity === 'bots' ? isBotRow(r.profile) : !isBotRow(r.profile)))
+      .filter(inProject)
+      .map((r) => {
+      const rawTitle = r.title || r.preview?.slice(0, 60) || tr('sidebar.untitled')
       // BUG-112: a row from a bot profile identifies itself in the drawer even
       // when its title doesn't (chats started while a bot was active are
       // auto-titled). Fleet-created chats already carry "Bot · <name>", so the
@@ -252,10 +349,13 @@ export function ScreenShell({
       // `new:` pseudo ids are the optimistic new-chat window's stand-ins —
       // never drawer rows (their create may still fail).
       .filter((s) => s.storedId && !s.storedId.startsWith('new:') && !seen.has(s.storedId))
+      // In-memory entries carry no profile: they belong to the identity that
+      // created them, so they only render in Sessions.
+      .filter(() => identity !== 'bots')
       .sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0))
       .map((s) => ({
         id: s.storedId,
-        title: s.title || 'New chat',
+        title: s.title || tr('sidebar.newChat'),
         ts: Math.max(s.createdAtMs ?? 0, lastActiveFor(s.storedId)),
         status: statusOf(s.storedId),
         active: s.storedId === current,
@@ -264,7 +364,7 @@ export function ScreenShell({
     // Uncapped: the sidebar's own search filters this list, and server rows
     // are bounded by the session.list fetch anyway.
     return [...locals, ...fromServer]
-  }, [rows, all, busy, attention, current, pendingStored, lastActiveMap])
+  }, [rows, all, busy, attention, current, pendingStored, lastActiveMap, identity, activeProjectId, projects, projectSessionIds, locale])
 
   const go = useCallback(
     (key: string) => {
@@ -273,19 +373,17 @@ export function ScreenShell({
       const route =
         key === 'chat'
           ? '/(tabs)/chat'
-          : key === 'fleet'
-            ? '/(tabs)/fleet'
-            : key === 'crew'
-              ? '/(tabs)/crew'
+          : key === 'inbox'
+            ? '/(tabs)/inbox'
+            : key === 'library'
+              ? '/(tabs)/connectors'
               : key === 'browser'
                 ? '/(tabs)/browser'
                 : key === 'terminal'
                   ? '/(tabs)/terminal'
                   : key === 'automations'
                     ? '/(tabs)/automations'
-                    : key === 'connectors'
-                      ? '/(tabs)/connectors'
-                      : '/(tabs)/settings'
+                    : '/(tabs)/settings'
       // navigate, never push: `/(tabs)` is a single route on the root stack,
       // so push mounts a whole fresh copy of every tab screen each tap —
       // navigate just switches the tab inside the instance we already have.
@@ -318,6 +416,35 @@ export function ScreenShell({
     },
     [router],
   )
+
+  // ── Bots mode: open a bot's canonical Bot Chat ───────────────────────────
+  // `openBotChat` owns the whole identity story (exact-title lookup, create-
+  // if-absent, single-flight, adopt-on-race) and switches the screen itself
+  // via switchToSession. The extra navigate is the belt-and-braces the other
+  // hand-offs use, so the tab is already up while the RPC runs.
+  //
+  // `key === ''` is the DEFAULT agent (the row reads "Moch"): it has no
+  // `Bot Chat` — the canonical chat is a per-bot artifact, and minting one on
+  // `default` would put a second forever-chat beside the assistant — so its
+  // row just returns to the chat the user was in.
+  const openBot = useCallback(
+    (key: string) => {
+      if (!key) {
+        router.navigate('/(tabs)/chat')
+        return
+      }
+      router.navigate('/(tabs)/chat')
+      void openBotChat(key).catch((e) => {
+        // Same failure language as app/bot.tsx's hand-off.
+        showAlert(tr('bot.chat.failed', { why: e instanceof Error ? e.message : String(e) }))
+      })
+    },
+    [router],
+  )
+
+  const newBot = useCallback(() => {
+    router.navigate('/(tabs)/fleet' as never)
+  }, [router])
 
   // ── Per-chat actions (surfaced by the sidebar's long-press / ⋯ menu) ──────
   // Each returns an error message for the dialog, or null on success —
@@ -528,11 +655,26 @@ export function ScreenShell({
           // turn started on another device marks its row the moment the
           // drawer opens, not at the next 60s tick.
           void refreshRunningSessions()
+          // UI-1: project counts/labels are server state too (created on the
+          // desktop, archived elsewhere) — re-read them with the list.
+          void refreshProjects()
+          // Bots mode's roster: a bot created on another device, or a
+          // canonical `Bot Chat` that just appeared, must be there on open.
+          void refreshFleet()
         }}
         onClose={() => setOpen(false)}
         onRequestOpen={() => setOpen(true)}
         nav={topNav}
         bottomNav={bottomNav}
+        identity={identity}
+        onIdentity={handleIdentity}
+        projects={projects}
+        activeProjectId={activeProjectId}
+        onProject={handleProject}
+        onNewProject={handleNewProject}
+        profiles={profiles}
+        onOpenBot={openBot}
+        onNewBot={newBot}
         recent={recent}
         onNav={go}
         onNewChat={startNew}
@@ -546,7 +688,9 @@ export function ScreenShell({
             <View style={s.footerNote}>
               <Icon name="alert-circle" size={14} color={C.amber} />
               <Text style={s.footerText}>
-                {pendingN} conversation{pendingN > 1 ? 's' : ''} waiting on you
+                {pendingN > 1
+                  ? tr('sidebar.pending.many', { n: pendingN })
+                  : tr('sidebar.pending.one')}
               </Text>
             </View>
           ) : null

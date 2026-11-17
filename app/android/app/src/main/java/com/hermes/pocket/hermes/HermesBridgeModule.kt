@@ -123,18 +123,42 @@ class HermesBridgeModule(reactContext: ReactApplicationContext) :
     }.start()
   }
 
+  /**
+   * Run one shell command inside the guest, with a caller-chosen timeout.
+   *
+   * The timeout is what makes real package installs possible: apt-get update
+   * alone outlives python's hard-wired 30s default on first run, so every
+   * long stage used to come back "failed". `timeoutSec` is nullable (boxed
+   * Integer — an accepted interop param type); null keeps python's default.
+   * NOTE: RN exports exactly one method per NAME (TurboModuleInteropUtils
+   * throws on duplicate names, and the interop layer is exact-arity), so this
+   * single 2-arg method is the whole surface — JS always passes both
+   * arguments, null for the old 1-arg form. A null would reach python as
+   * None (subprocess timeout=None, i.e. forever), so it defaults here, never
+   * in python. Range is 1..3600: a guest apt install must be able to run for
+   * minutes, but nothing may pin a bridge thread for hours.
+   */
   @ReactMethod
-  fun linuxExec(command: String, promise: Promise) {
+  fun linuxExec(command: String, timeoutSec: Int?, promise: Promise) {
     Thread {
       try {
+        val timeout = timeoutSec ?: 30
+        if (timeout < 1 || timeout > 3600) {
+          promise.reject("linux_exec_timeout", "timeoutSec must be between 1 and 3600")
+          return@Thread
+        }
         val py = com.chaquo.python.Python.getInstance()
-        val result = py.getModule("moch.linux_env").callAttr("exec_in_guest", command).toString()
+        val result =
+            py.getModule("moch.linux_env")
+                .callAttr("exec_in_guest", command, timeout)
+                .toString()
         val obj = org.json.JSONObject(result)
         val map = Arguments.createMap()
         map.putBoolean("ok", obj.optBoolean("ok", false))
         map.putString("stdout", obj.optString("stdout", ""))
         map.putString("stderr", obj.optString("stderr", ""))
         map.putString("error", obj.optString("error", ""))
+        if (obj.has("exit")) map.putInt("exit", obj.optInt("exit"))
         promise.resolve(map)
       } catch (e: Exception) {
         promise.reject("linux_exec", e.message, e)

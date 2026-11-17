@@ -44,6 +44,11 @@ export interface SessionRow {
    * still on disk. Rows now carry the profile they came from.
    */
   profile?: string
+  /** Working directory the session was created in (server `cwd`). Drives the
+   *  drawer's project filter via `projectForCwd` when a row has no project id. */
+  cwd?: string
+  /** Owning project id, when the gateway stamps rows with one. */
+  project_id?: string
 }
 
 /**

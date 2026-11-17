@@ -10,11 +10,12 @@ import {
   Image,
   PanResponder,
   Platform,
+  ScrollView,
   SectionList,
   TextInput,
   useWindowDimensions,
 } from 'react-native'
-import type { GestureResponderEvent, PanResponderGestureState, ViewStyle } from 'react-native'
+import type { GestureResponderEvent, PanResponderGestureState, TextStyle, ViewStyle } from 'react-native'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { Icon } from './Icon'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -22,10 +23,40 @@ import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller
 import RAnimated, { useAnimatedStyle } from 'react-native-reanimated'
 import { usePathname } from 'expo-router'
 import { useStore } from '@nanostores/react'
+import { isConnected as isConnectedAtom } from '../lib/gateway'
 import { archivedIds, groupChats, pinnedIds } from '../lib/chatListState'
 import type { RowStatus } from '../lib/attention'
+import { thinkerAtom } from '../lib/thinker'
+import { ocListSessions, describeOcError, type OcSession } from '../lib/opencodeClient'
+import { ocSessionsCached, ocSessionsStore } from '../lib/ocSessionsCache'
+import { openOcChat } from '../lib/chat'
+import { projectIdForCwd } from '../lib/projectScope'
 import { C, S, useStyles, useShape } from '../lib/theme'
 import { useReduceMotion } from './useReduceMotion'
+import { IdentitySwitch } from './IdentitySwitch'
+import { ProjectList } from './ProjectList'
+import { BotsRoster } from './BotsRoster'
+import { tr, localeAtom } from '../lib/strings'
+import type { Identity, ProjectRow } from '../lib/workspace'
+import type { FleetProfile } from '../lib/fleet'
+
+// ── OpenCode sessions drawer list (OPENCODE-MODE contract) ──────────────────
+// In OpenCode mode the drawer's chat list is the OpenCode server's session
+// list, not hermes session.rows. Fetched when the drawer opens; the 15s
+// cache lives in src/lib/ocSessionsCache.ts so the chat transport can
+// invalidate it the moment a turn creates/renames a session.
+
+function formatOcTime(ms?: number): string {
+  if (!ms) return ''
+  const d = new Date(ms)
+  const sameDay = d.toDateString() === new Date().toDateString()
+  return sameDay
+    ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
+
+/** Drawer rows that are hermes-only surfaces — dropped in OpenCode mode. */
+const OC_HIDDEN_NAV_KEYS = new Set(['inbox', 'browser', 'automations', 'library'])
 
 export interface NavItem {
   key: string
@@ -34,6 +65,12 @@ export interface NavItem {
   badge?: number
   /** Active automations: renders up to 3 mini Mochis, +N past that. */
   mochis?: number
+  /**
+   * Route slug this row belongs to when it differs from `key` — e.g. the
+   * Library row opens /(tabs)/connectors for now, and the drawer highlights
+   * by route suffix.
+   */
+  activeFor?: string
 }
 
 export interface RecentChat {
@@ -82,6 +119,25 @@ interface Props {
    * above the New-chat pill at the panel's bottom edge.
    */
   bottomNav?: NavItem[]
+  /** Sessions | Bots switch, rendered directly under the brand row. */
+  identity: Identity
+  onIdentity: (i: Identity) => void
+  /** Projects for the drawer's project list (Sessions mode only). */
+  projects: ProjectRow[]
+  activeProjectId: string | null
+  /** Select a project; `null` = the default (Personal) bucket. */
+  onProject: (id: string | null) => void
+  onNewProject: () => void
+  onProjectMenu?: (p: ProjectRow) => void
+  /** Bots mode roster source (`profiles.list` via `fleetProfiles`). */
+  profiles?: readonly FleetProfile[]
+  /**
+   * Open a bot's canonical Bot Chat. `''` = the default agent (an ordinary
+   * chat — `default` has no `Bot Chat` of its own).
+   */
+  onOpenBot?: (key: string) => void
+  /** Open the bot create flow (the Fleet screen). */
+  onNewBot?: () => void
   recent: RecentChat[]
   onNav: (key: string) => void
   onNewChat: () => void
@@ -231,6 +287,16 @@ export function Sidebar({
   onRequestOpen,
   nav,
   bottomNav,
+  identity,
+  onIdentity,
+  projects,
+  activeProjectId,
+  onProject,
+  onNewProject,
+  onProjectMenu,
+  profiles,
+  onOpenBot,
+  onNewBot,
   recent,
   onNav,
   onNewChat,
@@ -243,8 +309,76 @@ export function Sidebar({
 }: Props) {
   const s = useStyles(makeS)
   const S = useShape()
+  // Locale switches must re-render the drawer's own copy (project labels,
+  // search placeholder) — tr() reads the atom, not React state.
+  useStore(localeAtom)
   const pathname = usePathname()
-  const activeKey = nav.find((n) => pathname?.endsWith(n.key))?.key
+  // A row can own a route whose slug differs from its key (Library currently
+  // opens the connectors screen); highlight by that slug when present.
+  const activeKey = nav.find((n) => pathname?.endsWith(n.activeFor ?? n.key))?.key
+
+  // ── OpenCode mode ── read from the atom directly: this component is mounted
+  // by ScreenShell (not thinker-aware), so threading an ocMode prop through
+  // would touch a file outside this slice. Same theme, different data.
+  const thinker = useStore(thinkerAtom)
+  const ocMode = thinker === 'opencode'
+  // Boot vs failure: right after launch the gateway (and therefore the oc
+  // server) is still starting. That is not an error — the list shows a
+  // skeleton until the first successful connect, then fetches.
+  const online = useStore(isConnectedAtom)
+  // Hermes-only nav rows drop; Chats, Terminal (and the docked Settings) stay.
+  const shownNav = useMemo(
+    () => (ocMode ? nav.filter((n) => !OC_HIDDEN_NAV_KEYS.has(n.key)) : nav),
+    [nav, ocMode],
+  )
+  const shownBottomNav = useMemo(
+    () => (ocMode ? (bottomNav ?? []).filter((n) => !OC_HIDDEN_NAV_KEYS.has(n.key)) : bottomNav),
+    [bottomNav, ocMode],
+  )
+  // The OpenCode server's session list — the drawer's chat list in oc mode.
+  const [ocSessions, setOcSessions] = useState<OcSession[]>([])
+  const [ocLoading, setOcLoading] = useState(false)
+  const [ocError, setOcError] = useState('')
+  useEffect(() => {
+    if (!ocMode || !open) return
+    const cached = ocSessionsCached()
+    if (cached) {
+      setOcSessions(cached)
+      setOcError('')
+      return
+    }
+    // Booting: the gateway hasn't connected yet this run, so the oc server
+    // cannot answer — show the skeleton, not a scary error. The effect
+    // re-runs when `online` flips true and fetches then.
+    if (!online) {
+      setOcLoading(true)
+      setOcError('')
+      return
+    }
+    let alive = true
+    setOcLoading(true)
+    setOcError('')
+    ocListSessions()
+      .then((rows) => {
+        if (!alive) return
+        // Newest activity first (ordering is the caller's job per the wire
+        // contract), capped at 30 rows.
+        const sorted = [...(rows ?? [])]
+          .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
+          .slice(0, 30)
+        ocSessionsStore(sorted)
+        setOcSessions(sorted)
+        setOcLoading(false)
+      })
+      .catch((e: unknown) => {
+        if (!alive) return
+        setOcLoading(false)
+        // describeOcError keeps OPENCODE-MODE's "every catch renders the
+        // classifier" promise — a 403/500 must not read as a generic miss.
+        setOcError(describeOcError(e) || 'Could not reach the OpenCode server')
+      })
+    return () => { alive = false }
+  }, [open, ocMode, online])
   const { width, height } = useWindowDimensions()
   const insets = useSafeAreaInsets()
   const anim = progress
@@ -271,6 +405,38 @@ export function Sidebar({
   // exported helper so both map finger pixels to the same 0→1 progress.
   const panelWidth = drawerPanelWidth(width)
   const [query, setQuery] = useState('')
+  // The drawer's search filters OpenCode sessions by title too (declared here
+  // because it reads `query`).
+  const ocFiltered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return ocSessions
+    return ocSessions.filter((c) => (c.title ?? '').toLowerCase().includes(q))
+  }, [ocSessions, query])
+  // BUG-149: bucket the oc rows under their project via each row's
+  // `directory` (mints carry the selected project's cwd). Same labeled-group
+  // shape as the hermes list's section headers; rows without a directory
+  // (pre-BUG-149 sessions) or whose folder matches no project stay in the
+  // flat tail, ungrouped. The list is still NOT project-filtered — selecting
+  // a project changes where NEW sessions are created, not what is listed.
+  const ocGroups = useMemo(() => {
+    const projRows = projects.map((p) => ({ id: p.id, path: p.primaryPath, isNoProject: p.isNoProject }))
+    const byProject = new Map<string, OcSession[]>()
+    const flat: OcSession[] = []
+    for (const c of ocFiltered) {
+      const pid = projectIdForCwd(projRows, c.directory)
+      if (!pid) {
+        flat.push(c)
+        continue
+      }
+      const arr = byProject.get(pid)
+      if (arr) arr.push(c)
+      else byProject.set(pid, [c])
+    }
+    const groups = projects
+      .filter((p) => !p.isNoProject && byProject.has(p.id))
+      .map((p) => ({ id: p.id, name: p.name, rows: byProject.get(p.id) ?? [] }))
+    return { groups, flat }
+  }, [ocFiltered, projects])
   const [archOpen, setArchOpen] = useState(false)
 
   // Per-chat action state. The three overlays are mutually exclusive.
@@ -371,7 +537,11 @@ export function Sidebar({
         {item.mochis ? (
           <View
             style={s.mochiRunRow}
-            accessibilityLabel={`${item.mochis} running automation${item.mochis === 1 ? '' : 's'}`}
+            accessibilityLabel={
+              item.mochis === 1
+                ? tr('sidebar.running.one')
+                : tr('sidebar.running.many', { n: item.mochis })
+            }
           >
             {Array.from({ length: Math.min(item.mochis, 3) }).map((_, i) => (
               <Image key={i} source={MOCHI_RUN[i]} style={[s.mochiMini, i > 0 && s.mochiMiniOverlap]} />
@@ -435,6 +605,28 @@ export function Sidebar({
     })
     return () => sub.remove()
   }, [open])
+
+  // One oc row — shared by the project groups and the flat tail so both
+  // render the exact same row language (BUG-149 grouping).
+  const renderOcRow = (c: OcSession) => (
+    <Pressable
+      key={c.id}
+      style={({ pressed }) => [s.recentRow, pressed && s.recentRowPressed]}
+      onPress={() => {
+        onClose()
+        void openOcChat(c.id).catch(() => {})
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={`Open OpenCode chat ${c.title || 'Untitled'}`}
+    >
+      <View style={{ flex: 1 }}>
+        <Text style={s.recentTitle} numberOfLines={1}>{c.title || 'Untitled'}</Text>
+        {c.time?.updated ? (
+          <Text style={s.ocRowSub} numberOfLines={1}>{formatOcTime(c.time.updated)}</Text>
+        ) : null}
+      </View>
+    </Pressable>
+  )
 
   const searching = query.trim().length > 0
 
@@ -614,7 +806,7 @@ export function Sidebar({
           <Pressable
             style={s.sectionLabelRow}
             onPress={() => setArchOpen((v) => !v)}
-            accessibilityLabel={`${archOpen ? 'Collapse' : 'Expand'} archived chats`}
+            accessibilityLabel={`${tr(archOpen ? 'sidebar.collapse' : 'sidebar.expand')} ${tr('sidebar.archivedChats')}`}
           >
             <Text style={s.sectionLabel}>{section.label} ({section.count ?? 0})</Text>
             <Icon name={archOpen ? 'chevron-up' : 'chevron-down'} size={12} color={C.textFaint} />
@@ -633,7 +825,7 @@ export function Sidebar({
   const renderSectionFooter = useCallback(() => <View style={s.sectionGap} />, [])
 
   const listEmpty = useCallback(
-    () => (searching ? <Text style={s.noMatch}>No chats matching “{query.trim()}”</Text> : null),
+    () => (searching ? <Text style={s.noMatch}>{tr('sidebar.noMatch', { query: query.trim() })}</Text> : null),
     [searching, query],
   )
 
@@ -694,7 +886,7 @@ export function Sidebar({
         pointerEvents={open ? 'auto' : 'none'}
         {...panelPan.panHandlers}
       >
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close menu" />
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={tr('sidebar.closeMenu')} />
       </Animated.View>
 
       <Animated.View
@@ -717,15 +909,58 @@ export function Sidebar({
             style={({ pressed }) => [s.iconBtn, pressed && s.iconBtnPressed]}
             onPress={onClose}
             hitSlop={10}
-            accessibilityLabel="Close menu"
+            accessibilityLabel={tr('sidebar.closeMenu')}
           >
             <Icon name="close" size={20} color={C.textDim} />
           </Pressable>
         </View>
 
-        <View>{renderNavRows(nav)}</View>
+        {/* Identity (Sessions | Bots) — the drawer's top-level switch. OpenCode
+            mode has no Bots surface: the switch stays on Sessions and the
+            Bots segment is inert (no dead tap). */}
+        <IdentitySwitch identity={ocMode ? 'sessions' : identity} onChange={ocMode ? () => {} : onIdentity} />
 
-        {recent.length > 0 ? (
+        <View>{renderNavRows(shownNav)}</View>
+
+        {/* Sessions mode owns the project rail; Bots mode replaces that whole
+            body with the roster (one row per bot, no per-bot chat list — a
+            bot IS one canonical `Bot Chat`) and stays hidden in OpenCode mode
+            — bots are hermes profiles. Projects, though, organize this app's
+            own chats in BOTH thinkers: every chat is created with a project
+            cwd (lib/chat, mode-agnostic) and the embedded gateway serves
+            `projects.tree` regardless of thinker, so the rail shows in
+            OpenCode mode too. `ocMode ||` mirrors the switch's locked
+            Sessions segment above (a persisted 'bots' identity must not hide
+            the rail while the oc chat list renders). Grouping the OpenCode
+            server's own session list under projects is BUG-149. */}
+        {ocMode || identity === 'sessions' ? (
+          <ProjectList
+            projects={projects}
+            activeProjectId={activeProjectId}
+            onSelect={onProject}
+            onNewProject={onNewProject}
+            onProjectMenu={onProjectMenu}
+            active={open}
+          />
+        ) : null}
+
+        {!ocMode && identity === 'bots' ? (
+          <BotsRoster
+            profiles={profiles ?? []}
+            onOpenBot={(key) => {
+              onOpenBot?.(key)
+              onClose()
+            }}
+            onNewBot={() => {
+              onNewBot?.()
+              onClose()
+            }}
+            onCloseDrawer={onClose}
+            active={open}
+          />
+        ) : null}
+
+        {(ocMode || identity === 'sessions') && (ocMode || recent.length > 0) ? (
           <>
             <View style={s.searchWrap}>
               <Icon name="search" size={14} color={C.textFaint} />
@@ -734,12 +969,12 @@ export function Sidebar({
                 style={s.searchInput}
                 value={query}
                 onChangeText={setQuery}
-                placeholder="Search chats…"
+                placeholder={tr('sidebar.searchChats')}
                 placeholderTextColor={C.textFaint}
                 autoCorrect={false}
                 autoCapitalize="none"
                 editable={open}
-                accessibilityLabel="Search chats"
+                accessibilityLabel={ocMode ? 'Search OpenCode chats' : tr('sidebar.searchChats')}
                 onFocus={() => {
                   searchFocusRef.current = true
                 }}
@@ -752,7 +987,7 @@ export function Sidebar({
                   onPress={() => setQuery('')}
                   hitSlop={8}
                   style={({ pressed }) => [s.clearBtn, pressed && s.iconBtnPressed]}
-                  accessibilityLabel="Clear search"
+                  accessibilityLabel={tr('sidebar.clearSearch')}
                 >
                   <Icon name="close" size={14} color={C.textFaint} />
                 </Pressable>
@@ -762,7 +997,62 @@ export function Sidebar({
                 search field stays at the panel top while chat results render
                 above the keys instead of behind them. */}
             <RAnimated.View style={[{ flex: 1 }, drawerListKbPad]}>
-            <SectionList<RecentChat, Section>
+            {ocMode ? (
+              // OpenCode sessions: rows come from the OpenCode server, keyed
+              // by oc id. Tapping opens a fresh chat window bound to that
+              // session and hydrates its transcript. Deliberately NOT
+              // project-filtered — but BUG-149 GROUPS them: rows whose
+              // `directory` lands inside a project folder render under that
+              // project's name (same section shape as the hermes list);
+              // everything else stays flat below.
+              <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
+                <View style={s.sectionLabelRow}>
+                  <Text style={s.sectionLabel}>OpenCode sessions</Text>
+                </View>
+                {ocLoading ? (
+                  // Skeleton rows while the agent boots (or the list loads):
+                  // placeholder bars in the row rhythm — no spinner, no error
+                  // copy that reads like a failure before anything failed.
+                  <View accessibilityLabel="OpenCode sessions loading">
+                    {[0, 1, 2].map((i) => (
+                      <View key={i} style={[s.recentRow, { opacity: 0.55 - i * 0.15 }]}>
+                        <View style={{ flex: 1, gap: 7 }}>
+                          <View style={{ height: 12, width: `${74 - i * 16}%`, borderRadius: 6, backgroundColor: C.border }} />
+                          <View style={{ height: 9, width: '38%', borderRadius: 5, backgroundColor: C.border, opacity: 0.6 }} />
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                ) : ocError ? (
+                  <Text style={s.ocStateText}>{ocError}</Text>
+                ) : ocFiltered.length ? (
+                  <>
+                    {ocGroups.groups.map((g) => (
+                      <View key={g.id}>
+                        <View style={s.sectionLabelRow}>
+                          <Text style={s.sectionLabel}>{g.name}</Text>
+                        </View>
+                        {g.rows.map(renderOcRow)}
+                      </View>
+                    ))}
+                    {ocGroups.flat.length ? (
+                      <View>
+                        {ocGroups.groups.length ? (
+                          <View style={s.sectionLabelRow}>
+                            <Text style={s.sectionLabel}>{tr('oc.otherSessions')}</Text>
+                          </View>
+                        ) : null}
+                        {ocGroups.flat.map(renderOcRow)}
+                      </View>
+                    ) : null}
+                  </>
+                ) : (
+                  <Text style={s.ocStateText}>No OpenCode sessions yet</Text>
+                )}
+                <View style={{ height: 12 }} />
+              </ScrollView>
+            ) : (
+              <SectionList<RecentChat, Section>
               sections={sections}
               keyExtractor={chatKey}
               style={{ flex: 1 }}
@@ -780,57 +1070,72 @@ export function Sidebar({
               renderSectionFooter={renderSectionFooter}
               ListEmptyComponent={listEmpty}
             />
+            )}
             </RAnimated.View>
           </>
-        ) : (
+        ) : (ocMode || identity === 'sessions') ? (
           <View style={{ flex: 1 }} />
-        )}
+        ) : null}
 
-        {footer}
+        {/* The pending-questions note counts CHATS waiting on you; in Bots
+            mode the drawer shows no chats, so it would be unexplainable.
+            Hermes-only: OpenCode questions render in the chat itself. */}
+        {!ocMode && identity === 'sessions' ? footer : null}
 
         {/* Bottom-docked nav (Settings) + primary action, pinned like
             ChatGPT's blue button at the panel's bottom edge. */}
-        {bottomNav?.length ? <View>{renderNavRows(bottomNav)}</View> : null}
-        <Pressable
-          style={({ pressed }) => [s.newChat, pressed && { opacity: 0.85 }]}
-          onPress={() => {
-            onNewChat()
-            onClose()
-          }}
-          accessibilityLabel="New chat"
-        >
-          <Icon name="add" size={20} color={C.onAccent} />
-          <Text style={s.newChatText}>New chat</Text>
-        </Pressable>
+        {shownBottomNav?.length ? <View>{renderNavRows(shownBottomNav)}</View> : null}
+        {/* Bots mode has no "New chat": its primary action is the roster's
+            `+ New bot` (which opens the Fleet create flow). OpenCode mode
+            starts chats like Sessions — newChat is the local window the OC
+            session binds to. */}
+        {ocMode || identity === 'sessions' ? (
+          <Pressable
+            style={({ pressed }) => [s.newChat, pressed && { opacity: 0.85 }]}
+            onPress={() => {
+              onNewChat()
+              onClose()
+            }}
+            accessibilityLabel={tr('sidebar.newChat')}
+          >
+            <Icon name="add" size={20} color={C.onAccent} />
+            <Text style={s.newChatText}>{tr('sidebar.newChat')}</Text>
+          </Pressable>
+        ) : null}
       </Animated.View>
 
       {/* ── Per-chat popover, anchored where the row was pressed ──────────── */}
       {shownMenu ? (
         <View style={s.overlay} pointerEvents="box-none">
           <Animated.View style={[StyleSheet.absoluteFill, s.menuScrim, { opacity: menuAnim }]}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={closeDialogs} accessibilityLabel="Close menu" />
+            <Pressable style={StyleSheet.absoluteFill} onPress={closeDialogs} accessibilityLabel={tr('sidebar.closeMenu')} />
           </Animated.View>
           <Animated.View
             style={[s.menuCard, { left: menuLeft, top: menuTop, opacity: menuAnim, transform: [{ scale: menuScale }] }]}
           >
             <MenuRow
               icon="pin-outline"
-              label={menuPinned ? 'Unpin' : 'Pin'}
+              label={menuPinned ? tr('sidebar.unpin') : tr('sidebar.pin')}
               onPress={() => {
                 onPinToggle?.(shownMenu.chat.id)
                 closeDialogs()
               }}
             />
-            <MenuRow icon="pencil-outline" label="Rename" onPress={() => openRename(shownMenu.chat)} />
+            <MenuRow icon="pencil-outline" label={tr('sidebar.rename')} onPress={() => openRename(shownMenu.chat)} />
             <MenuRow
               icon="archive-outline"
-              label={menuArchived ? 'Unarchive' : 'Archive'}
+              label={menuArchived ? tr('sidebar.unarchive') : tr('sidebar.archive')}
               onPress={() => {
                 onArchiveToggle?.(shownMenu.chat.id)
                 closeDialogs()
               }}
             />
-            <MenuRow icon="trash-can-outline" label="Delete" danger onPress={() => openDelete(shownMenu.chat)} />
+            <MenuRow
+              icon="trash-can-outline"
+              label={tr('sidebar.delete')}
+              danger
+              onPress={() => openDelete(shownMenu.chat)}
+            />
           </Animated.View>
         </View>
       ) : null}
@@ -839,32 +1144,32 @@ export function Sidebar({
       {shownRename ? (
         <View style={s.overlay}>
           <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: C.scrim, opacity: renameAnim }]}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={closeDialogs} accessibilityLabel="Cancel rename" />
+            <Pressable style={StyleSheet.absoluteFill} onPress={closeDialogs} accessibilityLabel={tr('sidebar.cancel')} />
           </Animated.View>
           <RAnimated.View style={renameKbPad}>
             <Animated.View style={[s.dialogCard, { opacity: renameAnim, transform: [{ scale: renameScale }] }]}>
-              <Text style={s.dialogTitle}>Rename chat</Text>
+              <Text style={s.dialogTitle}>{tr('sidebar.renameChatTitle')}</Text>
               <TextInput
-                style={s.renameInput}
+                style={s.dialogInput}
                 value={renameText}
                 onChangeText={setRenameText}
                 autoFocus
                 selectTextOnFocus
                 maxLength={200}
                 onSubmitEditing={() => void saveRename()}
-                accessibilityLabel="Chat name"
+                accessibilityLabel={tr('sidebar.chatName')}
               />
               {dialogError ? <Text style={s.dialogError}>{dialogError}</Text> : null}
               <View style={s.dialogButtons}>
                 <Pressable style={[s.dialogBtn, dialogBusy && s.dialogBtnBusy]} onPress={closeDialogs} disabled={dialogBusy}>
-                  <Text style={s.dialogBtnText}>Cancel</Text>
+                  <Text style={s.dialogBtnText}>{tr('sidebar.cancel')}</Text>
                 </Pressable>
                 <Pressable
                   style={[s.dialogBtnPrimary, (dialogBusy || !renameText.trim()) && s.dialogBtnBusy]}
                   onPress={() => void saveRename()}
                   disabled={dialogBusy || !renameText.trim()}
                 >
-                  <Text style={s.dialogBtnPrimaryText}>Save</Text>
+                  <Text style={s.dialogBtnPrimaryText}>{tr('sidebar.save')}</Text>
                 </Pressable>
               </View>
             </Animated.View>
@@ -876,24 +1181,24 @@ export function Sidebar({
       {shownConfirm ? (
         <View style={s.overlay}>
           <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: C.scrim, opacity: confirmAnim }]}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={closeDialogs} accessibilityLabel="Cancel delete" />
+            <Pressable style={StyleSheet.absoluteFill} onPress={closeDialogs} accessibilityLabel={tr('sidebar.cancel')} />
           </Animated.View>
           <Animated.View style={[s.dialogCard, { opacity: confirmAnim, transform: [{ scale: confirmScale }] }]}>
-            <Text style={s.dialogTitle}>Delete this chat?</Text>
+            <Text style={s.dialogTitle}>{tr('sidebar.deleteChatTitle')}</Text>
             <Text style={s.dialogBody}>
-              “{shownConfirm.title}” is permanently removed from Moch.
+              {tr('sidebar.deleteChatBody', { title: shownConfirm.title })}
             </Text>
             {dialogError ? <Text style={s.dialogError}>{dialogError}</Text> : null}
             <View style={s.dialogButtons}>
               <Pressable style={[s.dialogBtn, dialogBusy && s.dialogBtnBusy]} onPress={closeDialogs} disabled={dialogBusy}>
-                <Text style={s.dialogBtnText}>Cancel</Text>
+                <Text style={s.dialogBtnText}>{tr('sidebar.cancel')}</Text>
               </Pressable>
               <Pressable
                 style={[s.dialogBtnDanger, dialogBusy && s.dialogBtnBusy]}
                 onPress={() => void runDelete()}
                 disabled={dialogBusy}
               >
-                <Text style={s.dialogBtnDangerText}>Delete</Text>
+                <Text style={s.dialogBtnDangerText}>{tr('sidebar.delete')}</Text>
               </Pressable>
             </View>
           </Animated.View>
@@ -928,7 +1233,9 @@ export function StatusDot({ status }: { status?: RowStatus }) {
   const color = status === 'input' ? C.amber : status === 'done' ? C.greenSoft : status === 'error' ? C.red : C.accent
   return (
     <Animated.View
-      accessibilityLabel={status === 'input' ? 'Waiting for your input' : status === 'done' ? 'New reply' : status === 'error' ? 'Errored' : 'Working'}
+      accessibilityLabel={tr(
+        status === 'input' ? 'status.input' : status === 'done' ? 'status.done' : status === 'error' ? 'status.error' : 'status.busy',
+      )}
       style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color, opacity: status === 'busy' ? pulse : 1 }}
     />
   )
@@ -988,7 +1295,7 @@ const RecentRow = React.memo(function RecentRow({
       onLongPress={(e) => onMenu(c, e)}
       delayLongPress={350}
       style={({ pressed }) => [s.recentRow, pressed && s.recentRowPressed]}
-      accessibilityLabel={`Open ${c.title}`}
+      accessibilityLabel={tr('sidebar.openChat', { title: c.title })}
     >
       <Text style={[s.recentTitle, c.active && s.recentTitleActive]} numberOfLines={1}>
         {c.title}
@@ -999,13 +1306,85 @@ const RecentRow = React.memo(function RecentRow({
         style={s.rowMenu}
         hitSlop={6}
         onPress={(e) => onMenu(c, e)}
-        accessibilityLabel={`Options for ${c.title}`}
+        accessibilityLabel={tr('sidebar.chatOptions', { title: c.title })}
       >
         <Icon name="ellipsis-horizontal" size={15} color={C.textFaint} />
       </Pressable>
     </Pressable>
   )
 })
+
+/**
+ * The drawer's dialog card language (title / input / body / buttons), shared
+ * by the chat dialogs and the project dialogs (ProjectList). One definition,
+ * so a second dialog style can never drift in.
+ */
+function makeDialogStyles() {
+  // `satisfies` (not a `: Type` annotation) keeps the literal types — a widened
+  // `string` for alignSelf/fontWeight leaks into StyleSheet.create and breaks
+  // every style in this sheet.
+  return {
+    dialogCard: {
+      width: '86%',
+      maxWidth: 400,
+      alignSelf: 'center',
+      backgroundColor: C.bgCard,
+      borderRadius: 16,
+      padding: 18,
+      gap: 12,
+    },
+    dialogTitle: { color: C.text, fontSize: 16, fontWeight: '700' },
+    dialogBody: { color: C.textDim, fontSize: 13.5 },
+    dialogError: { color: C.red, fontSize: 12.5 },
+    dialogInput: {
+      backgroundColor: C.inputBg,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: C.borderSoft,
+      color: C.text,
+      fontSize: 15,
+      paddingHorizontal: 12,
+      minHeight: 44,
+    },
+    dialogButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },
+    dialogBtn: {
+      minHeight: 40,
+      paddingHorizontal: 16,
+      borderRadius: 20,
+      justifyContent: 'center',
+      backgroundColor: C.bgHover,
+    },
+    dialogBtnBusy: { opacity: 0.5 },
+    dialogBtnText: { color: C.text, fontSize: 14.5, fontWeight: '600' },
+    dialogBtnPrimary: {
+      minHeight: 40,
+      paddingHorizontal: 18,
+      borderRadius: 20,
+      justifyContent: 'center',
+      backgroundColor: C.accent,
+    },
+    dialogBtnPrimaryText: { color: C.onAccent, fontSize: 14.5, fontWeight: '700' },
+    dialogBtnDanger: {
+      minHeight: 40,
+      paddingHorizontal: 18,
+      borderRadius: 20,
+      justifyContent: 'center',
+      backgroundColor: C.red,
+    },
+    dialogBtnDangerText: { color: '#FFFFFF', fontSize: 14.5, fontWeight: '700' },
+  } satisfies Record<string, ViewStyle | TextStyle>
+}
+
+/**
+ * Exported so ProjectList's dialogs reuse the exact same card/button styles.
+ * A hoisted function declaration on purpose: ProjectList imports back from
+ * this module (sidebar → project list → dialog styles), and a hoisted binding
+ * is initialized at module instantiation, so the cycle can never observe a
+ * temporal dead zone.
+ */
+export function makeDialogS() {
+  return StyleSheet.create(makeDialogStyles())
+}
 
 const makeS = () => StyleSheet.create({
   // Explicit stacking floor: the drawer's subtree must paint above the chat
@@ -1130,6 +1509,11 @@ const makeS = () => StyleSheet.create({
     justifyContent: 'center',
   },
   noMatch: { color: C.textFaint, fontSize: 13, paddingHorizontal: 16, paddingVertical: 12 },
+  // OpenCode sessions list — same row language as RecentRow, plus a time
+  // subtitle and honest loading/error/empty states.
+  ocRowSub: { color: C.textFaint, fontSize: 11.5, marginTop: 1 },
+  ocState: { paddingVertical: 28, alignItems: 'center' },
+  ocStateText: { color: C.textFaint, fontSize: 13, paddingHorizontal: 16, paddingVertical: 12 },
   newChat: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1180,52 +1564,6 @@ const makeS = () => StyleSheet.create({
   menuRowPressed: { backgroundColor: C.bgHover },
   menuRowLabel: { color: C.text, fontSize: 15.5, flex: 1 },
 
-  dialogCard: {
-    width: '86%',
-    maxWidth: 400,
-    alignSelf: 'center',
-    backgroundColor: C.bgCard,
-    borderRadius: 16,
-    padding: 18,
-    gap: 12,
-  },
-  dialogTitle: { color: C.text, fontSize: 16, fontWeight: '700' },
-  dialogBody: { color: C.textDim, fontSize: 13.5 },
-  dialogError: { color: C.red, fontSize: 12.5 },
-  renameInput: {
-    backgroundColor: C.inputBg,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: C.borderSoft,
-    color: C.text,
-    fontSize: 15,
-    paddingHorizontal: 12,
-    minHeight: 44,
-  },
-  dialogButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },
-  dialogBtn: {
-    minHeight: 40,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    justifyContent: 'center',
-    backgroundColor: C.bgHover,
-  },
-  dialogBtnBusy: { opacity: 0.5 },
-  dialogBtnText: { color: C.text, fontSize: 14.5, fontWeight: '600' },
-  dialogBtnPrimary: {
-    minHeight: 40,
-    paddingHorizontal: 18,
-    borderRadius: 20,
-    justifyContent: 'center',
-    backgroundColor: C.accent,
-  },
-  dialogBtnPrimaryText: { color: C.onAccent, fontSize: 14.5, fontWeight: '700' },
-  dialogBtnDanger: {
-    minHeight: 40,
-    paddingHorizontal: 18,
-    borderRadius: 20,
-    justifyContent: 'center',
-    backgroundColor: C.red,
-  },
-  dialogBtnDangerText: { color: '#FFFFFF', fontSize: 14.5, fontWeight: '700' },
+  // Chat dialogs + project dialogs: one shared definition (makeDialogStyles).
+  ...makeDialogStyles(),
 })

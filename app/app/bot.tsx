@@ -14,6 +14,7 @@ import { showAlert } from '../src/components/AlertDialog'
 import { C, useStyles } from '../src/lib/theme'
 import { rpc } from '../src/lib/gateway'
 import { refreshFleet, setActiveBot } from '../src/lib/fleet'
+import { openBotChat } from '../src/lib/botChat'
 import { tr, isRTL } from '../src/lib/strings'
 
 /**
@@ -35,6 +36,7 @@ export default function BotDetail() {
   const [deleting, setDeleting] = useState(false)
   const [noProvider, setNoProvider] = useState(false)
   const [mirroring, setMirroring] = useState(false)
+  const [opening, setOpening] = useState(false)
 
   const load = useCallback(async () => {
     if (!bot) return
@@ -125,6 +127,23 @@ export default function BotDetail() {
     }
   }
 
+  // Canonical Bot Chat hand-off (UI-1): a bot's row opens its ONE forever-chat
+  // (`Bot Chat`), never a fresh per-visit session. openBotChat resolves the
+  // exact-title chat, mints it only when the profile truly has none, and
+  // single-flights per profile — so a double-tap cannot mint two.
+  const openChat = async () => {
+    if (!bot || opening) return
+    setOpening(true)
+    try {
+      await openBotChat(bot)
+      router.navigate('/(tabs)/chat')
+    } catch (e) {
+      showAlert(tr('bot.chat.failed', { why: e instanceof Error ? e.message : String(e) }))
+    } finally {
+      setOpening(false)
+    }
+  }
+
   return (
     <SafeAreaView style={s.safe} edges={['bottom']}>
       <ScreenShell
@@ -133,13 +152,14 @@ export default function BotDetail() {
         right={
           <Pressable
             accessibilityLabel={tr("bot.chat", { name: bot })}
-            onPress={async () => {
-              await setActiveBot(bot)
-              router.navigate({ pathname: '/(tabs)/chat', params: { botProfile: bot } } as never)
-            }}
+            accessibilityRole="button"
+            onPress={openChat}
+            disabled={opening}
             hitSlop={8}
           >
-            <Ionicons name="chatbubble-outline" size={22} color={C.textDim} />
+            {opening
+              ? <ActivityIndicator size="small" color={C.textDim} />
+              : <Ionicons name="chatbubble-outline" size={22} color={C.textDim} />}
           </Pressable>
         }
       >

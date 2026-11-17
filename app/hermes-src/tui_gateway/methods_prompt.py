@@ -560,6 +560,38 @@ def _lock_in_submit_turn(
 # Per-turn client surfaces that carry a model-bound note (session_notifications._surface_note).
 _CLIENT_SURFACES = frozenset({"hud", "voice-live"})
 
+# Receipts outlive the client's own retry window (~120s) so any in-window timeout retry dedupes;
+# pruned on every insert so a long-lived session's dict can't grow without bound.
+_SUBMIT_RECEIPT_TTL_SECS = 300.0
+
+
+def _deduped_submit_reply(session: dict, client_request_id: str) -> dict | None:
+    """The stored prompt.submit reply for a replayed ``client_request_id``, else None (BUG-036).
+    A receipt past ``_SUBMIT_RECEIPT_TTL_SECS`` counts as expired — insert-time pruning keeps
+    the dict bounded, but only a lookup-time check keeps the retry window honest."""
+    with session["history_lock"]:
+        receipt = (session.get("_submit_receipts") or {}).get(client_request_id)
+        if (isinstance(receipt, dict)
+                and time.time() - float(receipt.get("ts") or 0.0) <= _SUBMIT_RECEIPT_TTL_SECS):
+            reply = receipt.get("reply")
+            if isinstance(reply, dict):
+                return reply
+    return None
+
+
+def _record_submit_receipt(session: dict, client_request_id: str, reply: dict) -> None:
+    """Record a terminal prompt.submit reply under ``session["_submit_receipts"]`` (same home +
+    lock as ``queued_prompt``), pruning entries older than ``_SUBMIT_RECEIPT_TTL_SECS``."""
+    now = time.time()
+    with session["history_lock"]:
+        receipts = session.get("_submit_receipts")
+        if not isinstance(receipts, dict):
+            receipts = session["_submit_receipts"] = {}
+        receipts[client_request_id] = {"reply": reply, "ts": now}
+        for key in [k for k, v in receipts.items()
+                    if not isinstance(v, dict) or now - float(v.get("ts") or 0.0) > _SUBMIT_RECEIPT_TTL_SECS]:
+            receipts.pop(key, None)
+
 
 @method("prompt.submit")
 def _(rid, params: dict) -> dict:
@@ -628,72 +660,94 @@ def _(rid, params: dict) -> dict:
         if (t := current_transport()) is not None:
             _attach_session_transport(session, t)
             _cancel_ws_orphan_reap(sid)
-    # Claim the turn against a possibly-running session (busy/queued reply, else fall
-    # through once ``running`` is observed False).  The provider interrupt happens after
-    # history_lock is released (a non-interruptible tool may hold it); if the old turn
-    # finished between the two acquisitions, retry the claim rather than strand this
-    # prompt in a queue whose drain already ran.
-    while True:
-        with session["history_lock"]:
-            if not session.get("running"):
-                break
-            if internal_hosted_submit:
-                return _err(rid, 4091, "hosted room member session is busy")
-            busy_transport = t or session.get("transport")
-        if has_truncation:
-            # A rewind/edit/restore/regenerate must land as a truncation, never as a
-            # steered correction or a plain follow-up queued to run after the live
-            # turn — either would silently drop the history cut the user asked for.
-            # Signal busy so the caller's own interrupt-then-retry loop (already
-            # built for exactly this race — see desktop's `runRewindSubmit`) waits
-            # for `running` to clear and resubmits with the truncation intact.
-            return _err(rid, 4009, "session busy")
-        busy_response = _handle_busy_submit(
-            rid, sid, session, text, busy_transport, queued=bool(params.get("queued")), turn_author=turn_author)
-        if busy_response is not None:
-            return busy_response
-    raw_rebind_ids = params.get("rebind_survivor_row_ids")
-    requested_rebind_ids = (
-        {r for r in raw_rebind_ids if isinstance(r, int) and not isinstance(r, bool)}
-        if isinstance(raw_rebind_ids, list) else None)
-    err, survivor_fields = _lock_in_submit_turn(
-        rid, sid, session, text, params, has_truncation, requested_rebind_ids, hosted_task, display_kind)
-    if err is not None:
-        return err
-    if turn_isolation:
-        if turn_author:
-            logger.debug("isolated compute turns carry no author yet; the turn from %s runs unattributed",
-                         turn_author.get("id"))
-        isolated_response = _submit_prompt_to_compute_host(
-            rid, sid, session, text, display_kind=display_kind, display_metadata=display_metadata)
-        if not isolated_response.get("error"):
-            # The truncation already happened inline above (memory + DB).
-            isolated_response["result"].update(survivor_fields)
-            return isolated_response
-        # An ordinal/id alone is not consent. A client that carries a leftover ordinal into an ORDINARY
-        # submit sends a request that is indistinguishable, field by field, from a real rewind — same
-        # method, same shape, an in-range target — and the cut it asks for is a destructive
-        # replace_messages() the user never requested (#80763: 296 -> 52 messages, 244 durable rows gone).
-        # Only the client knows whether this submit is a rewind/edit/regenerate, so it has to say so; refuse
-        # the cut when it doesn't. Consent is checked BEFORE target resolution: an unconfirmed
-        # (leaked-state) request must refuse with 4029 without paying the durable transcript read or
-        # heal-stamping live history dicts that row-id resolution performs.
-        logger.warning(
-            "compute-host dispatch failed for session %s; falling back inline: %s", sid,
-            isolated_response["error"].get("message", "unknown error"))
-    if (err := _persist_session_row_for_submit(rid, session, text, display_kind)) is not None:
-        return err
-    # A completed FAILED build must not wedge the session: rebuild, don't replay it.
-    if not _restart_completed_failed_agent_build(sid, session, session.get("agent_ready")):
-        _start_agent_build(sid, session)
-    run_thread = threading.Thread(
-        target=lambda: _run_after_agent_ready(
-            rid, sid, session, text, display_kind, display_metadata, hosted_terminal_callback, turn_author),
-        daemon=True)
-    # Handle lets session.interrupt tell a live turn from a stuck `running` flag.
-    session["_run_thread"] = run_thread
-    run_thread.start()
-    return _ok(rid, {"status": "streaming", **survivor_fields})
+    # BUG-036 server half: a timeout-retry replays the STORED reply for the same
+    # ``client_request_id`` instead of running the submit again. This must sit BEFORE the
+    # busy-claim loop: busy sessions are never refused (_handle_busy_submit steers/redirects/
+    # queues), so a late replay would otherwise enqueue a duplicate user turn.
+    client_request_id = str(params.get("client_request_id") or "").strip()
+    if client_request_id and (replayed := _deduped_submit_reply(session, client_request_id)) is not None:
+        logger.info("prompt.submit deduped replay: session=%s client_request_id=%s",
+                    sid, client_request_id)
+        # Re-stamp THIS request's JSON-RPC id: the receipt is the ORIGINAL call's reply,
+        # and the client correlates strictly by frame id — a verbatim replay would hang
+        # the retrying call until its own timeout instead of landing.
+        return {**replayed, "id": rid}
+
+    def _submit_turn() -> dict:
+        # Claim the turn against a possibly-running session (busy/queued reply, else fall
+        # through once ``running`` is observed False).  The provider interrupt happens after
+        # history_lock is released (a non-interruptible tool may hold it); if the old turn
+        # finished between the two acquisitions, retry the claim rather than strand this
+        # prompt in a queue whose drain already ran.
+        while True:
+            with session["history_lock"]:
+                if not session.get("running"):
+                    break
+                if internal_hosted_submit:
+                    return _err(rid, 4091, "hosted room member session is busy")
+                busy_transport = t or session.get("transport")
+            if has_truncation:
+                # A rewind/edit/restore/regenerate must land as a truncation, never as a
+                # steered correction or a plain follow-up queued to run after the live
+                # turn — either would silently drop the history cut the user asked for.
+                # Signal busy so the caller's own interrupt-then-retry loop (already
+                # built for exactly this race — see desktop's `runRewindSubmit`) waits
+                # for `running` to clear and resubmits with the truncation intact.
+                return _err(rid, 4009, "session busy")
+            busy_response = _handle_busy_submit(
+                rid, sid, session, text, busy_transport,
+                queued=bool(params.get("queued")), turn_author=turn_author)
+            if busy_response is not None:
+                return busy_response
+        raw_rebind_ids = params.get("rebind_survivor_row_ids")
+        requested_rebind_ids = (
+            {r for r in raw_rebind_ids if isinstance(r, int) and not isinstance(r, bool)}
+            if isinstance(raw_rebind_ids, list) else None)
+        err, survivor_fields = _lock_in_submit_turn(
+            rid, sid, session, text, params, has_truncation, requested_rebind_ids, hosted_task, display_kind)
+        if err is not None:
+            return err
+        if turn_isolation:
+            if turn_author:
+                logger.debug("isolated compute turns carry no author yet; the turn from %s runs unattributed",
+                             turn_author.get("id"))
+            isolated_response = _submit_prompt_to_compute_host(
+                rid, sid, session, text, display_kind=display_kind, display_metadata=display_metadata)
+            if not isolated_response.get("error"):
+                # The truncation already happened inline above (memory + DB).
+                isolated_response["result"].update(survivor_fields)
+                return isolated_response
+            # An ordinal/id alone is not consent. A client that carries a leftover ordinal into an ORDINARY
+            # submit sends a request that is indistinguishable, field by field, from a real rewind — same
+            # method, same shape, an in-range target — and the cut it asks for is a destructive
+            # replace_messages() the user never requested (#80763: 296 -> 52 messages, 244 durable rows gone).
+            # Only the client knows whether this submit is a rewind/edit/regenerate, so it has to say so; refuse
+            # the cut when it doesn't. Consent is checked BEFORE target resolution: an unconfirmed
+            # (leaked-state) request must refuse with 4029 without paying the durable transcript read or
+            # heal-stamping live history dicts that row-id resolution performs.
+            logger.warning(
+                "compute-host dispatch failed for session %s; falling back inline: %s", sid,
+                isolated_response["error"].get("message", "unknown error"))
+        if (err := _persist_session_row_for_submit(rid, session, text, display_kind)) is not None:
+            return err
+        # A completed FAILED build must not wedge the session: rebuild, don't replay it.
+        if not _restart_completed_failed_agent_build(sid, session, session.get("agent_ready")):
+            _start_agent_build(sid, session)
+        run_thread = threading.Thread(
+            target=lambda: _run_after_agent_ready(
+                rid, sid, session, text, display_kind, display_metadata, hosted_terminal_callback, turn_author),
+            daemon=True)
+        # Handle lets session.interrupt tell a live turn from a stuck `running` flag.
+        session["_run_thread"] = run_thread
+        run_thread.start()
+        return _ok(rid, {"status": "streaming", **survivor_fields})
+
+    reply = _submit_turn()
+    # Every terminal reply of the claim/turn path is a receipt: a timed-out client that retries
+    # with the same id gets THIS dict back verbatim (no second turn, no duplicate queue entry).
+    if client_request_id:
+        _record_submit_receipt(session, client_request_id, reply)
+    return reply
 
 
 # ── attachments ─────────────────────────────────────────────────────────────
