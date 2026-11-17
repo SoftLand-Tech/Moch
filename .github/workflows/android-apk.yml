@@ -54,14 +54,21 @@ jobs:
         run: |
           if [ -n "$MOCH_KEYSTORE_B64" ]; then
             echo "$MOCH_KEYSTORE_B64" | base64 -d > keystore.properties
+            # Gradle resolves relative storeFile paths against app/android/app/,
+            # not this directory — rewrite them to absolute paths.
+            SF=$(grep '^storeFile=' keystore.properties | cut -d= -f2-)
+            case "$SF" in
+              /*) ;;
+              *) sed -i "s|^storeFile=.*|storeFile=$PWD/$SF|" keystore.properties ;;
+            esac
           else
             keytool -genkeypair -v \
-              -keystore ci-release.jks -alias ci \
+              -keystore "$PWD/ci-release.jks" -alias ci \
               -keyalg RSA -keysize 2048 -validity 10000 \
               -storepass mochci -keypass mochci \
               -dname "CN=Moch CI, OU=CI, O=SoftLand-Tech, C=EG"
             {
-              echo "storeFile=ci-release.jks"
+              echo "storeFile=$PWD/ci-release.jks"
               echo "storePassword=mochci"
               echo "keyAlias=ci"
               echo "keyPassword=mochci"
