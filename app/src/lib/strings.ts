@@ -251,6 +251,9 @@ const EN: Catalog = {
   'bots.delete': 'Delete',
   'bots.delete.title': 'Tap again to delete',
   'bots.delete.failed': "Couldn't delete this bot: {why}",
+  'connectors.browse.empty': 'No servers bundled in this build — add one manually',
+  'connectors.empty.matches': 'No matches',
+  'connectors.offline': 'Offline',
 }
 
 const AR: Catalog = {
@@ -453,6 +456,9 @@ const AR: Catalog = {
   'bots.delete': 'حذف',
   'bots.delete.title': 'اضغط مرة أخرى للحذف',
   'bots.delete.failed': 'تعذّر حذف هذا البوت: {why}',
+  'connectors.browse.empty': 'لا توجد خوادم مضمّنة في هذا الإصدار — أضف واحدة يدويًا',
+  'connectors.empty.matches': 'لا توجد نتائج مطابقة',
+  'connectors.offline': 'غير متصل',
 }
 
 const CATALOGS: Record<Locale, Catalog> = { en: EN, ar: AR }
