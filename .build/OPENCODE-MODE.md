@@ -30,12 +30,17 @@ truth**; UI slices consume them, never re-implement the wire.
   `data.sessionID === ocSessionId`. Event order for one tool call:
   `session.tool.input.started` (has `name`!) → `session.tool.input.ended`
   → `session.tool.called` (`input` object) → `session.tool.progress` (opt)
-  → `session.tool.success|failed`. Track tool NAMES from `input.started`
-  keyed by `data.id`; `.called` starts the running row; `.success/.failed`
-  finish it. Text: `session.text.delta {delta}`. Reasoning:
-  `session.reasoning.delta {delta}`. Turn end: `session.execution.succeeded`
-  / `session.execution.failed {error}` / `session.idle`. Permission:
-  `permission.asked {id, action, resources, message?}`.
+  → `session.tool.success|failed`. The UI row starts at `input.started`
+  (first signal a tool exists — waiting for `.called` hid long tools for
+  their whole input phase); `.called` adds the input preview; `.success/
+  .failed` finishes it. Track tool NAMES from `input.started` keyed by
+  `data.id`. Silence watchdog: 15 s with NO frames when idle; 300 s while
+  a tool is in flight (a long write/build is legitimately silent — the
+  15 s rule killed healthy turns mid-write). Text: `session.text.delta
+  {delta}`. Reasoning: `session.reasoning.delta {delta}`. Turn end:
+  `session.execution.succeeded` / `session.execution.failed {error}` /
+  `session.idle`. Permission: `permission.asked {id, action, resources,
+  message?}`.
 - `POST /api/session/:id/interrupt` → stop.
 - `POST /api/session/:id/permission/:requestID/reply {reply:'once'|'always'|'reject'}`
 - `GET  /api/session/:id/message` → `{data:[...]}` NEWEST FIRST (reverse).

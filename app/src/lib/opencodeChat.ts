@@ -192,18 +192,26 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
     }
   })()
 
+  // Events in flight: a tool that has STARTED but not finished legitimately
+  // produces no frames while it generates/runs (a big file write can stream
+  // its input for minutes). The 15 s wedge detector must not fire through
+  // that — it killed healthy turns mid-write. Tracked by id, removed on
+  // success/failed.
+  const activeTools = new Set<string>()
+  let lastSilenceLimitMs = 15_000
   const armSilence = () => {
-    // 15 s with no frame at all means the relay is wedged — end the turn
-    // (heartbeats arrive as comment lines, which never reach onEvent, so a
-    // truly silent stream trips this; an active model keeps resetting it).
+    // No frame at all means the relay is wedged — end the turn. Heartbeats
+    // arrive as comment lines, which never reach onEvent, so a truly silent
+    // stream trips this; an active model keeps resetting it. In-flight
+    // tools get a much longer leash: silence during a running tool is normal.
     if (silenceTimer) clearTimeout(silenceTimer)
-    silenceTimer = setTimeout(() => resolveSilent('silent'), 15_000)
+    lastSilenceLimitMs = activeTools.size > 0 ? 300_000 : 15_000
+    silenceTimer = setTimeout(() => resolveSilent('silent'), lastSilenceLimitMs)
   }
 
   const onEvent = (e: OcEvent) => {
     const d = e.data || {}
     if (String(d.sessionID ?? '') !== ocId) return
-    armSilence()
     switch (e.type) {
       case 'session.text.delta': {
         const delta = String(d.delta ?? '')
@@ -231,8 +239,21 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
         break
       }
       case 'session.tool.input.started': {
+        // The FIRST signal a tool exists. Show the row NOW — waiting for
+        // .called hid long tools (big file writes) for their whole input
+        // phase, so a turn could die with the tool never rendered at all.
         const id = String(d.id ?? '')
-        if (id) toolNames.set(id, String(d.name ?? 'tool'))
+        if (!id) break
+        const name = String(d.name ?? 'tool')
+        toolNames.set(id, name)
+        activeTools.add(id)
+        toolStartTs.set(id, Date.now())
+        if (!started) {
+          hooks.start()
+          started = true
+        }
+        hasActivity = true
+        hooks.tool(id, name, 'running')
         break
       }
       case 'session.tool.called': {
@@ -243,7 +264,7 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
           started = true
         }
         hasActivity = true
-        toolStartTs.set(id, Date.now())
+        if (!toolStartTs.has(id)) toolStartTs.set(id, Date.now())
         hooks.tool(id, toolNames.get(id) ?? 'tool', 'running', previewOf(d.input))
         break
       }
@@ -258,6 +279,7 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
       case 'session.tool.failed': {
         const id = String(d.id ?? '')
         if (!id) break
+        activeTools.delete(id)
         const dur = toolStartTs.get(id)
         hooks.tool(
           id,
@@ -311,6 +333,9 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
       default:
         break
     }
+    // Re-arm AFTER the switch: the silence limit depends on whether a tool
+    // is in flight (events above may have added/removed one).
+    armSilence()
     if (turnDone) finishOnce()
   }
 
@@ -356,12 +381,14 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
     return
   }
   if (!turnDone) {
-    // No terminal frame: the SSE connection died mid-turn (or went silent
-    // for 15 s — a wedged relay). The turn is dead either way; the message
-    // says which, with the drop reason when the stream rejected.
+    // No terminal frame: the SSE connection died mid-turn (or went silent —
+    // a wedged relay). The turn is dead either way; the message says which,
+    // with the drop reason when the stream rejected. The silence message
+    // reports the limit that actually fired (15 s idle / 180 s with a tool
+    // in flight) so a long silent tool reads differently from a dead stream.
     failed = true
     errorMsg = errorMsg ?? (winner === 'silent'
-      ? `The model stopped responding (no events for 15s, ${hasActivity ? 'mid-answer' : 'before any output'})`
+      ? `The model stopped responding (no events for ${Math.round(lastSilenceLimitMs / 1000)}s, ${hasActivity ? 'mid-answer' : 'before any output'})`
       : streamErr
         ? `The OpenCode connection dropped mid-turn — ${describeOcError(streamErr)}`
         : 'The OpenCode connection dropped mid-turn')
