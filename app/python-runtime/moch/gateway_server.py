@@ -28,7 +28,7 @@ import socket
 import threading
 import time
 import traceback
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 _STATE: dict[str, Any] = {
     "started": False,
@@ -53,6 +53,152 @@ _READY_TIMEOUT_S = 90.0  # first boot extracts/compiles; phone storage is slow
 # initial try plus one retry per scheduled delay. Pure data so tests can pin
 # the schedule; give-up leaves the error state exactly as before.
 _BOOT_RETRY_DELAYS_S: tuple[float, ...] = (5.0, 15.0, 60.0)
+
+
+# ── BUG-132 residual hardening: the browser warm-up loop ─────────────────────
+# The first minutes after a cold boot resolve a MINIMAL tool kit (the tool
+# registry matures late — device-measured: 6 tools at T+60s vs 21 with all ten
+# browser_* at T+5min), so sessions built in the window snapshot a cold
+# catalog. The prewarm loop re-arms on first readiness: browser_gate.activate
+# clears both caches AND walks the live sessions, healing early chats in
+# place. The OLD loop was ``for _ in range(60)`` at 15 s/pass — a silent
+# ~15-minute ceiling that fresh installs outgrew (">15 min cold-kit window"
+# reports: the registry matured AFTER the loop gave up and nothing ever
+# re-armed) — and every pass paid a FULL get_tool_definitions() catalog build
+# just to ask one yes/no question. Both fixed below: unbounded + backoff, and
+# a toolset-level probe that builds no catalog. Module-level constants (like
+# _BOOT_RETRY_DELAYS_S) so tests can shrink them.
+_PREWARM_POLL_S = 15.0
+_PREWARM_BACKOFF_AFTER = 8
+_PREWARM_BACKOFF_STEP_S = 15.0
+_PREWARM_MAX_POLL_S = 60.0
+
+
+def _prewarm_poll_delay(
+    pass_no: int,
+    *,
+    poll_s: float,
+    backoff_after: int,
+    backoff_step_s: float,
+    max_poll_s: float,
+) -> float:
+    """Seconds to sleep after not-ready pass ``pass_no`` (1-based).
+
+    Base cadence for the first ``backoff_after`` consecutive not-ready passes,
+    then one backoff step per further pass, capped at ``max_poll_s`` — so a
+    forever-cold relay costs a daemon-thread wake a minute, not a busy tick.
+    """
+    if pass_no <= backoff_after:
+        return poll_s
+    return min(poll_s + (pass_no - backoff_after) * backoff_step_s, max_poll_s)
+
+
+def _browser_tools_registered() -> bool:
+    """CHEAP toolset-level readiness probe: browser_navigate is registered
+    AND its own availability gate passes.
+
+    The old per-pass probe built the entire catalog every pass
+    (get_tool_definitions: registry walk + dynamic schemas + sanitizer +
+    tool-search assembly) to ask this one yes/no question. This walks the
+    registry directly — registration is the maturity signal, and the routed
+    availability gate is the same check_fn the catalog build would consult,
+    so readiness means exactly what it meant before, minus the build. The
+    expensive full-catalog work now lives only in the readiness ACTION
+    (browser_gate.activate) and in the boot-time warm kit
+    (_warm_imports_and_catalog)."""
+    try:
+        import model_tools as _mt
+
+        # Not registered yet — the registry fills in late on cold boots.
+        if not _mt.get_toolset_for_tool("browser_navigate"):
+            return False
+        from tools.registry import registry as _registry
+
+        entry = _registry.get_entry("browser_navigate")
+        check = getattr(entry, "check_fn", None)
+        if check is None:
+            return entry is not None
+        return bool(check())
+    except Exception:
+        return False
+
+
+def _prewarm_pass_maintenance() -> None:
+    """Between-pass upkeep (not-ready passes only): drop any memoized cold
+    catalog so the next FULL build — a session's first request, or the
+    readiness ACTION — recomputes WARM once the registry matures. Deliberately
+    cheap: one dict clear, never a catalog build."""
+    try:
+        from model_tools import _clear_tool_defs_cache as _clr
+
+        _clr()
+    except Exception:
+        pass
+
+
+def _browser_prewarm_probe() -> bool:
+    """The per-pass probe the warm-up loop actually runs: the cheap
+    registered-check, plus the between-pass memo drop while not ready."""
+    ready = _browser_tools_registered()
+    if not ready:
+        _prewarm_pass_maintenance()
+    return ready
+
+
+def _prewarm_browser_loop(
+    probe: Callable[[], bool],
+    on_ready: Callable[[], None],
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+    poll_s: float = _PREWARM_POLL_S,
+    backoff_after: int = _PREWARM_BACKOFF_AFTER,
+    backoff_step_s: float = _PREWARM_BACKOFF_STEP_S,
+    max_poll_s: float = _PREWARM_MAX_POLL_S,
+) -> None:
+    """Poll ``probe`` until readiness, then run ``on_ready`` EXACTLY once.
+
+    Unbounded (BUG-132 residual): the old ``range(60)`` loop silently expired
+    after ~15 minutes; this one never does. Polling backs off after
+    ``backoff_after`` consecutive not-ready passes (see
+    _prewarm_poll_delay); any readiness flip ends the loop — the action fires
+    and the backoff streak conceptually resets with the next warm-up.
+    Interval/backoff knobs are kwargs (constants are the defaults) so tests
+    can shrink them and count passes.
+    """
+    passes = 0
+    while True:
+        if probe():
+            on_ready()
+            return
+        passes += 1
+        sleep(
+            _prewarm_poll_delay(
+                passes,
+                poll_s=poll_s,
+                backoff_after=backoff_after,
+                backoff_step_s=backoff_step_s,
+                max_poll_s=max_poll_s,
+            )
+        )
+
+
+def _warm_imports_and_catalog() -> None:
+    """First-import cost at boot, not mid-request (Tier A bundle), plus ONE
+    full tool-catalog build (BUG-132): the first session's first
+    get_tool_definitions() then hits a warm memo instead of paying the
+    registry walk + schema build mid-request. All best-effort — failures are
+    swallowed; the prewarm loop re-arms the catalog as the registry matures."""
+    for _mod in ("edge_tts", "PIL.Image", "aiohttp"):
+        try:
+            __import__(_mod)
+        except Exception:
+            pass
+    try:
+        import model_tools as _mt
+
+        _mt.get_tool_definitions(None, None, quiet_mode=True)
+    except Exception:
+        pass
 
 
 def _free_port() -> int:
@@ -373,7 +519,12 @@ def _run_server(port: int) -> None:
         _warm_waiters = set()
 
         def _browser_tools_ready() -> bool:
-            """True when browser_navigate resolves in a FRESH catalog build."""
+            """True when browser_navigate resolves in a FRESH catalog build.
+
+            The FULL (expensive) probe — kept for the per-request note
+            dispatch and the _browser_warming predicate. The warm-up loop
+            below must NOT use it: it now polls the cheap
+            _browser_tools_registered instead (BUG-132 residual)."""
             try:
                 import model_tools
 
@@ -391,53 +542,43 @@ def _run_server(port: int) -> None:
             return os.environ.get("MOCH_BROWSER_RELAY", "") == "1" and not _browser_tools_ready()
 
         def _prewarm_browser() -> None:
-            # Poll gently: each pass clears the memo (forcing a fresh, WARM
-            # recompute once the registry matures) and the lazy installs the
-            # probes trigger ARE the warm-up. On first readiness, run the full
-            # activate so open chats are refreshed in place.
+            # BUG-132 residual: poll gently with the CHEAP probe (no
+            # full-catalog build per pass — the expensive full catalog runs
+            # exactly once below, on first readiness, and once in the boot
+            # import-prewarm), never silently expire (the old range(60) loop
+            # capped the window at ~15 minutes, which fresh installs
+            # outgrew), and back off while the registry is slow to mature.
             import time as _time
 
-            for _ in range(60):  # ~15 min cap
-                if _browser_tools_ready():
-                    _warm_rearm()
-                    print("[moch] browser toolset warm", flush=True)
-                    # Auto-continue: every session that asked during the window
-                    # gets ONE short continuation turn — the user's original
-                    # request is already in the agent's context, so this is a
-                    # single cheap prompt, submitted through the same queue the
-                    # app uses (safe if a turn is still running).
-                    for _sid in list(_warm_waiters):
-                        _warm_waiters.discard(_sid)
-                        try:
-                            _note_upstream(
-                                {
-                                    "jsonrpc": "2.0",
-                                    "id": "moch-warm-" + _sid,
-                                    "method": "prompt.submit",
-                                    "params": {
-                                        "session_id": _sid,
-                                        "text": "[SYSTEM: The in-app browser is now ready. Carry out the user's earlier browser request now.]",
-                                    },
-                                }
-                            )
-                        except Exception:
-                            pass
-                    return
-                try:
-                    from model_tools import _clear_tool_defs_cache as _clr
+            def _action() -> None:
+                _warm_rearm()
+                print("[moch] browser toolset warm", flush=True)
+                # Auto-continue: every session that asked during the window
+                # gets ONE short continuation turn — the user's original
+                # request is already in the agent's context, so this is a
+                # single cheap prompt, submitted through the same queue the
+                # app uses (safe if a turn is still running).
+                for _sid in list(_warm_waiters):
+                    _warm_waiters.discard(_sid)
+                    try:
+                        _note_upstream(
+                            {
+                                "jsonrpc": "2.0",
+                                "id": "moch-warm-" + _sid,
+                                "method": "prompt.submit",
+                                "params": {
+                                    "session_id": _sid,
+                                    "text": "[SYSTEM: The in-app browser is now ready. Carry out the user's earlier browser request now.]",
+                                },
+                            }
+                        )
+                    except Exception:
+                        pass
 
-                    _clr()
-                except Exception:
-                    pass
-                _time.sleep(15)
+            _prewarm_browser_loop(_browser_prewarm_probe, _action, sleep=_time.sleep)
 
         def _import_prewarm() -> None:
-            # First-import cost at boot, not mid-request (Tier A bundle).
-            for _mod in ("edge_tts", "PIL.Image", "aiohttp"):
-                try:
-                    __import__(_mod)
-                except Exception:
-                    pass
+            _warm_imports_and_catalog()
 
         threading.Thread(target=_import_prewarm, name="moch-import-prewarm", daemon=True).start()
         _prewarm = threading.Thread(target=_prewarm_browser, name="moch-browser-prewarm", daemon=True)
