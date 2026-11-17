@@ -10,7 +10,6 @@ import {
   Image,
   PanResponder,
   Platform,
-  ActivityIndicator,
   ScrollView,
   SectionList,
   TextInput,
@@ -24,6 +23,7 @@ import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller
 import RAnimated, { useAnimatedStyle } from 'react-native-reanimated'
 import { usePathname } from 'expo-router'
 import { useStore } from '@nanostores/react'
+import { isConnected as isConnectedAtom } from '../lib/gateway'
 import { archivedIds, groupChats, pinnedIds } from '../lib/chatListState'
 import type { RowStatus } from '../lib/attention'
 import { thinkerAtom } from '../lib/thinker'
@@ -321,6 +321,10 @@ export function Sidebar({
   // would touch a file outside this slice. Same theme, different data.
   const thinker = useStore(thinkerAtom)
   const ocMode = thinker === 'opencode'
+  // Boot vs failure: right after launch the gateway (and therefore the oc
+  // server) is still starting. That is not an error — the list shows a
+  // skeleton until the first successful connect, then fetches.
+  const online = useStore(isConnectedAtom)
   // Hermes-only nav rows drop; Chats, Terminal (and the docked Settings) stay.
   const shownNav = useMemo(
     () => (ocMode ? nav.filter((n) => !OC_HIDDEN_NAV_KEYS.has(n.key)) : nav),
@@ -339,6 +343,14 @@ export function Sidebar({
     const cached = ocSessionsCached()
     if (cached) {
       setOcSessions(cached)
+      setOcError('')
+      return
+    }
+    // Booting: the gateway hasn't connected yet this run, so the oc server
+    // cannot answer — show the skeleton, not a scary error. The effect
+    // re-runs when `online` flips true and fetches then.
+    if (!online) {
+      setOcLoading(true)
       setOcError('')
       return
     }
@@ -365,7 +377,7 @@ export function Sidebar({
         setOcError(describeOcError(e) || 'Could not reach the OpenCode server')
       })
     return () => { alive = false }
-  }, [open, ocMode])
+  }, [open, ocMode, online])
   const { width, height } = useWindowDimensions()
   const insets = useSafeAreaInsets()
   const anim = progress
@@ -951,8 +963,18 @@ export function Sidebar({
                   <Text style={s.sectionLabel}>OpenCode sessions</Text>
                 </View>
                 {ocLoading ? (
-                  <View style={s.ocState}>
-                    <ActivityIndicator color={C.accent} />
+                  // Skeleton rows while the agent boots (or the list loads):
+                  // placeholder bars in the row rhythm — no spinner, no error
+                  // copy that reads like a failure before anything failed.
+                  <View accessibilityLabel="OpenCode sessions loading">
+                    {[0, 1, 2].map((i) => (
+                      <View key={i} style={[s.recentRow, { opacity: 0.55 - i * 0.15 }]}>
+                        <View style={{ flex: 1, gap: 7 }}>
+                          <View style={{ height: 12, width: `${74 - i * 16}%`, borderRadius: 6, backgroundColor: C.border }} />
+                          <View style={{ height: 9, width: '38%', borderRadius: 5, backgroundColor: C.border, opacity: 0.6 }} />
+                        </View>
+                      </View>
+                    ))}
                   </View>
                 ) : ocError ? (
                   <Text style={s.ocStateText}>{ocError}</Text>

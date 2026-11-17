@@ -70,12 +70,12 @@ import { chatTabFocused } from '../../src/lib/attention'
 import { draftFor, setDraft } from '../../src/lib/drafts'
 import { activeBotAtom, setActiveBot } from '../../src/lib/fleet'
 import { shareInInbox, ackShareIn, applySharedToDraft, type SharedFile } from '../../src/lib/shareIn'
-import { isConnected as isConnectedAtom, connectionState, gatewayError, retryNow } from '../../src/lib/gateway'
+import { isConnected as isConnectedAtom, everConnected, connectionState, gatewayError, retryNow } from '../../src/lib/gateway'
 import { completeSlash, loadCatalog, runCommand, parseSlashCommand, canonicalName, interactiveTarget, describeCommand, subsFor, argumentModeFor, slashLabel, localCompleteSync, resolveSlashRoute, type CompletionItem, type SlashOutcome } from '../../src/lib/slash'
 import { liveModel, liveReasoning, liveReasoningDisplay, fetchReasoningDisplay } from '../../src/lib/modelState'
 import { thinkerAtom, ocOneShotAtom } from '../../src/lib/thinker'
 import { ocPickFor, rememberOcPick } from '../../src/lib/opencodeChat'
-import { ocDefaultModel } from '../../src/lib/opencodeClient'
+import { ocDefaultModel, ocEnsureServer } from '../../src/lib/opencodeClient'
 import { ModelPickerSheet } from '../../src/components/ModelPickerSheet'
 import { CommandOptionsSheet } from '../../src/components/CommandOptionsSheet'
 import { CommandCatalogSheet } from '../../src/components/CommandCatalogSheet'
@@ -127,6 +127,10 @@ export default function Chat() {
   // only appears when the outage outlasts this grace window.
   const [offlineGrace, setOfflineGrace] = useState(false)
   const connState = useStore(connectionState)
+  // Never connected yet THIS run = booting, not offline. The banner must not
+  // tell a phone with full signal that it is "Offline" while the embedded
+  // agent is still coming up (1.0.39 routes straight to chat during boot).
+  const everOpen = useStore(everConnected)
   useEffect(() => {
     if (online) { setOfflineGrace(false); return }
     setOfflineGrace(true)
@@ -195,11 +199,13 @@ export default function Chat() {
       }
       return () => { alive = false }
     }
-    ocDefaultModel()
+    ocEnsureServer()
+      .catch(() => {})
+      .then(() => ocDefaultModel())
       .then((m) => { if (alive) setOcModel(m?.modelID ?? '') })
       .catch(() => {})
     return () => { alive = false }
-  }, [ocMode, ocOneShot, modelPickerOpen, storedId])
+  }, [ocMode, ocOneShot, modelPickerOpen, storedId, online])
   const [catalogOpen, setCatalogOpen] = useState(false)
   const [optionSheet, setOptionSheet] = useState<{ command: string; allowText: boolean } | null>(null)
   const listRef = useRef<FlatList>(null)
@@ -1207,7 +1213,9 @@ export default function Chat() {
               accessibilityLabel="Reconnect"
             >
               <Text style={s.bannerText}>
-                {conn === 'connecting' ? 'Connecting…' : `Offline${gerr ? ' — tap to retry' : ''}`}
+                {conn === 'connecting' ? 'Connecting…'
+                  : !everOpen ? 'Starting your agent…'
+                  : `Offline${gerr ? ' — tap to retry' : ''}`}
                 {qb.length ? ` · ${qb.length} queued` : ''}
               </Text>
             </Pressable>
