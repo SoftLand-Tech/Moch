@@ -65,6 +65,7 @@ import {
   stopOpencodeServer,
 } from '../../src/lib/thinker'
 import { parseAbout, readAbout, saveAbout, type AboutFields } from '../../src/lib/aboutMe'
+import { checkForMochUpdate, otaSupported, reloadIntoUpdate } from '../../src/lib/updates'
 
 /** Appearance cards: human captions owned by i18n, not by theme.ts. */
 const THEME_CAPTION_KEY: Record<ThemeId, string> = {
@@ -302,6 +303,10 @@ function SettingsInner() {
   const [aboutOpen, setAboutOpen] = React.useState(false)
   const [aboutForm, setAboutForm] = React.useState<AboutFields>({ name: '', work: '', extra: '' })
   const [aboutError, setAboutError] = React.useState<string | null>(null)
+  // OTA (expo-updates): manual check from the About section. The native side
+  // already checks on every launch (CHECK_ON_LAUNCH=ALWAYS) and applies on
+  // the next cold start; this row is the immediate/visible path.
+  const [updateState, setUpdateState] = React.useState<'idle' | 'checking' | 'ready' | 'uptodate'>('idle')
   const notifPerm = useStore(notificationPermission)
   const linux = useLinuxGuest()
   const runtime = useRuntimeInfo()
@@ -461,6 +466,35 @@ function SettingsInner() {
         setAboutError(e instanceof Error ? e.message : String(e))
       } finally {
         setAboutBusy(false)
+      }
+    })()
+  }
+
+  // Manual OTA check: honest three-way result, restart offer when ready.
+  const runUpdateCheck = () => {
+    if (updateState === 'checking') return
+    setUpdateState('checking')
+    void (async () => {
+      const r = await checkForMochUpdate()
+      if (r.error) {
+        showAlert(
+          t('settings.updates.check'),
+          t('settings.updates.failed', { why: r.error }),
+          [{ text: t('chrome.alert.ok') }],
+        )
+        setUpdateState('idle')
+      } else if (r.available) {
+        setUpdateState('ready')
+        showAlert(t('settings.updates.ready.title'), t('settings.updates.ready.body'), [
+          { text: t('common.close'), style: 'cancel' },
+          {
+            text: t('settings.updates.restart'),
+            onPress: () => { void reloadIntoUpdate() },
+          },
+        ])
+      } else {
+        setUpdateState('uptodate')
+        setTimeout(() => setUpdateState('idle'), 4000)
       }
     })()
   }
@@ -680,6 +714,24 @@ function SettingsInner() {
               label={`Moch v${appVersion()} (${appBuild()})`}
               disabled
             />
+            {otaSupported() ? (
+              <Row
+                label={
+                  updateState === 'checking'
+                    ? t('settings.updates.checking')
+                    : updateState === 'uptodate'
+                      ? t('settings.updates.uptodate')
+                      : updateState === 'ready'
+                        ? t('settings.updates.ready.row')
+                        : t('settings.updates.check')
+                }
+                chevron={updateState === 'idle'}
+                right={updateState === 'checking' ? <Spinner size="small" color={C.accent} /> : undefined}
+                onPress={updateState === 'idle' ? runUpdateCheck : undefined}
+                disabled={updateState !== 'idle'}
+                a11y={t('settings.updates.a11y')}
+              />
+            ) : null}
           </Group>
           <View style={[s.btnPair, { flexDirection: dir.row }]}>
             <GhostBtn
