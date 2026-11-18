@@ -18,7 +18,7 @@
  * creating from the drawer would be a second implementation of that flow.
  */
 import React, { useEffect, useMemo, useState } from 'react'
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { MaterialCommunityIcons } from '@expo/vector-icons'
 import { useRouter } from 'expo-router'
 import { useStore } from '@nanostores/react'
@@ -36,9 +36,7 @@ import {
 import { rpc } from '../lib/gateway'
 import {
   DEFAULT_PROFILE,
-  botInitials,
   botStatusOf,
-  botTintIndex,
   relativeAge,
   rosterRows,
   withSessionPreviews,
@@ -46,6 +44,7 @@ import {
   type RosterRow,
 } from '../lib/botRosterMeta'
 import { StatusDot } from './Sidebar'
+import { BotAvatar } from './BotAvatar'
 
 export interface BotsRosterProps {
   /** The roster from `profiles.list` (`fleetProfiles`), or raw wire rows. */
@@ -217,7 +216,7 @@ export function BotsRoster({ profiles, onOpenBot, onNewBot, onCloseDrawer, activ
               accessibilityLabel={name}
               accessibilityHint={tr('bots.menu.hint')}
             >
-              <BotDisc row={row} />
+              <BotAvatar profile={row.profile} isDefault={row.isDefault} size={32} />
               <View style={s.rowText}>
                 <Text style={[s.name, on && s.nameOn]} numberOfLines={1}>{name}</Text>
                 {subtitle ? (
@@ -292,30 +291,6 @@ export function BotsRoster({ profiles, onOpenBot, onNewBot, onCloseDrawer, activ
           </View>
         </View>
       ) : null}
-    </View>
-  )
-}
-
-/**
- * The colored initial disc. Colors are read from `C` at render (the theme
- * mutates its tokens in place), and the slot comes from a stable hash of the
- * name so a bot keeps its color across launches. The default agent gets the
- * mascot instead — it is Moch, not a hire.
- */
-function BotDisc({ row }: { row: RosterRow }) {
-  const s = useStyles(makeS)
-  if (row.isDefault) {
-    return (
-      <View style={[s.disc, s.discDefault]}>
-        <Image source={require('../../assets/mochi-run-1.png')} style={s.discMochi} />
-      </View>
-    )
-  }
-  const tints = [C.accent, C.blush, C.green, C.amber]
-  const bg = tints[botTintIndex(row.profile)]
-  return (
-    <View style={[s.disc, { backgroundColor: bg }]}>
-      <Text style={s.discText} numberOfLines={1}>{botInitials(row.name)}</Text>
     </View>
   )
 }

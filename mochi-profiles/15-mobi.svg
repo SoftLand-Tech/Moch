@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="mochi-char-15" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" width="100%" height="100%">
+  <defs>
+    <linearGradient id="sproutGrad-15" x1="550" y1="380" x2="880" y2="220" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#E76437"/><stop offset="55%" stop-color="#F89236"/><stop offset="100%" stop-color="#FA9F3C"/></linearGradient>
+    <linearGradient id="bodyGrad-15" x1="627" y1="300" x2="627" y2="990" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#FFFFFF"/><stop offset="55%" stop-color="#F8FAFC"/><stop offset="78%" stop-color="#E2E8F0"/><stop offset="92%" stop-color="#CBD5E1"/><stop offset="100%" stop-color="#94A3B8"/></linearGradient>
+    <linearGradient id="visorGrad-15" x1="627" y1="400" x2="627" y2="860" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#232A40"/><stop offset="100%" stop-color="#141826"/></linearGradient>
+    
+    <style>
+      #mochi-char-15 .body-part {
+        transform-origin: 627px 985px;
+        animation: breathe-15 4.6s cubic-bezier(0.45, 0.05, 0.55, 0.95) -2.05s infinite;
+      }
+      @keyframes breathe-15 {
+        0%, 100% { transform: scale(1, 1) translateY(0px); }
+        22% { transform: scale(1.018, 0.982) translateY(3px); }
+        52% { transform: scale(0.982, 1.028) translateY(-10px); }
+        70% { transform: scale(0.988, 1.020) translateY(-7px); }
+        86% { transform: scale(1.010, 0.990) translateY(1.5px); }
+      }
+      #mochi-char-15 .sprout-part {
+        transform-origin: 627px 385px;
+        animation: sprout-15 4.6s ease-in-out -2.05s infinite;
+      }
+      @keyframes sprout-15 {
+        0%, 100% { transform: rotate(0deg) translateY(0px); }
+        25% { transform: rotate(-3.5deg) translateY(2px); }
+        55% { transform: rotate(4.5deg) translateY(-9px); }
+        80% { transform: rotate(-2deg) translateY(1px); }
+      }
+      #mochi-char-15 .visor-part {
+        transform-origin: 627px 615px;
+        animation: visor-15 4.6s cubic-bezier(0.45, 0.05, 0.55, 0.95) -2.05s infinite;
+      }
+      @keyframes visor-15 {
+        0%, 100% { transform: translateY(0px) scale(1); }
+        22% { transform: translateY(2px) scale(1.004, 0.996); }
+        52% { transform: translateY(-8px) scale(0.996, 1.006); }
+        86% { transform: translateY(1px); }
+      }
+      #mochi-char-15 .face-part {
+        transform-origin: 627px 615px;
+        animation: glance-15 11.5s ease-in-out -2.05s infinite;
+      }
+      @keyframes glance-15 {
+        0%, 25%, 100% { transform: translate(0px, 0px); }
+        30%, 44% { transform: translate(-5px, -3px); }
+        48%, 68% { transform: translate(0px, 0px); }
+        73%, 86% { transform: translate(5px, -3px); }
+      }
+      #mochi-char-15 .eye {
+        transform-box: fill-box;
+        transform-origin: center 65%;
+        animation: blink-15 5.2s -2.05s infinite;
+      }
+      @keyframes blink-15 {
+        0%, 68%, 74%, 100% { transform: scaleY(1); }
+        71% { transform: scaleY(0.08) translateY(6px); }
+      }
+    </style>
+  
+  </defs>
+  <rect width="1254" height="1254" fill="#000000"/>
+  <g>
+    
+      <g class="sprout-part">
+        <!-- Long swept-back Mochi Bunny Ears -->
+        <path d="M 535 395 C 465 305, 335 215, 265 255 C 225 280, 285 375, 395 425 C 455 450, 505 435, 535 395 Z" fill="url(#bodyGrad-15)"/>
+        <path d="M 495 385 C 440 315, 345 255, 300 280 C 275 295, 320 360, 405 398 Z" fill="#FECDD3" opacity="0.65"/>
+        <path d="M 719 395 C 789 305, 919 215, 989 255 C 1029 280, 969 375, 859 425 C 799 450, 749 435, 719 395 Z" fill="url(#bodyGrad-15)"/>
+        <path d="M 759 385 C 814 315, 909 255, 954 280 C 979 295, 934 360, 849 398 Z" fill="#FECDD3" opacity="0.65"/>
+        <!-- Dad Mochi's signature warm orange sprout nestled in the center! -->
+        <path d="M 627 385 C 610 325, 635 265, 675 265 C 710 265, 695 335, 627 385 Z" fill="url(#sproutGrad-15)"/>
+      </g>
+    
+    
+    <g class="body-part">
+      <path d="M 627 375 C 745 375, 855 425, 920 515 C 975 590, 990 685, 980 775 C 968 890, 895 965, 780 982 C 705 992, 549 992, 474 982 C 359 965, 286 890, 274 775 C 264 685, 279 590, 334 515 C 399 425, 509 375, 627 375 Z" fill="url(#bodyGrad-15)"/>
+      
+    </g>
+    <path class="visor-part" d="M 627 465 C 720 465, 805 485, 848 525 C 882 558, 888 605, 888 655 C 888 708, 875 755, 840 790 C 798 825, 715 840, 627 840 C 539 840, 456 825, 414 790 C 379 755, 366 708, 366 655 C 366 605, 372 558, 406 525 C 449 485, 534 465, 627 465 Z" fill="url(#visorGrad-15)"/>
+    <g class="face-part">
+      <g fill="#FAF1E7">
+        <g transform="translate(0, 38)">
+      <path class="eye" d="M 457 655 C 446 655, 439 646, 439 634 C 439 598, 468 572, 505 572 C 542 572, 571 598, 571 634 C 571 646, 564 655, 553 655 C 543 655, 537 646, 536 635 C 533 618, 521 608, 505 608 C 489 608, 477 618, 474 635 C 473 646, 467 655, 457 655 Z"/>
+      <path class="eye" d="M 797 655 C 808 655, 815 646, 815 634 C 815 598, 786 572, 749 572 C 712 572, 683 598, 683 634 C 683 646, 690 655, 701 655 C 711 655, 717 646, 718 635 C 721 618, 733 608, 749 608 C 765 608, 777 618, 780 635 C 781 646, 787 655, 797 655 Z"/>
+    </g>
+      </g>
+      <g fill="#FB7185">
+        
+      <ellipse cx="442" cy="725" rx="25" ry="13" transform="rotate(32 442 725)"/>
+      <ellipse cx="482" cy="735" rx="22" ry="11" transform="rotate(20 482 735)"/>
+      <ellipse cx="812" cy="725" rx="25" ry="13" transform="rotate(-32 812 725)"/>
+      <ellipse cx="772" cy="735" rx="22" ry="11" transform="rotate(-20 772 735)"/>
+    
+      </g>
+    </g>
+  </g>
+</svg>
