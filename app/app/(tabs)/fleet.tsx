@@ -42,6 +42,7 @@ import {
   FleetProfile,
 } from '../../src/lib/fleet'
 import { isConnected } from '../../src/lib/gateway'
+import { openBotChat } from '../../src/lib/botChat'
 import { showAlert } from '../../src/components/AlertDialog'
 
 /** §2.7 starter templates: tappable job seeds — zero typing path. */
@@ -75,6 +76,8 @@ export default function Fleet() {
   const [creating, setCreating] = useState(false)
   const [job, setJob] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
+  // A Chat tap resumes the bot's canonical `Bot Chat` (never a fresh session).
+  const [opening, setOpening] = useState<string | null>(null)
   // BUG-139 creation checklist: persisted defaults, launch-skill picker.
   const [checklist, setChecklist] = useState<CreateChecklist>(DEFAULT_CHECKLIST)
   const [skillsList, setSkillsList] = useState<LaunchSkill[]>([])
@@ -152,6 +155,22 @@ export default function Fleet() {
       setBusy(null)
     }
   }
+
+  // Open a bot's ONE forever-chat (`Bot Chat`) — the exact same hand-off the
+  // bot modal and the drawer roster use. Never mints a fresh session: that
+  // made every Fleet "Chat" tap look like a new normal chat with extra prompts.
+  const openBotConversation = useCallback(async (name: string) => {
+    if (opening) return
+    setOpening(name)
+    try {
+      await openBotChat(name)
+      router.navigate('/(tabs)/chat')
+    } catch (e) {
+      showAlert(t('bot.chat.failed', { why: e instanceof Error ? e.message : String(e) }))
+    } finally {
+      setOpening(null)
+    }
+  }, [opening, router, t])
 
   const waiting = status?.queue.waiting ?? []
 
@@ -306,12 +325,10 @@ export default function Fleet() {
                     <View style={[s.cardBtns, { flexDirection: dir.row }]}>
                       <PrimaryBtn
                         small
-                        label={t('fleet.chat.cta')}
+                        label={opening === item.name ? t('common.loading') : t('fleet.chat.cta')}
                         accessibilityLabel={t('fleet.chat', { name: item.name })}
-                        onPress={() => router.navigate({
-                          pathname: '/(tabs)/chat',
-                          params: { botProfile: item.name },
-                        } as never)}
+                        disabled={opening !== null}
+                        onPress={() => { void openBotConversation(item.name) }}
                         style={s.chatBtn}
                       />
                       <GhostBtn
