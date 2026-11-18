@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="mochi-char-8" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" width="100%" height="100%">
+  <defs>
+    <linearGradient id="sproutGrad-8" x1="550" y1="380" x2="880" y2="220" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#D97706"/><stop offset="55%" stop-color="#FACC15"/><stop offset="100%" stop-color="#FEF08A"/></linearGradient>
+    <linearGradient id="bodyGrad-8" x1="627" y1="300" x2="627" y2="990" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#F1F5F9"/><stop offset="50%" stop-color="#CBD5E1"/><stop offset="78%" stop-color="#94A3B8"/><stop offset="92%" stop-color="#64748B"/><stop offset="100%" stop-color="#334155"/></linearGradient>
+    <linearGradient id="visorGrad-8" x1="627" y1="400" x2="627" y2="860" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#181B26"/><stop offset="100%" stop-color="#0B0D13"/></linearGradient>
+    
+    <style>
+      #mochi-char-8 .body-part {
+        transform-origin: 627px 985px;
+        animation: breathe-8 3.8s cubic-bezier(0.45, 0.05, 0.55, 0.95) -2.96s infinite;
+      }
+      @keyframes breathe-8 {
+        0%, 100% { transform: scale(1, 1) translateY(0px); }
+        22% { transform: scale(1.018, 0.982) translateY(3px); }
+        52% { transform: scale(0.982, 1.028) translateY(-10px); }
+        70% { transform: scale(0.988, 1.020) translateY(-7px); }
+        86% { transform: scale(1.010, 0.990) translateY(1.5px); }
+      }
+      #mochi-char-8 .sprout-part {
+        transform-origin: 627px 400px;
+        animation: sprout-8 3.8s ease-in-out -2.96s infinite;
+      }
+      @keyframes sprout-8 {
+        0%, 100% { transform: rotate(0deg) translateY(0px); }
+        25% { transform: rotate(-3.5deg) translateY(2px); }
+        55% { transform: rotate(4.5deg) translateY(-9px); }
+        80% { transform: rotate(-2deg) translateY(1px); }
+      }
+      #mochi-char-8 .visor-part {
+        transform-origin: 627px 615px;
+        animation: visor-8 3.8s cubic-bezier(0.45, 0.05, 0.55, 0.95) -2.96s infinite;
+      }
+      @keyframes visor-8 {
+        0%, 100% { transform: translateY(0px) scale(1); }
+        22% { transform: translateY(2px) scale(1.004, 0.996); }
+        52% { transform: translateY(-8px) scale(0.996, 1.006); }
+        86% { transform: translateY(1px); }
+      }
+      #mochi-char-8 .face-part {
+        transform-origin: 627px 615px;
+        animation: glance-8 9.5s ease-in-out -2.96s infinite;
+      }
+      @keyframes glance-8 {
+        0%, 25%, 100% { transform: translate(0px, 0px); }
+        30%, 44% { transform: translate(-5px, -3px); }
+        48%, 68% { transform: translate(0px, 0px); }
+        73%, 86% { transform: translate(5px, -3px); }
+      }
+      #mochi-char-8 .eye {
+        transform-box: fill-box;
+        transform-origin: center 65%;
+        animation: blink-8 7.0s -2.96s infinite;
+      }
+      @keyframes blink-8 {
+        0%, 68%, 74%, 100% { transform: scaleY(1); }
+        71% { transform: scaleY(0.08) translateY(6px); }
+      }
+    </style>
+  
+  </defs>
+  <rect width="1254" height="1254" fill="#000000"/>
+  <g>
+    
+      <g class="sprout-part">
+        <path d="M 627 400 C 627 310, 710 250, 775 280" fill="none" stroke="#94A3B8" stroke-width="18" stroke-linecap="round"/>
+        <circle cx="785" cy="285" r="32" fill="url(#sproutGrad-8)"/>
+      </g>
+    
+    
+      <ellipse cx="505" cy="945" rx="58" ry="34" fill="#64748B"/>
+      <ellipse cx="749" cy="945" rx="58" ry="34" fill="#64748B"/>
+    
+    <g class="body-part">
+      <path d="M 627 390 C 785 390, 914 510, 914 665 C 914 820, 785 945, 627 945 C 469 945, 340 820, 340 665 C 340 510, 469 390, 627 390 Z" fill="url(#bodyGrad-8)"/>
+      
+    </g>
+    <path class="visor-part" d="M 627 475 C 735 475, 825 515, 845 585 C 860 635, 855 700, 825 745 C 790 795, 715 815, 627 815 C 539 815, 464 795, 429 745 C 399 700, 394 635, 409 585 C 429 515, 519 475, 627 475 Z" fill="url(#visorGrad-8)"/>
+    <g class="face-part">
+      <g fill="#FAF1E7">
+        <g transform="translate(627, 638.5) scale(0.92) translate(-627, -613.5)">
+      <path class="eye" d="M 457 655 C 446 655, 439 646, 439 634 C 439 598, 468 572, 505 572 C 542 572, 571 598, 571 634 C 571 646, 564 655, 553 655 C 543 655, 537 646, 536 635 C 533 618, 521 608, 505 608 C 489 608, 477 618, 474 635 C 473 646, 467 655, 457 655 Z"/>
+      <path class="eye" d="M 797 655 C 808 655, 815 646, 815 634 C 815 598, 786 572, 749 572 C 712 572, 683 598, 683 634 C 683 646, 690 655, 701 655 C 711 655, 717 646, 718 635 C 721 618, 733 608, 749 608 C 765 608, 777 618, 780 635 C 781 646, 787 655, 797 655 Z"/>
+    </g>
+      </g>
+      <g fill="#FB923C">
+        
+      <ellipse cx="455" cy="705" rx="20" ry="10" transform="rotate(30 455 705)"/>
+      <ellipse cx="490" cy="714" rx="18" ry="9" transform="rotate(18 490 714)"/>
+      <ellipse cx="799" cy="705" rx="20" ry="10" transform="rotate(-30 799 705)"/>
+      <ellipse cx="764" cy="714" rx="18" ry="9" transform="rotate(-18 764 714)"/>
+    
+      </g>
+    </g>
+  </g>
+</svg>

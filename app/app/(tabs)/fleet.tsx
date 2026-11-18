@@ -29,6 +29,7 @@ import {
 import { isConnected } from '../../src/lib/gateway'
 import { tr, isRTL } from '../../src/lib/strings'
 import { showAlert } from '../../src/components/AlertDialog'
+import { BotAvatar } from '../../src/components/BotAvatar'
 
 /** §2.7 starter templates: tappable job seeds — zero typing path. */
 const STARTERS: { label: string; job: string }[] = [
@@ -203,11 +204,7 @@ export default function Fleet() {
                   onPress={() => router.push({ pathname: '/bot', params: { name: item.name } } as never)}
                 >
                   <View style={s.cardHead}>
-                    <Ionicons
-                      name={frozen ? 'snow-outline' : 'person-circle-outline'}
-                      size={26}
-                      color={frozen ? C.accent : C.textDim}
-                    />
+                    <BotAvatar profile={item.name} size={32} frozen={frozen} />
                     <View style={s.cardTitles}>
                       <Text style={s.cardName}>{item.name}</Text>
                       {!!item.description && (

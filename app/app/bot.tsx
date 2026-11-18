@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { ScreenShell } from '../src/components/ScreenShell'
+import { BotAvatar } from '../src/components/BotAvatar'
 import { showAlert } from '../src/components/AlertDialog'
 import { C, useStyles } from '../src/lib/theme'
 import { rpc } from '../src/lib/gateway'
@@ -171,6 +172,10 @@ export default function BotDetail() {
               <Ionicons name="chevron-back" size={18} color={C.textDim} />
               <Text style={s.backText}>{tr("fleet.detail.back")}</Text>
             </Pressable>
+            <View style={s.avatarRow}>
+              <BotAvatar profile={bot} size={48} />
+              <Text style={s.avatarName} numberOfLines={1}>{bot}</Text>
+            </View>
             <Text style={s.label}>{tr("bot.job")}</Text>
             <TextInput style={s.input} value={desc} onChangeText={setDesc}
                        placeholder="What is this bot for?" placeholderTextColor={C.textFaint} />
@@ -238,6 +243,8 @@ const makeS = () =>
     body: { padding: 16, paddingBottom: 40 },
     backRow: { flexDirection: isRTL() ? 'row-reverse' : 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
     backText: { color: C.textDim, fontSize: 13 },
+    avatarRow: { flexDirection: isRTL() ? 'row-reverse' : 'row', alignItems: 'center', gap: 12, marginTop: 8 },
+    avatarName: { color: C.text, fontSize: 18, fontWeight: '700', flex: 1 },
     label: { color: C.textDim, fontSize: 12, marginTop: 14, marginBottom: 6 },
     input: {
       color: C.text,

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="mochi-char-14" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" width="100%" height="100%">
+  <defs>
+    <linearGradient id="sproutGrad-14" x1="550" y1="380" x2="880" y2="220" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#E11D48"/><stop offset="55%" stop-color="#F43F5E"/><stop offset="100%" stop-color="#FDE047"/></linearGradient>
+    <linearGradient id="bodyGrad-14" x1="627" y1="300" x2="627" y2="990" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#FEF9C3"/><stop offset="45%" stop-color="#FDBA74"/><stop offset="75%" stop-color="#FB923C"/><stop offset="92%" stop-color="#F43F5E"/><stop offset="100%" stop-color="#BE123C"/></linearGradient>
+    <linearGradient id="visorGrad-14" x1="627" y1="400" x2="627" y2="860" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#331F36"/><stop offset="100%" stop-color="#1E1221"/></linearGradient>
+    
+    <style>
+      #mochi-char-14 .body-part {
+        transform-origin: 627px 985px;
+        animation: breathe-14 3.9s cubic-bezier(0.45, 0.05, 0.55, 0.95) -1.68s infinite;
+      }
+      @keyframes breathe-14 {
+        0%, 100% { transform: scale(1, 1) translateY(0px); }
+        22% { transform: scale(1.018, 0.982) translateY(3px); }
+        52% { transform: scale(0.982, 1.028) translateY(-10px); }
+        70% { transform: scale(0.988, 1.020) translateY(-7px); }
+        86% { transform: scale(1.010, 0.990) translateY(1.5px); }
+      }
+      #mochi-char-14 .sprout-part {
+        transform-origin: 745px 365px;
+        animation: sprout-14 3.9s ease-in-out -1.68s infinite;
+      }
+      @keyframes sprout-14 {
+        0%, 100% { transform: rotate(0deg) translateY(0px); }
+        25% { transform: rotate(-3.5deg) translateY(2px); }
+        55% { transform: rotate(4.5deg) translateY(-9px); }
+        80% { transform: rotate(-2deg) translateY(1px); }
+      }
+      #mochi-char-14 .visor-part {
+        transform-origin: 627px 615px;
+        animation: visor-14 3.9s cubic-bezier(0.45, 0.05, 0.55, 0.95) -1.68s infinite;
+      }
+      @keyframes visor-14 {
+        0%, 100% { transform: translateY(0px) scale(1); }
+        22% { transform: translateY(2px) scale(1.004, 0.996); }
+        52% { transform: translateY(-8px) scale(0.996, 1.006); }
+        86% { transform: translateY(1px); }
+      }
+      #mochi-char-14 .face-part {
+        transform-origin: 627px 615px;
+        animation: glance-14 9.8s ease-in-out -1.68s infinite;
+      }
+      @keyframes glance-14 {
+        0%, 25%, 100% { transform: translate(0px, 0px); }
+        30%, 44% { transform: translate(-5px, -3px); }
+        48%, 68% { transform: translate(0px, 0px); }
+        73%, 86% { transform: translate(5px, -3px); }
+      }
+      #mochi-char-14 .eye {
+        transform-box: fill-box;
+        transform-origin: center 65%;
+        animation: blink-14 7.6s -1.68s infinite;
+      }
+      @keyframes blink-14 {
+        0%, 68%, 74%, 100% { transform: scaleY(1); }
+        71% { transform: scaleY(0.08) translateY(6px); }
+      }
+    </style>
+  
+  </defs>
+  <rect width="1254" height="1254" fill="#000000"/>
+  <g>
+    
+      <g class="sprout-part">
+        <path d="M 745 365 C 785 290, 875 245, 935 275 C 965 290, 925 355, 845 375 Z" fill="url(#sproutGrad-14)"/>
+        <path d="M 725 355 C 745 270, 815 205, 875 225 C 905 235, 875 305, 795 345 Z" fill="#FDE047"/>
+      </g>
+    
+    
+    <g class="body-part">
+      <path d="M 575 330 C 695 320, 825 375, 905 465 C 975 545, 995 645, 985 745 C 972 875, 885 965, 755 982 C 645 995, 495 990, 415 945 C 315 890, 270 785, 275 660 C 280 535, 325 435, 405 380 C 465 340, 515 335, 575 330 Z" fill="url(#bodyGrad-14)"/>
+      
+    </g>
+    <path class="visor-part" d="M 620 425 C 718 425, 808 445, 852 485 C 886 520, 892 570, 892 620 C 892 675, 882 725, 848 762 C 805 798, 718 815, 620 815 C 522 815, 438 798, 395 762 C 360 725, 352 675, 352 620 C 352 570, 358 520, 392 485 C 435 445, 522 425, 620 425 Z" fill="url(#visorGrad-14)"/>
+    <g class="face-part">
+      <g fill="#FAF1E7">
+        <g transform="translate(0, 5)">
+      <path class="eye" d="M 457 655 C 446 655, 439 646, 439 634 C 439 598, 468 572, 505 572 C 542 572, 571 598, 571 634 C 571 646, 564 655, 553 655 C 543 655, 537 646, 536 635 C 533 618, 521 608, 505 608 C 489 608, 477 618, 474 635 C 473 646, 467 655, 457 655 Z"/>
+      <path class="eye" d="M 797 655 C 808 655, 815 646, 815 634 C 815 598, 786 572, 749 572 C 712 572, 683 598, 683 634 C 683 646, 690 655, 701 655 C 711 655, 717 646, 718 635 C 721 618, 733 608, 749 608 C 765 608, 777 618, 780 635 C 781 646, 787 655, 797 655 Z"/>
+    </g>
+      </g>
+      <g fill="#FF4D6D">
+        
+      <ellipse cx="438" cy="695" rx="24" ry="12" transform="rotate(32 438 695)"/>
+      <ellipse cx="478" cy="705" rx="22" ry="11" transform="rotate(20 478 705)"/>
+      <ellipse cx="806" cy="695" rx="24" ry="12" transform="rotate(-32 806 695)"/>
+      <ellipse cx="766" cy="705" rx="22" ry="11" transform="rotate(-20 766 705)"/>
+    
+      </g>
+    </g>
+  </g>
+</svg>
