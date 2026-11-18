@@ -13,11 +13,13 @@ import {
   ocEnsureServer,
   ocHistory,
   ocPrompt,
+  ocRunCommand,
   ocStream,
   describeOcError,
   type OcEvent,
   type OcHistoryMessage,
 } from './opencodeClient'
+import { loadOcCommands } from './ocCommands'
 import { guestRun } from './thinker'
 import { log } from './log'
 // BUG-149: session mints carry the active project's cwd, exactly like
@@ -147,6 +149,13 @@ export interface OcTurnOptions {
   /** Title used when creating the OpenCode session (first turn). */
   title?: string
   text: string
+  /**
+   * Official OpenCode command turn (issue 16): when set, POST
+   * /api/session/:id/command {name, text} instead of a plain prompt, AFTER
+   * the session is ensured. Output still streams over the same SSE pump, so
+   * the transcript renders exactly like a normal OC turn.
+   */
+  command?: { name: string; text: string }
   hooks: OcTurnHooks
   /** Polled between events; true aborts the pump (user pressed stop). */
   isCancelled?: () => boolean
@@ -170,6 +179,10 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
   const { mapKey, text, hooks, isCancelled, signal } = opts
   const ensured = await ocEnsureServer()
   if (!ensured.ok) throw new Error(ensured.error || 'The OpenCode server is not running')
+  // The server (re)started or was re-attached — refresh the official command
+  // registry so the palette and the command dispatch see the live list.
+  // Fire-and-forget: never delay or fail the turn over the palette cache.
+  void loadOcCommands({ force: true }).catch(() => {})
 
   const ocId = await ensureOcSession(mapKey, opts.title || text.slice(0, 60))
   if (isCancelled?.()) return
@@ -379,7 +392,14 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
   cap = setTimeout(() => resolveSilent('silent'), 15 * 60 * 1000)
 
   try {
-    await ocPrompt(ocId, text)
+    if (opts.command) {
+      // Official command (issue 16): same session, same SSE stream — only
+      // the submit endpoint differs. An OcError here propagates exactly
+      // like a failed prompt submit.
+      await ocRunCommand(ocId, opts.command.name, opts.command.text)
+    } else {
+      await ocPrompt(ocId, text)
+    }
   } catch (e) {
     finishOnce()
     throw e instanceof Error ? e : new Error(String(e))

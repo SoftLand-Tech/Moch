@@ -183,6 +183,9 @@ export interface BotChatDeps {
   setActiveBot: (profile: string) => Promise<void> | void
   /** Bring a stored chat on screen: shared resume + activation. */
   openChat: (storedId: string) => Promise<void>
+  /** Fresh chat scoped to the active bot (the chat module's `newChat`) —
+   *  the last-resort recovery when the canonical chat cannot be restored. */
+  newChat?: () => Promise<string>
 }
 
 let depsOverride: BotChatDeps | null = null
@@ -215,6 +218,10 @@ async function botChatDeps(): Promise<BotChatDeps> {
       // Boot restores this key, so a relaunch lands back in the bot chat.
       const storage = (await import('@react-native-async-storage/async-storage')).default
       void storage.setItem(chat.SESSION_KEY, r.storedId).catch(() => {})
+    },
+    newChat: async () => {
+      // chat.newChat already scopes to getActiveBot() (set above).
+      return chat.newChat()
     },
   }
 }
@@ -274,6 +281,53 @@ async function createBotChat(profile: string): Promise<CreateOutcome> {
   return { kind: 'created', storedId: stored }
 }
 
+/**
+ * A resume that fails like a GONE session (the stored row survived but the
+ * live session behind it no longer exists) is recovery, not failure: the
+ * user already navigated to the chat tab, so an alert would land them on a
+ * chat AND a scary error for the same tap.
+ */
+const STALE_SESSION_RX = /session not found|no such session|not found|404/i
+
+/**
+ * Last-resort recovery after a stale canonical row: mint a fresh canonical
+ * `Bot Chat` (handling the "already in use" race like the main create path),
+ * and if even that fails, fall back to a fresh chat scoped to the bot.
+ * Resolves with the id actually opened, or throws a REAL (non-stale) error.
+ */
+async function recoverBotChat(profile: string, deps: BotChatDeps): Promise<string> {
+  try {
+    const created = await createBotChat(profile)
+    if (created.kind === 'conflict') {
+      // Same race the main path handles: another client claimed the name
+      // between our lookup and our title write — adopt its row.
+      const winner = await findBotChat(profile)
+      if (!winner) {
+        throw botChatFailure(
+          `Could not open ${profile}'s ${BOT_CHAT_TITLE} — another client just claimed ` +
+            'the name but the chat is not visible yet. Try again.',
+        )
+      }
+      log('info', 'botchat', `${profile}: recovery race lost — adopting ${winner.storedId}`)
+      await deps.openChat(winner.storedId)
+      return winner.storedId
+    }
+    await deps.openChat(created.storedId)
+    return created.storedId
+  } catch (err) {
+    log('warn', 'botchat', `${profile}: canonical recovery failed — falling back to a fresh chat`)
+    // Fallback: a fresh chat scoped to the bot (setActiveBot already ran).
+    if (deps.newChat) {
+      const id = await deps.newChat()
+      // The fallback succeeded — the recovery attempt's recorded failure
+      // must not linger as a banner on a chat that actually opened.
+      botChatError.set('')
+      return id
+    }
+    throw err
+  }
+}
+
 async function openBotChatOnce(profile: string): Promise<string> {
   botChatError.set('')
   const deps = await botChatDeps()
@@ -284,8 +338,18 @@ async function openBotChatOnce(profile: string): Promise<string> {
 
   const found = await findBotChat(profile)
   if (found) {
-    await deps.openChat(found.storedId)
-    return found.storedId
+    try {
+      await deps.openChat(found.storedId)
+      return found.storedId
+    } catch (err) {
+      if (!STALE_SESSION_RX.test(errMessage(err))) throw err
+      // The registry row outlived its session. Retire the stale row
+      // (best-effort) and give the bot a fresh canonical chat instead of
+      // throwing the confusing "session not found" at the user.
+      log('warn', 'botchat', `${profile}: stale ${BOT_CHAT_TITLE} row ${found.storedId} — recovering`)
+      void botRpc('session.delete', { session_id: found.storedId }).catch(() => {})
+      return await recoverBotChat(profile, deps)
+    }
   }
 
   const created = await createBotChat(profile)

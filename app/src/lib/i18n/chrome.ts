@@ -33,6 +33,10 @@ export const chrome: Catalog = {
     'chrome.drawer.ocError': 'Could not reach the OpenCode server',
     'chrome.drawer.ocEmpty': 'No OpenCode sessions yet',
     'chrome.drawer.openOc': 'Open OpenCode chat {title}',
+    // ── [12] expandable project rows ──────────────────────────────────────
+    'chrome.drawer.projectExpand': 'Show recent chats for {name}',
+    'chrome.drawer.projectCollapse': 'Hide recent chats for {name}',
+    'chrome.drawer.moreChats': 'More',
 
     // ── Relative ages (compact, used by drawer rows / bots roster) ───────
     'chrome.age.lessMinute': '<1m',
@@ -131,6 +135,11 @@ export const chrome: Catalog = {
     'chrome.drawer.ocEmpty': 'لا جلسات OpenCode بعد',
     'chrome.drawer.openOc': 'افتح محادثة OpenCode {title}',
 
+    // ── [12] expandable project rows ──────────────────────────────────────
+    'chrome.drawer.projectExpand': 'اعرض المحادثات الأخيرة لمشروع {name}',
+    'chrome.drawer.projectCollapse': 'إخفاء المحادثات الأخيرة لمشروع {name}',
+    'chrome.drawer.moreChats': 'المزيد',
+
     // ── Relative ages ────────────────────────────────────────────────────
     'chrome.age.lessMinute': '<1 د',
     'chrome.age.minutes': '{n} د',
@@ -227,6 +236,11 @@ export const chrome: Catalog = {
     'chrome.drawer.ocEmpty': '暂无 OpenCode 会话',
     'chrome.drawer.openOc': '打开 OpenCode 对话 {title}',
 
+    // ── [12] expandable project rows ──────────────────────────────────────
+    'chrome.drawer.projectExpand': '显示“{name}”的最近对话',
+    'chrome.drawer.projectCollapse': '隐藏“{name}”的最近对话',
+    'chrome.drawer.moreChats': '更多',
+
     // ── Relative ages ────────────────────────────────────────────────────
     'chrome.age.lessMinute': '<1分',
     'chrome.age.minutes': '{n}分',
@@ -320,6 +334,11 @@ export const chrome: Catalog = {
     'chrome.drawer.ocError': 'Impossible de joindre le serveur OpenCode',
     'chrome.drawer.ocEmpty': 'Aucune session OpenCode pour le moment',
     'chrome.drawer.openOc': 'Ouvrir la discussion OpenCode {title}',
+
+    // ── [12] expandable project rows ──────────────────────────────────────
+    'chrome.drawer.projectExpand': 'Afficher les discussions récentes de {name}',
+    'chrome.drawer.projectCollapse': 'Masquer les discussions récentes de {name}',
+    'chrome.drawer.moreChats': 'Plus',
 
     // ── Relative ages ────────────────────────────────────────────────────
     'chrome.age.lessMinute': '<1 min',

@@ -62,7 +62,7 @@ function formatOcTime(ms?: number): string {
  * their own timestamp with chrome.age.* keys (SPEC §3: localize relative
  * times at the render site rather than hardcoding English units).
  */
-function ageLabel(ms?: number): string {
+export function ageLabel(ms?: number): string {
   if (!ms || !Number.isFinite(ms) || ms <= 0) return ''
   const delta = Date.now() - ms
   if (delta < 60_000) return tr('chrome.age.lessMinute')
@@ -78,7 +78,7 @@ function ageLabel(ms?: number): string {
 }
 
 /** Drawer rows that are hermes-only surfaces — dropped in OpenCode mode. */
-const OC_HIDDEN_NAV_KEYS = new Set(['inbox', 'browser', 'automations', 'library'])
+const OC_HIDDEN_NAV_KEYS = new Set(['inbox', 'automations', 'library'])
 
 /** Section labels come from `groupChats` in English; translate by group key. */
 const SECTION_LABEL_KEYS: Record<string, string> = {
@@ -161,6 +161,19 @@ interface Props {
   onProject: (id: string | null) => void
   onNewProject: () => void
   onProjectMenu?: (p: ProjectRow) => void
+  /**
+   * Per-project recent chats (session id → its most recent rows), supplied by
+   * ScreenShell from the same `session.list` rows the drawer list already
+   * renders. Drives the expandable project rows: tapping a project also opens
+   * an inline mini-list of up to five of its conversations. No project key =
+   * no conversations yet (the row stays a plain row, no dead expansion).
+   */
+  projectChats?: Record<string, RecentChat[]>
+  /**
+   * "More" under a project's mini-list: the owner activates the project and
+   * navigates to the Chats screen (which filters on the active project).
+   */
+  onProjectChatsMore?: (id: string) => void
   /** Bots mode roster source (`profiles.list` via `fleetProfiles`). */
   profiles?: readonly FleetProfile[]
   /**
@@ -304,7 +317,8 @@ export function settleTo(anim: Animated.Value, toValue: 0 | 1, duration: number)
  *   panel (292dp, bgCard, hairline side border, 12dp gutters)
  *   ├─ MochiMark + "Moch" + search affordance + close
  *   ├─ Sessions | Bots Segmented (identity state stays in lib/workspace)
- *   ├─ Sessions body: Projects → Workspace 2-col nav grid → Recent Chats
+ *   ├─ Sessions body: Workspace 2-col nav grid → Projects (expandable, with
+ *   │  per-project recent chats) → Recent Chats
  *   │  (OpenCode mode swaps the chat list for the server's sessions)
  *   ├─ Bots body: BotsRoster cards + dashed "+ New bot"
  *   ├─ amber pending-questions card (owner-provided footer)
@@ -341,6 +355,8 @@ export function Sidebar({
   onProject,
   onNewProject,
   onProjectMenu,
+  projectChats,
+  onProjectChatsMore,
   profiles,
   onOpenBot,
   onNewBot,
@@ -665,6 +681,29 @@ export function Sidebar({
     )
   }
 
+  // Feedback round 2 [2]: the docked Settings control is an icon-ONLY small
+  // card (≈44×44, radius 12, bgElev + hairline) centered at the panel bottom —
+  // the label lives on the accessibilityLabel, not in the pixels. Any future
+  // second bottom item keeps the old labeled grid.
+  const renderBottomTile = (item: NavItem) => {
+    const on = item.key === activeKey
+    return (
+      <Pressable
+        key={item.key}
+        style={({ pressed }) => [s.bottomTile, on && s.bottomTileOn, pressed && s.rowPressed]}
+        onPress={() => {
+          onNav(item.key)
+          onClose()
+        }}
+        accessibilityRole="button"
+        accessibilityState={{ selected: on }}
+        accessibilityLabel={item.label}
+      >
+        <Icon name={item.icon} size={20} color={on ? C.accent : C.textDim} />
+      </Pressable>
+    )
+  }
+
   // Open/close slide. A layout effect on the `open` prop flip, so no extra
   // render sits between the tap/gesture-release and the first animated frame;
   // the tree is already mounted (from the first open on). First run is a no-op:
@@ -911,6 +950,15 @@ export function Sidebar({
   // ── A2-18: stable identities for everything the SectionList re-renders ────
   const handleCloseDrawer = useCallback(() => onCloseRef.current?.(), [])
   const handleOpenChat = useCallback((id: string) => onOpenChatRef.current(id), [])
+  // [12] opening a mini-list chat from an expanded project row: close the
+  // drawer, then swap the screen (same hand-off as the plain chat rows).
+  const openProjectChat = useCallback(
+    (id: string) => {
+      onCloseRef.current?.()
+      onOpenChatRef.current(id)
+    },
+    [],
+  )
 
   const renderItem = useCallback(
     ({ item: c }: { item: RecentChat }) => (
@@ -1057,9 +1105,14 @@ export function Sidebar({
     </View>
   )
 
+  // Feedback round 2 [11]: Workspace grid ABOVE Projects. Selection state lives
+  // in lib/workspace; "More" hands off to the owner (activates the project +
+  // navigates to the Chats screen, which filters on the active project).
   const navAndProjects = (
     <>
-      <Kicker style={s.firstKicker}>{tr('sidebar.projects')}</Kicker>
+      <Kicker style={s.firstKicker}>{tr('chrome.drawer.workspace')}</Kicker>
+      {renderNavGrid(shownNav)}
+      <Kicker>{tr('sidebar.projects')}</Kicker>
       <ProjectList
         projects={projects}
         activeProjectId={activeProjectId}
@@ -1067,9 +1120,10 @@ export function Sidebar({
         onNewProject={onNewProject}
         onProjectMenu={onProjectMenu}
         active={open}
+        projectChats={projectChats}
+        onOpenProjectChat={openProjectChat}
+        onProjectMore={onProjectChatsMore}
       />
-      <Kicker>{tr('chrome.drawer.workspace')}</Kicker>
-      {renderNavGrid(shownNav)}
     </>
   )
 
@@ -1177,12 +1231,13 @@ export function Sidebar({
         ) : null}
 
         {/* Identity (Sessions | Bots) — the drawer's top-level switch. OpenCode
-            mode has no Bots surface: the switch stays on Sessions and the
-            Bots segment is inert (no dead tap). */}
+            mode has no Bots surface: [14] the Bots half is not rendered at all
+            (an inert segment reads as broken), only the Sessions label stays. */}
         <IdentitySwitch
           identity={ocMode ? 'sessions' : identity}
           onChange={ocMode ? () => {} : onIdentity}
           botsCount={botsN}
+          hideBots={ocMode}
         />
 
         {/* BUG-133: chat-pad pattern on the LIST only — the drawer's search
@@ -1324,7 +1379,11 @@ export function Sidebar({
             `+ New bot`. Evidence of the mockup's Settings-in-the-grid lives
             here so it stays reachable from every drawer mode. */}
         {shownBottomNav?.length ? (
-          <View style={s.bottomNav}>{renderNavGrid(shownBottomNav, 1)}</View>
+          <View style={s.bottomNav}>
+            {shownBottomNav.length === 1
+              ? renderBottomTile(shownBottomNav[0])
+              : renderNavGrid(shownBottomNav, 1)}
+          </View>
         ) : null}
       </Animated.View>
 
@@ -1761,7 +1820,19 @@ const makeS = () => StyleSheet.create({
     borderColor: 'rgba(245,165,36,0.28)',
   },
   pendingBody: { flex: 1, minWidth: 0 },
-  bottomNav: { marginTop: 8 },
+  bottomNav: { marginTop: 8, alignItems: 'center' },
+  // [2] icon-only docked Settings card.
+  bottomTile: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.bgElev,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  bottomTileOn: { borderColor: C.accent },
 
   // Anchored chat menu + dialogs — in-app overlays (Alert.alert is a no-op on
   // web). The container carries no background: each overlay fades its own

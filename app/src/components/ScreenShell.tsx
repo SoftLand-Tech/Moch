@@ -371,6 +371,54 @@ export function ScreenShell({
     return [...locals, ...fromServer]
   }, [rows, all, busy, attention, current, pendingStored, lastActiveMap, identity, activeProjectId, projects, projectSessionIds, locale])
 
+  // ── [12] per-project recent chats for the drawer's expandable rows ────────
+  // Same `session.list` rows the `recent` memo renders, but NOT project-
+  // filtered (the mini-lists must fill for every project, whatever is active)
+  // and without the in-memory locals (they carry no project metadata yet —
+  // they'd read as belonging to nothing, so they stay out instead of lying).
+  // Same title/status/ts language as `recent`, so a mini-list row and its
+  // full-list counterpart can never disagree. No new RPCs.
+  const projectChats = useMemo<Record<string, RecentChat[]>>(() => {
+    void locale
+    const statusOf = (id: string) => rowStatus(busy.includes(id), attention[id], pendingStored.includes(id))
+    const ownerIndex = buildSessionOwnerIndex(projectSessionIds)
+    const out: Record<string, RecentChat[]> = {}
+    for (const r of rows) {
+      // Bots mode's identity split (same rule as `recent`): profile rows are
+      // bot chats, not project sessions.
+      if (r.profile && r.profile !== 'default') continue
+      const pid = projectIdForSession(r, ownerIndex)
+      if (!pid) continue // null = Home bucket, undefined = unclassified
+      const rawTitle = r.title || r.preview?.slice(0, 60) || tr('sidebar.untitled')
+      const title =
+        r.profile && r.profile !== 'default' && !rawTitle.toLowerCase().includes(r.profile.toLowerCase())
+          ? `${r.profile} · ${rawTitle}`
+          : rawTitle
+      const chat: RecentChat = {
+        id: r.id,
+        title,
+        ts: Math.max(toMs(r.started_at), lastActiveMap[r.id] ?? 0),
+        status: statusOf(r.id),
+        active: r.id === current,
+      }
+      const arr = out[pid]
+      if (arr) arr.push(chat)
+      else out[pid] = [chat]
+    }
+    for (const pid of Object.keys(out)) out[pid].sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0))
+    return out
+  }, [rows, busy, attention, current, pendingStored, lastActiveMap, projectSessionIds, locale])
+
+  // [12] "More" under a project's mini-list: activate the project and open the
+  // Chats screen, which filters its rows on the active project.
+  const openProjectChats = useCallback(
+    (id: string) => {
+      void setActiveProject(id)
+      router.navigate('/(tabs)/sessions')
+    },
+    [router],
+  )
+
   const go = useCallback(
     (key: string) => {
       // Skills and Models now live inside Settings (AGENT section); the Chats
@@ -591,6 +639,8 @@ export function ScreenShell({
         activeProjectId={activeProjectId}
         onProject={handleProject}
         onNewProject={handleNewProject}
+        projectChats={projectChats}
+        onProjectChatsMore={openProjectChats}
         profiles={profiles}
         onOpenBot={openBot}
         onNewBot={newBot}

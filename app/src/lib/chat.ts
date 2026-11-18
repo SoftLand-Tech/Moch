@@ -40,6 +40,7 @@ import {
   type OcHistoryRow,
 } from './opencodeChat'
 import { ocInterrupt, ocPermissionReply, OcError, describeOcError } from './opencodeClient'
+import { ocCommandTurnPayload } from './ocCommands'
 import { invalidateOcSessionsCache } from './ocSessionsCache'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -2063,6 +2064,12 @@ async function runOcSubmit(sid: string, text: string, title: string | undefined)
       // first message titles it instead.
       title: title && title !== 'New chat' ? title : text,
       text,
+      // Issue 16: a leading /name that is an OFFICIAL OpenCode command
+      // (registry loaded from the server) submits via the session command
+      // endpoint after the session is ensured — same SSE pump, so output
+      // renders like any OC turn. Unknown/empty registry → plain prompt.
+      // One-shot never reaches here (it runs runOcOneShot, commands untouched).
+      command: ocCommandTurnPayload(text) ?? undefined,
       hooks: ocHooksFor(sid),
       isCancelled: () => cancel.current,
     })

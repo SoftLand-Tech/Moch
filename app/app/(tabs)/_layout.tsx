@@ -10,10 +10,12 @@ import { thinkerAtom } from '../../src/lib/thinker'
  * kept because the drawer routes to these screens.
  *
  * When the thinker is OpenCode (OPENCODE-MODE contract), the hermes-only
- * surfaces (crew, fleet, agent browser, automations, skills, connectors,
- * inbox, agent, sessions) drop out of the tab registry with `href: null` —
- * still routed for deep links, but not part of this app's surface. Chat,
- * Terminal and Settings stay.
+ * surfaces (crew, fleet, agent, sessions, automations, skills, connectors,
+ * inbox) drop out of the tab registry with `href: null` — still routed for
+ * deep links, but not part of this app's surface. Chat, Terminal, Settings
+ * stay — and so does the Browser (issue 15): OpenCode drives it through the
+ * moch-browser MCP adapter (oc_browser_mcp + the CDP relay), so the screen
+ * is the tool's live target, not a hermes-only surface.
  */
 export default function TabsLayout() {
   // Subscribe so a theme switch re-reads C.bg for the scene backgrounds —
@@ -33,7 +35,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="chat" />
       <Tabs.Screen name="crew" options={ocHidden} />
       <Tabs.Screen name="fleet" options={ocHidden} />
-      <Tabs.Screen name="browser" options={ocHidden} />
+      <Tabs.Screen name="browser" />
       <Tabs.Screen name="sessions" options={ocHidden} />
       <Tabs.Screen name="agent" options={ocHidden} />
       <Tabs.Screen name="terminal" />

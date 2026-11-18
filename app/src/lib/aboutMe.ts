@@ -75,6 +75,41 @@ export async function saveAbout(fields: { name?: string; work?: string; extra?: 
   }
 }
 
+export interface AboutFields {
+  name: string
+  work: string
+  extra: string
+}
+
+/**
+ * Inverse of the wizard's saveAbout format: pulls the name / work answers back
+ * out of the stored entries and joins every other line into `extra` (so facts
+ * remembered later survive an edit round-trip). Matches the two canonical
+ * entry shapes exactly (straight or typographic apostrophe, optional final
+ * period); anything else is "anything else".
+ */
+export function parseAbout(entries: string[]): AboutFields {
+  let name = ''
+  let work = ''
+  const rest: string[] = []
+  for (const raw of entries) {
+    const line = raw.trim()
+    if (!line) continue
+    const nameM = line.match(/^The user['’]s name is (.+?)\.?$/i)
+    if (nameM && !name) {
+      name = nameM[1].trim()
+      continue
+    }
+    const workM = line.match(/^What they do: (.+?)\.?$/i)
+    if (workM && !work) {
+      work = workM[1].trim()
+      continue
+    }
+    rest.push(line)
+  }
+  return { name, work, extra: rest.join('\n') }
+}
+
 /** Append one remembered fact later (Settings / chat). */
 export async function remember(text: string): Promise<boolean> {
   const entry = text.trim()

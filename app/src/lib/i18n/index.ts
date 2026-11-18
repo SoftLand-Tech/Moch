@@ -25,6 +25,7 @@ import { bot } from './bot'
 import { automations } from './automations'
 import { settings } from './settings'
 import { setup } from './setup'
+import { ocmode } from './ocmode'
 
 /** Every domain catalog, in merge order (later wins on duplicate keys). */
 export const DOMAINS: Catalog[] = [
@@ -44,6 +45,7 @@ export const DOMAINS: Catalog[] = [
   automations,
   settings,
   setup,
+  ocmode,
 ]
 
 function merge(): Record<Locale, Messages> {

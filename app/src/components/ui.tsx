@@ -455,9 +455,19 @@ export function Toggle({
       accessibilityState={{ checked: value }}
       accessibilityLabel={accessibilityLabel}
       hitSlop={6}
-      style={[s.toggleTrack, { backgroundColor: value ? C.accent : C.bgHover, flexDirection: dir.row }, style]}
+      style={[s.toggleTrack, { backgroundColor: value ? C.accent : C.bgHover }, style]}
     >
-      <View style={[s.toggleKnob, { backgroundColor: value ? C.onAccent : '#fff', transform: [{ translateX: value ? 18 : 0 }] }]} />
+      <View
+        style={[
+          s.toggleKnob,
+          {
+            backgroundColor: value ? C.onAccent : '#fff',
+            left: dir.rtl ? undefined : 2,
+            right: dir.rtl ? 2 : undefined,
+            transform: [{ translateX: value ? (dir.rtl ? -18 : 18) : 0 }],
+          },
+        ]}
+      />
     </Pressable>
   )
 }
@@ -629,8 +639,8 @@ const makeS = () =>
       justifyContent: 'center',
     },
     segItemOn: { backgroundColor: C.accent },
-    toggleTrack: { width: 42, height: 24, borderRadius: 999, padding: 2, justifyContent: 'center' },
-    toggleKnob: { width: 20, height: 20, borderRadius: 10 },
+    toggleTrack: { width: 42, height: 24, borderRadius: 12 },
+    toggleKnob: { position: 'absolute', top: 2, width: 20, height: 20, borderRadius: 10 },
     grabber: {
       width: 36,
       height: 4,

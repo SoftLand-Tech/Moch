@@ -234,7 +234,10 @@ class TestBuildGuestLaunch(MochLinuxExecTest):
         self.assertTrue(any(a.startswith("--kernel-release=") and "\\Linux\\" in a for a in argv),
                         argv)
         self.assertIn("-w", argv)
-        self.assertEqual(argv[argv.index("-w") + 1], "/root")
+        # GH issue 13: the guest shell starts in /workspace (the bind of
+        # MOCH_WORKSPACE) so `ls` shows the project dirs the app creates;
+        # HOME stays /root (credentials), see test_env_home_and_guest_path.
+        self.assertEqual(argv[argv.index("-w") + 1], "/workspace")
         # guest argv appended verbatim
         self.assertEqual(argv[-3:], ["/bin/bash", "--norc", "--noprofile"])
         # env: loader via native-lib dir, talloc libs, no LD_PRELOAD
@@ -301,6 +304,9 @@ class TestShims(MochLinuxExecTest):
             self.assertIn(
                 'export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"',
                 body)
+            # v7 (GH issue 13): the shell's start workdir is the guest
+            # /workspace bind so `ls` shows the created project folders
+            self.assertIn("-w /workspace /bin/bash", body)
 
     def test_ensure_shims_creates_proot_tmp_dir(self):
         # On-device 2026-10-06: wizard-only installs never ran a
@@ -319,9 +325,10 @@ class TestShims(MochLinuxExecTest):
         # lacked the BUG-134 HOME/PATH exports — installed guests must pick
         # up /root parity on the first post-update boot, not only on
         # reinstall).
-        self.assertEqual(le.SHIM_FORMAT, 6, "BUG-134 requires the v6 HOME/PATH shim")
+        self.assertEqual(le.SHIM_FORMAT, 7, "GH issue 13 requires the v7 /workspace workdir shim")
         for stale_marker in ("# moch-shim-format: 2", "# moch-shim-format: 3",
-                             "# moch-shim-format: 4", "# moch-shim-format: 5"):
+                             "# moch-shim-format: 4", "# moch-shim-format: 5",
+                             "# moch-shim-format: 6"):
             shim = self.linux / "bin" / "sh"
             shim.parent.mkdir(parents=True, exist_ok=True)
             shim.write_text(
@@ -570,6 +577,17 @@ class TestLinuxSession(MochLinuxExecTest):
         self.assertEqual(env["TERM"], "dumb")
         self.assertEqual(env["HOME"], "/root")
         self.assertTrue(env["PATH"].startswith("/usr/local/sbin:/usr/local/bin"))
+        # GH issue 13: every guest shell — session included — starts in
+        # /workspace so `ls` shows the created project dirs.
+        self.assertEqual(argv[argv.index("-w") + 1], "/workspace")
+
+    def test_shell_argv_starts_in_workspace(self):
+        """The terminal's exact shell argv (bash -i) starts in /workspace."""
+        argv, env = le.build_guest_launch(["/bin/bash", "-i"])
+        self.assertEqual(argv[argv.index("-w") + 1], "/workspace")
+        self.assertEqual(argv[-2:], ["/bin/bash", "-i"])
+        # HOME stays /root even though the workdir moved (credentials)
+        self.assertEqual(env["HOME"], "/root")
 
 
 # --------------------------------------------------------------------------
