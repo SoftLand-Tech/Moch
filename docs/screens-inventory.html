@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moch — Screens Inventory (issue #169 prep)</title>
+<style>
+  :root{
+    --bg:#0A0813; --card:#151220; --elev:#1A1727; --hover:#272535;
+    --text:#fff; --dim:#B4B1C4; --faint:#86829B;
+    --accent:#F79236; --on-accent:#2E1A08; --green:#10A37F; --green-soft:#4ADE80;
+    --red:#FF5A5A; --amber:#F5A524; --border:rgba(248,239,229,.11);
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--text);font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif;margin:0;line-height:1.55}
+  header{padding:28px 20px 8px;max-width:1060px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 6px}
+  .sub{color:var(--dim);font-size:14px;max-width:70ch}
+  .pill{display:inline-block;background:rgba(247,146,54,.12);color:var(--accent);border:1px solid var(--border);border-radius:999px;padding:2px 12px;font-size:12px;font-weight:700;margin:2px 6px 2px 0}
+  main{max-width:1060px;margin:0 auto;padding:12px 20px 60px}
+  h2{font-size:18px;margin:34px 0 10px;color:var(--accent)}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin:12px 0}
+  .card h3{margin:0 0 2px;font-size:16px}
+  .route{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:var(--green-soft)}
+  .grid{display:grid;grid-template-columns:130px 1fr;gap:4px 12px;margin-top:10px;font-size:13.5px}
+  .k{color:var(--faint);font-weight:700;font-size:11px;letter-spacing:.6px;text-transform:uppercase;padding-top:3px}
+  .v{color:var(--dim)} .v b,.v strong{color:var(--text);font-weight:600}
+  code{background:var(--elev);border:1px solid var(--border);border-radius:6px;padding:0 6px;font-size:12px;color:var(--text)}
+  table{border-collapse:collapse;width:100%;font-size:13px;margin-top:8px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+  th{color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+  td.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+  .sw{display:inline-block;width:22px;height:22px;border-radius:6px;border:1px solid var(--border);vertical-align:-6px;margin-right:8px}
+  footer{color:var(--faint);font-size:12px;max-width:1060px;margin:0 auto;padding:0 20px 40px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Moch — User-Visible Screens Inventory</h1>
+  <p class="sub">Prep for issue #169. Source of truth: <code>app/app/</code> routes (expo-router), shared code in <code>app/src/</code>.
+  19 routes total: 12 tabs + <code>bot</code> modal + <code>index</code> entry + <code>setup</code> wizard + 4 onboarding steps.
+  Tab bar is hidden (<code>display:none</code> in <code>app/(tabs)/_layout.tsx</code>) — navigation goes through the drawer in <code>ScreenShell</code>.</p>
+  <div>
+    <span class="pill">19 screens</span>
+    <span class="pill">2 themes: mocheme (default) · relay</span>
+    <span class="pill">#169-relevant: chat (new-session + composer)</span>
+  </div>
+</header>
+<main>
+
+<h2>0 · Shared chrome (read before the screens)</h2>
+<div class="card">
+  <h3>ScreenShell — <span class="route">app/src/components/ScreenShell.tsx</span></h3>
+  <div class="grid">
+    <div class="k">Renders</div><div class="v">Top bar (hamburger, centered <strong>title</strong>, optional <strong>search icon</strong>, caller-supplied <strong>right</strong> cluster, connection dot = tap-to-reconnect) + slide-in <strong>Sidebar</strong> drawer. Two header shapes: mocheme floating rounded tray, relay plain bar.</div>
+    <div class="k">Drawer holds</div><div class="v">Identity switch (Sessions | Bots), <strong>ProjectList</strong>, <strong>BotsRoster</strong> (Bots mode), nav (Chats, Inbox, Browser, Terminal, Automations, Library→connectors, Settings), recent-chat list with status dots, New chat, pin/archive/rename/delete per-row actions, pending-questions footer.</div>
+  </div>
+</div>
+<div class="card">
+  <h3>BotsRoster — <span class="route">app/src/components/BotsRoster.tsx</span></h3>
+  <div class="grid">
+    <div class="k">Renders</div><div class="v">One row per bot profile (avatar disc w/ stable tint, name, preview/relative age, <strong>StatusDot</strong>), <strong>+ New bot</strong> row, long-press sheet (Open chat / Edit / Delete with two-tap armed confirm). Empty: localized "no bots" line.</div>
+  </div>
+</div>
+<div class="card">
+  <h3>ModelPickerSheet — <span class="route">app/src/components/ModelPickerSheet.tsx</span></h3>
+  <div class="grid">
+    <div class="k">Renders</div><div class="v">Bottom-sheet Modal (RNKC <code>KeyboardAvoidingView</code> root). Steps: <strong>provider → model → scope</strong> (This chat / Everywhere / Next reply only). Search filter, ACTIVE badges, fast/reasoning chips, price + unavailable flags, confirm dialog for guarded switches, OpenCode mode (provider-grouped list, one-tap apply, per-session pick). Loading spinner, in-sheet load warnings.</div>
+  </div>
+</div>
+<div class="card">
+  <h3>ProjectList — <span class="route">app/src/components/ProjectList.tsx</span></h3>
+  <div class="grid">
+    <div class="k">Renders</div><div class="v">"All projects" default row + per-project rows (color dot, name, session count), <strong>New project</strong> row. Long-press sheet (Rename / Set as default / Archive / Delete) and new/rename/delete dialogs in one Modal. Drawer-scoped: closes when drawer closes.</div>
+  </div>
+</div>
+
+<h2>1 · Chat (★ #169 surface)</h2>
+<div class="card">
+  <h3>Chat — <span class="route">app/app/(tabs)/chat.tsx</span> · route <code>/(tabs)/chat</code></h3>
+  <div class="grid">
+    <div class="k">Header/title</div><div class="v"><strong>Title = active chat title</strong> ("Moch" fallback). <code>onSearch</code> → navigates to <code>/(tabs)/sessions</code>. Right cluster: <strong>New chat</strong> (+) button (navigate + <code>newChat()</code>), <strong>model chip</strong> (opens ModelPickerSheet; OpenCode variant in OC mode), <strong>active-bot chip</strong> (explains profile scoping, "Switch back" action).</div>
+    <div class="k">Sections</div><div class="v"><strong>Offline banner</strong> (tap = retry) and <strong>switch/create-failure banner</strong> (tap = retry) above the list. <strong>Transcript</strong> (<code>FlatList</code>, <code>MessageBubble</code>/<code>ToolRow</code> from <code>Chat.tsx</code>, floating Mochi mascot, jump-to-latest). <strong>Empty state</strong>: 4 starter rows ("What can you do?", "Summarize my day", "Explain this repo", "Browse slash commands") — shown only for genuinely empty chats; booting placeholder shows "Loading chat…" spinner. <strong>Run status</strong> line above composer. <strong>Slash palette</strong> (while composer focused, starts with <code>/</code>), approval / clarification (single + batch Send-gated) / privileged-input sheets pinned above keyboard.</div>
+    <div class="k">Composer ★</div><div class="v">Rounded pill (<code>S.radiusComposer</code>): <strong>+ attach button</strong> (opens <code>AttachSheet</code>: library / camera / file; gated off in steer mode &amp; offline), <strong>multiline TextInput</strong> (placeholders: <code>Ask Mochi…</code> / "Filter commands…" in slash mode / "Steer the running task…" / "Reply — queued until it finishes" / "Transcribing…"), <strong>mic/record button</strong> (voice → <code>VoiceRecStrip</code>), <strong>send button</strong> (arrow-up; becomes ■ Stop while busy; disabled unless text or attachments). Attachments render as chips; offline queue strip with Edit / send-now-as-steer / remove per item. Interactive pickers: <code>AttachSheet</code>, <code>ModelPickerSheet</code>, <code>CommandCatalogSheet</code>, <code>CommandOptionsSheet</code>.</div>
+    <div class="k">States</div><div class="v">Loading chat (spinner), offline banner ("Starting your agent…" pre-first-connect / "Offline — tap to retry"), retry banner on switch/create failure, steer mode while busy, recording/transcribing voice states, queued-sends strip.</div>
+    <div class="k">CTAs/inputs</div><div class="v"><strong>New chat</strong>, model chip, bot chip, message TextInput, attach/mic/send, starter rows, slash palette, CommandCatalog, retry banners, stop run.</div>
+  </div>
+</div>
+
+<h2>2 · Tabs — conversations &amp; attention</h2>
+<div class="card">
+  <h3>Chats (sessions) — <span class="route">app/app/(tabs)/sessions.tsx</span> · route <code>/(tabs)/sessions</code></h3>
+  <div class="grid">
+    <div class="k">Header/title</div><div class="v"><strong>"Chats"</strong> + brand; tray search icon focuses the filter field.</div>
+    <div class="k">Sections</div><div class="v"><strong>Search field</strong> ("Search conversations…") + <strong>New chat</strong> (+) button. <strong>Pending-questions banner</strong> ("N question(s) waiting on you — tap to answer" → jumps to blocking chat). Error row (tap = retry), offline row (tap = reconnect). <strong>FlatList rows</strong>: title, "open" tag on current, StatusDot, meta line (source · N msgs · started &lt;relative&gt;).</div>
+    <div class="k">States</div><div class="v">First-load spinner; "Could not load chats" (error), "Offline", "No matches" (query), "No conversations yet" + <strong>Start chatting</strong> CTA. Pull-to-refresh.</div>
+    <div class="k">CTAs/inputs</div><div class="v">Search input, New chat, row tap = open (<code>switchToSession</code>), row long-press = delete (confirm dialog).</div>
+  </div>
+</div>
+<div class="card">
+  <h3>Inbox — <span class="route">app/app/(tabs)/inbox.tsx</span> · route <code>/(tabs)/inbox</code></h3>
+  <div class="grid">
+    <div class="k">Header/title</div><div class="v"><strong>Localized inbox title</strong> + brand.</div>
+    <div class="k">Sections</div><div class="v"><strong>SectionList</strong> in fixed order Needs you (ask/amber) → Finished (done/green) → Failed (error/red); empty sections dropped. Rows: StatusDot, title, relative age, detail line.</div>
+    <div class="k">States</div><div class="v"><strong>Empty</strong>: static Mochi avatar image + localized title/body. Pull-to-refresh (force <code>loadSessions</code>).</div>
+    <div class="k">CTAs/inputs</div><div class="v">Row tap = open chat via <code>switchToSession</code> (failures surface in chat's retry banner). No inputs.</div>
+  </div>
+</div>
+
+<h2>3 · Tabs — agent control</h2>
+<div class="card">
+  <h3>Models (agent) — <span class="route">app/app/(tabs)/agent.tsx</span> · route <code>/(tabs)/agent</code></h3>
+  <div class="grid">
+    <div class="k">Header/title</div><div class="v"><strong>"Models"</strong> + brand.</div>
+    <div class="k">Sections</div><div class="v"><strong>MODEL</strong> card (current model + provider, CHANGE → ModelPickerSheet; "Saved everywhere" default line). <strong>PROVIDERS</strong>: search field, connected rows ("Connected · N models"), collapsible "Not set up" group, inline <code>ProviderKeyForm</code> for api_key providers. <strong>REASONING EFFORT</strong>: Everywhere/This-chat scope pills + effort pills. <strong>SHOW REASONING</strong> toggle switch.</div>
+    <div class="k">States</div><div class="v">Offline: "Not connected" + Reconnect. Inline spinners (model list, reasoning save, per-provider disconnect). "No providers match", "No provider inventory yet". Alerts for save/disconnect failures.</div>
+    <div class="k">CTAs/inputs</div><div class="v">CHANGE model card, provider rows (Pick a model / Disconnect / API-key connect), search, scope + effort pills, reasoning switch, reconnect.</div>
+  </div>
+</div>
+<div class="card">
+  <h3>Terminal — <span class="route">app/app/(tabs)/terminal.tsx</span> · route <code>/(tabs)/terminal</code></h3>
+  <div class="grid">
+    <div class="k">Header/title</div><div class="v"><strong>"Terminal"</strong>. Right: <strong>clear-screen</strong> and <strong>kill-session</strong> (confirm dialog) icon buttons.</div>
+    <div class="k">Sections</div><div class="v"><strong>xterm.js WebView</strong> (local asset; PTY bytes via inject/postMessage, buffered pre-ready). Tap output = focus IME; tap on link (WebView hit-test) opens it in Browser instead. Hidden sentinel TextInput for typing; <strong>sticky Ctrl/Alt</strong> + key pad row; font-size control; tap-to-refocus on output taps.</div>
+    <div class="k">States</div><div class="v">Gate machine: checking / no-guest (install Linux) / no-bridge / no-pty (with message) / ready / failed. Session survives unmount; dead PTY state.</div>
+    <div class="k">CTAs/inputs</div><div class="v">Hidden text field, Ctrl/Alt/key pads, submit line, clear, kill, font size.</div>
+  </div>
+</div>
+<div class="card">
+  <h3>Browser — <span class="route">app/app/(tabs)/browser.tsx</span> · route <code>/(tabs)/browser</code></h3>
+  <div class="grid">
+    <div class="k">Header/title</div><div class="v"><strong>"Browser"</strong> (no brand).</div>
+    <div class="k">Sections</div><div class="v"><strong>Tab strip</strong> (TabChips + new-tab +). <strong>URL row</strong> (back/forward/reload, URL draft field, Ask-Moch toggle). <strong>Load-progress bar</strong>. <strong>Ask row</strong> (optional; routes page text into chat composer draft). <strong>WebView pool</strong> — every tab stays mounted (inactive = 1px/opaque/untouchable so CDP keeps frames).</div>
+    <div class="k">States</div><div class="v">Booting ("Starting the browser relay…" spinner); relay-unavailable (error + <strong>Retry</strong>); per-tab loading flag; renderer-crash remount.</div>
+    <div class="k">CTAs/inputs</div><div class="v">New/close/switch tab, URL submit, back/forward/reload, Ask Moch, retry boot.</div>
+  </div>
+</div>
+
+<h2>4 · Tabs — bots, work, integrations</h2>
+<div class="card">
+  <h3>Fleet — <span class="route">app/app/(tabs)/fleet.tsx</span> · route <code>/(tabs)/fleet</code></h3>
+  <div class="grid">
+    <div class="k">Header/title</div><div class="v"><strong>Localized fleet title</strong> + brand; right: <strong>refresh</strong> button.</div>
+    <div class="k">Sections</div><div class="v">Runtime status row (fleet active queue slots / idle, waiting list). <strong>Bot cards</strong>: name, description, chat button (→ chat with <code>botProfile</code>), freeze/unfreeze button. <strong>Create box</strong> (FAB → form): job starter chips, job TextInput, suggested-name hint, checklist (copy USER.md / memory files / launch-skill picker), Cancel/Create.</div>
+    <div class="k">States</div><div class="v">Loading spinner; offline banner; empty (icon + title + body); partial-create notice; per-card busy; create error line.</div>
+    <div class="k">CTAs/inputs</div><div class="v">Refresh, open bot (→ /bot), chat-with-bot, freeze/unfreeze, create FAB + job input + checklist + Create.</div>
+  </div>
+</div>
+<div class="card">
+  <h3>Crew — <span class="route">app/app/(tabs)/crew.tsx</span> · route <code>/(tabs)/crew</code></h3>
+  <div class="grid">
+    <div class="k">Header/title</div><div class="v"><strong>"Crew"</strong> + brand.</div>
+    <div class="k">Sections</div><div class="v"><strong>Kanban columns</strong> Ready / Working / Blocked / Done with counts; task rows expand to <strong>Complete</strong> + <strong>reassign chips</strong> (frozen bots disabled). <strong>Run timeline</strong> footer (source icon, title, @profile, status). <strong>Create box</strong> (FAB → title/body inputs, assignee chips, Cancel/Create).</div>
+    <div class="k">States</div><div class="v">Loading spinner; offline line; error + action-error lines; empty column "—"; empty timeline line; per-task busy. Pull-to-refresh.</div>
+    <div class="k">CTAs/inputs</div><div class="v">Expand task, Complete, reassign chip, create FAB + title/body/assignee + Create.</div>
+  </div>
+</div>
+<div class="card">
+  <h3>Automations — <span class="route">app/app/(tabs)/automations.tsx</span> · route <code>/(tabs)/automations</code></h3>
+  <div class="grid">
+    <div class="k">Header/title</div><div class="v"><strong>"Automations"</strong> + brand; right: <strong>+ add</strong> (accent circle).</div>
+    <div class="k">Sections</div><div class="v">Intro line (jobs run on gateway). Status row. <strong>Job cards</strong>: name, next-run chip ("in Xm") or paused chip, prompt preview, schedule + last-status meta; expanded: Job ID (tap-to-copy), next/last run, repeat, deliver, paused-reason, last error. Actions: <strong>Run now / Pause-Resume / Edit / Delete</strong>. <strong>Add/Edit modal</strong>: NAME (locked in edit), SCHEDULE + format hint, PROMPT (multiline) + self-contained hint, Cancel / Create-Save.</div>
+    <div class="k">States</div><div class="v">Loading spinner; error row (tap = retry); empty (icon + "No automations yet" + New automation CTA); paused-card dim; per-job busy; prompt-load-degraded warning.</div>
+    <div class="k">CTAs/inputs</div><div class="v">Add, expand card, Run now, Pause/Resume, Edit, Delete, modal Cancel/Save, name/schedule/prompt inputs.</div>
+  </div>
+</div>
+<div class="card">
+  <h3>Skills — <span class="route">app/app/(tabs)/skills.tsx</span> · route <code>/(tabs)/skills</code></h3>
+  <div class="grid">
+    <div class="k">Header/title</div><div class="v"><strong>"Skills"</strong> + brand (ScreenShell).</div>
+    <div class="k">Sections</div><div class="v"><strong>Filter field</strong> + <strong>Commands (N) / Skills (N) tabs</strong>. Command rows: name + description. Skill rows: name + origin badge + description or "used N×".</div>
+    <div class="k">States</div><div class="v">Loading spinner (until first catalog); empty: "No matches" / "No commands loaded" / "No skills installed" / "Offline".</div>
+    <div class="k">CTAs/inputs</div><div class="v">Filter input, tab switch, row tap = drops <code>/skill </code> draft into chat composer and navigates there.</div>
+  </div>
+</div>
+<div class="card">
+  <h3>Connectors — <span class="route">app/app/(tabs)/connectors.tsx</span> · route <code>/(tabs)/connectors</code></h3>
+  <div class="grid">
+    <div class="k">Header/title</div><div class="v"><strong>"Connectors"</strong> + brand. Fallback screen when gateway lacks MCP: "Not available on this machine".</div>
+    <div class="k">Sections</div><div class="v"><strong>Search + ＋Add header</strong>, <strong>Yours (N) / Browse tabs</strong>. Yours rows: letter/logo tile, name, transport badge, "Desktop only" badge for command servers, status line (connected+tools / connecting / failed / idle-starts-on-first-use / disabled / sign-in needed), url/command line. Browse grid: tiles + API-key chip + Install/Installed. <strong>Sheets</strong>: server detail (config lines, OAuth sign-in w/ waiting/error/timeout, Test + tools list, Test / API key / Remove), add-custom form, API-key form.</div>
+    <div class="k">States</div><div class="v">Loading, list-error banner + Retry, empty ("No MCP servers yet…" / no matches / Offline), installed states, OAuth waiting/error/timeout, test progress + ok/failed tool list.</div>
+    <div class="k">CTAs/inputs</div><div class="v">Search, Add, tab switch, row → detail, Install, Test, API key (save), Remove, OAuth Sign in / Try again / Cancel, pull-to-refresh.</div>
+  </div>
+</div>
+
+<h2>5 · Tabs — settings</h2>
+<div class="card">
+  <h3>Settings — <span class="route">app/app/(tabs)/settings.tsx</span> · route <code>/(tabs)/settings</code></h3>
+  <div class="grid">
+    <div class="k">Header/title</div><div class="v"><strong>"Settings"</strong> + brand.</div>
+    <div class="k">Sections</div><div class="v"><strong>Connection hero</strong> (host, state, secure/plain, error). <strong>RUNTIME</strong> (embedded gateway rows + Linux install/update/reset). <strong>APPEARANCE</strong> (theme cards mocheme/relay + Language EN/AR). <strong>AGENT</strong> (→ Skills, → Models). <strong>THIS PHONE</strong> (local-only note, approvals-off note, Reconnect, Disconnect). <strong>THINKER</strong> (active brain, retry-server-mode when one-shot, Switch thinker dialog, Providers →). <strong>MEMORY</strong> (About me viewer). <strong>NOTIFICATIONS</strong> (toggle + enable). <strong>ABOUT</strong> (Copy diagnostics, Export transcript, version row).</div>
+    <div class="k">States</div><div class="v">Connection-state hero colors; Linux install progress/size; busy flags on about/diagnostics. Alerts for failures.</div>
+    <div class="k">CTAs/inputs</div><div class="v">Theme cards, language dialog, nav rows, reconnect/disconnect, thinker switch, provider nav, notification switch, copy/export.</div>
+  </div>
+</div>
+
+<h2>6 · Modal, entry, setup, onboarding</h2>
+<div class="card">
+  <h3>Bot detail — <span class="route">app/app/bot.tsx</span> · modal <code>/bot?name=…</code></h3>
+  <div class="grid">
+    <div class="k">Header/title</div><div class="v"><strong>Bot name</strong> + brand; right: <strong>chat-bubble button</strong> (opens bot's canonical Bot Chat, spinner while opening).</div>
+    <div class="k">Sections</div><div class="v">Back row. <strong>Job</strong> (description input). <strong>SOUL</strong> (multiline editor). <strong>No-provider box</strong> (amber; "Use my provider" CTA) when bot lacks a model key. <strong>Save row</strong> (+ "saved" indicator). <strong>Danger zone</strong>: delete wizard (Delete → confirm → deleting).</div>
+    <div class="k">States</div><div class="v">Loading spinner; saving/disabled; saved indicator (cleared on failed save); two-step delete arm; mirroring/connecting provider.</div>
+    <div class="k">CTAs/inputs</div><div class="v">Job + SOUL inputs, Save, Use my provider, chat hand-off, back, three-tap Delete.</div>
+  </div>
+</div>
+<div class="card">
+  <h3>Entry — <span class="route">app/app/index.tsx</span> · route <code>/</code></h3>
+  <div class="grid">
+    <div class="k">Renders</div><div class="v">Mochi stage illustration, "YOUR AGENT, ON THIS PHONE" kicker, "Moch" title. <strong>Starting</strong>: "Starting your agent…" + spinner + first-launch hint → auto-routes to chat (returning) or <code>/onboarding/environment</code> (first run). <strong>Error</strong>: message + <strong>Try again</strong> + <strong>Open Moch anyway</strong>. Legacy-remote notice card when an old pairing config is on disk.</div>
+    <div class="k">CTAs</div><div class="v">Try again, Open Moch anyway. No inputs.</div>
+  </div>
+</div>
+<div class="card">
+  <h3>Setup wizard — <span class="route">app/app/setup.tsx</span> · route <code>/setup</code> (modal)</h3>
+  <div class="grid">
+    <div class="k">Renders</div><div class="v">FIRST-RUN SETUP, step title + progress dots. <strong>1 Choose an environment</strong>: Ubuntu 24.04 / Debian 12 / None cards + Install/Continue + Skip setup. <strong>2 Connect a model</strong>: provider cards (ready tags), ProviderKeyForm, Continue/Skip. <strong>3 Basics</strong>: notifications + battery-exemption cards, Finish setup. <strong>4 Installing</strong>: spinner or success check + Enter Moch.</div>
+    <div class="k">States</div><div class="v">Bootstrap busy + error, provider list loading, install polling + on-disk size, skipped-Linux path.</div>
+    <div class="k">CTAs/inputs</div><div class="v">Distro cards, provider cards + key input, permission cards, per-step Continue/Skip/Finish/Enter.</div>
+  </div>
+</div>
+<div class="card">
+  <h3>Onboarding 1 · Environment — <span class="route">app/app/onboarding/environment.tsx</span> · route <code>/onboarding/environment</code></h3>
+  <div class="grid">
+    <div class="k">Renders</div><div class="v">Distro picker (Ubuntu 24.04 / Debian 12 / none) + install; <strong>categorised package picker</strong> (npm/php/… one-tap; per-item results; "apt-get update…" stage text); Continue/Skip. Non-fatal: failed packages reported per item.</div>
+    <div class="k">CTAs/inputs</div><div class="v">Distro select, package toggles, install, continue/skip.</div>
+  </div>
+</div>
+<div class="card">
+  <h3>Onboarding 2 · Thinker — <span class="route">app/app/onboarding/thinker.tsx</span> · route <code>/onboarding/thinker</code></h3>
+  <div class="grid">
+    <div class="k">Renders</div><div class="v"><strong>Moch (hermes)</strong> vs <strong>OpenCode</strong> choice; OpenCode requires Linux guest (points back to step 1 if missing). Install/server-start flow with busy + error, auto-collected diagnostics (expandable), manual one-shot probe, one-shot fallback offer after server failure.</div>
+    <div class="k">CTAs/inputs</div><div class="v">Thinker pick, install/start, diagnostics expand, probe run, continue.</div>
+  </div>
+</div>
+<div class="card">
+  <h3>Onboarding 3 · Providers — <span class="route">app/app/onboarding/providers.tsx</span> · route <code>/onboarding/providers</code></h3>
+  <div class="grid">
+    <div class="k">Renders</div><div class="v">STEP 3 OF 4 (wizard only; reused from Settings with plain Back exit). Provider list per thinker (OpenCode integrations vs Moch providers), <code>ProviderKeyForm</code> saves (keys take effect on live chats); skipping always allowed.</div>
+    <div class="k">CTAs/inputs</div><div class="v">Provider select, API-key input + save, Skip/Continue (→ about).</div>
+  </div>
+</div>
+<div class="card">
+  <h3>Onboarding 4 · About you — <span class="route">app/app/onboarding/about.tsx</span> · route <code>/onboarding/about</code></h3>
+  <div class="grid">
+    <div class="k">Renders</div><div class="v">STEP 4 OF 4. <strong>Name / What you do / Anything else</strong> inputs (saved to on-phone USER.md memory). Permission cards: notifications, battery exemption. OpenCode note card (bots/crew/automations/browser hidden). <strong>Start using Moch</strong> (→ chat).</div>
+    <div class="k">CTAs/inputs</div><div class="v">Three text inputs, two permission rows, Start using Moch.</div>
+  </div>
+</div>
+
+<h2>7 · Color palette (live tokens in <code>app/src/lib/theme.ts</code>)</h2>
+<div class="card">
+  <h3>Mocheme (default) — sprout-orange accent on visor-navy near-black</h3>
+  <table>
+    <tr><th>Token</th><th></th><th>Hex</th><th>Role</th></tr>
+    <tr><td class="mono">bg</td><td><span class="sw" style="background:#0A0813"></span></td><td class="mono">#0A0813</td><td>Screen background</td></tr>
+    <tr><td class="mono">bgCard</td><td><span class="sw" style="background:#151220"></span></td><td class="mono">#151220</td><td>Cards, rows, composer chrome</td></tr>
+    <tr><td class="mono">bgElev</td><td><span class="sw" style="background:#1A1727"></span></td><td class="mono">#1A1727</td><td>Elevated sheets, menus</td></tr>
+    <tr><td class="mono">bgHover</td><td><span class="sw" style="background:#272535"></span></td><td class="mono">#272535</td><td>Pressed/hover fill</td></tr>
+    <tr><td class="mono">inputBg</td><td><span class="sw" style="background:#1A1727"></span></td><td class="mono">#1A1727</td><td>Text inputs</td></tr>
+    <tr><td class="mono">text</td><td><span class="sw" style="background:#FFFFFF"></span></td><td class="mono">#FFFFFF</td><td>Primary text</td></tr>
+    <tr><td class="mono">textDim</td><td><span class="sw" style="background:#B4B1C4"></span></td><td class="mono">#B4B1C4</td><td>Secondary text</td></tr>
+    <tr><td class="mono">textFaint</td><td><span class="sw" style="background:#86829B"></span></td><td class="mono">#86829B</td><td>Hints, timestamps</td></tr>
+    <tr><td class="mono">accent</td><td><span class="sw" style="background:#F79236"></span></td><td class="mono">#F79236</td><td>Primary actions, send</td></tr>
+    <tr><td class="mono">accentDark</td><td><span class="sw" style="background:#C56F1F"></span></td><td class="mono">#C56F1F</td><td>Accent pressed/shade</td></tr>
+    <tr><td class="mono">onAccent</td><td><span class="sw" style="background:#2E1A08"></span></td><td class="mono">#2E1A08</td><td>Ink on accent (white fails 2.3:1 here)</td></tr>
+    <tr><td class="mono">green / greenSoft</td><td><span class="sw" style="background:#10A37F"></span></td><td class="mono">#10A37F / #4ADE80</td><td>Success, connected dot</td></tr>
+    <tr><td class="mono">red</td><td><span class="sw" style="background:#FF5A5A"></span></td><td class="mono">#FF5A5A</td><td>Errors, destructive</td></tr>
+    <tr><td class="mono">amber</td><td><span class="sw" style="background:#F5A524"></span></td><td class="mono">#F5A524</td><td>Warnings, pending dots</td></tr>
+    <tr><td class="mono">accentSoft</td><td><span class="sw" style="background:rgba(247,146,54,.12)"></span></td><td class="mono">rgba(247,146,54,.12)</td><td>Selected rows, inline code bg</td></tr>
+    <tr><td class="mono">redSoft</td><td><span class="sw" style="background:rgba(255,90,90,.12)"></span></td><td class="mono">rgba(255,90,90,.12)</td><td>Delete-armed, error wash</td></tr>
+    <tr><td class="mono">amberSoft</td><td><span class="sw" style="background:rgba(245,165,36,.12)"></span></td><td class="mono">rgba(245,165,36,.12)</td><td>Offline banner, notices</td></tr>
+    <tr><td class="mono">greenTint</td><td><span class="sw" style="background:rgba(74,222,128,.12)"></span></td><td class="mono">rgba(74,222,128,.12)</td><td>Success wash</td></tr>
+    <tr><td class="mono">border / borderSoft</td><td><span class="sw" style="background:rgba(248,239,229,.11)"></span></td><td class="mono">rgba(248,239,229,.11) / .06</td><td>Card + hairline borders (cream-locked)</td></tr>
+    <tr><td class="mono">userBubble / userText</td><td><span class="sw" style="background:#F6ECE1"></span></td><td class="mono">#F6ECE1 / #2B283B</td><td>User bubble: Mochi cream + visor-navy ink</td></tr>
+    <tr><td class="mono">blush</td><td><span class="sw" style="background:#FA9B6A"></span></td><td class="mono">#FA9B6A</td><td>Thinking dots, swatches</td></tr>
+    <tr><td class="mono">thinkBorder</td><td><span class="sw" style="background:rgba(248,239,229,.25)"></span></td><td class="mono">rgba(248,239,229,.25)</td><td>Dashed thinking-pill outline</td></tr>
+    <tr><td class="mono">btnTint</td><td><span class="sw" style="background:rgba(248,239,229,.06)"></span></td><td class="mono">rgba(248,239,229,.06)</td><td>Composer round-button wash</td></tr>
+  </table>
+</div>
+<div class="card">
+  <h3>Relay (alt theme) — logo cyan on dark teal</h3>
+  <table>
+    <tr><th>Token</th><th></th><th>Hex</th><th>Differs from mocheme</th></tr>
+    <tr><td class="mono">bg</td><td><span class="sw" style="background:#060D0F"></span></td><td class="mono">#060D0F</td><td>Teal-black base</td></tr>
+    <tr><td class="mono">bgCard</td><td><span class="sw" style="background:#121B1D"></span></td><td class="mono">#121B1D</td><td></td></tr>
+    <tr><td class="mono">bgElev / inputBg</td><td><span class="sw" style="background:#162022"></span></td><td class="mono">#162022</td><td></td></tr>
+    <tr><td class="mono">bgHover</td><td><span class="sw" style="background:#233134"></span></td><td class="mono">#233134</td><td></td></tr>
+    <tr><td class="mono">textDim / textFaint</td><td><span class="sw" style="background:#AEBDBF"></span></td><td class="mono">#AEBDBF / #829396</td><td>Teal-locked neutrals</td></tr>
+    <tr><td class="mono">accent</td><td><span class="sw" style="background:#39CADB"></span></td><td class="mono">#39CADB</td><td>Brand cyan</td></tr>
+    <tr><td class="mono">accentDark</td><td><span class="sw" style="background:#2795A3"></span></td><td class="mono">#2795A3</td><td></td></tr>
+    <tr><td class="mono">onAccent</td><td><span class="sw" style="background:#052529"></span></td><td class="mono">#052529</td><td>Dark-teal ink</td></tr>
+    <tr><td class="mono">accentSoft</td><td><span class="sw" style="background:rgba(57,202,219,.12)"></span></td><td class="mono">rgba(57,202,219,.12)</td><td></td></tr>
+    <tr><td class="mono">border / borderSoft</td><td><span class="sw" style="background:#26383A"></span></td><td class="mono">#26383A / #1A2628</td><td>Solid (not translucent)</td></tr>
+    <tr><td class="mono">userBubble / userText</td><td><span class="sw" style="background:#1F2C2F"></span></td><td class="mono">#1F2C2F / #FFFFFF</td><td>Dark bubble, white ink</td></tr>
+    <tr><td class="mono">green/red/amber + softs</td><td><span class="sw" style="background:#10A37F"></span></td><td class="mono">same as mocheme</td><td>Unchanged</td></tr>
+    <tr><td class="mono">blush / thinkBorder / btnTint</td><td><span class="sw" style="background:#829396"></span></td><td class="mono">#829396 / transparent / transparent</td><td>Flat relay shapes</td></tr>
+  </table>
+  <p class="sub">Switching: <code>C</code>/<code>S</code> are mutated in place by <code>applyTheme()</code>; screens rebuild styles via <code>useStyles()</code>. NOTE: the task asked for "light/dark" — the code ships <strong>two dark themes</strong> (mocheme + relay), no light mode.</p>
+</div>
+
+</main>
+<footer>Generated from code only — no guessing. Routes: app/app/(tabs)/{chat,crew,fleet,browser,sessions,agent,terminal,automations,skills,connectors,inbox,settings}.tsx, app/app/{bot,index,setup}.tsx, app/app/onboarding/{environment,thinker,providers,about}.tsx. Theme: app/src/lib/theme.ts. Chrome: ScreenShell, BotsRoster, ModelPickerSheet, ProjectList.</footer>
+</body>
+</html>
