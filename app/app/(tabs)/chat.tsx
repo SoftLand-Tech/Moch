@@ -296,18 +296,14 @@ export default function Chat() {
   )
 
   // The Skills screen hands over a command to pre-fill (`/model ` etc).
-  // The Fleet screen hands over a bot identity: set active + fresh bot chat.
-  const { draft, botProfile } = useLocalSearchParams<{ draft?: string; botProfile?: string }>()
-  const lastBotProfile = useRef<string | undefined>(undefined)
-  useEffect(() => {
-    if (!botProfile) return
-    void (async () => {
-      await setActiveBot(botProfile)
-      await newChat().catch((e) => alertOk(t('chat.newChatFailed'), e instanceof Error ? e.message : String(e)))
-    })()
-    // One-shot hand-off: the alert text is read on the firing pass only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [botProfile])
+  //
+  // NOTE: the Fleet screen used to hand over a bot identity here and this
+  // effect called setActiveBot() + newChat() — i.e. EVERY "Chat" tap minted a
+  // brand-new `Bot · <name>` session instead of reopening the bot's one
+  // canonical `Bot Chat`. That was the "bots are just sessions with extra
+  // prompts" bug: opening a bot now goes through openBotChat() at the call
+  // site (exact-title lookup → resume), and this hand-off is gone.
+  const { draft } = useLocalSearchParams<{ draft?: string }>()
   const lastDraft = useRef<string | undefined>(undefined)
 
   // ── Bot Switcher (round-2 feedback) ─────────────────────────────────────
