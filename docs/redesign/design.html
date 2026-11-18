@@ -1,0 +1,3552 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="mocheme">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Moch — Interactive Mobile UI Showcase (20 Screens)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ==========================================================================
+     1. LIVE DESIGN TOKENS (Exact match to app/src/lib/theme.ts)
+     ========================================================================== */
+  :root, [data-theme="mocheme"] {
+    --bg: #0A0813;
+    --bgCard: #151220;
+    --bgElev: #1A1727;
+    --bgHover: #272535;
+    --inputBg: #1A1727;
+    --text: #FFFFFF;
+    --textDim: #B4B1C4;
+    --textFaint: #86829B;
+    --accent: #F79236;
+    --accentDark: #C56F1F;
+    --onAccent: #2E1A08;
+    --green: #10A37F;
+    --greenSoft: #4ADE80;
+    --red: #FF5A5A;
+    --amber: #F5A524;
+    --accentSoft: rgba(247, 146, 54, 0.12);
+    --redSoft: rgba(255, 90, 90, 0.12);
+    --amberSoft: rgba(245, 165, 36, 0.12);
+    --greenTint: rgba(74, 222, 128, 0.12);
+    --border: rgba(248, 239, 229, 0.11);
+    --borderSoft: rgba(248, 239, 229, 0.06);
+    --userBubble: #F6ECE1;
+    --userText: #2B283B;
+    --blush: #FA9B6A;
+    --thinkBorder: rgba(248, 239, 229, 0.25);
+    --btnTint: rgba(248, 239, 229, 0.06);
+    --stageGlow: rgba(247, 146, 54, 0.14);
+    --shellShape: tray;
+  }
+
+  [data-theme="relay"] {
+    --bg: #060D0F;
+    --bgCard: #121B1D;
+    --bgElev: #162022;
+    --bgHover: #233134;
+    --inputBg: #162022;
+    --text: #FFFFFF;
+    --textDim: #AEBDBF;
+    --textFaint: #829396;
+    --accent: #39CADB;
+    --accentDark: #2795A3;
+    --onAccent: #052529;
+    --green: #10A37F;
+    --greenSoft: #4ADE80;
+    --red: #FF5A5A;
+    --amber: #F5A524;
+    --accentSoft: rgba(57, 202, 219, 0.12);
+    --redSoft: rgba(255, 90, 90, 0.12);
+    --amberSoft: rgba(245, 165, 36, 0.12);
+    --greenTint: rgba(74, 222, 128, 0.12);
+    --border: #26383A;
+    --borderSoft: #1A2628;
+    --userBubble: #1F2C2F;
+    --userText: #FFFFFF;
+    --blush: #829396;
+    --thinkBorder: transparent;
+    --btnTint: transparent;
+    --stageGlow: rgba(57, 202, 219, 0.14);
+    --shellShape: bar;
+  }
+
+  /* ==========================================================================
+     2. SHOWCASE SHELL & LAYOUT
+     ========================================================================== */
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #050409;
+    color: #F4F3F8;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body {
+    background-image:
+      radial-gradient(ellipse 70% 50% at 50% 42%, var(--stageGlow), transparent 70%),
+      linear-gradient(180deg, #07060D 0%, #040308 100%);
+    display: flex;
+    flex-direction: column;
+    transition: background-image 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .mono {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  /* Top Showcase Header */
+  .showcase-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 20px;
+    background: rgba(9, 8, 16, 0.82);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    flex-wrap: wrap;
+  }
+
+  .brand-cluster {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .brand-badge {
+    width: 34px;
+    height: 34px;
+    border-radius: 11px;
+    background: var(--bgCard);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+  }
+
+  .brand-title {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .slide-counter {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accentSoft);
+    border: 1px solid var(--border);
+    padding: 2px 9px;
+    border-radius: 999px;
+  }
+
+  .header-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .segmented-pill {
+    display: inline-flex;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+    padding: 3px;
+    gap: 2px;
+  }
+
+  .seg-btn {
+    border: none;
+    background: transparent;
+    color: #A5A2B8;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .seg-btn:hover {
+    color: #fff;
+  }
+
+  .seg-btn.active {
+    background: var(--accent);
+    color: var(--onAccent);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  }
+
+  .swatch-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .grid-toggle-btn {
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 13px;
+    border-radius: 999px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .grid-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: var(--accent);
+  }
+
+  .grid-toggle-btn.active {
+    background: var(--accentSoft);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* ==========================================================================
+     3. CAROUSEL MAIN STAGE & DEVICE FRAME
+     ========================================================================== */
+  .carousel-workspace {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px 16px 12px;
+    gap: 28px;
+    max-width: 1440px;
+    width: 100%;
+    margin: 0 auto;
+    position: relative;
+  }
+
+  .stage-arena {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    position: relative;
+    user-select: none;
+  }
+
+  /* Side Peeks (Previous / Next Preview) */
+  .peek-card {
+    width: 215px;
+    height: 465px;
+    border-radius: 34px;
+    background: var(--bg);
+    border: 2px solid rgba(255, 255, 255, 0.09);
+    box-shadow: 0 24px 50px rgba(0, 0, 0, 0.65);
+    overflow: hidden;
+    position: relative;
+    cursor: pointer;
+    opacity: 0.48;
+    transform: scale(0.92);
+    transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+    flex-shrink: 0;
+  }
+
+  .peek-card:hover {
+    opacity: 0.78;
+    transform: scale(0.95);
+    border-color: var(--accent);
+  }
+
+  .peek-scaler {
+    width: 390px;
+    height: 844px;
+    transform: scale(0.551);
+    transform-origin: top left;
+    pointer-events: none;
+  }
+
+  .peek-label {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    right: 12px;
+    background: rgba(10, 8, 19, 0.86);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    z-index: 5;
+  }
+
+  /* Carousel Prev/Next Buttons */
+  .nav-arrow-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+    flex-shrink: 0;
+    backdrop-filter: blur(10px);
+    z-index: 15;
+  }
+
+  .nav-arrow-btn:hover {
+    background: var(--accent);
+    color: var(--onAccent);
+    border-color: var(--accent);
+    transform: scale(1.07);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  }
+
+  .nav-arrow-btn:active {
+    transform: scale(0.96);
+  }
+
+  /* High-Craft iPhone Frame (390 x 844 logical viewport) */
+  .device-wrapper {
+    position: relative;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .phone-bezel {
+    width: 390px;
+    height: 844px;
+    border-radius: 52px;
+    background: #14131A;
+    padding: 11px;
+    box-shadow:
+      0 0 0 1.5px rgba(255, 255, 255, 0.16),
+      0 0 0 4px #09080E,
+      0 32px 80px rgba(0, 0, 0, 0.82),
+      0 0 60px var(--stageGlow);
+    position: relative;
+    transition: box-shadow 0.4s ease, transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* Hardware Side Buttons */
+  .phone-bezel::before {
+    content: '';
+    position: absolute;
+    left: -3.5px;
+    top: 150px;
+    width: 3px;
+    height: 52px;
+    background: #2A2835;
+    border-radius: 3px 0 0 3px;
+    box-shadow: 0 68px 0 #2A2835, 0 -46px 0 -0.5px #2A2835;
+  }
+
+  .phone-bezel::after {
+    content: '';
+    position: absolute;
+    right: -3.5px;
+    top: 185px;
+    width: 3px;
+    height: 82px;
+    background: #2A2835;
+    border-radius: 0 3px 3px 0;
+  }
+
+  .phone-screen {
+    width: 100%;
+    height: 100%;
+    border-radius: 42px;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    user-select: text;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+
+  /* Slide Animation Classes */
+  .screen-body-host {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .slide-enter-next {
+    animation: slideInNext 0.34s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+
+  .slide-enter-prev {
+    animation: slideInPrev 0.34s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+
+  @keyframes slideInNext {
+    from { opacity: 0.35; transform: translateX(26px) scale(0.985); }
+    to { opacity: 1; transform: translateX(0) scale(1); }
+  }
+
+  @keyframes slideInPrev {
+    from { opacity: 0.35; transform: translateX(-26px) scale(0.985); }
+    to { opacity: 1; transform: translateX(0) scale(1); }
+  }
+
+  /* iOS Status Bar + Dynamic Island */
+  .ios-statusbar {
+    height: 46px;
+    padding: 12px 24px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    position: relative;
+    z-index: 30;
+    flex-shrink: 0;
+  }
+
+  .dynamic-island {
+    position: absolute;
+    left: 50%;
+    top: 10px;
+    transform: translateX(-50%);
+    width: 112px;
+    height: 30px;
+    background: #000;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 10px;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+  }
+
+  .island-camera {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #2a3b68, #090d1a 70%);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .status-icons {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  /* Home Indicator */
+  .ios-home-indicator {
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background: transparent;
+    position: relative;
+    z-index: 30;
+  }
+
+  .ios-home-bar {
+    width: 126px;
+    height: 4.5px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.32);
+  }
+
+  /* ==========================================================================
+     4. SCREEN INSPECTOR CARD
+     ========================================================================== */
+  .inspector-card {
+    width: 365px;
+    background: rgba(18, 16, 29, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 24px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+    flex-shrink: 0;
+  }
+
+  .insp-category {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+    background: var(--accentSoft);
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: 999px;
+    width: fit-content;
+  }
+
+  .insp-title {
+    margin: 4px 0 2px;
+    font-size: 21px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: #fff;
+  }
+
+  .insp-route-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .route-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--greenSoft);
+    background: rgba(74, 222, 128, 0.1);
+    border: 1px solid rgba(74, 222, 128, 0.22);
+    padding: 3px 8px;
+    border-radius: 7px;
+  }
+
+  .file-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #9D99B2;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 3px 8px;
+    border-radius: 7px;
+  }
+
+  .insp-section-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #86829B;
+    margin-bottom: 6px;
+  }
+
+  .state-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .state-pill-btn {
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    color: #C7C4D8;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 11px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .state-pill-btn:hover {
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  .state-pill-btn.active {
+    background: var(--accent);
+    color: var(--onAccent);
+    border-color: var(--accent);
+    font-weight: 700;
+  }
+
+  .insp-desc {
+    font-size: 13px;
+    line-height: 1.55;
+    color: #C6C3D6;
+    margin: 0;
+  }
+
+  .cta-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .cta-chip {
+    font-size: 11px;
+    font-weight: 600;
+    color: #E2E0EC;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 3px 8px;
+    border-radius: 6px;
+  }
+
+  .token-bar {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .token-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 11px;
+    color: #A4A0B8;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 5px 8px;
+    border-radius: 8px;
+  }
+
+  .token-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    flex-shrink: 0;
+  }
+
+  /* ==========================================================================
+     5. BOTTOM FILMSTRIP / DOT SELECTOR
+     ========================================================================== */
+  .filmstrip-dock {
+    padding: 10px 18px 14px;
+    background: rgba(9, 8, 16, 0.85);
+    backdrop-filter: blur(18px);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .filmstrip-scroll {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    max-width: 100%;
+    padding: 2px 6px 4px;
+    scrollbar-width: none;
+  }
+
+  .filmstrip-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .film-pill {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: #9C98B0;
+    font-family: inherit;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 5px 11px;
+    border-radius: 999px;
+    cursor: pointer;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .film-pill:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+  }
+
+  .film-pill.active {
+    background: var(--accent);
+    color: var(--onAccent);
+    border-color: var(--accent);
+    font-weight: 700;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  }
+
+  .film-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    opacity: 0.78;
+  }
+
+  /* ==========================================================================
+     6. ALL SCREENS GRID VIEW
+     ========================================================================== */
+  .grid-view-container {
+    display: none;
+    max-width: 1400px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 24px 20px 60px;
+  }
+
+  .grid-view-container.visible {
+    display: block;
+  }
+
+  .screens-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 20px;
+  }
+
+  .grid-item-card {
+    background: rgba(20, 18, 32, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    padding: 14px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .grid-item-card:hover {
+    transform: translateY(-4px);
+    border-color: var(--accent);
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55);
+  }
+
+  .grid-thumb-box {
+    width: 100%;
+    height: 310px;
+    border-radius: 14px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .grid-thumb-scaler {
+    width: 390px;
+    height: 844px;
+    transform: scale(0.56);
+    transform-origin: top left;
+    pointer-events: none;
+  }
+
+  /* ==========================================================================
+     7. IN-PHONE MOCH UI PRIMITIVES (ScreenShell, Cards, Drawers, Sheets)
+     ========================================================================== */
+  .app-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 14px 18px;
+    scrollbar-width: none;
+  }
+  .app-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* ScreenShell Header: Mocheme Floating Tray vs Relay Plain Bar */
+  .shell-header-wrap {
+    padding: 4px 12px 6px;
+    flex-shrink: 0;
+    z-index: 20;
+  }
+
+  .shell-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 44px;
+    padding: 5px 8px;
+    transition: all 0.25s ease;
+  }
+
+  [data-theme="mocheme"] .shell-header {
+    background: var(--bgCard);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  }
+
+  [data-theme="relay"] .shell-header {
+    background: transparent;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    padding: 5px 4px 8px;
+  }
+
+  .shell-icon-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    background: var(--btnTint);
+    color: var(--text);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.18s ease;
+  }
+
+  .shell-icon-btn:hover {
+    background: var(--bgHover);
+  }
+
+  .shell-title-block {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .shell-title {
+    font-size: 14.5px;
+    font-weight: 700;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .shell-brand {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--textFaint);
+  }
+
+  .conn-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--greenSoft);
+    box-shadow: 0 0 8px var(--greenSoft);
+    display: inline-block;
+    flex-shrink: 0;
+  }
+
+  .conn-dot.offline {
+    background: var(--amber);
+    box-shadow: 0 0 8px var(--amber);
+  }
+
+  /* Common App Cards & Inputs */
+  .m-card {
+    background: var(--bgCard);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 12px;
+    margin-bottom: 10px;
+  }
+
+  .m-elev {
+    background: var(--bgElev);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px;
+  }
+
+  .m-section-kicker {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--textFaint);
+    margin: 12px 2px 6px;
+  }
+
+  .m-input {
+    width: 100%;
+    background: var(--inputBg);
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    padding: 9px 11px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    outline: none;
+  }
+
+  .m-input:focus {
+    border-color: var(--accent);
+  }
+
+  .m-btn-primary {
+    background: var(--accent);
+    color: var(--onAccent);
+    border: none;
+    border-radius: 11px;
+    padding: 9px 14px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: opacity 0.18s ease, transform 0.15s ease;
+  }
+
+  .m-btn-primary:active {
+    transform: scale(0.98);
+  }
+
+  .m-btn-ghost {
+    background: var(--bgElev);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    padding: 8px 12px;
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .m-pill {
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .m-pill-accent {
+    background: var(--accentSoft);
+    color: var(--accent);
+    border: 1px solid var(--border);
+  }
+
+  .m-pill-green {
+    background: var(--greenTint);
+    color: var(--greenSoft);
+  }
+
+  .m-pill-amber {
+    background: var(--amberSoft);
+    color: var(--amber);
+  }
+
+  .m-pill-red {
+    background: var(--redSoft);
+    color: var(--red);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot-green { background: var(--greenSoft); }
+  .dot-amber { background: var(--amber); }
+  .dot-red { background: var(--red); }
+  .dot-idle { background: var(--textFaint); }
+
+  /* Slide-In Sidebar Drawer Overlay */
+  .drawer-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.58);
+    backdrop-filter: blur(3px);
+    z-index: 40;
+    display: flex;
+    animation: fadeIn 0.2s ease;
+  }
+
+  .drawer-panel {
+    width: 292px;
+    height: 100%;
+    background: var(--bgCard);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 46px 12px 22px;
+    animation: slideDrawer 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .drawer-panel::-webkit-scrollbar { display: none; }
+
+  @keyframes slideDrawer {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(0); }
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  /* Bottom Sheet Modal Overlay (ModelPickerSheet, AttachSheet, ConnectorDetail) */
+  .sheet-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.62);
+    backdrop-filter: blur(3px);
+    z-index: 45;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    animation: fadeIn 0.2s ease;
+  }
+
+  .sheet-card {
+    background: var(--bgElev);
+    border-top: 1px solid var(--border);
+    border-radius: 24px 24px 0 0;
+    padding: 10px 14px 26px;
+    max-height: 78%;
+    overflow-y: auto;
+    animation: slideSheet 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @keyframes slideSheet {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+
+  .sheet-grabber {
+    width: 36px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--textFaint);
+    opacity: 0.45;
+    margin: 0 auto 10px;
+  }
+
+  /* Responsive Adjustments */
+  @media (max-width: 1220px) {
+    .peek-card { display: none; }
+  }
+
+  @media (max-width: 880px) {
+    .carousel-workspace {
+      flex-direction: column;
+      padding-top: 12px;
+    }
+    .inspector-card {
+      width: 100%;
+      max-width: 440px;
+    }
+  }
+
+  @media (max-width: 440px) {
+    .phone-bezel {
+      transform: scale(0.88);
+      margin: -45px 0;
+    }
+  }
+</style>
+</head>
+<body>
+
+  <!-- ========================================================================
+       TOP SHOWCASE HEADER (Theme Toggle, Counter, Grid View Toggle)
+       ======================================================================== -->
+  <header class="showcase-header">
+    <div class="brand-cluster">
+      <div class="brand-badge" id="header-logo"></div>
+      <div>
+        <div class="brand-title">
+          Moch UI Showcase
+          <span class="slide-counter mono" id="slide-counter">01 / 20</span>
+        </div>
+        <div style="font-size:11px;color:#8E8AA3;">All 19 routes + Shared Chrome · Issue #169 design spec</div>
+      </div>
+    </div>
+
+    <div class="header-controls">
+      <!-- Live Theme Switcher -->
+      <div class="segmented-pill" role="group" aria-label="Theme Switcher">
+        <button class="seg-btn active" id="btn-theme-mocheme" onclick="setTheme('mocheme')">
+          <span class="swatch-dot" style="background:#F79236;"></span>
+          Mocheme (Default)
+        </button>
+        <button class="seg-btn" id="btn-theme-relay" onclick="setTheme('relay')">
+          <span class="swatch-dot" style="background:#39CADB;"></span>
+          Relay (Alt)
+        </button>
+      </div>
+
+      <!-- All Screens Grid Toggle -->
+      <button class="grid-toggle-btn" id="btn-grid-toggle" onclick="toggleGridView()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>
+        <span id="grid-toggle-label">All Screens Grid</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ========================================================================
+       CAROUSEL WORKSPACE (DEFAULT VIEW)
+       ======================================================================== -->
+  <main class="carousel-workspace" id="carousel-view">
+    <div class="stage-arena" id="swipe-arena">
+      <!-- Previous Arrow -->
+      <button class="nav-arrow-btn" onclick="prevSlide()" title="Previous screen (Left Arrow)" aria-label="Previous screen">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+
+      <!-- Previous Screen Peek -->
+      <div class="peek-card" onclick="prevSlide()" title="Jump to previous screen">
+        <div class="peek-scaler" id="peek-prev-host"></div>
+        <div class="peek-label">
+          <span>← Prev</span>
+          <span id="peek-prev-title" style="color:var(--accent);">About You</span>
+        </div>
+      </div>
+
+      <!-- Active Centered Mobile Device Frame (390 x 844) -->
+      <div class="device-wrapper">
+        <div class="phone-bezel">
+          <div class="phone-screen" id="active-phone-screen">
+            <!-- iOS Status Bar & Dynamic Island -->
+            <div class="ios-statusbar">
+              <span>9:41</span>
+              <div class="dynamic-island">
+                <div class="island-camera"></div>
+              </div>
+              <div class="status-icons">
+                <svg width="15" height="11" viewBox="0 0 16 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="4.3" y="5" width="3" height="7" rx="1"/><rect x="8.6" y="2.5" width="3" height="9.5" rx="1"/><rect x="13" y="0" width="3" height="12" rx="1"/></svg>
+                <svg width="14" height="11" viewBox="0 0 16 12" fill="currentColor"><path d="M8 9.6a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8zm-3.6-2.2a5.2 5.2 0 0 1 7.2 0l1.2-1.3a7 7 0 0 0-9.6 0l1.2 1.3zm-2.8-2.9a9.2 9.2 0 0 1 12.8 0l1.2-1.3a11 11 0 0 0-15.2 0l1.2 1.3z"/></svg>
+                <svg width="22" height="11" viewBox="0 0 24 12" fill="none"><rect x="0.5" y="0.5" width="20" height="11" rx="3" stroke="currentColor" stroke-opacity="0.45"/><rect x="2" y="2" width="16" height="8" rx="1.8" fill="currentColor"/><path d="M22 4v4a1.5 1.5 0 0 0 0-4z" fill="currentColor" fill-opacity="0.5"/></svg>
+              </div>
+            </div>
+
+            <!-- Dynamic Screen Content Host -->
+            <div class="screen-body-host" id="phone-screen-body"></div>
+
+            <!-- Interactive Overlays (Sidebar Drawer / Bottom Sheets) -->
+            <div id="phone-overlay-host"></div>
+
+            <!-- iOS Home Bar -->
+            <div class="ios-home-indicator">
+              <div class="ios-home-bar"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Next Screen Peek -->
+      <div class="peek-card" onclick="nextSlide()" title="Jump to next screen">
+        <div class="peek-scaler" id="peek-next-host"></div>
+        <div class="peek-label">
+          <span id="peek-next-title" style="color:var(--accent);">Chat</span>
+          <span>Next →</span>
+        </div>
+      </div>
+
+      <!-- Next Arrow -->
+      <button class="nav-arrow-btn" onclick="nextSlide()" title="Next screen (Right Arrow)" aria-label="Next screen">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+
+    <!-- Screen Inspector Card -->
+    <aside class="inspector-card" id="inspector-card">
+      <div>
+        <div class="insp-category" id="insp-category">0 · Shared Chrome</div>
+        <h2 class="insp-title" id="insp-title">Shared Chrome</h2>
+        <div class="insp-route-row">
+          <span class="route-badge" id="insp-route">ScreenShell · Drawer · Sheets</span>
+          <span class="file-badge" id="insp-file">app/src/components/</span>
+        </div>
+      </div>
+
+      <div id="insp-states-wrap">
+        <div class="insp-section-label">Interactive Screen State</div>
+        <div class="state-pills" id="insp-states"></div>
+      </div>
+
+      <div>
+        <div class="insp-section-label">Design &amp; Functional Notes</div>
+        <p class="insp-desc" id="insp-desc"></p>
+      </div>
+
+      <div>
+        <div class="insp-section-label">Interactive Controls &amp; CTAs</div>
+        <div class="cta-chips" id="insp-ctas"></div>
+      </div>
+
+      <div class="token-bar" id="insp-tokens"></div>
+    </aside>
+  </main>
+
+  <!-- ========================================================================
+       ALL SCREENS GRID VIEW (SECONDARY BIRD'S-EYE VIEW)
+       ======================================================================== -->
+  <section class="grid-view-container" id="grid-view">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px;">
+      <div>
+        <h2 style="margin:0;font-size:20px;font-weight:800;">Complete 20-Screen Inventory</h2>
+        <p style="margin:4px 0 0;font-size:13px;color:#9E9AB2;">Click any screen card to inspect it at full scale in the interactive carousel.</p>
+      </div>
+      <button class="m-btn-primary" onclick="toggleGridView()">← Back to Carousel</button>
+    </div>
+    <div class="screens-grid" id="screens-grid-host"></div>
+  </section>
+
+  <!-- ========================================================================
+       BOTTOM FILMSTRIP SELECTOR
+       ======================================================================== -->
+  <footer class="filmstrip-dock" id="filmstrip-dock">
+    <div class="filmstrip-scroll" id="filmstrip-list"></div>
+  </footer>
+
+  <!-- ========================================================================
+       JAVASCRIPT: STATE, SVG ASSETS, 20 SCREEN RENDERERS & INTERACTIONS
+       ======================================================================== -->
+  <script>
+    /* ------------------------------------------------------------------------
+       1. CRISP CUSTOM SVG ASSETS (Mochi Mascot & UI Icons)
+       ------------------------------------------------------------------------ */
+    function getMochiSVG(size = 56, mood = 'happy') {
+      return `
+        <svg width="${size}" height="${size}" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <radialGradient id="mochiGlow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.32"/>
+              <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+            </radialGradient>
+            <linearGradient id="mochiBody" x1="20" y1="18" x2="60" y2="68" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#FFF9F2"/>
+              <stop offset="100%" stop-color="#EADCCF"/>
+            </linearGradient>
+          </defs>
+          <circle cx="40" cy="42" r="36" fill="url(#mochiGlow)"/>
+          <!-- Sprout stem & leaf -->
+          <path d="M40 19C40 13 42 10 45 8" stroke="#4ADE80" stroke-width="2.8" stroke-linecap="round"/>
+          <path d="M41 13C46 8 54 9 54 14C54 18 47 18 41 13Z" fill="var(--accent)"/>
+          <path d="M39 14C34 10 28 11 28 15C28 18 34 18 39 14Z" fill="#4ADE80"/>
+          <!-- Mochi rounded body -->
+          <rect x="15" y="20" width="50" height="44" rx="22" fill="url(#mochiBody)" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/>
+          <!-- Visor screen -->
+          <rect x="21" y="29" width="38" height="22" rx="11" fill="#171424"/>
+          <!-- Eyes inside visor -->
+          ${mood === 'sleepy'
+            ? `<path d="M29 40h6M45 40h6" stroke="var(--accent)" stroke-width="2.6" stroke-linecap="round"/>`
+            : `<circle cx="32" cy="39" r="3.2" fill="var(--accent)"/>
+               <circle cx="48" cy="39" r="3.2" fill="var(--accent)"/>
+               <circle cx="33" cy="38" r="1" fill="#FFF"/>
+               <circle cx="49" cy="38" r="1" fill="#FFF"/>
+               <path d="M37.5 43.5Q40 46 42.5 43.5" stroke="var(--blush)" stroke-width="2" stroke-linecap="round"/>`
+          }
+          <!-- Rosy cheeks -->
+          <ellipse cx="24" cy="53" rx="3.5" ry="2" fill="var(--blush)" fill-opacity="0.55"/>
+          <ellipse cx="56" cy="53" rx="3.5" ry="2" fill="var(--blush)" fill-opacity="0.55"/>
+        </svg>
+      `;
+    }
+
+    const ICONS = {
+      menu: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="15" y2="17"/></svg>`,
+      search: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.2" y2="16.2"/></svg>`,
+      plus: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+      mic: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
+      arrowUp: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`,
+      stop: `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>`,
+      chevronRight: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>`,
+      chevronDown: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>`,
+      refresh: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`,
+      chatBubble: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
+      trash: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>`,
+      check: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>`
+    };
+
+    /* ------------------------------------------------------------------------
+       2. GLOBAL INTERACTIVE APP STATE
+       ------------------------------------------------------------------------ */
+    const APP = {
+      theme: 'mocheme',
+      currentSlide: 0,
+      gridOpen: false,
+      drawerOpen: false,
+      drawerMode: 'sessions', // 'sessions' | 'bots'
+      activeProject: 'all',
+      modelSheetOpen: false,
+      modelSheetStep: 'model', // 'provider' | 'model' | 'scope'
+      selectedProvider: 'Anthropic',
+      selectedModel: 'claude-sonnet-4',
+      selectedScope: 'Everywhere',
+      attachSheetOpen: false,
+      voiceRecording: false,
+      slashMenuOpen: false,
+      connectorSheet: null,
+
+      // Per-screen interactive sub-states
+      screenStates: {
+        0: 'drawer',
+        1: 'active',
+        2: 'default',
+        3: 'grouped',
+        4: 'connected',
+        5: 'ready',
+        6: 'browsing',
+        7: 'active',
+        8: 'kanban',
+        9: 'list',
+        10: 'commands',
+        11: 'yours',
+        12: 'connected',
+        13: 'normal',
+        14: 'starting',
+        15: 'step1',
+        16: 'ubuntu',
+        17: 'moch',
+        18: 'anthropic',
+        19: 'default'
+      },
+
+      // Interactive data stores inside mockups
+      chatMessages: [
+        { role: 'user', text: 'Audit theme tokens in app/src/lib/theme.ts for issue #169.' },
+        { role: 'tool', title: 'read_file · app/src/lib/theme.ts', duration: '18ms', detail: 'Loaded 2 theme maps: mocheme (default) & relay (alt).' },
+        { role: 'assistant', text: 'Verified both palettes. Mocheme uses sprout-orange (#F79236) on visor-navy (#0A0813) with cream user bubbles (#F6ECE1). Relay switches to brand cyan (#39CADB) on dark teal (#060D0F).' }
+      ],
+      chatDraft: '',
+      toolExpanded: false,
+      sessionSearch: '',
+      agentReasoningEffort: 'High',
+      agentReasoningScope: 'Everywhere',
+      agentShowReasoning: true,
+      agentNotSetupOpen: true,
+      termFontSize: 11.5,
+      termCtrlActive: false,
+      browserAskOpen: false,
+      browserTab: 0,
+      frozenBots: { 'Release Monitor': true },
+      fleetCreateOpen: false,
+      crewExpandedTask: 't2',
+      crewCompleted: {},
+      autoExpandedId: 'a1',
+      autoPaused: { a2: true },
+      copiedJobId: false,
+      skillFilter: '',
+      skillTab: 'commands',
+      connectorTab: 'yours',
+      settingsNotifs: true,
+      botDeleteArm: 0,
+      botSavedBadge: false,
+      selectedPackages: { npm: true, python3: true, git: true, php: false, curl: true },
+      selectedThinker: 'moch',
+      thinkerDiagOpen: false,
+      selectedOnboardProvider: 'Anthropic',
+      onboardKeySaved: false
+    };
+
+    /* ------------------------------------------------------------------------
+       3. ALL 20 SCREENS METADATA & INVENTORY SPECIFICATION
+       ------------------------------------------------------------------------ */
+    const SCREENS = [
+      {
+        id: 0,
+        short: 'Chrome',
+        category: '0 · Shared Chrome',
+        title: 'ScreenShell & Shared Chrome',
+        route: 'ScreenShell · Drawer · Sheets',
+        file: 'app/src/components/',
+        states: [
+          { key: 'drawer', label: 'Sidebar Drawer' },
+          { key: 'bots', label: 'Bots Roster' },
+          { key: 'picker', label: 'ModelPickerSheet' }
+        ],
+        desc: 'Shared chrome wrapping all 12 tabs: adaptive header (floating rounded tray in Mocheme vs plain bar in Relay), slide-in Sidebar drawer with Sessions | Bots switch, ProjectList, BotsRoster, and bottom-sheet ModelPickerSheet.',
+        ctas: ['Sessions | Bots', 'ProjectList', 'BotsRoster', 'ModelPickerSheet', 'Route Jump']
+      },
+      {
+        id: 1,
+        short: 'Chat ★',
+        category: '1 · Chat (★ #169 Surface)',
+        title: 'Chat & Composer',
+        route: '/(tabs)/chat',
+        file: 'app/app/(tabs)/chat.tsx',
+        states: [
+          { key: 'active', label: 'Active Chat' },
+          { key: 'empty', label: 'Empty (4 Starters)' },
+          { key: 'busy', label: 'Busy (Steer Mode)' },
+          { key: 'offline', label: 'Offline Banner' }
+        ],
+        desc: 'Core #169 surface. Features active chat title, New chat (+), live model chip, active-bot chip, MessageBubble & collapsible ToolRow, dashed thinking pill, slash command palette (/), and rounded pill composer where you can type and send messages.',
+        ctas: ['New chat (+)', 'Model chip', 'Type & Send', 'Slash /', 'Attach +', 'Voice mic']
+      },
+      {
+        id: 2,
+        short: 'Chats',
+        category: '2 · Conversations & Attention',
+        title: 'Chats (Sessions)',
+        route: '/(tabs)/sessions',
+        file: 'app/app/(tabs)/sessions.tsx',
+        states: [
+          { key: 'default', label: 'Active List' },
+          { key: 'empty', label: 'Empty State' }
+        ],
+        desc: 'Full conversation directory with live search filter ("Search conversations…"), New chat button, amber pending-questions banner ("2 questions waiting on you"), StatusDots, "open" tag on active chat, and metadata lines.',
+        ctas: ['Search input', 'New chat (+)', 'Pending banner', 'Open session']
+      },
+      {
+        id: 3,
+        short: 'Inbox',
+        category: '2 · Conversations & Attention',
+        title: 'Inbox',
+        route: '/(tabs)/inbox',
+        file: 'app/app/(tabs)/inbox.tsx',
+        states: [
+          { key: 'grouped', label: 'Grouped Queue' },
+          { key: 'empty', label: 'Empty (Mochi)' }
+        ],
+        desc: 'Attention queue grouped in strict priority order: Needs you (amber dot) → Finished (green dot) → Failed (red dot). Empty state displays the Mochi mascot illustration.',
+        ctas: ['Tap row → Chat', 'Pull to refresh']
+      },
+      {
+        id: 4,
+        short: 'Models',
+        category: '3 · Agent Control',
+        title: 'Models (Agent)',
+        route: '/(tabs)/agent',
+        file: 'app/app/(tabs)/agent.tsx',
+        states: [
+          { key: 'connected', label: 'Connected' },
+          { key: 'offline', label: 'Offline' }
+        ],
+        desc: 'Active MODEL card with CHANGE button (opens ModelPickerSheet), PROVIDERS inventory with search, connected rows, collapsible "Not set up" inline ProviderKeyForm, REASONING EFFORT scope & level pills, and SHOW REASONING toggle.',
+        ctas: ['CHANGE model', 'ProviderKeyForm', 'Effort pills', 'Reasoning switch']
+      },
+      {
+        id: 5,
+        short: 'Terminal',
+        category: '3 · Agent Control',
+        title: 'Terminal (PTY)',
+        route: '/(tabs)/terminal',
+        file: 'app/app/(tabs)/terminal.tsx',
+        states: [
+          { key: 'ready', label: 'PTY Ready' },
+          { key: 'noguest', label: 'No Linux Guest' }
+        ],
+        desc: 'Local xterm.js WebView connected to on-device Linux PTY. Includes clear-screen & kill-session header icons, tappable link hit-testing (opens in Browser), sticky Ctrl/Alt modifiers, arrow key pad, and font-size controls.',
+        ctas: ['Sticky Ctrl/Alt', 'Key pad', 'Font -/+', 'Link → Browser']
+      },
+      {
+        id: 6,
+        short: 'Browser',
+        category: '3 · Agent Control',
+        title: 'Browser Relay',
+        route: '/(tabs)/browser',
+        file: 'app/app/(tabs)/browser.tsx',
+        states: [
+          { key: 'browsing', label: 'Active Tab' },
+          { key: 'booting', label: 'Booting Relay' }
+        ],
+        desc: 'CDP-backed WebView pool (no brand subtitle in header). Features TabChips strip + new tab (+), back/forward/reload, URL bar, accent load progress bar, and expandable Ask-Moch bar that routes page text into Chat.',
+        ctas: ['TabChips', 'URL submit', 'Ask Moch toggle']
+      },
+      {
+        id: 7,
+        short: 'Fleet',
+        category: '4 · Bots, Work & Integrations',
+        title: 'Fleet',
+        route: '/(tabs)/fleet',
+        file: 'app/app/(tabs)/fleet.tsx',
+        states: [
+          { key: 'active', label: 'Active Roster' },
+          { key: 'create', label: 'Create Bot Form' }
+        ],
+        desc: 'Runtime queue slot monitor ("2/4 active queue slots · 1 waiting"), Bot cards with StatusDot, Chat handoff, interactive Freeze/Unfreeze toggle, and Create Bot box with job starter chips and USER.md/memory checklist.',
+        ctas: ['Freeze/Unfreeze', 'Chat w/ bot', 'Create Bot form']
+      },
+      {
+        id: 8,
+        short: 'Crew',
+        category: '4 · Bots, Work & Integrations',
+        title: 'Crew Kanban',
+        route: '/(tabs)/crew',
+        file: 'app/app/(tabs)/crew.tsx',
+        states: [
+          { key: 'kanban', label: 'Board + Timeline' },
+          { key: 'newtask', label: 'New Task Sheet' }
+        ],
+        desc: 'Multi-agent task coordination across Ready, Working, Blocked, and Done columns. Expandable task rows reveal Complete CTA and assignee chips (frozen bots disabled), anchored by a Run timeline footer.',
+        ctas: ['Expand task', 'Complete', 'Reassign chip', '+ Create task']
+      },
+      {
+        id: 9,
+        short: 'Automations',
+        category: '4 · Bots, Work & Integrations',
+        title: 'Automations',
+        route: '/(tabs)/automations',
+        file: 'app/app/(tabs)/automations.tsx',
+        states: [
+          { key: 'list', label: 'Scheduled Jobs' },
+          { key: 'modal', label: 'Add / Edit Job' }
+        ],
+        desc: 'Gateway cron & scheduled prompt jobs. Cards display next-run countdown ("in 14m") or Paused badge, schedule expression, expandable tap-to-copy Job ID, and Run now / Pause-Resume / Edit / Delete actions.',
+        ctas: ['+ Add job', 'Run now', 'Pause/Resume', 'Copy Job ID']
+      },
+      {
+        id: 10,
+        short: 'Skills',
+        category: '4 · Bots, Work & Integrations',
+        title: 'Skills & Commands',
+        route: '/(tabs)/skills',
+        file: 'app/app/(tabs)/skills.tsx',
+        states: [
+          { key: 'commands', label: 'Commands (12)' },
+          { key: 'skills', label: 'Skills (8)' }
+        ],
+        desc: 'Searchable catalog split into Commands (slash commands) and Skills (bundled/user skills with origin badges and usage counters). Tapping any row drops "/skill " into the Chat composer.',
+        ctas: ['Filter input', 'Commands | Skills', 'Tap → Chat draft']
+      },
+      {
+        id: 11,
+        short: 'Connectors',
+        category: '4 · Bots, Work & Integrations',
+        title: 'Connectors (MCP)',
+        route: '/(tabs)/connectors',
+        file: 'app/app/(tabs)/connectors.tsx',
+        states: [
+          { key: 'yours', label: 'Yours (4)' },
+          { key: 'browse', label: 'Browse Directory' },
+          { key: 'detail', label: 'Server Detail Sheet' }
+        ],
+        desc: 'MCP server manager with Yours / Browse tabs, transport badges (HTTP, SSE, STDIO), "Desktop only" flags, OAuth sign-in / API-key status lines, and interactive Server Detail & Tool Tester sheet.',
+        ctas: ['Yours | Browse', '+ Add custom', 'OAuth / Test tools']
+      },
+      {
+        id: 12,
+        short: 'Settings',
+        category: '5 · Settings',
+        title: 'Settings',
+        route: '/(tabs)/settings',
+        file: 'app/app/(tabs)/settings.tsx',
+        states: [
+          { key: 'connected', label: 'Connected Hero' },
+          { key: 'offline', label: 'Disconnected' }
+        ],
+        desc: 'Connection hero card, embedded Linux RUNTIME status, interactive APPEARANCE theme cards (tap Mocheme or Relay right inside the phone to switch themes!), AGENT links, THINKER switcher, MEMORY, NOTIFICATIONS, and diagnostics.',
+        ctas: ['Theme cards', 'EN/AR toggle', 'Skills / Models', 'Copy diagnostics']
+      },
+      {
+        id: 13,
+        short: 'Bot Modal',
+        category: '6 · Modal, Entry & Setup',
+        title: 'Bot Detail Modal',
+        route: '/bot?name=researcher',
+        file: 'app/app/bot.tsx',
+        states: [
+          { key: 'normal', label: 'Configured Bot' },
+          { key: 'noprovider', label: 'No-Provider Warning' }
+        ],
+        desc: 'Full modal editor for an individual bot profile: header chat-bubble handoff button, Job description input, SOUL persona editor, amber No-provider box ("Use my provider"), Save indicator, and three-tap armed Delete wizard.',
+        ctas: ['Chat handoff', 'Edit SOUL', 'Use my provider', '3-tap Delete']
+      },
+      {
+        id: 14,
+        short: 'Entry /',
+        category: '6 · Modal, Entry & Setup',
+        title: 'Entry Splash & Boot',
+        route: '/',
+        file: 'app/app/index.tsx',
+        states: [
+          { key: 'starting', label: 'Starting Agent' },
+          { key: 'error', label: 'Boot Error + Legacy' }
+        ],
+        desc: 'Launch screen featuring Mochi stage illustration, "YOUR AGENT, ON THIS PHONE" kicker, "Moch" title, spinner + first-launch hint, plus error recovery actions and legacy remote pairing notice.',
+        ctas: ['Try again', 'Open Moch anyway']
+      },
+      {
+        id: 15,
+        short: 'Setup Wizard',
+        category: '6 · Modal, Entry & Setup',
+        title: 'First-Run Setup Wizard',
+        route: '/setup',
+        file: 'app/app/setup.tsx',
+        states: [
+          { key: 'step1', label: '1 · Environment' },
+          { key: 'step2', label: '2 · Model' },
+          { key: 'step3', label: '3 · Basics' },
+          { key: 'step4', label: '4 · Installing' }
+        ],
+        desc: '4-step modal setup flow with progress dots: (1) Ubuntu 24.04 / Debian 12 / None, (2) Provider cards + API key form, (3) Notifications + Battery exemption cards, and (4) Disk install progress + Enter Moch.',
+        ctas: ['Step dots 1–4', 'Distro cards', 'ProviderKeyForm', 'Enter Moch']
+      },
+      {
+        id: 16,
+        short: 'Onboard 1',
+        category: '6 · Modal, Entry & Setup',
+        title: 'Onboarding 1 · Environment',
+        route: '/onboarding/environment',
+        file: 'app/app/onboarding/environment.tsx',
+        states: [
+          { key: 'ubuntu', label: 'Ubuntu 24.04 + Pkgs' },
+          { key: 'installing', label: 'apt-get Progress' }
+        ],
+        desc: 'Linux guest distro selector paired with a categorised one-tap package picker (npm, python3, git, php, curl) showing per-item install statuses and live apt-get stage progress.',
+        ctas: ['Distro select', 'Package toggles', 'Continue / Skip']
+      },
+      {
+        id: 17,
+        short: 'Onboard 2',
+        category: '6 · Modal, Entry & Setup',
+        title: 'Onboarding 2 · Thinker',
+        route: '/onboarding/thinker',
+        file: 'app/app/onboarding/thinker.tsx',
+        states: [
+          { key: 'moch', label: 'Moch (hermes)' },
+          { key: 'opencode', label: 'OpenCode + Diag' }
+        ],
+        desc: 'Choose between native Moch (hermes) and OpenCode (which requires the Linux guest from Step 1), complete with server-start health check, expandable diagnostics log, and one-shot probe.',
+        ctas: ['Thinker cards', 'Expand diagnostics', 'Run probe', 'Continue']
+      },
+      {
+        id: 18,
+        short: 'Onboard 3',
+        category: '6 · Modal, Entry & Setup',
+        title: 'Onboarding 3 · Providers',
+        route: '/onboarding/providers',
+        file: 'app/app/onboarding/providers.tsx',
+        states: [
+          { key: 'anthropic', label: 'Anthropic Ready' },
+          { key: 'keyform', label: 'API Key Entry' }
+        ],
+        desc: 'STEP 3 OF 4 provider configuration (also reused from Settings). Displays provider list with Ready badges, inline masked ProviderKeyForm, and non-blocking Skip / Continue navigation.',
+        ctas: ['Provider select', 'Save API key', 'Skip / Continue']
+      },
+      {
+        id: 19,
+        short: 'Onboard 4',
+        category: '6 · Modal, Entry & Setup',
+        title: 'Onboarding 4 · About You',
+        route: '/onboarding/about',
+        file: 'app/app/onboarding/about.tsx',
+        states: [
+          { key: 'default', label: 'USER.md + Perms' },
+          { key: 'opencode_note', label: 'OpenCode Note' }
+        ],
+        desc: 'STEP 4 OF 4 final onboarding step: seeds on-phone USER.md memory (Name, What you do, Anything else), configures Notifications & Battery exemption, and launches into Chat via "Start using Moch".',
+        ctas: ['USER.md inputs', 'Permission cards', 'Start using Moch']
+      }
+    ];
+
+    /* ------------------------------------------------------------------------
+       4. SHARED CHROME HELPERS (ScreenShell, Sidebar Drawer, ModelPickerSheet)
+       ------------------------------------------------------------------------ */
+    function renderScreenShellHeader({ title, showBrand = true, showSearch = false, rightHtml = '', offline = false }) {
+      return `
+        <div class="shell-header-wrap">
+          <div class="shell-header">
+            <button class="shell-icon-btn" onclick="openDrawer()" title="Open Sidebar Drawer" aria-label="Open menu">
+              ${ICONS.menu}
+            </button>
+            <div class="shell-title-block">
+              <div class="shell-title">
+                <span class="conn-dot ${offline ? 'offline' : ''}" title="${offline ? 'Offline — tap to reconnect' : 'Connected to 127.0.0.1:4310'}"></span>
+                <span>${title}</span>
+              </div>
+              ${showBrand ? `<span class="shell-brand">MOCH</span>` : ''}
+            </div>
+            <div style="display:flex;align-items:center;gap:4px;">
+              ${showSearch ? `<button class="shell-icon-btn" onclick="goToSlide(2)" title="Search Chats">${ICONS.search}</button>` : ''}
+              ${rightHtml}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderSidebarDrawer(inlineMode = false) {
+      const projects = [
+        { id: 'all', name: 'All projects', color: 'var(--accent)', count: 14 },
+        { id: 'p1', name: 'Moch Core #169', color: '#4ADE80', count: 6 },
+        { id: 'p2', name: 'Personal Ops', color: '#39CADB', count: 5 }
+      ];
+      const bots = [
+        { name: 'Researcher', desc: 'Deep web & repo synthesis', age: '2m', status: 'dot-green', tint: 'rgba(247,146,54,0.18)', letter: 'R' },
+        { name: 'Code Reviewer', desc: 'PR diffs & TypeScript checks', age: '18m', status: 'dot-amber', tint: 'rgba(74,222,128,0.18)', letter: 'C' },
+        { name: 'Release Monitor', desc: 'Paused · CI watch', age: '3h', status: 'dot-idle', tint: 'rgba(134,130,155,0.18)', letter: 'M' }
+      ];
+      const navItems = [
+        { label: 'Chats', slide: 2, badge: '14' },
+        { label: 'Inbox', slide: 3, badge: '2', accent: true },
+        { label: 'Browser', slide: 6 },
+        { label: 'Terminal', slide: 5 },
+        { label: 'Fleet', slide: 7 },
+        { label: 'Crew', slide: 8 },
+        { label: 'Automations', slide: 9 },
+        { label: 'Library · Skills', slide: 10 },
+        { label: 'Connectors', slide: 11 },
+        { label: 'Settings', slide: 12 }
+      ];
+      const recentChats = [
+        { title: 'Release #169 prep', dot: 'dot-green', age: 'now', active: true },
+        { title: 'Theme token audit', dot: 'dot-amber', age: '14m' },
+        { title: 'Linux PTY bridge debug', dot: 'dot-idle', age: '2h' }
+      ];
+
+      const inner = `
+        <div class="drawer-panel" onclick="event.stopPropagation()" style="${inlineMode ? 'width:100%;padding-top:10px;animation:none;border-right:none;' : ''}">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              ${getMochiSVG(26)}
+              <span style="font-weight:800;font-size:15px;">Moch</span>
+            </div>
+            ${!inlineMode ? `<button class="shell-icon-btn" onclick="closeOverlays()" style="width:26px;height:26px;font-size:14px;">✕</button>` : `<span class="m-pill m-pill-accent">Drawer Chrome</span>`}
+          </div>
+
+          <!-- Identity Switch: Sessions | Bots -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:3px;margin-bottom:10px;">
+            <button onclick="APP.drawerMode='sessions';renderActiveScreen();" style="border:none;border-radius:8px;padding:5px;font-size:11.5px;font-weight:700;cursor:pointer;background:${APP.drawerMode === 'sessions' ? 'var(--accent)' : 'transparent'};color:${APP.drawerMode === 'sessions' ? 'var(--onAccent)' : 'var(--textDim)'};">Sessions</button>
+            <button onclick="APP.drawerMode='bots';renderActiveScreen();" style="border:none;border-radius:8px;padding:5px;font-size:11.5px;font-weight:700;cursor:pointer;background:${APP.drawerMode === 'bots' ? 'var(--accent)' : 'transparent'};color:${APP.drawerMode === 'bots' ? 'var(--onAccent)' : 'var(--textDim)'};">Bots (3)</button>
+          </div>
+
+          ${APP.drawerMode === 'sessions' ? `
+            <!-- ProjectList -->
+            <div class="m-section-kicker" style="margin-top:2px;">Projects</div>
+            <div style="display:flex;flex-direction:column;gap:3px;margin-bottom:8px;">
+              ${projects.map(p => `
+                <div onclick="APP.activeProject='${p.id}';renderActiveScreen();" style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-radius:9px;cursor:pointer;background:${APP.activeProject === p.id ? 'var(--accentSoft)' : 'transparent'};border:1px solid ${APP.activeProject === p.id ? 'var(--border)' : 'transparent'};">
+                  <div style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;">
+                    <span style="width:8px;height:8px;border-radius:50%;background:${p.color};"></span>
+                    <span>${p.name}</span>
+                  </div>
+                  <span class="mono" style="font-size:10.5px;color:var(--textFaint);">${p.count}</span>
+                </div>
+              `).join('')}
+              <div style="font-size:11.5px;color:var(--accent);font-weight:600;padding:4px 8px;cursor:pointer;">+ New project</div>
+            </div>
+
+            <!-- Navigation Routes -->
+            <div class="m-section-kicker">Workspace</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:10px;">
+              ${navItems.map(n => `
+                <div onclick="closeOverlays();goToSlide(${n.slide});" style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-radius:8px;background:var(--bgElev);border:1px solid var(--borderSoft);font-size:11.5px;font-weight:600;cursor:pointer;">
+                  <span>${n.label}</span>
+                  ${n.badge ? `<span style="font-size:10px;font-weight:700;padding:0 5px;border-radius:99px;background:${n.accent ? 'var(--amberSoft)' : 'var(--btnTint)'};color:${n.accent ? 'var(--amber)' : 'var(--textDim)'};">${n.badge}</span>` : ''}
+                </div>
+              `).join('')}
+            </div>
+
+            <!-- Recent Chats -->
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <span class="m-section-kicker">Recent Chats</span>
+              <span onclick="closeOverlays();goToSlide(1);" style="font-size:11px;font-weight:700;color:var(--accent);cursor:pointer;">+ New chat</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px;">
+              ${recentChats.map(c => `
+                <div onclick="closeOverlays();goToSlide(1);" style="display:flex;align-items:center;justify-content:space-between;padding:7px 8px;border-radius:9px;background:${c.active ? 'var(--bgHover)' : 'transparent'};cursor:pointer;">
+                  <div style="display:flex;align-items:center;gap:7px;min-width:0;">
+                    <span class="status-dot ${c.dot}"></span>
+                    <span style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${c.title}</span>
+                  </div>
+                  <span style="font-size:10px;color:var(--textFaint);">${c.age}</span>
+                </div>
+              `).join('')}
+            </div>
+          ` : `
+            <!-- BotsRoster -->
+            <div class="m-section-kicker" style="margin-top:2px;">Bots Roster</div>
+            <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
+              ${bots.map(b => `
+                <div onclick="closeOverlays();goToSlide(13);" style="display:flex;align-items:center;gap:9px;padding:8px;border-radius:11px;background:var(--bgElev);border:1px solid var(--border);cursor:pointer;">
+                  <div style="width:32px;height:32px;border-radius:50%;background:${b.tint};color:var(--text);font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${b.letter}</div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                      <span style="font-size:12.5px;font-weight:700;">${b.name}</span>
+                      <span style="font-size:10px;color:var(--textFaint);">${b.age}</span>
+                    </div>
+                    <div style="font-size:11px;color:var(--textDim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${b.desc}</div>
+                  </div>
+                  <span class="status-dot ${b.status}"></span>
+                </div>
+              `).join('')}
+              <div onclick="closeOverlays();goToSlide(7);" style="padding:8px;border-radius:10px;border:1px dashed var(--border);text-align:center;font-size:12px;font-weight:700;color:var(--accent);cursor:pointer;">+ New bot</div>
+            </div>
+          `}
+
+          <!-- Pending Questions Footer -->
+          <div onclick="closeOverlays();goToSlide(3);" style="margin-top:auto;padding:8px 10px;border-radius:10px;background:var(--amberSoft);border:1px solid rgba(245,165,36,0.28);display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+            <span style="font-size:11.5px;font-weight:700;color:var(--amber);">2 pending questions</span>
+            <span style="font-size:11px;color:var(--amber);">View →</span>
+          </div>
+        </div>
+      `;
+      return inlineMode ? inner : `<div class="drawer-backdrop" onclick="closeOverlays()">${inner}</div>`;
+    }
+
+    function renderModelPickerSheet(inlineMode = false) {
+      const providers = ['Anthropic', 'OpenAI', 'OpenRouter', 'Google Gemini'];
+      const modelsByProvider = {
+        'Anthropic': [
+          { id: 'claude-sonnet-4', tag: 'Fast · Reasoning', price: '$3 / $15' },
+          { id: 'claude-opus-4', tag: 'Deep Reasoning', price: '$15 / $75' },
+          { id: 'claude-haiku-3.5', tag: 'Ultra Fast', price: '$0.80 / $4' }
+        ],
+        'OpenAI': [
+          { id: 'gpt-4.1', tag: 'Balanced', price: '$2 / $8' },
+          { id: 'o3-mini', tag: 'Reasoning', price: '$1.10 / $4.40' }
+        ],
+        'OpenRouter': [
+          { id: 'deepseek/r1', tag: 'Reasoning', price: '$0.55 / $2.19' },
+          { id: 'qwen/qwen-2.5-coder', tag: 'Code', price: '$0.20 / $0.60' }
+        ],
+        'Google Gemini': [
+          { id: 'gemini-2.5-pro', tag: '1M Context', price: '$1.25 / $5' },
+          { id: 'gemini-2.5-flash', tag: 'Fast', price: '$0.15 / $0.60' }
+        ]
+      };
+      const scopes = ['This chat', 'Everywhere', 'Next reply only'];
+      const models = modelsByProvider[APP.selectedProvider] || modelsByProvider['Anthropic'];
+
+      const sheet = `
+        <div class="sheet-card" onclick="event.stopPropagation()" style="${inlineMode ? 'max-height:100%;border-radius:18px;border:1px solid var(--border);animation:none;' : ''}">
+          ${!inlineMode ? `<div class="sheet-grabber"></div>` : ''}
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div>
+              <div style="font-size:14px;font-weight:800;">ModelPickerSheet</div>
+              <div style="font-size:11px;color:var(--textDim);">Provider → Model → Scope</div>
+            </div>
+            ${!inlineMode ? `<button class="shell-icon-btn" onclick="closeOverlays()" style="width:26px;height:26px;">✕</button>` : `<span class="m-pill m-pill-green">ACTIVE</span>`}
+          </div>
+
+          <!-- Step 1: Provider Chips -->
+          <div style="display:flex;gap:5px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none;">
+            ${providers.map(p => `
+              <button onclick="APP.selectedProvider='${p}';renderActiveScreen();" style="border:1px solid ${APP.selectedProvider === p ? 'var(--accent)' : 'var(--border)'};background:${APP.selectedProvider === p ? 'var(--accentSoft)' : 'var(--bgCard)'};color:${APP.selectedProvider === p ? 'var(--accent)' : 'var(--textDim)'};border-radius:999px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">${p}</button>
+            `).join('')}
+          </div>
+
+          <!-- Step 2: Models List -->
+          <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px;">
+            ${models.map(m => {
+              const isAct = APP.selectedModel === m.id;
+              return `
+                <div onclick="APP.selectedModel='${m.id}';renderActiveScreen();" style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:11px;background:${isAct ? 'var(--accentSoft)' : 'var(--bgCard)'};border:1px solid ${isAct ? 'var(--accent)' : 'var(--border)'};cursor:pointer;">
+                  <div>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <span class="mono" style="font-size:12px;font-weight:700;">${m.id}</span>
+                      ${isAct ? `<span class="m-pill m-pill-accent" style="font-size:9px;padding:1px 6px;">ACTIVE</span>` : ''}
+                    </div>
+                    <div style="font-size:10.5px;color:var(--textDim);margin-top:2px;">${m.tag}</div>
+                  </div>
+                  <span class="mono" style="font-size:10px;color:var(--textFaint);">${m.price}</span>
+                </div>
+              `;
+            }).join('')}
+          </div>
+
+          <!-- Step 3: Scope Selector -->
+          <div class="m-section-kicker" style="margin-top:4px;">Apply Scope</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:10px;">
+            ${scopes.map(sc => `
+              <button onclick="APP.selectedScope='${sc}';renderActiveScreen();" style="border:1px solid ${APP.selectedScope === sc ? 'var(--accent)' : 'var(--border)'};background:${APP.selectedScope === sc ? 'var(--accent)' : 'var(--bgCard)'};color:${APP.selectedScope === sc ? 'var(--onAccent)' : 'var(--textDim)'};border-radius:9px;padding:6px 4px;font-size:10.5px;font-weight:700;cursor:pointer;">${sc}</button>
+            `).join('')}
+          </div>
+
+          ${!inlineMode ? `<button class="m-btn-primary" style="width:100%;" onclick="closeOverlays()">Done · Use ${APP.selectedModel}</button>` : ''}
+        </div>
+      `;
+      return inlineMode ? sheet : `<div class="sheet-backdrop" onclick="closeOverlays()">${sheet}</div>`;
+    }
+
+    /* ------------------------------------------------------------------------
+       5. ALL 20 SCREEN RENDERERS
+       ------------------------------------------------------------------------ */
+    function renderScreenHTML(screenId, stateKey) {
+      switch (screenId) {
+        /* --------------------------------------------------------------------
+           0. SHARED CHROME
+           -------------------------------------------------------------------- */
+        case 0: {
+          if (stateKey === 'picker') {
+            return `
+              ${renderScreenShellHeader({ title: 'Shared Chrome', showSearch: true })}
+              <div class="app-scroll" style="display:flex;flex-direction:column;justify-content:flex-end;">
+                <div style="text-align:center;margin-bottom:12px;">
+                  <span class="m-pill m-pill-accent">Bottom Sheet Component</span>
+                  <div style="font-size:12px;color:var(--textDim);margin-top:4px;">Tap providers, models &amp; scope pills below</div>
+                </div>
+                ${renderModelPickerSheet(true)}
+              </div>
+            `;
+          }
+          if (stateKey === 'bots') {
+            APP.drawerMode = 'bots';
+          } else {
+            APP.drawerMode = 'sessions';
+          }
+          return `
+            <div style="flex:1;display:flex;overflow:hidden;">
+              ${renderSidebarDrawer(true)}
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           1. CHAT (★ #169 SURFACE)
+           -------------------------------------------------------------------- */
+        case 1: {
+          const isOffline = stateKey === 'offline';
+          const isBusy = stateKey === 'busy';
+          const isEmpty = stateKey === 'empty';
+
+          const rightCluster = `
+            <button class="shell-icon-btn" onclick="APP.screenStates[1]='empty';renderActiveScreen();" title="New chat (+)" style="width:28px;height:28px;">${ICONS.plus}</button>
+            <button onclick="openModelSheet()" style="border:1px solid var(--border);background:var(--accentSoft);color:var(--accent);border-radius:999px;padding:3px 8px;font-size:10.5px;font-weight:700;cursor:pointer;max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${APP.selectedModel.replace('claude-','')}</button>
+          `;
+
+          return `
+            ${renderScreenShellHeader({
+              title: isEmpty ? 'New chat' : 'Release #169 prep',
+              showBrand: false,
+              showSearch: true,
+              rightHtml: rightCluster,
+              offline: isOffline
+            })}
+
+            <!-- Active-bot profile chip -->
+            <div style="padding:0 12px 6px;display:flex;align-items:center;justify-content:space-between;gap:6px;">
+              <div style="display:flex;align-items:center;gap:6px;background:var(--bgCard);border:1px solid var(--border);border-radius:999px;padding:3px 9px;font-size:11px;">
+                <span class="status-dot dot-green"></span>
+                <span style="color:var(--textDim);">Bot:</span>
+                <strong style="color:var(--text);">@researcher</strong>
+              </div>
+              <span onclick="goToSlide(13)" style="font-size:11px;font-weight:600;color:var(--accent);cursor:pointer;">Switch back</span>
+            </div>
+
+            <!-- Offline / Retry Banner -->
+            ${isOffline ? `
+              <div onclick="APP.screenStates[1]='active';renderActiveScreen();" style="margin:0 12px 6px;padding:7px 11px;border-radius:11px;background:var(--amberSoft);border:1px solid rgba(245,165,36,0.35);display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+                <span style="font-size:11.5px;font-weight:700;color:var(--amber);">Offline — tap to retry</span>
+                <span class="mono" style="font-size:10px;color:var(--amber);">RETRY</span>
+              </div>
+            ` : ''}
+
+            <!-- Transcript or Empty Starters -->
+            <div class="app-scroll" id="chat-transcript-scroll" style="display:flex;flex-direction:column;gap:10px;">
+              ${isEmpty ? `
+                <div style="margin:auto 0;display:flex;flex-direction:column;align-items:center;text-align:center;padding:8px 4px;">
+                  ${getMochiSVG(68)}
+                  <div style="font-size:16px;font-weight:800;margin-top:6px;">Ask Mochi anything</div>
+                  <div style="font-size:12px;color:var(--textDim);margin:2px 0 14px;">On-phone agent · Local memory &amp; tools ready</div>
+                  <div style="width:100%;display:flex;flex-direction:column;gap:7px;text-align:left;">
+                    ${['What can you do?', 'Summarize my day', 'Explain this repo', 'Browse slash commands'].map(starter => `
+                      <div onclick="sendQuickChat('${starter}')" style="padding:10px 12px;border-radius:13px;background:var(--bgCard);border:1px solid var(--border);font-size:12.5px;font-weight:600;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+                        <span>${starter}</span>
+                        <span style="color:var(--accent);">${ICONS.chevronRight}</span>
+                      </div>
+                    `).join('')}
+                  </div>
+                </div>
+              ` : `
+                ${APP.chatMessages.map(m => {
+                  if (m.role === 'user') {
+                    return `
+                      <div style="align-self:flex-end;max-width:82%;background:var(--userBubble);color:var(--userText);padding:9px 13px;border-radius:16px 16px 4px 16px;font-size:12.5px;font-weight:500;line-height:1.45;box-shadow:0 2px 8px rgba(0,0,0,0.2);">
+                        ${m.text}
+                      </div>
+                    `;
+                  }
+                  if (m.role === 'tool') {
+                    return `
+                      <div onclick="APP.toolExpanded=!APP.toolExpanded;renderActiveScreen();" style="background:var(--bgCard);border:1px solid var(--border);border-radius:11px;padding:7px 10px;cursor:pointer;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;">
+                          <div style="display:flex;align-items:center;gap:6px;">
+                            <span style="color:var(--greenSoft);">${ICONS.check}</span>
+                            <span class="mono" style="color:var(--textDim);font-weight:600;">${m.title}</span>
+                          </div>
+                          <span class="mono" style="font-size:10px;color:var(--textFaint);">${m.duration}</span>
+                        </div>
+                        ${APP.toolExpanded ? `<div class="mono" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--borderSoft);font-size:10.5px;color:var(--textDim);">${m.detail}</div>` : ''}
+                      </div>
+                    `;
+                  }
+                  return `
+                    <div style="display:flex;gap:8px;align-items:flex-start;">
+                      <div style="flex-shrink:0;margin-top:2px;">${getMochiSVG(26)}</div>
+                      <div style="flex:1;font-size:12.5px;line-height:1.5;color:var(--text);background:var(--bgCard);border:1px solid var(--borderSoft);padding:9px 12px;border-radius:4px 16px 16px 16px;">
+                        ${m.text}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+
+                <!-- Dashed Thinking Pill -->
+                <div style="display:inline-flex;align-items:center;gap:6px;align-self:flex-start;padding:5px 10px;border-radius:999px;border:1px dashed var(--thinkBorder);background:var(--bgCard);font-size:11px;color:var(--textDim);">
+                  <span style="width:6px;height:6px;border-radius:50%;background:var(--blush);"></span>
+                  <span>${isBusy ? 'Thinking & inspecting routes… (3.2s)' : 'Thought for 1.4s'}</span>
+                </div>
+
+                <!-- Queued-sends strip when offline -->
+                ${isOffline ? `
+                  <div style="background:var(--bgElev);border:1px solid var(--border);border-radius:11px;padding:8px 10px;display:flex;align-items:center;justify-content:space-between;gap:6px;">
+                    <div style="min-width:0;">
+                      <div style="font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;">Queued (1)</div>
+                      <div style="font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Verify relay border contrast</div>
+                    </div>
+                    <div style="display:flex;gap:4px;">
+                      <span class="m-pill m-pill-accent" style="cursor:pointer;" onclick="APP.screenStates[1]='active';renderActiveScreen();">Send now</span>
+                    </div>
+                  </div>
+                ` : ''}
+              `}
+            </div>
+
+            <!-- Slash Command Palette (when / typed or toggled) -->
+            ${APP.slashMenuOpen ? `
+              <div style="margin:0 12px 6px;background:var(--bgElev);border:1px solid var(--border);border-radius:13px;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,0.45);">
+                <div style="font-size:10px;font-weight:700;color:var(--textFaint);padding:2px 6px 4px;text-transform:uppercase;">Slash Commands</div>
+                ${[
+                  { cmd: '/skill', desc: 'Invoke an installed agent skill' },
+                  { cmd: '/model', desc: 'Switch active model for this chat' },
+                  { cmd: '/compact', desc: 'Summarize context window' }
+                ].map(s => `
+                  <div onclick="APP.chatDraft='${s.cmd} ';APP.slashMenuOpen=false;renderActiveScreen();" style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-radius:8px;cursor:pointer;">
+                    <span class="mono" style="font-size:12px;font-weight:700;color:var(--accent);">${s.cmd}</span>
+                    <span style="font-size:11px;color:var(--textDim);">${s.desc}</span>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+
+            <!-- Run Status Line -->
+            ${isBusy ? `
+              <div style="padding:3px 16px;font-size:11px;font-weight:600;color:var(--accent);display:flex;align-items:center;justify-content:space-between;">
+                <span>● Running tool: grep_search…</span>
+                <span class="mono" style="font-size:10px;">Steer active</span>
+              </div>
+            ` : ''}
+
+            <!-- Rounded Pill Composer (S.radiusComposer) -->
+            <div style="padding:6px 12px 4px;">
+              ${APP.voiceRecording ? `
+                <div style="background:var(--bgCard);border:1px solid var(--accent);border-radius:999px;padding:7px 10px;display:flex;align-items:center;justify-content:space-between;">
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="width:9px;height:9px;border-radius:50%;background:var(--red);"></span>
+                    <span class="mono" style="font-size:12px;font-weight:700;">0:04 · Listening…</span>
+                  </div>
+                  <button class="m-btn-primary" style="padding:5px 12px;border-radius:999px;font-size:11.5px;" onclick="APP.voiceRecording=false;sendQuickChat('Check screen #169 composer layout');">Transcribe</button>
+                </div>
+              ` : `
+                <div style="background:var(--bgCard);border:1px solid var(--border);border-radius:24px;padding:5px 6px;display:flex;align-items:center;gap:6px;">
+                  <!-- + Attach Button -->
+                  <button onclick="${isBusy || isOffline ? '' : 'APP.attachSheetOpen=true;renderActiveScreen();'}" style="width:32px;height:32px;border-radius:50%;border:none;background:var(--btnTint);color:${isBusy || isOffline ? 'var(--textFaint)' : 'var(--text)'};opacity:${isBusy || isOffline ? '0.45' : '1'};display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" title="Attach file or photo">
+                    ${ICONS.plus}
+                  </button>
+
+                  <!-- TextInput -->
+                  <input
+                    id="chat-composer-input"
+                    type="text"
+                    value="${APP.chatDraft.replace(/"/g, '&quot;')}"
+                    oninput="handleChatInput(this.value)"
+                    onkeydown="if(event.key==='Enter') submitChatInput()"
+                    placeholder="${isBusy ? 'Steer the running task…' : isOffline ? 'Reply — queued until connected' : 'Ask Mochi… (type /)'}"
+                    style="flex:1;min-width:0;border:none;background:transparent;color:var(--text);font-family:inherit;font-size:13px;outline:none;"
+                  />
+
+                  <!-- Mic Button -->
+                  <button onclick="APP.voiceRecording=true;renderActiveScreen();" style="width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:var(--textDim);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" title="Voice input">
+                    ${ICONS.mic}
+                  </button>
+
+                  <!-- Send / Stop Button -->
+                  ${isBusy ? `
+                    <button onclick="APP.screenStates[1]='active';renderActiveScreen();" style="width:32px;height:32px;border-radius:50%;border:none;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" title="Stop run">
+                      ${ICONS.stop}
+                    </button>
+                  ` : `
+                    <button onclick="submitChatInput()" style="width:32px;height:32px;border-radius:50%;border:none;background:var(--accent);color:var(--onAccent);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;" title="Send message">
+                      ${ICONS.arrowUp}
+                    </button>
+                  `}
+                </div>
+              `}
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           2. CHATS / SESSIONS (/(tabs)/sessions)
+           -------------------------------------------------------------------- */
+        case 2: {
+          const isEmpty = stateKey === 'empty';
+          const sessions = [
+            { title: 'Release #169 prep', open: true, dot: 'dot-green', meta: 'mobile · 24 msgs · started 12m ago' },
+            { title: 'Theme token contrast check', open: false, dot: 'dot-amber', meta: 'mobile · 9 msgs · started 45m ago' },
+            { title: 'Gateway cron diagnostics', open: false, dot: 'dot-green', meta: 'automation · 6 msgs · started 2h ago' },
+            { title: 'Ubuntu proot setup notes', open: false, dot: 'dot-idle', meta: 'terminal · 18 msgs · started 1d ago' },
+            { title: 'MCP GitHub server OAuth', open: false, dot: 'dot-idle', meta: 'mobile · 11 msgs · started 2d ago' }
+          ].filter(s => s.title.toLowerCase().includes(APP.sessionSearch.toLowerCase()));
+
+          return `
+            ${renderScreenShellHeader({ title: 'Chats', showSearch: true })}
+            <div class="app-scroll">
+              <!-- Search + New Chat Row -->
+              <div style="display:flex;gap:7px;margin-bottom:10px;">
+                <input class="m-input" type="text" placeholder="Search conversations…" value="${APP.sessionSearch}" oninput="APP.sessionSearch=this.value;renderActiveScreen();" />
+                <button class="m-btn-primary" onclick="goToSlide(1)" style="padding:0 12px;" title="New chat">${ICONS.plus}</button>
+              </div>
+
+              <!-- Pending Questions Banner -->
+              <div onclick="goToSlide(1)" style="background:var(--amberSoft);border:1px solid rgba(245,165,36,0.32);border-radius:12px;padding:9px 12px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+                <span style="font-size:12px;font-weight:700;color:var(--amber);">2 questions waiting on you — tap to answer</span>
+                <span style="color:var(--amber);">${ICONS.chevronRight}</span>
+              </div>
+
+              ${isEmpty ? `
+                <div class="m-card" style="text-align:center;padding:28px 16px;">
+                  <div style="font-size:14px;font-weight:700;margin-bottom:4px;">No conversations yet</div>
+                  <div style="font-size:12px;color:var(--textDim);margin-bottom:14px;">Start a fresh session with Mochi on this phone.</div>
+                  <button class="m-btn-primary" onclick="goToSlide(1)">Start chatting</button>
+                </div>
+              ` : `
+                <div style="display:flex;flex-direction:column;gap:7px;">
+                  ${sessions.map(s => `
+                    <div onclick="goToSlide(1)" class="m-card" style="margin-bottom:0;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                      <div style="min-width:0;">
+                        <div style="display:flex;align-items:center;gap:6px;">
+                          <span class="status-dot ${s.dot}"></span>
+                          <span style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.title}</span>
+                          ${s.open ? `<span class="m-pill m-pill-accent" style="font-size:9.5px;padding:1px 6px;">open</span>` : ''}
+                        </div>
+                        <div style="font-size:11px;color:var(--textFaint);margin-top:3px;padding-left:14px;">${s.meta}</div>
+                      </div>
+                      <span style="color:var(--textFaint);">${ICONS.chevronRight}</span>
+                    </div>
+                  `).join('')}
+                </div>
+              `}
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           3. INBOX (/(tabs)/inbox)
+           -------------------------------------------------------------------- */
+        case 3: {
+          if (stateKey === 'empty') {
+            return `
+              ${renderScreenShellHeader({ title: 'Inbox' })}
+              <div class="app-scroll" style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;">
+                ${getMochiSVG(84)}
+                <div style="font-size:16px;font-weight:800;margin-top:10px;">Nothing waiting on you</div>
+                <div style="font-size:12.5px;color:var(--textDim);margin-top:4px;max-width:240px;">Approvals, finished background runs, and alerts appear here.</div>
+              </div>
+            `;
+          }
+
+          const sections = [
+            {
+              title: 'Needs you',
+              dot: 'dot-amber',
+              pill: 'm-pill-amber',
+              items: [
+                { title: 'Approve shell command: npm test', age: '3m', detail: 'Release #169 prep · privileged tool gate' },
+                { title: 'Clarify target branch for PR #170', age: '19m', detail: '@researcher · awaiting single-choice answer' }
+              ]
+            },
+            {
+              title: 'Finished',
+              dot: 'dot-green',
+              pill: 'm-pill-green',
+              items: [
+                { title: 'Morning Digest automation', age: '1h', detail: 'Summarized 7 unread threads & 3 PRs' }
+              ]
+            },
+            {
+              title: 'Failed',
+              dot: 'dot-red',
+              pill: 'm-pill-red',
+              items: [
+                { title: 'Linear MCP sync', age: '3h', detail: 'OAuth token expired — reconnect in Connectors' }
+              ]
+            }
+          ];
+
+          return `
+            ${renderScreenShellHeader({ title: 'Inbox' })}
+            <div class="app-scroll">
+              ${sections.map(sec => `
+                <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 2px 6px;">
+                  <span class="m-section-kicker" style="margin:0;">${sec.title}</span>
+                  <span class="m-pill ${sec.pill}" style="font-size:10px;">${sec.items.length}</span>
+                </div>
+                ${sec.items.map(item => `
+                  <div onclick="goToSlide(1)" class="m-card" style="cursor:pointer;display:flex;align-items:flex-start;gap:9px;">
+                    <span class="status-dot ${sec.dot}" style="margin-top:5px;"></span>
+                    <div style="flex:1;min-width:0;">
+                      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+                        <span style="font-size:13px;font-weight:700;">${item.title}</span>
+                        <span style="font-size:10.5px;color:var(--textFaint);">${item.age}</span>
+                      </div>
+                      <div style="font-size:11.5px;color:var(--textDim);margin-top:2px;">${item.detail}</div>
+                    </div>
+                  </div>
+                `).join('')}
+              `).join('')}
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           4. MODELS / AGENT (/(tabs)/agent)
+           -------------------------------------------------------------------- */
+        case 4: {
+          const isOffline = stateKey === 'offline';
+          return `
+            ${renderScreenShellHeader({ title: 'Models', offline: isOffline })}
+            <div class="app-scroll">
+              ${isOffline ? `
+                <div class="m-card" style="background:var(--amberSoft);border-color:rgba(245,165,36,0.35);display:flex;align-items:center;justify-content:space-between;">
+                  <span style="font-size:12.5px;font-weight:700;color:var(--amber);">Not connected to gateway</span>
+                  <button class="m-btn-primary" style="padding:5px 10px;font-size:11.5px;" onclick="APP.screenStates[4]='connected';renderActiveScreen();">Reconnect</button>
+                </div>
+              ` : ''}
+
+              <!-- MODEL Card -->
+              <div class="m-section-kicker" style="margin-top:2px;">Model</div>
+              <div class="m-card" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+                <div>
+                  <div class="mono" style="font-size:13.5px;font-weight:700;">${APP.selectedModel}</div>
+                  <div style="font-size:11.5px;color:var(--textDim);margin-top:2px;">${APP.selectedProvider} · Saved everywhere</div>
+                </div>
+                <button class="m-btn-primary" style="padding:7px 12px;font-size:11.5px;" onclick="openModelSheet()">CHANGE</button>
+              </div>
+
+              <!-- PROVIDERS Section -->
+              <div class="m-section-kicker">Providers</div>
+              <input class="m-input" type="text" placeholder="Filter providers…" style="margin-bottom:8px;" />
+
+              <div class="m-card" style="padding:10px 12px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid var(--borderSoft);">
+                  <div>
+                    <div style="font-size:13px;font-weight:700;">Anthropic</div>
+                    <div style="font-size:11px;color:var(--greenSoft);">Connected · 6 models</div>
+                  </div>
+                  <span class="m-pill m-pill-accent" style="cursor:pointer;" onclick="openModelSheet()">Pick a model</span>
+                </div>
+                <div style="display:flex;align-items:center;justify-content:space-between;padding-top:8px;">
+                  <div>
+                    <div style="font-size:13px;font-weight:700;">OpenAI</div>
+                    <div style="font-size:11px;color:var(--greenSoft);">Connected · 8 models</div>
+                  </div>
+                  <span style="font-size:11px;color:var(--textFaint);cursor:pointer;">Disconnect</span>
+                </div>
+              </div>
+
+              <!-- Collapsible Not Set Up + Inline ProviderKeyForm -->
+              <div class="m-card" style="padding:10px 12px;">
+                <div onclick="APP.agentNotSetupOpen=!APP.agentNotSetupOpen;renderActiveScreen();" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+                  <span style="font-size:12px;font-weight:700;color:var(--textDim);">Not set up (2)</span>
+                  <span style="color:var(--textFaint);">${APP.agentNotSetupOpen ? ICONS.chevronDown : ICONS.chevronRight}</span>
+                </div>
+                ${APP.agentNotSetupOpen ? `
+                  <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--borderSoft);">
+                    <div style="font-size:12px;font-weight:700;margin-bottom:5px;">OpenRouter API Key</div>
+                    <div style="display:flex;gap:6px;">
+                      <input class="m-input mono" type="password" value="sk-or-v1-••••••••••" style="padding:6px 9px;font-size:11.5px;" />
+                      <button class="m-btn-primary" style="padding:6px 11px;font-size:11.5px;">Save</button>
+                    </div>
+                  </div>
+                ` : ''}
+              </div>
+
+              <!-- REASONING EFFORT -->
+              <div class="m-section-kicker">Reasoning Effort</div>
+              <div class="m-card">
+                <div style="display:flex;gap:6px;margin-bottom:8px;">
+                  ${['Everywhere', 'This chat'].map(sc => `
+                    <button onclick="APP.agentReasoningScope='${sc}';renderActiveScreen();" style="border:1px solid ${APP.agentReasoningScope === sc ? 'var(--accent)' : 'var(--border)'};background:${APP.agentReasoningScope === sc ? 'var(--accentSoft)' : 'transparent'};color:${APP.agentReasoningScope === sc ? 'var(--accent)' : 'var(--textDim)'};border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700;cursor:pointer;">${sc}</button>
+                  `).join('')}
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;">
+                  ${['Low', 'Medium', 'High', 'Max'].map(lvl => `
+                    <button onclick="APP.agentReasoningEffort='${lvl}';renderActiveScreen();" style="border:1px solid ${APP.agentReasoningEffort === lvl ? 'var(--accent)' : 'var(--border)'};background:${APP.agentReasoningEffort === lvl ? 'var(--accent)' : 'var(--bgElev)'};color:${APP.agentReasoningEffort === lvl ? 'var(--onAccent)' : 'var(--text)'};border-radius:9px;padding:6px 0;font-size:11.5px;font-weight:700;cursor:pointer;">${lvl}</button>
+                  `).join('')}
+                </div>
+              </div>
+
+              <!-- SHOW REASONING Toggle -->
+              <div class="m-card" style="display:flex;align-items:center;justify-content:space-between;">
+                <div>
+                  <div style="font-size:13px;font-weight:700;">Show reasoning</div>
+                  <div style="font-size:11px;color:var(--textDim);">Display dashed thinking pills in transcript</div>
+                </div>
+                <div onclick="APP.agentShowReasoning=!APP.agentShowReasoning;renderActiveScreen();" style="width:42px;height:24px;border-radius:999px;background:${APP.agentShowReasoning ? 'var(--accent)' : 'var(--bgHover)'};padding:2px;cursor:pointer;transition:background 0.2s;">
+                  <div style="width:20px;height:20px;border-radius:50%;background:${APP.agentShowReasoning ? 'var(--onAccent)' : '#fff'};transform:translateX(${APP.agentShowReasoning ? '18px' : '0'});transition:transform 0.2s;"></div>
+                </div>
+              </div>
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           5. TERMINAL (/(tabs)/terminal)
+           -------------------------------------------------------------------- */
+        case 5: {
+          const rightCluster = `
+            <button class="shell-icon-btn" title="Clear terminal" style="width:28px;height:28px;font-size:11px;">⌫</button>
+            <button class="shell-icon-btn" title="Kill PTY session" style="width:28px;height:28px;color:var(--red);">✕</button>
+          `;
+          if (stateKey === 'noguest') {
+            return `
+              ${renderScreenShellHeader({ title: 'Terminal', showBrand: false, rightHtml: rightCluster })}
+              <div class="app-scroll" style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;">
+                <div class="m-card" style="padding:20px;">
+                  <div style="font-size:15px;font-weight:800;margin-bottom:6px;">No Linux guest installed</div>
+                  <div style="font-size:12px;color:var(--textDim);margin-bottom:14px;">Install Ubuntu 24.04 or Debian 12 to launch an interactive on-device PTY shell.</div>
+                  <button class="m-btn-primary" onclick="goToSlide(16)">Install Linux Environment</button>
+                </div>
+              </div>
+            `;
+          }
+
+          return `
+            ${renderScreenShellHeader({ title: 'Terminal', showBrand: false, rightHtml: rightCluster })}
+            <!-- xterm.js WebView -->
+            <div style="flex:1;margin:2px 10px 6px;background:#050508;border:1px solid var(--border);border-radius:14px;padding:10px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;">
+              <div class="mono" style="font-size:${APP.termFontSize}px;line-height:1.5;color:#E2E0EC;overflow-y:auto;">
+                <div><span style="color:#4ADE80;">moch@ubuntu</span>:<span style="color:#39CADB;">~/app</span>$ hermes status</div>
+                <div style="color:#B4B1C4;">● Gateway: <span style="color:#4ADE80;">running</span> (pid 4812 · 41 MB)</div>
+                <div style="color:#B4B1C4;">● PTY Bridge: <span style="color:#4ADE80;">attached</span> (/dev/pts/0)</div>
+                <div style="color:#B4B1C4;">● Health URL: <span onclick="goToSlide(6)" style="color:var(--accent);text-decoration:underline;cursor:pointer;">http://127.0.0.1:4310/health</span></div>
+                <div style="margin-top:8px;"><span style="color:#4ADE80;">moch@ubuntu</span>:<span style="color:#39CADB;">~/app</span>$ git log -1 --oneline</div>
+                <div style="color:#F5A524;">9f4c21a feat(chat): polish #169 composer pill</div>
+                <div style="margin-top:8px;"><span style="color:#4ADE80;">moch@ubuntu</span>:<span style="color:#39CADB;">~/app</span>$ <span style="display:inline-block;width:7px;height:13px;background:var(--accent);vertical-align:-2px;"></span></div>
+              </div>
+
+              <!-- Font size control bar -->
+              <div style="display:flex;align-items:center;justify-content:space-between;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);font-size:10.5px;color:var(--textFaint);">
+                <span class="mono">xterm.js · 80×24</span>
+                <div style="display:flex;gap:5px;">
+                  <button onclick="APP.termFontSize=Math.max(9.5,APP.termFontSize-1);renderActiveScreen();" style="background:var(--bgElev);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:1px 7px;cursor:pointer;">A-</button>
+                  <button onclick="APP.termFontSize=Math.min(14,APP.termFontSize+1);renderActiveScreen();" style="background:var(--bgElev);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:1px 7px;cursor:pointer;">A+</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Sticky Ctrl/Alt + Key Pad Row -->
+            <div style="padding:4px 10px 4px;display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;">
+              ${['Ctrl', 'Alt', 'Tab', 'Esc', '↑', '↓', '←', '→'].map(k => {
+                const isCtrl = k === 'Ctrl' && APP.termCtrlActive;
+                return `
+                  <button onclick="${k === 'Ctrl' ? 'APP.termCtrlActive=!APP.termCtrlActive;renderActiveScreen();' : ''}" style="flex:1;min-width:36px;padding:6px 4px;border-radius:8px;border:1px solid ${isCtrl ? 'var(--accent)' : 'var(--border)'};background:${isCtrl ? 'var(--accent)' : 'var(--bgCard)'};color:${isCtrl ? 'var(--onAccent)' : 'var(--text)'};font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;cursor:pointer;">${k}</button>
+                `;
+              }).join('')}
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           6. BROWSER (/(tabs)/browser)
+           -------------------------------------------------------------------- */
+        case 6: {
+          const tabs = [
+            { title: 'Issue #169 Spec', url: 'https://github.com/moch-ai/moch/issues/169' },
+            { title: 'Gateway Health', url: 'http://127.0.0.1:4310/health' }
+          ];
+          const activeTab = tabs[APP.browserTab] || tabs[0];
+
+          return `
+            ${renderScreenShellHeader({ title: 'Browser', showBrand: false })}
+            <!-- TabChips Strip -->
+            <div style="padding:0 12px 6px;display:flex;align-items:center;gap:5px;overflow-x:auto;scrollbar-width:none;">
+              ${tabs.map((t, idx) => `
+                <div onclick="APP.browserTab=${idx};renderActiveScreen();" style="padding:4px 10px;border-radius:999px;background:${APP.browserTab === idx ? 'var(--accentSoft)' : 'var(--bgCard)'};border:1px solid ${APP.browserTab === idx ? 'var(--accent)' : 'var(--border)'};color:${APP.browserTab === idx ? 'var(--accent)' : 'var(--textDim)'};font-size:11px;font-weight:700;white-space:nowrap;cursor:pointer;">
+                  ${t.title}
+                </div>
+              `).join('')}
+              <button onclick="APP.browserTab=(APP.browserTab+1)%2;renderActiveScreen();" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--border);background:var(--bgCard);color:var(--text);display:flex;align-items:center;justify-content:center;cursor:pointer;">+</button>
+            </div>
+
+            <!-- URL Row + Ask-Moch Toggle -->
+            <div style="padding:0 12px 6px;display:flex;align-items:center;gap:5px;">
+              <button class="shell-icon-btn" style="width:26px;height:26px;font-size:12px;">←</button>
+              <button class="shell-icon-btn" style="width:26px;height:26px;font-size:12px;">↻</button>
+              <div class="mono" style="flex:1;min-width:0;background:var(--inputBg);border:1px solid var(--border);border-radius:9px;padding:5px 8px;font-size:10.5px;color:var(--textDim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                ${activeTab.url}
+              </div>
+              <button onclick="APP.browserAskOpen=!APP.browserAskOpen;renderActiveScreen();" style="border:1px solid var(--accent);background:${APP.browserAskOpen ? 'var(--accent)' : 'var(--accentSoft)'};color:${APP.browserAskOpen ? 'var(--onAccent)' : 'var(--accent)'};border-radius:9px;padding:5px 8px;font-size:10.5px;font-weight:700;cursor:pointer;white-space:nowrap;">Ask Moch</button>
+            </div>
+
+            <!-- Load-Progress Bar -->
+            <div style="height:2px;background:var(--borderSoft);margin:0 12px 6px;border-radius:99px;overflow:hidden;">
+              <div style="width:${stateKey === 'booting' ? '38%' : '100%'};height:100%;background:var(--accent);"></div>
+            </div>
+
+            <!-- Expandable Ask-Moch Row -->
+            ${APP.browserAskOpen ? `
+              <div style="margin:0 12px 8px;padding:7px;background:var(--bgElev);border:1px solid var(--accent);border-radius:11px;display:flex;gap:6px;">
+                <input class="m-input" type="text" value="Summarize this page into Chat" style="padding:5px 8px;font-size:11.5px;" />
+                <button class="m-btn-primary" style="padding:5px 10px;font-size:11px;" onclick="sendQuickChat('Summarize: ${activeTab.title}')">Send</button>
+              </div>
+            ` : ''}
+
+            <!-- WebView Pool Viewport -->
+            <div class="app-scroll" style="padding-top:2px;">
+              ${stateKey === 'booting' ? `
+                <div class="m-card" style="text-align:center;padding:36px 16px;">
+                  <div style="font-size:13px;font-weight:700;color:var(--accent);">Starting the browser relay…</div>
+                  <div style="font-size:11.5px;color:var(--textDim);margin-top:4px;">Attaching headless CDP frame pool</div>
+                </div>
+              ` : `
+                <div class="m-card" style="padding:14px;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                    <span class="m-pill m-pill-green">Open · #169</span>
+                    <span class="mono" style="font-size:10.5px;color:var(--textFaint);">CDP Frame Active</span>
+                  </div>
+                  <div style="font-size:15px;font-weight:800;margin-bottom:6px;">New-session &amp; composer ergonomics</div>
+                  <p style="font-size:12px;color:var(--textDim);line-height:1.5;margin:0 0 10px;">
+                    Ensure empty state shows 4 starter rows only for genuinely new chats, and keep the rounded pill composer accessible with steer mode while busy.
+                  </p>
+                  <div style="background:var(--bgElev);border:1px solid var(--border);border-radius:10px;padding:9px;font-size:11.5px;color:var(--textDim);">
+                    <strong style="color:var(--text);">Tip:</strong> Tap <em>Ask Moch</em> above to pipe page DOM context straight into the Chat composer.
+                  </div>
+                </div>
+              `}
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           7. FLEET (/(tabs)/fleet)
+           -------------------------------------------------------------------- */
+        case 7: {
+          const rightCluster = `<button class="shell-icon-btn" title="Refresh fleet" style="width:28px;height:28px;">${ICONS.refresh}</button>`;
+          const bots = [
+            { name: 'Researcher', desc: 'Synthesizes web docs, GitHub issues & local files', dot: 'dot-green' },
+            { name: 'Code Reviewer', desc: 'Checks diffs, TypeScript types & test coverage', dot: 'dot-amber' },
+            { name: 'Release Monitor', desc: 'Watches build pipelines & gateway health', dot: 'dot-idle' }
+          ];
+          const showCreate = stateKey === 'create' || APP.fleetCreateOpen;
+
+          return `
+            ${renderScreenShellHeader({ title: 'Fleet', rightHtml: rightCluster })}
+            <div class="app-scroll">
+              <!-- Runtime Status Strip -->
+              <div class="m-elev" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;font-size:11.5px;">
+                <span style="font-weight:700;color:var(--greenSoft);">● 2 / 4 active queue slots</span>
+                <span style="color:var(--textFaint);">1 waiting</span>
+              </div>
+
+              <!-- Bot Cards -->
+              ${bots.map(b => {
+                const frozen = !!APP.frozenBots[b.name];
+                return `
+                  <div class="m-card" style="opacity:${frozen ? '0.68' : '1'};">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+                      <div style="display:flex;align-items:center;gap:7px;">
+                        <span class="status-dot ${frozen ? 'dot-idle' : b.dot}"></span>
+                        <span onclick="goToSlide(13)" style="font-size:13.5px;font-weight:800;cursor:pointer;">${b.name}</span>
+                      </div>
+                      ${frozen ? `<span class="m-pill m-pill-amber">Frozen</span>` : `<span class="m-pill m-pill-green">Active</span>`}
+                    </div>
+                    <div style="font-size:12px;color:var(--textDim);margin-bottom:10px;">${b.desc}</div>
+                    <div style="display:flex;gap:6px;">
+                      <button class="m-btn-primary" style="flex:1;padding:6px 10px;font-size:11.5px;" onclick="goToSlide(1)">Chat</button>
+                      <button class="m-btn-ghost" style="padding:6px 10px;font-size:11.5px;" onclick="APP.frozenBots['${b.name}']=!APP.frozenBots['${b.name}'];renderActiveScreen();">
+                        ${frozen ? 'Unfreeze' : 'Freeze'}
+                      </button>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+
+              <!-- Create Bot Box -->
+              ${showCreate ? `
+                <div class="m-card" style="border-color:var(--accent);">
+                  <div style="font-size:13px;font-weight:800;margin-bottom:6px;">Create new bot</div>
+                  <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:7px;">
+                    ${['PR Triage', 'Daily Briefing', 'SQL Analyst'].map(chip => `
+                      <span class="m-pill m-pill-accent" style="cursor:pointer;">${chip}</span>
+                    `).join('')}
+                  </div>
+                  <input class="m-input" type="text" value="Triage incoming GitHub issues" style="margin-bottom:5px;font-size:12px;" />
+                  <div style="font-size:10.5px;color:var(--textFaint);margin-bottom:8px;">Suggested name: <strong style="color:var(--text);">@issue-triager</strong></div>
+                  <div style="display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:var(--textDim);margin-bottom:10px;">
+                    <label><input type="checkbox" checked /> Copy USER.md memory</label>
+                    <label><input type="checkbox" checked /> Share workspace memory files</label>
+                    <label><input type="checkbox" /> Attach launch skill (github-pr)</label>
+                  </div>
+                  <div style="display:flex;gap:6px;">
+                    <button class="m-btn-ghost" style="flex:1;" onclick="APP.fleetCreateOpen=false;APP.screenStates[7]='active';renderActiveScreen();">Cancel</button>
+                    <button class="m-btn-primary" style="flex:1;" onclick="APP.fleetCreateOpen=false;APP.screenStates[7]='active';renderActiveScreen();">Create</button>
+                  </div>
+                </div>
+              ` : `
+                <button class="m-btn-primary" style="width:100%;" onclick="APP.fleetCreateOpen=true;renderActiveScreen();">+ New Bot</button>
+              `}
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           8. CREW (/(tabs)/crew)
+           -------------------------------------------------------------------- */
+        case 8: {
+          const cols = [
+            { name: 'Ready', count: 2, color: 'var(--textDim)', tasks: [
+              { id: 't1', title: 'Verify Relay border tokens', bot: '@reviewer' }
+            ]},
+            { name: 'Working', count: 1, color: 'var(--accent)', tasks: [
+              { id: 't2', title: 'Audit #169 empty chat starters', bot: '@researcher' }
+            ]},
+            { name: 'Blocked', count: 1, color: 'var(--amber)', tasks: [
+              { id: 't3', title: 'Sync Linear sprint issues', bot: '@monitor' }
+            ]},
+            { name: 'Done', count: 3, color: 'var(--greenSoft)', tasks: [] }
+          ];
+
+          return `
+            ${renderScreenShellHeader({ title: 'Crew' })}
+            <div class="app-scroll">
+              ${stateKey === 'newtask' ? `
+                <div class="m-card" style="border-color:var(--accent);">
+                  <div style="font-size:13px;font-weight:800;margin-bottom:6px;">Create Crew Task</div>
+                  <input class="m-input" type="text" placeholder="Task title…" value="Run mobile viewport QA pass" style="margin-bottom:6px;" />
+                  <input class="m-input" type="text" placeholder="Instructions…" value="Verify 390x844 layout & touch targets" style="margin-bottom:8px;font-size:12px;" />
+                  <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px;">
+                    <span class="m-pill m-pill-accent">@researcher</span>
+                    <span class="m-pill" style="background:var(--bgElev);color:var(--textDim);">@reviewer</span>
+                    <span class="m-pill" style="background:var(--bgElev);color:var(--textFaint);opacity:0.5;">@monitor (frozen)</span>
+                  </div>
+                  <button class="m-btn-primary" style="width:100%;" onclick="APP.screenStates[8]='kanban';renderActiveScreen();">Create Task</button>
+                </div>
+              ` : ''}
+
+              <!-- Kanban Columns -->
+              ${cols.map(col => `
+                <div style="margin-bottom:10px;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin:4px 2px 5px;">
+                    <span style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;color:${col.color};">${col.name}</span>
+                    <span class="mono" style="font-size:11px;color:var(--textFaint);">${col.count}</span>
+                  </div>
+                  ${col.tasks.length === 0 ? `
+                    <div class="m-elev" style="font-size:11.5px;color:var(--textFaint);text-align:center;">— 3 completed tasks —</div>
+                  ` : col.tasks.map(t => {
+                    const expanded = APP.crewExpandedTask === t.id;
+                    const done = !!APP.crewCompleted[t.id];
+                    return `
+                      <div onclick="APP.crewExpandedTask='${t.id}';renderActiveScreen();" class="m-card" style="margin-bottom:6px;cursor:pointer;border-color:${expanded ? 'var(--accent)' : 'var(--border)'};">
+                        <div style="display:flex;align-items:center;justify-content:space-between;">
+                          <span style="font-size:12.5px;font-weight:700;text-decoration:${done ? 'line-through' : 'none'};">${t.title}</span>
+                          <span class="mono" style="font-size:10.5px;color:var(--accent);">${t.bot}</span>
+                        </div>
+                        ${expanded ? `
+                          <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--borderSoft);display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;" onclick="event.stopPropagation()">
+                            <button class="m-btn-primary" style="padding:4px 10px;font-size:11px;" onclick="APP.crewCompleted['${t.id}']=true;renderActiveScreen();">${done ? 'Completed ✓' : 'Complete'}</button>
+                            <div style="display:flex;gap:4px;">
+                              <span class="m-pill m-pill-accent" style="font-size:10px;">@researcher</span>
+                              <span class="m-pill" style="background:var(--bgElev);color:var(--textFaint);font-size:10px;opacity:0.45;" title="Frozen bot disabled">@monitor</span>
+                            </div>
+                          </div>
+                        ` : ''}
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              `).join('')}
+
+              <!-- Run Timeline Footer -->
+              <div class="m-section-kicker">Run Timeline</div>
+              <div class="m-elev" style="display:flex;flex-direction:column;gap:6px;font-size:11.5px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <span>⚡ Daily PR triage · <strong style="color:var(--accent);">@reviewer</strong></span>
+                  <span style="color:var(--greenSoft);">done</span>
+                </div>
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <span>💬 Repo audit · <strong style="color:var(--accent);">@researcher</strong></span>
+                  <span style="color:var(--amber);">running</span>
+                </div>
+              </div>
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           9. AUTOMATIONS (/(tabs)/automations)
+           -------------------------------------------------------------------- */
+        case 9: {
+          const rightCluster = `<button onclick="APP.screenStates[9]='modal';renderActiveScreen();" style="width:28px;height:28px;border-radius:50%;border:none;background:var(--accent);color:var(--onAccent);display:flex;align-items:center;justify-content:center;cursor:pointer;" title="New automation">${ICONS.plus}</button>`;
+          const jobs = [
+            { id: 'a1', jobId: 'job_01j9x8k2', name: 'Morning Digest', next: 'in 14m', sched: '0 9 * * 1-5', prompt: 'Summarize inbox items, open PRs, and today calendar events.' },
+            { id: 'a2', jobId: 'job_01j9x9m4', name: 'PR Watcher', next: 'in 1h', sched: '*/30 * * * *', prompt: 'Check moch-ai/moch for newly opened issues labeled #169.' }
+          ];
+
+          return `
+            ${renderScreenShellHeader({ title: 'Automations', rightHtml: rightCluster })}
+            <div class="app-scroll">
+              <div style="font-size:11.5px;color:var(--textDim);margin:0 2px 10px;">Jobs run on gateway · Persistent across restarts</div>
+
+              ${stateKey === 'modal' ? `
+                <div class="m-card" style="border-color:var(--accent);">
+                  <div style="font-size:13.5px;font-weight:800;margin-bottom:8px;">New Automation</div>
+                  <div class="m-section-kicker" style="margin-top:0;">Name</div>
+                  <input class="m-input" type="text" value="Nightly Backup Check" style="margin-bottom:6px;" />
+                  <div class="m-section-kicker">Schedule (Cron)</div>
+                  <input class="m-input mono" type="text" value="0 23 * * *" style="margin-bottom:6px;" />
+                  <div class="m-section-kicker">Prompt</div>
+                  <textarea class="m-input" rows="2" style="margin-bottom:8px;">Verify local SQLite &amp; USER.md snapshots.</textarea>
+                  <div style="display:flex;gap:6px;">
+                    <button class="m-btn-ghost" style="flex:1;" onclick="APP.screenStates[9]='list';renderActiveScreen();">Cancel</button>
+                    <button class="m-btn-primary" style="flex:1;" onclick="APP.screenStates[9]='list';renderActiveScreen();">Create</button>
+                  </div>
+                </div>
+              ` : ''}
+
+              ${jobs.map(j => {
+                const paused = !!APP.autoPaused[j.id];
+                const expanded = APP.autoExpandedId === j.id;
+                return `
+                  <div onclick="APP.autoExpandedId='${j.id}';renderActiveScreen();" class="m-card" style="opacity:${paused ? '0.72' : '1'};cursor:pointer;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+                      <span style="font-size:13.5px;font-weight:800;">${j.name}</span>
+                      ${paused ? `<span class="m-pill m-pill-amber">Paused</span>` : `<span class="m-pill m-pill-accent">${j.next}</span>`}
+                    </div>
+                    <div style="font-size:12px;color:var(--textDim);margin-bottom:6px;">${j.prompt}</div>
+                    <div class="mono" style="font-size:10.5px;color:var(--textFaint);">${j.sched} · last: ok</div>
+
+                    ${expanded ? `
+                      <div style="margin-top:9px;padding-top:9px;border-top:1px solid var(--borderSoft);" onclick="event.stopPropagation()">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                          <span onclick="APP.copiedJobId=true;renderActiveScreen();" class="mono" style="font-size:10.5px;background:var(--bgElev);border:1px solid var(--border);padding:3px 8px;border-radius:6px;cursor:pointer;">
+                            ID: ${j.jobId} · ${APP.copiedJobId ? 'Copied ✓' : 'Tap to copy'}
+                          </span>
+                          <span style="font-size:10.5px;color:var(--greenSoft);">deliver: inbox</span>
+                        </div>
+                        <div style="display:flex;gap:5px;">
+                          <button class="m-btn-primary" style="flex:1;padding:6px 8px;font-size:11px;" onclick="goToSlide(1)">Run now</button>
+                          <button class="m-btn-ghost" style="flex:1;padding:6px 8px;font-size:11px;" onclick="APP.autoPaused['${j.id}']=!APP.autoPaused['${j.id}'];renderActiveScreen();">${paused ? 'Resume' : 'Pause'}</button>
+                          <button class="m-btn-ghost" style="padding:6px 9px;font-size:11px;color:var(--red);">Delete</button>
+                        </div>
+                      </div>
+                    ` : ''}
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           10. SKILLS (/(tabs)/skills)
+           -------------------------------------------------------------------- */
+        case 10: {
+          const activeTab = stateKey === 'skills' ? 'skills' : APP.skillTab;
+          const commands = [
+            { name: '/skill', desc: 'Load and execute a specialized skill workflow' },
+            { name: '/model', desc: 'Switch active LLM provider or model scope' },
+            { name: '/compact', desc: 'Compress conversation history tokens' },
+            { name: '/memory', desc: 'Inspect or update on-phone USER.md memory' }
+          ].filter(c => c.name.includes(APP.skillFilter.toLowerCase()) || c.desc.toLowerCase().includes(APP.skillFilter.toLowerCase()));
+
+          const skills = [
+            { name: 'github-pr', origin: 'bundled', desc: 'Review pull requests, diffs & CI checks', used: 'used 14×' },
+            { name: 'web-research', origin: 'bundled', desc: 'Multi-source search & structured synthesis', used: 'used 9×' },
+            { name: 'expo-audit', origin: 'user', desc: 'Verify React Native & Expo Router screens', used: 'used 4×' }
+          ].filter(s => s.name.includes(APP.skillFilter.toLowerCase()) || s.desc.toLowerCase().includes(APP.skillFilter.toLowerCase()));
+
+          return `
+            ${renderScreenShellHeader({ title: 'Skills' })}
+            <div class="app-scroll">
+              <input class="m-input" type="text" placeholder="Filter commands or skills…" value="${APP.skillFilter}" oninput="APP.skillFilter=this.value;renderActiveScreen();" style="margin-bottom:8px;" />
+
+              <!-- Commands (12) / Skills (8) Tabs -->
+              <div style="display:grid;grid-template-columns:1fr 1fr;background:var(--bgCard);border:1px solid var(--border);border-radius:11px;padding:3px;margin-bottom:10px;">
+                <button onclick="APP.skillTab='commands';APP.screenStates[10]='commands';renderActiveScreen();" style="border:none;border-radius:8px;padding:6px;font-size:12px;font-weight:700;cursor:pointer;background:${activeTab === 'commands' ? 'var(--accent)' : 'transparent'};color:${activeTab === 'commands' ? 'var(--onAccent)' : 'var(--textDim)'};">Commands (12)</button>
+                <button onclick="APP.skillTab='skills';APP.screenStates[10]='skills';renderActiveScreen();" style="border:none;border-radius:8px;padding:6px;font-size:12px;font-weight:700;cursor:pointer;background:${activeTab === 'skills' ? 'var(--accent)' : 'transparent'};color:${activeTab === 'skills' ? 'var(--onAccent)' : 'var(--textDim)'};">Skills (8)</button>
+              </div>
+
+              ${activeTab === 'commands' ? commands.map(c => `
+                <div onclick="APP.chatDraft='${c.name} ';goToSlide(1);" class="m-card" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                  <div>
+                    <div class="mono" style="font-size:13px;font-weight:700;color:var(--accent);">${c.name}</div>
+                    <div style="font-size:11.5px;color:var(--textDim);margin-top:2px;">${c.desc}</div>
+                  </div>
+                  <span style="color:var(--textFaint);">${ICONS.chevronRight}</span>
+                </div>
+              `).join('') : skills.map(s => `
+                <div onclick="APP.chatDraft='/skill ${s.name} ';goToSlide(1);" class="m-card" style="cursor:pointer;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <span class="mono" style="font-size:13px;font-weight:700;">${s.name}</span>
+                      <span class="m-pill m-pill-accent" style="font-size:9.5px;">${s.origin}</span>
+                    </div>
+                    <span class="mono" style="font-size:10.5px;color:var(--textFaint);">${s.used}</span>
+                  </div>
+                  <div style="font-size:11.5px;color:var(--textDim);">${s.desc}</div>
+                </div>
+              `).join('')}
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           11. CONNECTORS (/(tabs)/connectors)
+           -------------------------------------------------------------------- */
+        case 11: {
+          const activeTab = stateKey === 'browse' ? 'browse' : APP.connectorTab;
+          const yours = [
+            { letter: 'G', name: 'GitHub MCP', transport: 'HTTP', status: 'Connected · 12 tools', color: 'var(--greenSoft)', url: 'https://api.githubcopilot.com/mcp/' },
+            { letter: 'L', name: 'Linear', transport: 'SSE', status: 'Sign-in needed (OAuth)', color: 'var(--amber)', url: 'https://mcp.linear.app/sse' },
+            { letter: 'F', name: 'Filesystem', transport: 'STDIO', desktop: true, status: 'Idle · starts on first use', color: 'var(--textDim)', url: 'npx @modelcontextprotocol/server-fs' }
+          ];
+          const browse = [
+            { letter: 'S', name: 'Slack', keyTag: true, installed: false },
+            { letter: 'N', name: 'Notion', keyTag: false, installed: true },
+            { letter: 'P', name: 'Postgres', keyTag: true, installed: false },
+            { letter: 'B', name: 'Brave Search', keyTag: true, installed: false }
+          ];
+
+          return `
+            ${renderScreenShellHeader({ title: 'Connectors' })}
+            <div class="app-scroll">
+              <!-- Search + Add -->
+              <div style="display:flex;gap:6px;margin-bottom:8px;">
+                <input class="m-input" type="text" placeholder="Search MCP servers…" />
+                <button class="m-btn-primary" style="white-space:nowrap;padding:0 12px;">+ Add</button>
+              </div>
+
+              <!-- Yours (4) / Browse Tabs -->
+              <div style="display:grid;grid-template-columns:1fr 1fr;background:var(--bgCard);border:1px solid var(--border);border-radius:11px;padding:3px;margin-bottom:10px;">
+                <button onclick="APP.connectorTab='yours';APP.screenStates[11]='yours';renderActiveScreen();" style="border:none;border-radius:8px;padding:6px;font-size:12px;font-weight:700;cursor:pointer;background:${activeTab === 'yours' ? 'var(--accent)' : 'transparent'};color:${activeTab === 'yours' ? 'var(--onAccent)' : 'var(--textDim)'};">Yours (4)</button>
+                <button onclick="APP.connectorTab='browse';APP.screenStates[11]='browse';renderActiveScreen();" style="border:none;border-radius:8px;padding:6px;font-size:12px;font-weight:700;cursor:pointer;background:${activeTab === 'browse' ? 'var(--accent)' : 'transparent'};color:${activeTab === 'browse' ? 'var(--onAccent)' : 'var(--textDim)'};">Browse</button>
+              </div>
+
+              ${activeTab === 'yours' ? yours.map(srv => `
+                <div onclick="APP.screenStates[11]='detail';renderActiveScreen();" class="m-card" style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                  <div style="width:36px;height:36px;border-radius:10px;background:var(--accentSoft);color:var(--accent);font-weight:800;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${srv.letter}</div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+                      <span style="font-size:13px;font-weight:700;">${srv.name}</span>
+                      <span class="mono" style="font-size:9.5px;padding:1px 5px;border-radius:5px;background:var(--bgElev);border:1px solid var(--border);">${srv.transport}</span>
+                      ${srv.desktop ? `<span class="m-pill m-pill-amber" style="font-size:9px;padding:1px 5px;">Desktop only</span>` : ''}
+                    </div>
+                    <div style="font-size:11px;color:${srv.color};margin-top:2px;font-weight:600;">${srv.status}</div>
+                    <div class="mono" style="font-size:10px;color:var(--textFaint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${srv.url}</div>
+                  </div>
+                </div>
+              `).join('') : `
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                  ${browse.map(b => `
+                    <div class="m-card" style="margin-bottom:0;display:flex;flex-direction:column;justify-content:space-between;gap:8px;">
+                      <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <div style="width:30px;height:30px;border-radius:8px;background:var(--accentSoft);color:var(--accent);font-weight:800;display:flex;align-items:center;justify-content:center;">${b.letter}</div>
+                        ${b.keyTag ? `<span class="mono" style="font-size:9.5px;color:var(--textFaint);">API key</span>` : ''}
+                      </div>
+                      <div style="font-size:13px;font-weight:700;">${b.name}</div>
+                      <button class="${b.installed ? 'm-btn-ghost' : 'm-btn-primary'}" style="padding:5px;font-size:11px;width:100%;">${b.installed ? 'Installed ✓' : 'Install'}</button>
+                    </div>
+                  `).join('')}
+                </div>
+              `}
+
+              <!-- Server Detail Sheet Preview -->
+              ${stateKey === 'detail' ? `
+                <div class="m-card" style="margin-top:10px;border-color:var(--accent);background:var(--bgElev);">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                    <span style="font-size:13.5px;font-weight:800;">GitHub MCP · Detail</span>
+                    <button class="shell-icon-btn" style="width:24px;height:24px;" onclick="APP.screenStates[11]='yours';renderActiveScreen();">✕</button>
+                  </div>
+                  <div style="font-size:11.5px;color:var(--greenSoft);margin-bottom:8px;">● Connected · 12 tools exposed</div>
+                  <div style="display:flex;gap:6px;">
+                    <button class="m-btn-primary" style="flex:1;padding:6px;font-size:11.5px;">Test tools</button>
+                    <button class="m-btn-ghost" style="padding:6px 10px;font-size:11.5px;color:var(--red);">Remove</button>
+                  </div>
+                </div>
+              ` : ''}
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           12. SETTINGS (/(tabs)/settings)
+           -------------------------------------------------------------------- */
+        case 12: {
+          const isOffline = stateKey === 'offline';
+          return `
+            ${renderScreenShellHeader({ title: 'Settings', offline: isOffline })}
+            <div class="app-scroll">
+              <!-- Connection Hero -->
+              <div class="m-card" style="background:${isOffline ? 'var(--redSoft)' : 'var(--greenTint)'};border-color:${isOffline ? 'rgba(255,90,90,0.35)' : 'rgba(74,222,128,0.3)'};">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+                  <span class="mono" style="font-size:13px;font-weight:700;">127.0.0.1:4310</span>
+                  <span class="m-pill ${isOffline ? 'm-pill-red' : 'm-pill-green'}">${isOffline ? 'Disconnected' : 'Connected'}</span>
+                </div>
+                <div style="font-size:11.5px;color:var(--textDim);">Local embedded gateway · Secure loopback</div>
+              </div>
+
+              <!-- APPEARANCE (Live Theme Switcher Inside Phone!) -->
+              <div class="m-section-kicker">Appearance</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+                <div onclick="setTheme('mocheme')" class="m-card" style="margin-bottom:0;cursor:pointer;border-color:${APP.theme === 'mocheme' ? 'var(--accent)' : 'var(--border)'};">
+                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                    <span style="width:12px;height:12px;border-radius:50%;background:#F79236;"></span>
+                    <strong style="font-size:12.5px;">Mocheme</strong>
+                  </div>
+                  <div style="font-size:10.5px;color:var(--textDim);">Sprout orange · Visor navy</div>
+                </div>
+                <div onclick="setTheme('relay')" class="m-card" style="margin-bottom:0;cursor:pointer;border-color:${APP.theme === 'relay' ? 'var(--accent)' : 'var(--border)'};">
+                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                    <span style="width:12px;height:12px;border-radius:50%;background:#39CADB;"></span>
+                    <strong style="font-size:12.5px;">Relay</strong>
+                  </div>
+                  <div style="font-size:10.5px;color:var(--textDim);">Brand cyan · Dark teal</div>
+                </div>
+              </div>
+
+              <!-- RUNTIME & AGENT -->
+              <div class="m-section-kicker">Runtime &amp; Agent</div>
+              <div class="m-card" style="padding:0;overflow:hidden;">
+                <div onclick="goToSlide(16)" style="padding:10px 12px;border-bottom:1px solid var(--borderSoft);display:flex;justify-content:space-between;font-size:12.5px;cursor:pointer;">
+                  <span>Linux Guest</span>
+                  <span style="color:var(--greenSoft);font-weight:600;">Ubuntu 24.04 · 284 MB ›</span>
+                </div>
+                <div onclick="goToSlide(10)" style="padding:10px 12px;border-bottom:1px solid var(--borderSoft);display:flex;justify-content:space-between;font-size:12.5px;cursor:pointer;">
+                  <span>Skills &amp; Commands</span>
+                  <span style="color:var(--textFaint);">20 loaded ›</span>
+                </div>
+                <div onclick="goToSlide(4)" style="padding:10px 12px;display:flex;justify-content:space-between;font-size:12.5px;cursor:pointer;">
+                  <span>Models &amp; Reasoning</span>
+                  <span class="mono" style="font-size:11.5px;color:var(--accent);">${APP.selectedModel} ›</span>
+                </div>
+              </div>
+
+              <!-- THINKER & MEMORY -->
+              <div class="m-section-kicker">Thinker &amp; Memory</div>
+              <div class="m-card" style="padding:0;overflow:hidden;">
+                <div onclick="goToSlide(17)" style="padding:10px 12px;border-bottom:1px solid var(--borderSoft);display:flex;justify-content:space-between;font-size:12.5px;cursor:pointer;">
+                  <span>Active Thinker</span>
+                  <span style="font-weight:700;">Moch (hermes) ›</span>
+                </div>
+                <div onclick="goToSlide(19)" style="padding:10px 12px;display:flex;justify-content:space-between;font-size:12.5px;cursor:pointer;">
+                  <span>About me (USER.md)</span>
+                  <span style="color:var(--textFaint);">Edit ›</span>
+                </div>
+              </div>
+
+              <!-- NOTIFICATIONS & ABOUT -->
+              <div class="m-card" style="display:flex;align-items:center;justify-content:space-between;">
+                <span style="font-size:12.5px;font-weight:700;">Background Notifications</span>
+                <div onclick="APP.settingsNotifs=!APP.settingsNotifs;renderActiveScreen();" style="width:40px;height:22px;border-radius:999px;background:${APP.settingsNotifs ? 'var(--accent)' : 'var(--bgHover)'};padding:2px;cursor:pointer;">
+                  <div style="width:18px;height:18px;border-radius:50%;background:${APP.settingsNotifs ? 'var(--onAccent)' : '#fff'};transform:translateX(${APP.settingsNotifs ? '18px' : '0'});"></div>
+                </div>
+              </div>
+
+              <div style="display:flex;gap:6px;">
+                <button class="m-btn-ghost" style="flex:1;font-size:11.5px;">Copy diagnostics</button>
+                <button class="m-btn-ghost" style="flex:1;font-size:11.5px;">Export transcript</button>
+              </div>
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           13. BOT DETAIL MODAL (/bot?name=researcher)
+           -------------------------------------------------------------------- */
+        case 13: {
+          const noProv = stateKey === 'noprovider';
+          const deleteLabels = ['Delete bot', 'Tap again to confirm delete', 'Deleting profile…'];
+          return `
+            <div style="padding:8px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);">
+              <button onclick="goToSlide(7)" class="m-btn-ghost" style="padding:5px 10px;font-size:12px;">← Back</button>
+              <div style="text-align:center;">
+                <div style="font-size:14.5px;font-weight:800;">Researcher</div>
+                <div class="shell-brand">MOCH · BOT MODAL</div>
+              </div>
+              <button onclick="goToSlide(1)" class="m-btn-primary" style="width:32px;height:32px;padding:0;border-radius:50%;" title="Open Bot Chat">
+                ${ICONS.chatBubble}
+              </button>
+            </div>
+
+            <div class="app-scroll">
+              ${noProv ? `
+                <div class="m-card" style="background:var(--amberSoft);border-color:rgba(245,165,36,0.35);">
+                  <div style="font-size:12.5px;font-weight:700;color:var(--amber);margin-bottom:4px;">No model provider configured</div>
+                  <div style="font-size:11.5px;color:var(--textDim);margin-bottom:8px;">This bot needs an API key before it can reply.</div>
+                  <button class="m-btn-primary" style="padding:6px 12px;font-size:11.5px;" onclick="APP.screenStates[13]='normal';renderActiveScreen();">Use my provider</button>
+                </div>
+              ` : ''}
+
+              <div class="m-section-kicker" style="margin-top:2px;">Job</div>
+              <input class="m-input" type="text" value="Synthesize repos, PRs & web docs into concise briefs" />
+
+              <div class="m-section-kicker">SOUL (System Persona)</div>
+              <textarea class="m-input" rows="5" style="line-height:1.45;">You are Researcher, an analytical companion inside Moch. Cite file paths, keep answers structured, and ask clarifying questions only when blocked.</textarea>
+
+              <!-- Save Row -->
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;">
+                <button class="m-btn-primary" onclick="APP.botSavedBadge=true;renderActiveScreen();">Save changes</button>
+                ${APP.botSavedBadge ? `<span class="m-pill m-pill-green">saved ✓</span>` : `<span style="font-size:11px;color:var(--textFaint);">Synced to profile</span>`}
+              </div>
+
+              <!-- Danger Zone (3-tap armed delete) -->
+              <div class="m-section-kicker" style="color:var(--red);margin-top:22px;">Danger Zone</div>
+              <div class="m-card" style="border-color:rgba(255,90,90,0.3);background:var(--redSoft);">
+                <div style="font-size:11.5px;color:var(--textDim);margin-bottom:8px;">Permanently remove @researcher and its isolated memory.</div>
+                <button onclick="APP.botDeleteArm=(APP.botDeleteArm+1)%3;renderActiveScreen();" style="width:100%;padding:8px;border-radius:10px;border:1px solid var(--red);background:${APP.botDeleteArm > 0 ? 'var(--red)' : 'transparent'};color:${APP.botDeleteArm > 0 ? '#fff' : 'var(--red)'};font-weight:700;font-size:12px;cursor:pointer;">
+                  ${deleteLabels[APP.botDeleteArm]}
+                </button>
+              </div>
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           14. ENTRY (/)
+           -------------------------------------------------------------------- */
+        case 14: {
+          const isError = stateKey === 'error';
+          return `
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;">
+              ${getMochiSVG(112, isError ? 'sleepy' : 'happy')}
+              <div style="font-size:10.5px;font-weight:800;letter-spacing:0.12em;color:var(--accent);margin-top:14px;">YOUR AGENT, ON THIS PHONE</div>
+              <div style="font-size:32px;font-weight:800;letter-spacing:-0.03em;margin:2px 0 14px;">Moch</div>
+
+              ${isError ? `
+                <div class="m-card" style="width:100%;text-align:left;background:var(--redSoft);border-color:rgba(255,90,90,0.35);">
+                  <div style="font-size:13px;font-weight:700;color:var(--red);margin-bottom:3px;">Gateway did not respond</div>
+                  <div style="font-size:11.5px;color:var(--textDim);">Port 4310 timed out after 8s.</div>
+                </div>
+                <div class="m-card" style="width:100%;text-align:left;background:var(--amberSoft);border-color:rgba(245,165,36,0.3);">
+                  <div style="font-size:11.5px;font-weight:700;color:var(--amber);">Legacy remote pairing found</div>
+                  <div style="font-size:11px;color:var(--textDim);">Moch now runs locally on this phone.</div>
+                </div>
+                <button class="m-btn-primary" style="width:100%;margin-bottom:8px;" onclick="APP.screenStates[14]='starting';renderActiveScreen();">Try again</button>
+                <button class="m-btn-ghost" style="width:100%;" onclick="goToSlide(1)">Open Moch anyway</button>
+              ` : `
+                <div style="display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;background:var(--bgCard);border:1px solid var(--border);font-size:12.5px;font-weight:600;">
+                  <span style="width:9px;height:9px;border-radius:50%;background:var(--accent);"></span>
+                  <span>Starting your agent…</span>
+                </div>
+                <div style="font-size:11.5px;color:var(--textFaint);margin-top:12px;max-width:240px;">First launch unpacks the local runtime. Usually takes ~4 seconds.</div>
+              `}
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           15. SETUP WIZARD (/setup modal)
+           -------------------------------------------------------------------- */
+        case 15: {
+          const stepMap = { step1: 1, step2: 2, step3: 3, step4: 4 };
+          const step = stepMap[stateKey] || 1;
+          const titles = ['', 'Choose an environment', 'Connect a model', 'Basics & permissions', 'Installing runtime'];
+
+          return `
+            <div style="padding:14px 16px 8px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                <span style="font-size:10.5px;font-weight:800;letter-spacing:0.09em;color:var(--accent);">FIRST-RUN SETUP</span>
+                <div style="display:flex;gap:5px;">
+                  ${[1,2,3,4].map(n => `
+                    <span onclick="APP.screenStates[15]='step${n}';renderActiveScreen();" style="width:${step === n ? '18px' : '7px'};height:7px;border-radius:999px;background:${step >= n ? 'var(--accent)' : 'var(--bgHover)'};cursor:pointer;transition:all 0.2s;"></span>
+                  `).join('')}
+                </div>
+              </div>
+              <div style="font-size:20px;font-weight:800;">${titles[step]}</div>
+            </div>
+
+            <div class="app-scroll">
+              ${step === 1 ? `
+                ${[
+                  { name: 'Ubuntu 24.04 LTS', tag: 'Recommended', desc: 'Full apt ecosystem, Node, Python & OpenCode support.' },
+                  { name: 'Debian 12 (Bookworm)', tag: 'Lightweight', desc: 'Minimal stable Linux guest (~190 MB).' },
+                  { name: 'None (Host only)', tag: 'Fastest', desc: 'Run Moch chat & cloud connectors without Linux.' }
+                ].map((d, i) => `
+                  <div class="m-card" style="border-color:${i === 0 ? 'var(--accent)' : 'var(--border)'};">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+                      <strong style="font-size:13.5px;">${d.name}</strong>
+                      <span class="m-pill m-pill-accent">${d.tag}</span>
+                    </div>
+                    <div style="font-size:11.5px;color:var(--textDim);">${d.desc}</div>
+                  </div>
+                `).join('')}
+                <button class="m-btn-primary" style="width:100%;margin-top:6px;" onclick="APP.screenStates[15]='step2';renderActiveScreen();">Install &amp; Continue</button>
+              ` : step === 2 ? `
+                <div class="m-card" style="border-color:var(--accent);">
+                  <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+                    <strong>Anthropic</strong>
+                    <span class="m-pill m-pill-green">Ready</span>
+                  </div>
+                  <input class="m-input mono" type="password" value="sk-ant-api03-••••••••" style="margin-bottom:8px;" />
+                  <button class="m-btn-primary" style="width:100%;" onclick="APP.screenStates[15]='step3';renderActiveScreen();">Save &amp; Continue</button>
+                </div>
+                <button class="m-btn-ghost" style="width:100%;" onclick="APP.screenStates[15]='step3';renderActiveScreen();">Skip for now</button>
+              ` : step === 3 ? `
+                <div class="m-card">
+                  <div style="font-size:13px;font-weight:700;margin-bottom:2px;">Notifications</div>
+                  <div style="font-size:11.5px;color:var(--textDim);">Alert when background agents finish or need approval.</div>
+                </div>
+                <div class="m-card">
+                  <div style="font-size:13px;font-weight:700;margin-bottom:2px;">Battery optimization exemption</div>
+                  <div style="font-size:11.5px;color:var(--textDim);">Keep local gateway socket alive while screen is locked.</div>
+                </div>
+                <button class="m-btn-primary" style="width:100%;margin-top:8px;" onclick="APP.screenStates[15]='step4';renderActiveScreen();">Finish setup</button>
+              ` : `
+                <div class="m-card" style="text-align:center;padding:28px 16px;">
+                  <div style="width:44px;height:44px;border-radius:50%;background:var(--greenTint);color:var(--greenSoft);display:flex;align-items:center;justify-content:center;margin:0 auto 10px;">${ICONS.check}</div>
+                  <div style="font-size:16px;font-weight:800;">Environment Ready</div>
+                  <div class="mono" style="font-size:11.5px;color:var(--textDim);margin:4px 0 16px;">284 MB on disk · Gateway online</div>
+                  <button class="m-btn-primary" style="width:100%;" onclick="goToSlide(1)">Enter Moch</button>
+                </div>
+              `}
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           16. ONBOARDING 1 · ENVIRONMENT (/onboarding/environment)
+           -------------------------------------------------------------------- */
+        case 16: {
+          const pkgs = ['npm', 'python3', 'git', 'php', 'curl'];
+          const installing = stateKey === 'installing';
+          return `
+            <div style="padding:14px 16px 6px;">
+              <div style="font-size:10.5px;font-weight:800;color:var(--accent);letter-spacing:0.08em;">STEP 1 OF 4</div>
+              <div style="font-size:19px;font-weight:800;">Linux Environment</div>
+            </div>
+            <div class="app-scroll">
+              <div class="m-section-kicker" style="margin-top:2px;">Distribution</div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px;">
+                ${['Ubuntu 24.04', 'Debian 12', 'None'].map((d, i) => `
+                  <div style="padding:8px 6px;border-radius:11px;text-align:center;font-size:11.5px;font-weight:700;background:${i === 0 ? 'var(--accentSoft)' : 'var(--bgCard)'};border:1px solid ${i === 0 ? 'var(--accent)' : 'var(--border)'};color:${i === 0 ? 'var(--accent)' : 'var(--textDim)'};">${d}</div>
+                `).join('')}
+              </div>
+
+              <div class="m-section-kicker">Categorised Packages (One-Tap)</div>
+              <div class="m-card" style="display:flex;flex-wrap:wrap;gap:6px;">
+                ${pkgs.map(p => {
+                  const sel = !!APP.selectedPackages[p];
+                  return `
+                    <button onclick="APP.selectedPackages['${p}']=!APP.selectedPackages['${p}'];renderActiveScreen();" style="border:1px solid ${sel ? 'var(--accent)' : 'var(--border)'};background:${sel ? 'var(--accentSoft)' : 'var(--bgElev)'};color:${sel ? 'var(--accent)' : 'var(--textDim)'};border-radius:9px;padding:6px 10px;font-family:'JetBrains Mono',monospace;font-size:11.5px;font-weight:700;cursor:pointer;">
+                      ${sel ? '✓ ' : '+ '}${p}
+                    </button>
+                  `;
+                }).join('')}
+              </div>
+
+              ${installing ? `
+                <div class="m-elev mono" style="font-size:11px;color:var(--greenSoft);margin-bottom:10px;">
+                  ● Running: apt-get update && apt-get install -y nodejs python3 git…
+                </div>
+              ` : ''}
+
+              <div style="display:flex;gap:8px;margin-top:8px;">
+                <button class="m-btn-ghost" style="flex:1;" onclick="goToSlide(17)">Skip</button>
+                <button class="m-btn-primary" style="flex:2;" onclick="goToSlide(17)">Install &amp; Continue</button>
+              </div>
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           17. ONBOARDING 2 · THINKER (/onboarding/thinker)
+           -------------------------------------------------------------------- */
+        case 17: {
+          const isOpenCode = stateKey === 'opencode' || APP.selectedThinker === 'opencode';
+          return `
+            <div style="padding:14px 16px 6px;">
+              <div style="font-size:10.5px;font-weight:800;color:var(--accent);letter-spacing:0.08em;">STEP 2 OF 4</div>
+              <div style="font-size:19px;font-weight:800;">Choose Thinker</div>
+            </div>
+            <div class="app-scroll">
+              <div onclick="APP.selectedThinker='moch';APP.screenStates[17]='moch';renderActiveScreen();" class="m-card" style="cursor:pointer;border-color:${!isOpenCode ? 'var(--accent)' : 'var(--border)'};">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+                  <strong style="font-size:14px;">Moch (hermes)</strong>
+                  <span class="m-pill m-pill-green">Default · Native</span>
+                </div>
+                <div style="font-size:12px;color:var(--textDim);">Full multi-bot Fleet, Crew Kanban, Automations, and Browser relay.</div>
+              </div>
+
+              <div onclick="APP.selectedThinker='opencode';APP.screenStates[17]='opencode';renderActiveScreen();" class="m-card" style="cursor:pointer;border-color:${isOpenCode ? 'var(--accent)' : 'var(--border)'};">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+                  <strong style="font-size:14px;">OpenCode</strong>
+                  <span class="m-pill m-pill-amber">Requires Linux guest</span>
+                </div>
+                <div style="font-size:12px;color:var(--textDim);">Terminal-first coding agent running inside your Ubuntu guest.</div>
+              </div>
+
+              <!-- Expandable Diagnostics + One-Shot Probe -->
+              <div class="m-card">
+                <div onclick="APP.thinkerDiagOpen=!APP.thinkerDiagOpen;renderActiveScreen();" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:12px;font-weight:700;">
+                  <span>Server health &amp; diagnostics</span>
+                  <span style="color:var(--greenSoft);">Healthy ▾</span>
+                </div>
+                ${APP.thinkerDiagOpen ? `
+                  <div class="mono" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--borderSoft);font-size:10.5px;color:var(--textDim);">
+                    loopback: 127.0.0.1:4310 OK<br/>
+                    one-shot probe: 142ms
+                  </div>
+                ` : ''}
+              </div>
+
+              <button class="m-btn-primary" style="width:100%;" onclick="goToSlide(18)">Continue</button>
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           18. ONBOARDING 3 · PROVIDERS (/onboarding/providers)
+           -------------------------------------------------------------------- */
+        case 18: {
+          const providers = [
+            { name: 'Anthropic', ready: true },
+            { name: 'OpenAI', ready: false },
+            { name: 'OpenRouter', ready: false },
+            { name: 'Google Gemini', ready: false },
+            { name: 'Ollama (Local)', ready: true }
+          ];
+          return `
+            <div style="padding:14px 16px 6px;">
+              <div style="font-size:10.5px;font-weight:800;color:var(--accent);letter-spacing:0.08em;">STEP 3 OF 4</div>
+              <div style="font-size:19px;font-weight:800;">Connect Providers</div>
+            </div>
+            <div class="app-scroll">
+              <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
+                ${providers.map(p => {
+                  const sel = APP.selectedOnboardProvider === p.name;
+                  return `
+                    <div onclick="APP.selectedOnboardProvider='${p.name}';renderActiveScreen();" style="padding:9px 11px;border-radius:11px;background:${sel ? 'var(--accentSoft)' : 'var(--bgCard)'};border:1px solid ${sel ? 'var(--accent)' : 'var(--border)'};display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+                      <strong style="font-size:12.5px;">${p.name}</strong>
+                      ${p.ready ? `<span class="m-pill m-pill-green">Ready</span>` : `<span style="font-size:11px;color:var(--textFaint);">Tap to add key</span>`}
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+
+              <!-- Inline ProviderKeyForm -->
+              <div class="m-card">
+                <div style="font-size:12px;font-weight:700;margin-bottom:5px;">${APP.selectedOnboardProvider} API Key</div>
+                <div style="display:flex;gap:6px;">
+                  <input class="m-input mono" type="password" value="sk-••••••••••••••••••••" style="font-size:11.5px;" />
+                  <button class="m-btn-primary" onclick="APP.onboardKeySaved=true;renderActiveScreen();">${APP.onboardKeySaved ? 'Saved ✓' : 'Save'}</button>
+                </div>
+              </div>
+
+              <div style="display:flex;gap:8px;">
+                <button class="m-btn-ghost" style="flex:1;" onclick="goToSlide(19)">Skip</button>
+                <button class="m-btn-primary" style="flex:2;" onclick="goToSlide(19)">Continue</button>
+              </div>
+            </div>
+          `;
+        }
+
+        /* --------------------------------------------------------------------
+           19. ONBOARDING 4 · ABOUT YOU (/onboarding/about)
+           -------------------------------------------------------------------- */
+        case 19: {
+          return `
+            <div style="padding:14px 16px 6px;">
+              <div style="font-size:10.5px;font-weight:800;color:var(--accent);letter-spacing:0.08em;">STEP 4 OF 4</div>
+              <div style="font-size:19px;font-weight:800;">About You</div>
+              <div style="font-size:11.5px;color:var(--textDim);">Saved to on-phone USER.md memory</div>
+            </div>
+            <div class="app-scroll">
+              <div class="m-section-kicker" style="margin-top:2px;">Name</div>
+              <input class="m-input" type="text" value="Alex" style="margin-bottom:6px;" />
+
+              <div class="m-section-kicker">What you do</div>
+              <input class="m-input" type="text" value="Mobile &amp; AI systems engineer" style="margin-bottom:6px;" />
+
+              <div class="m-section-kicker">Anything else</div>
+              <textarea class="m-input" rows="2" style="margin-bottom:8px;">Prefer concise diffs, TypeScript strict mode, and direct answers.</textarea>
+
+              <!-- Permissions -->
+              <div class="m-card" style="padding:9px 11px;display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-size:12px;font-weight:700;">Notifications</span>
+                <span class="m-pill m-pill-green">Enabled</span>
+              </div>
+              <div class="m-card" style="padding:9px 11px;display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-size:12px;font-weight:700;">Battery exemption</span>
+                <span class="m-pill m-pill-accent">Recommended</span>
+              </div>
+
+              ${stateKey === 'opencode_note' ? `
+                <div class="m-card" style="background:var(--amberSoft);border-color:rgba(245,165,36,0.3);font-size:11.5px;color:var(--amber);">
+                  Note: In OpenCode thinker mode, Fleet, Crew, Automations, and Browser tabs stay hidden.
+                </div>
+              ` : ''}
+
+              <button class="m-btn-primary" style="width:100%;padding:11px;margin-top:4px;font-size:13.5px;" onclick="goToSlide(1)">
+                Start using Moch →
+              </button>
+            </div>
+          `;
+        }
+      }
+    }
+
+    /* ------------------------------------------------------------------------
+       6. CHAT INTERACTION HANDLERS (LIVE TYPING, SENDING, ATTACHMENTS)
+       ------------------------------------------------------------------------ */
+    function handleChatInput(val) {
+      APP.chatDraft = val;
+      const shouldOpenSlash = val.startsWith('/');
+      if (shouldOpenSlash !== APP.slashMenuOpen) {
+        APP.slashMenuOpen = shouldOpenSlash;
+        renderActiveScreen();
+        const inp = document.getElementById('chat-composer-input');
+        if (inp) {
+          inp.focus();
+          inp.setSelectionRange(val.length, val.length);
+        }
+      }
+    }
+
+    function submitChatInput() {
+      const text = APP.chatDraft.trim();
+      if (!text) return;
+      APP.chatDraft = '';
+      APP.slashMenuOpen = false;
+      APP.screenStates[1] = 'active';
+      APP.chatMessages.push({ role: 'user', text });
+      APP.chatMessages.push({
+        role: 'assistant',
+        text: `Got it — "${text}". Running on ${APP.selectedModel} (${APP.selectedScope}).`
+      });
+      renderActiveScreen();
+      setTimeout(() => {
+        const sc = document.getElementById('chat-transcript-scroll');
+        if (sc) sc.scrollTop = sc.scrollHeight;
+      }, 20);
+    }
+
+    function sendQuickChat(text) {
+      APP.chatDraft = text;
+      submitChatInput();
+    }
+
+    /* ------------------------------------------------------------------------
+       7. OVERLAY CONTROLS (DRAWER, MODEL PICKER, ATTACH SHEET)
+       ------------------------------------------------------------------------ */
+    function openDrawer() {
+      APP.drawerOpen = true;
+      renderOverlays();
+    }
+
+    function openModelSheet() {
+      APP.modelSheetOpen = true;
+      renderOverlays();
+    }
+
+    function closeOverlays() {
+      APP.drawerOpen = false;
+      APP.modelSheetOpen = false;
+      APP.attachSheetOpen = false;
+      renderOverlays();
+    }
+
+    function renderOverlays() {
+      const host = document.getElementById('phone-overlay-host');
+      if (!host) return;
+      if (APP.drawerOpen) {
+        host.innerHTML = renderSidebarDrawer(false);
+        return;
+      }
+      if (APP.modelSheetOpen) {
+        host.innerHTML = renderModelPickerSheet(false);
+        return;
+      }
+      if (APP.attachSheetOpen) {
+        host.innerHTML = `
+          <div class="sheet-backdrop" onclick="closeOverlays()">
+            <div class="sheet-card" onclick="event.stopPropagation()">
+              <div class="sheet-grabber"></div>
+              <div style="font-size:14px;font-weight:800;margin-bottom:10px;">Attach to Chat</div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">
+                ${['Photo Library', 'Camera', 'File'].map(item => `
+                  <button onclick="closeOverlays();sendQuickChat('[Attached: ${item}]');" class="m-card" style="margin-bottom:0;text-align:center;cursor:pointer;padding:12px 6px;">
+                    <div style="font-size:12px;font-weight:700;">${item}</div>
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+      host.innerHTML = '';
+    }
+
+    /* ------------------------------------------------------------------------
+       8. CAROUSEL NAVIGATION, THEME SWITCHING & RENDER PIPELINE
+       ------------------------------------------------------------------------ */
+    function setTheme(themeName) {
+      APP.theme = themeName;
+      document.documentElement.setAttribute('data-theme', themeName);
+      document.getElementById('btn-theme-mocheme').classList.toggle('active', themeName === 'mocheme');
+      document.getElementById('btn-theme-relay').classList.toggle('active', themeName === 'relay');
+      renderAll();
+    }
+
+    function goToSlide(index, direction = 'next') {
+      const total = SCREENS.length;
+      APP.currentSlide = ((index % total) + total) % total;
+      closeOverlays();
+      if (APP.gridOpen) {
+        toggleGridView(false);
+      }
+      renderAll(direction);
+    }
+
+    function nextSlide() {
+      goToSlide(APP.currentSlide + 1, 'next');
+    }
+
+    function prevSlide() {
+      goToSlide(APP.currentSlide - 1, 'prev');
+    }
+
+    function setScreenState(screenId, stateKey) {
+      APP.screenStates[screenId] = stateKey;
+      renderAll();
+    }
+
+    function toggleGridView(forceState) {
+      APP.gridOpen = typeof forceState === 'boolean' ? forceState : !APP.gridOpen;
+      const carouselEl = document.getElementById('carousel-view');
+      const gridEl = document.getElementById('grid-view');
+      const dockEl = document.getElementById('filmstrip-dock');
+      const btnEl = document.getElementById('btn-grid-toggle');
+      const labelEl = document.getElementById('grid-toggle-label');
+
+      if (APP.gridOpen) {
+        carouselEl.style.display = 'none';
+        dockEl.style.display = 'none';
+        gridEl.classList.add('visible');
+        btnEl.classList.add('active');
+        labelEl.textContent = 'Carousel View';
+        renderGridThumbnails();
+      } else {
+        carouselEl.style.display = 'flex';
+        dockEl.style.display = 'flex';
+        gridEl.classList.remove('visible');
+        btnEl.classList.remove('active');
+        labelEl.textContent = 'All Screens Grid';
+      }
+    }
+
+    function renderActiveScreen(direction = null) {
+      const screen = SCREENS[APP.currentSlide];
+      const stateKey = APP.screenStates[screen.id];
+      const bodyHost = document.getElementById('phone-screen-body');
+
+      bodyHost.classList.remove('slide-enter-next', 'slide-enter-prev');
+      if (direction === 'next') {
+        void bodyHost.offsetWidth;
+        bodyHost.classList.add('slide-enter-next');
+      } else if (direction === 'prev') {
+        void bodyHost.offsetWidth;
+        bodyHost.classList.add('slide-enter-prev');
+      }
+
+      bodyHost.innerHTML = renderScreenHTML(screen.id, stateKey);
+      renderOverlays();
+    }
+
+    function renderPeeks() {
+      const total = SCREENS.length;
+      const prevIdx = (APP.currentSlide - 1 + total) % total;
+      const nextIdx = (APP.currentSlide + 1) % total;
+
+      const prevScreen = SCREENS[prevIdx];
+      const nextScreen = SCREENS[nextIdx];
+
+      document.getElementById('peek-prev-title').textContent = `${prevScreen.id}. ${prevScreen.short}`;
+      document.getElementById('peek-next-title').textContent = `${nextScreen.id}. ${nextScreen.short}`;
+
+      document.getElementById('peek-prev-host').innerHTML = `
+        <div style="width:390px;height:844px;background:var(--bg);color:var(--text);display:flex;flex-direction:column;padding-top:46px;">
+          ${renderScreenHTML(prevScreen.id, APP.screenStates[prevScreen.id])}
+        </div>
+      `;
+      document.getElementById('peek-next-host').innerHTML = `
+        <div style="width:390px;height:844px;background:var(--bg);color:var(--text);display:flex;flex-direction:column;padding-top:46px;">
+          ${renderScreenHTML(nextScreen.id, APP.screenStates[nextScreen.id])}
+        </div>
+      `;
+    }
+
+    function renderInspector() {
+      const screen = SCREENS[APP.currentSlide];
+      const activeState = APP.screenStates[screen.id];
+
+      document.getElementById('slide-counter').textContent =
+        `${String(screen.id + 1).padStart(2, '0')} / ${SCREENS.length}`;
+      document.getElementById('insp-category').textContent = screen.category;
+      document.getElementById('insp-title').textContent = `${screen.id}. ${screen.title}`;
+      document.getElementById('insp-route').textContent = screen.route;
+      document.getElementById('insp-file').textContent = screen.file;
+      document.getElementById('insp-desc').textContent = screen.desc;
+
+      // State Switcher Pills
+      document.getElementById('insp-states').innerHTML = screen.states.map(st => `
+        <button class="state-pill-btn ${activeState === st.key ? 'active' : ''}" onclick="setScreenState(${screen.id}, '${st.key}')">
+          ${st.label}
+        </button>
+      `).join('');
+
+      // CTA Chips
+      document.getElementById('insp-ctas').innerHTML = screen.ctas.map(c => `
+        <span class="cta-chip">${c}</span>
+      `).join('');
+
+      // Active Theme Token Summary
+      const tokens = APP.theme === 'mocheme'
+        ? [
+            { label: 'accent #F79236', color: '#F79236' },
+            { label: 'bg #0A0813', color: '#0A0813' },
+            { label: 'bubble #F6ECE1', color: '#F6ECE1' },
+            { label: 'shell: floating tray', color: '#151220' }
+          ]
+        : [
+            { label: 'accent #39CADB', color: '#39CADB' },
+            { label: 'bg #060D0F', color: '#060D0F' },
+            { label: 'bubble #1F2C2F', color: '#1F2C2F' },
+            { label: 'shell: plain bar', color: '#121B1D' }
+          ];
+
+      document.getElementById('insp-tokens').innerHTML = tokens.map(t => `
+        <div class="token-item">
+          <span class="token-swatch" style="background:${t.color};"></span>
+          <span class="mono">${t.label}</span>
+        </div>
+      `).join('');
+    }
+
+    function renderFilmstrip() {
+      const host = document.getElementById('filmstrip-list');
+      host.innerHTML = SCREENS.map((s, idx) => `
+        <button class="film-pill ${idx === APP.currentSlide ? 'active' : ''}" id="film-pill-${idx}" onclick="goToSlide(${idx})">
+          <span class="film-num">${String(s.id).padStart(2, '0')}</span>
+          <span>${s.short}</span>
+        </button>
+      `).join('');
+
+      const activePill = document.getElementById(`film-pill-${APP.currentSlide}`);
+      if (activePill) {
+        activePill.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      }
+    }
+
+    function renderGridThumbnails() {
+      const host = document.getElementById('screens-grid-host');
+      host.innerHTML = SCREENS.map(s => `
+        <div class="grid-item-card" onclick="goToSlide(${s.id})">
+          <div class="grid-thumb-box">
+            <div class="grid-thumb-scaler">
+              <div style="width:390px;height:844px;background:var(--bg);color:var(--text);display:flex;flex-direction:column;padding-top:34px;">
+                ${renderScreenHTML(s.id, APP.screenStates[s.id])}
+              </div>
+            </div>
+          </div>
+          <div>
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <span style="font-size:13.5px;font-weight:800;">${s.id}. ${s.title}</span>
+              <span class="mono" style="font-size:10.5px;color:var(--accent);">${s.route}</span>
+            </div>
+            <div style="font-size:11px;color:#8D89A3;margin-top:2px;">${s.category}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderAll(direction = null) {
+      document.getElementById('header-logo').innerHTML = getMochiSVG(24);
+      renderActiveScreen(direction);
+      renderPeeks();
+      renderInspector();
+      renderFilmstrip();
+      if (APP.gridOpen) renderGridThumbnails();
+    }
+
+    /* ------------------------------------------------------------------------
+       9. KEYBOARD & TOUCH SWIPE NAVIGATION
+       ------------------------------------------------------------------------ */
+    document.addEventListener('keydown', (e) => {
+      const tag = document.activeElement && document.activeElement.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === 'ArrowRight') nextSlide();
+      if (e.key === 'ArrowLeft') prevSlide();
+      if (e.key === 'Escape') closeOverlays();
+    });
+
+    let touchStartX = 0;
+    const arena = document.getElementById('swipe-arena');
+    arena.addEventListener('touchstart', (e) => {
+      touchStartX = e.changedTouches[0].screenX;
+    }, { passive: true });
+    arena.addEventListener('touchend', (e) => {
+      const dx = e.changedTouches[0].screenX - touchStartX;
+      if (Math.abs(dx) > 55) {
+        if (dx < 0) nextSlide();
+        else prevSlide();
+      }
+    }, { passive: true });
+
+    // Initial Boot
+    window.addEventListener('DOMContentLoaded', () => {
+      renderAll();
+    });
+  </script>
+</body>
+</html>
