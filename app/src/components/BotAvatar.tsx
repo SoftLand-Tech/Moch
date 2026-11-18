@@ -2,6 +2,7 @@ import React from 'react'
 import { Image, StyleSheet, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { C, useStyles } from '../lib/theme'
+import { useDir } from '../lib/strings'
 import { DEFAULT_PROFILE } from '../lib/botRosterMeta'
 
 /**
@@ -59,8 +60,13 @@ export function BotAvatar({
   frozen?: boolean
 }) {
   const s = useStyles(makeS)
+  const dir = useDir()
   const def = isDefault ?? profile === DEFAULT_PROFILE
   const imgSize = Math.round(size * 0.78)
+  // Manual RTL mirroring (root layout never forces I18nManager): the snow
+  // badge sits on the logical end of the disc, like every other badge in the
+  // redesign. Public props/behavior are unchanged for Sidebar/BotsRoster.
+  const badgeSide = dir.rtl ? { left: -2 } : { right: -2 }
   return (
     <View
       style={[s.disc, { width: size, height: size, borderRadius: size / 2 }]}
@@ -72,7 +78,13 @@ export function BotAvatar({
         style={{ width: imgSize, height: imgSize, resizeMode: 'contain' }}
       />
       {frozen ? (
-        <View style={[s.frozenBadge, { width: size * 0.45, height: size * 0.45, borderRadius: size * 0.225 }]}>
+        <View
+          style={[
+            s.frozenBadge,
+            badgeSide,
+            { width: size * 0.45, height: size * 0.45, borderRadius: size * 0.225 },
+          ]}
+        >
           <Ionicons name="snow-outline" size={Math.max(8, Math.round(size * 0.28))} color={C.accent} />
         </View>
       ) : null}
@@ -86,11 +98,12 @@ const makeS = () =>
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: C.accentSoft,
+      borderWidth: 1,
+      borderColor: C.border,
       overflow: 'visible',
     },
     frozenBadge: {
       position: 'absolute',
-      right: -2,
       bottom: -2,
       alignItems: 'center',
       justifyContent: 'center',

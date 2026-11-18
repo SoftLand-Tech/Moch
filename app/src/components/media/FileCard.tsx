@@ -6,6 +6,7 @@ import { Icon } from '../Icon'
 import { useStore } from '@nanostores/react'
 import { C, useStyles } from '../../lib/theme'
 import type { ChatSegment } from '../../lib/chat'
+import { useDir, useT } from '../../lib/strings'
 import { cacheKeyFor, fileIconForPath, formatBytes } from '../../lib/media'
 import { downloadMediaFile } from '../../lib/mediaCache'
 import { mediaStateForKey } from '../../lib/mediaState'
@@ -21,6 +22,8 @@ import { mediaStateForKey } from '../../lib/mediaState'
  */
 export function FileCard({ seg }: { seg: ChatSegment }) {
   const s = useStyles(makeS)
+  const dir = useDir()
+  const t = useT()
   const load = useStore(mediaStateForKey(seg.path ? cacheKeyFor(seg.path) : '_idle_'))
   const [localUri, setLocalUri] = useState<string | null>(seg.localUri ?? null)
   const [sharing, setSharing] = useState(false)
@@ -70,23 +73,28 @@ export function FileCard({ seg }: { seg: ChatSegment }) {
   return (
     <View style={s.card}>
       <Pressable
-        style={({ pressed }) => [s.row, pressed && s.pressed]}
+        style={({ pressed }) => [s.row, { flexDirection: dir.row }, pressed && s.pressed]}
         onPress={() => { void (localUri ? open() : fetchThen()) }}
         disabled={loading}
-        accessibilityLabel={`File${seg.name ? `: ${seg.name}` : ''}${
-          loading ? ', downloading' : localUri ? ', tap to open' : ', tap to download'
-        }`}
+        accessibilityLabel={t('chat.media.fileA11y', {
+          name: seg.name ?? seg.path?.split('/').pop() ?? t('chat.media.fileLabel'),
+          action: loading
+            ? t('chat.media.fileActionDownloading')
+            : localUri
+              ? t('chat.media.fileActionOpen')
+              : t('chat.media.fileActionDownload'),
+        })}
       >
         <Icon name={fileIconForPath(seg.name ?? seg.path ?? '') as keyof typeof Ionicons.glyphMap} size={22} color={C.accent} />
         <View style={s.meta}>
-          <Text style={s.name} numberOfLines={1}>{seg.name ?? seg.path?.split('/').pop() ?? 'File'}</Text>
+          <Text style={s.name} numberOfLines={1}>{seg.name ?? seg.path?.split('/').pop() ?? t('chat.media.fileLabel')}</Text>
           <Text style={s.sub}>
             {seg.size ? formatBytes(seg.size) : ''}
-            {loading ? (pct != null ? ` · ${pct}%` : ' · downloading…') : ''}
+            {loading ? (pct != null ? ` · ${pct}%` : ` · ${t('chat.media.downloading')}`) : ''}
           </Text>
         </View>
         {localUri && !loading ? (
-          <Pressable onPress={() => void share()} hitSlop={8} accessibilityLabel="Share file">
+          <Pressable onPress={() => void share()} hitSlop={8} accessibilityLabel={t('chat.media.shareFileA11y')}>
             {sharing ? <Icon name="hourglass-outline" size={16} color={C.textFaint} /> : <Icon name="share-outline" size={16} color={C.textDim} />}
           </Pressable>
         ) : null}
@@ -97,7 +105,7 @@ export function FileCard({ seg }: { seg: ChatSegment }) {
         </View>
       ) : null}
       {errorMsg && !loading ? (
-        <Pressable style={({ pressed }) => [s.errorRow, pressed && s.pressed]} onPress={() => void fetchThen()} accessibilityLabel="Retry download">
+        <Pressable style={({ pressed }) => [s.errorRow, { flexDirection: dir.row }, pressed && s.pressed]} onPress={() => void fetchThen()} accessibilityLabel={t('chat.media.retryDownloadA11y')}>
           <Icon name="alert-circle" size={14} color={C.red} />
           <Text style={s.errorText} numberOfLines={1}>{errorMsg}</Text>
           <Icon name="refresh" size={14} color={C.accent} />
@@ -110,7 +118,7 @@ export function FileCard({ seg }: { seg: ChatSegment }) {
 const makeS = () => StyleSheet.create({
   card: {
     backgroundColor: C.bgElev,
-    borderRadius: 16,
+    borderRadius: 13,
     minWidth: 220,
     overflow: 'hidden',
   },

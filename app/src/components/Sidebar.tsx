@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
-  Text,
   Pressable,
   StyleSheet,
   Animated,
@@ -18,6 +17,8 @@ import {
 import type { GestureResponderEvent, PanResponderGestureState, TextStyle, ViewStyle } from 'react-native'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { Icon } from './Icon'
+import { MochiMark } from './MochiMark'
+import { Field, HeaderButton, Kicker, Txt } from './ui'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
 import RAnimated, { useAnimatedStyle } from 'react-native-reanimated'
@@ -31,12 +32,12 @@ import { ocListSessions, describeOcError, type OcSession } from '../lib/opencode
 import { ocSessionsCached, ocSessionsStore } from '../lib/ocSessionsCache'
 import { openOcChat } from '../lib/chat'
 import { projectIdForCwd } from '../lib/projectScope'
-import { C, S, useStyles, useShape } from '../lib/theme'
+import { C, useStyles } from '../lib/theme'
 import { useReduceMotion } from './useReduceMotion'
 import { IdentitySwitch } from './IdentitySwitch'
 import { ProjectList } from './ProjectList'
 import { BotsRoster } from './BotsRoster'
-import { tr, localeAtom } from '../lib/strings'
+import { tr, localeAtom, useDir } from '../lib/strings'
 import type { Identity, ProjectRow } from '../lib/workspace'
 import type { FleetProfile } from '../lib/fleet'
 
@@ -55,8 +56,39 @@ function formatOcTime(ms?: number): string {
     : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
+/**
+ * Compact relative age ("2m", "3h", …) with the unit localized. The pure
+ * helper in `lib/chatListState` only groups by day, so drawer rows format
+ * their own timestamp with chrome.age.* keys (SPEC §3: localize relative
+ * times at the render site rather than hardcoding English units).
+ */
+function ageLabel(ms?: number): string {
+  if (!ms || !Number.isFinite(ms) || ms <= 0) return ''
+  const delta = Date.now() - ms
+  if (delta < 60_000) return tr('chrome.age.lessMinute')
+  const mins = Math.floor(delta / 60_000)
+  if (mins < 60) return tr('chrome.age.minutes', { n: mins })
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return tr('chrome.age.hours', { n: hours })
+  const days = Math.floor(hours / 24)
+  if (days < 7) return tr('chrome.age.days', { n: days })
+  const weeks = Math.floor(days / 7)
+  if (weeks < 5) return tr('chrome.age.weeks', { n: weeks })
+  return tr('chrome.age.months', { n: Math.floor(days / 30) })
+}
+
 /** Drawer rows that are hermes-only surfaces — dropped in OpenCode mode. */
 const OC_HIDDEN_NAV_KEYS = new Set(['inbox', 'browser', 'automations', 'library'])
+
+/** Section labels come from `groupChats` in English; translate by group key. */
+const SECTION_LABEL_KEYS: Record<string, string> = {
+  pinned: 'chrome.drawer.chatsPinned',
+  today: 'common.today',
+  yesterday: 'common.yesterday',
+  week: 'chrome.drawer.chatsWeek',
+  older: 'chrome.drawer.chatsOlder',
+  archived: 'chrome.drawer.chatsArchived',
+}
 
 export interface NavItem {
   key: string
@@ -197,10 +229,10 @@ function usePopFade(visible: boolean, inMs = 150, outMs = 130) {
 // ── Drawer swipe tuning (A2-21) ──────────────────────────────────────────────
 // Shared with ScreenShell, whose swipe-anywhere open gesture drives the same
 // progress value and reuses the same claim/threshold language.
-// EDGE_W: width of the left-edge catch strip while closed. Kept at 28 with no
-// hitSlop — taps starting inside the strip are swallowed (RN has no touch
-// re-dispatch), so the strip stays narrow AND starts below the top bar
-// (EDGE_TOP_GAP) so it never covers the hamburger button.
+// EDGE_W: width of the edge catch strip while closed (left edge in LTR, right
+// edge in RTL). Kept at 28 with no hitSlop — taps starting inside the strip
+// are swallowed (RN has no touch re-dispatch), so the strip stays narrow AND
+// starts below the top bar (EDGE_TOP_GAP) so it never covers the hamburger.
 const EDGE_W = 28
 // The top bar's bottom edge sits at insets.top + 52 (paddingTop 6 + 38dp
 // circle + paddingBottom 8); 56 leaves a little slack under it.
@@ -220,8 +252,11 @@ const SNAP_MS = 180
 
 export const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
 
-/** ChatGPT's panel is ~300dp, capped so it never looks empty on a tablet. */
-export const drawerPanelWidth = (windowWidth: number) => Math.min(windowWidth * 0.82, 320)
+/**
+ * The mockup's drawer is 292dp wide (`design.html .drawer-panel`), capped so
+ * it never looks empty on a tablet.
+ */
+export const drawerPanelWidth = (windowWidth: number) => Math.min(windowWidth * 0.84, 292)
 
 /** SectionList keyExtractor hoisted to module scope for identity stability. */
 const chatKey = (c: RecentChat) => c.id
@@ -263,11 +298,23 @@ export function settleTo(anim: Animated.Value, toValue: 0 | 1, duration: number)
 }
 
 /**
- * ChatGPT-style slide-in sidebar.
+ * ChatGPT-style slide-in sidebar, restyled to the redesign mockup
+ * (`design.html` renderSidebarDrawer):
+ *
+ *   panel (292dp, bgCard, hairline side border, 12dp gutters)
+ *   ├─ MochiMark + "Moch" + search affordance + close
+ *   ├─ Sessions | Bots Segmented (identity state stays in lib/workspace)
+ *   ├─ Sessions body: Projects → Workspace 2-col nav grid → Recent Chats
+ *   │  (OpenCode mode swaps the chat list for the server's sessions)
+ *   ├─ Bots body: BotsRoster cards + dashed "+ New bot"
+ *   ├─ amber pending-questions card (owner-provided footer)
+ *   └─ bottom-docked nav (Settings)
  *
  * Implemented as an overlay rather than a Drawer navigator: the app already
  * routes through expo-router tabs, and an overlay keeps that intact while
- * giving the same "drawer slides over the conversation" behaviour.
+ * giving the same "drawer slides over the conversation" behaviour. In Arabic
+ * (RTL) the panel docks to the RIGHT edge and both the open/close animation
+ * and its drag gestures mirror — the shared 0→1 progress value is unchanged.
  *
  * All sessions live here. The list is grouped into sections (Pinned / Today /
  * Yesterday / Previous 7 days / Older / Archived) and every row exposes its
@@ -308,10 +355,11 @@ export function Sidebar({
   footer,
 }: Props) {
   const s = useStyles(makeS)
-  const S = useShape()
+  const dir = useDir()
   // Locale switches must re-render the drawer's own copy (project labels,
-  // search placeholder) — tr() reads the atom, not React state.
-  useStore(localeAtom)
+  // search placeholder, section headers) — tr() reads the atom, not state.
+  const locale = useStore(localeAtom)
+  void locale
   const pathname = usePathname()
   // A row can own a route whose slug differs from its key (Library currently
   // opens the connectors screen); highlight by that slug when present.
@@ -375,7 +423,7 @@ export function Sidebar({
         setOcLoading(false)
         // describeOcError keeps OPENCODE-MODE's "every catch renders the
         // classifier" promise — a 403/500 must not read as a generic miss.
-        setOcError(describeOcError(e) || 'Could not reach the OpenCode server')
+        setOcError(describeOcError(e) || tr('chrome.drawer.ocError'))
       })
     return () => { alive = false }
   }, [open, ocMode, online])
@@ -401,10 +449,14 @@ export function Sidebar({
   // pointerEvents/aria-hidden, and display:none is the only thing browsers
   // reliably drop from the tab order (it also blurs anything focused inside).
   const [dormant, setDormant] = useState(false)
-  // ChatGPT's panel width — shared with the owner's swipe gesture via the
+  // The mockup's panel width — shared with the owner's swipe gesture via the
   // exported helper so both map finger pixels to the same 0→1 progress.
   const panelWidth = drawerPanelWidth(width)
   const [query, setQuery] = useState('')
+  // The mockup has no always-on search field: a compact affordance in the
+  // drawer header expands the real search input (same query state/behaviour;
+  // top-anchored-search avoidance below keeps results above the keyboard).
+  const [searchOpen, setSearchOpen] = useState(false)
   // The drawer's search filters OpenCode sessions by title too (declared here
   // because it reads `query`).
   const ocFiltered = useMemo(() => {
@@ -438,6 +490,12 @@ export function Sidebar({
     return { groups, flat }
   }, [ocFiltered, projects])
   const [archOpen, setArchOpen] = useState(false)
+
+  // Number of named bots, for the mockup's "Bots (n)" segment label.
+  const botsN = useMemo(
+    () => (profiles ?? []).filter((p) => p.name !== 'default').length,
+    [profiles],
+  )
 
   // Per-chat action state. The three overlays are mutually exclusive.
   const [menuFor, setMenuFor] = useState<RecentChat | null>(null)
@@ -512,31 +570,50 @@ export function Sidebar({
   const moveSeenRef = useRef(false)
   const firstRun = useRef(true)
 
-  // Shared row renderer for the top nav block and the bottom-docked one.
-  const renderNavRows = (items: NavItem[]) =>
-    items.map((item) => (
+  // Focus the expanded search field on demand (the tap that opened it is the
+  // user gesture; the top-anchored-search kbPad below keeps results above the
+  // IME — app/AGENTS.md pattern #4).
+  useEffect(() => {
+    if (!searchOpen) return
+    const id = setTimeout(() => searchInputRef.current?.focus(), 60)
+    return () => clearTimeout(id)
+  }, [searchOpen])
+
+  // ── Navigation tiles (mockup "Workspace" 2-column grid) ──────────────────
+  // Same items/routes/labels and badges as before; the mockup renders them as
+  // compact elevated tiles instead of icon rows. Running automations keep
+  // their mini-Mochi indicator, inbox keeps its amber count pill.
+  const renderNavTile = (item: NavItem) => {
+    const on = item.key === activeKey
+    return (
       <Pressable
         key={item.key}
         style={({ pressed }) => [
-          s.navRow,
-          item.key === activeKey && S.drawerRoundedCap && s.navRowOn,
+          s.navTile,
+          { flexDirection: dir.row },
+          on && s.navTileOn,
           pressed && s.rowPressed,
         ]}
         onPress={() => {
           onNav(item.key)
           onClose()
         }}
+        accessibilityRole="button"
+        accessibilityState={{ selected: on }}
         accessibilityLabel={item.label}
       >
-        <Icon
-          name={item.icon}
-          size={20}
-          color={item.key === activeKey && S.drawerRoundedCap ? C.accent : C.text}
-        />
-        <Text style={s.navLabel}>{item.label}</Text>
+        <Txt
+          size={11.5}
+          weight="600"
+          color={C.text}
+          numberOfLines={1}
+          style={s.navTileLabel}
+        >
+          {item.label}
+        </Txt>
         {item.mochis ? (
           <View
-            style={s.mochiRunRow}
+            style={[s.mochiRunRow, { flexDirection: dir.row }]}
             accessibilityLabel={
               item.mochis === 1
                 ? tr('sidebar.running.one')
@@ -544,18 +621,49 @@ export function Sidebar({
             }
           >
             {Array.from({ length: Math.min(item.mochis, 3) }).map((_, i) => (
-              <Image key={i} source={MOCHI_RUN[i]} style={[s.mochiMini, i > 0 && s.mochiMiniOverlap]} />
+              <Image
+                key={i}
+                source={MOCHI_RUN[i]}
+                style={[s.mochiMini, i > 0 && (dir.rtl ? s.mochiMiniOverlapRtl : s.mochiMiniOverlap)]}
+              />
             ))}
-            {item.mochis > 3 ? <Text style={s.mochiMore}>+{item.mochis - 3}</Text> : null}
+            {item.mochis > 3 ? (
+              <Txt size={9.5} weight="700" color={C.textFaint} style={s.mochiMore}>
+                +{item.mochis - 3}
+              </Txt>
+            ) : null}
           </View>
         ) : null}
         {item.badge ? (
-          <View style={s.badge}>
-            <Text style={s.badgeText}>{item.badge > 9 ? '9+' : item.badge}</Text>
+          <View style={[s.navBadge, item.key === 'inbox' ? s.navBadgeAmber : s.navBadgeTint]}>
+            <Txt size={10} weight="700" color={item.key === 'inbox' ? C.amber : C.textDim}>
+              {item.badge > 9 ? '9+' : item.badge}
+            </Txt>
           </View>
         ) : null}
       </Pressable>
-    ))
+    )
+  }
+
+  const renderNavGrid = (items: NavItem[], columns = 2) => {
+    if (!items.length) return null
+    const rows: NavItem[][] = []
+    for (let i = 0; i < items.length; i += columns) rows.push(items.slice(i, i + columns))
+    return (
+      <View style={s.navGrid}>
+        {rows.map((row, ri) => (
+          <View key={ri} style={[s.navGridRow, { flexDirection: dir.row }]}>
+            {row.map((item) => renderNavTile(item))}
+            {row.length < columns
+              ? Array.from({ length: columns - row.length }).map((_, i) => (
+                  <View key={`spacer-${i}`} style={s.navTileSpacer} />
+                ))
+              : null}
+          </View>
+        ))}
+      </View>
+    )
+  }
 
   // Open/close slide. A layout effect on the `open` prop flip, so no extra
   // render sits between the tap/gesture-release and the first animated frame;
@@ -570,6 +678,7 @@ export function Sidebar({
     if (open) {
       setDormant(false)
       setQuery('')
+      setSearchOpen(false)
       // Fixed-duration leg, identical to the hamburger-open animation,
       // starting wherever the drag released: one consistent glide the user
       // already knows. (Scaling the duration by remaining distance made the
@@ -588,6 +697,7 @@ export function Sidebar({
     setRenaming(null)
     setConfirming(null)
     setDialogError(null)
+    setSearchOpen(false)
     searchInputRef.current?.blur()
     const a = Animated.timing(anim, { toValue: 0, duration: CLOSE_MS, easing: Easing.in(Easing.cubic), useNativeDriver: true })
     a.start(({ finished }) => {
@@ -606,25 +716,35 @@ export function Sidebar({
     return () => sub.remove()
   }, [open])
 
+  const toggleSearch = () => {
+    if (searchOpen) {
+      searchInputRef.current?.blur()
+      setQuery('')
+      setSearchOpen(false)
+    } else {
+      setSearchOpen(true)
+    }
+  }
+
   // One oc row — shared by the project groups and the flat tail so both
   // render the exact same row language (BUG-149 grouping).
   const renderOcRow = (c: OcSession) => (
     <Pressable
       key={c.id}
-      style={({ pressed }) => [s.recentRow, pressed && s.recentRowPressed]}
+      style={({ pressed }) => [s.recentRow, { flexDirection: dir.row }, pressed && s.recentRowPressed]}
       onPress={() => {
         onClose()
         void openOcChat(c.id).catch(() => {})
       }}
       accessibilityRole="button"
-      accessibilityLabel={`Open OpenCode chat ${c.title || 'Untitled'}`}
+      accessibilityLabel={tr('chrome.drawer.openOc', { title: c.title || tr('sidebar.untitled') })}
     >
-      <View style={{ flex: 1 }}>
-        <Text style={s.recentTitle} numberOfLines={1}>{c.title || 'Untitled'}</Text>
-        {c.time?.updated ? (
-          <Text style={s.ocRowSub} numberOfLines={1}>{formatOcTime(c.time.updated)}</Text>
-        ) : null}
-      </View>
+      <Txt size={12} weight="600" color={C.textDim} numberOfLines={1} style={s.recentTitle}>
+        {c.title || tr('sidebar.untitled')}
+      </Txt>
+      {c.time?.updated ? (
+        <Txt size={10} color={C.textFaint} mono numberOfLines={1}>{formatOcTime(c.time.updated)}</Txt>
+      ) : null}
     </Pressable>
   )
 
@@ -652,9 +772,11 @@ export function Sidebar({
 
   // A2-22: memoized so the interpolation node (and its native-driver
   // attachment) isn't rebuilt on every render during search typing or churn.
+  // The drawer docks LEFT in LTR and RIGHT in RTL; the progress value itself
+  // is direction-agnostic (0 = closed, 1 = open).
   const translateX = useMemo(
-    () => anim.interpolate({ inputRange: [0, 1], outputRange: [-panelWidth, 0] }),
-    [anim, panelWidth],
+    () => anim.interpolate({ inputRange: [0, 1], outputRange: [dir.rtl ? panelWidth : -panelWidth, 0] }),
+    [anim, panelWidth, dir.rtl],
   )
 
   const closeDialogs = () => {
@@ -714,15 +836,17 @@ export function Sidebar({
     else closeDialogs()
   }
 
-  // ── A2-21: edge swipe right to open ──────────────────────────────────────
-  // Lives on a 28dp strip that only exists while closed (see the root JSX).
-  // Positive-dx-only claim so leftward edge drags never grab; onStart is false
-  // so taps stay inert (accepted dead zone). The gesture finger-tracks via JS
-  // setValue on the native-driven `anim`; releases that open route through
-  // onRequestOpen so the layout effect owns the final leg.
+  // ── A2-21: edge swipe to open (mirrored in RTL) ──────────────────────────
+  // Lives on a 28dp strip on the leading edge that only exists while closed
+  // (see the root JSX). Positive-dx-only claim in LTR (negative in RTL) so
+  // opposite drags never grab; onStart is false so taps stay inert (accepted
+  // dead zone). The gesture finger-tracks via JS setValue on the native-driven
+  // `anim`; releases that open route through onRequestOpen so the layout
+  // effect owns the final leg.
   const edgePan = useMemo(() => {
     const settle = (_e: GestureResponderEvent, g: PanResponderGestureState) => {
-      if (g.vx > FLICK || progressRef.current > 0.5) {
+      const opening = dir.rtl ? g.vx < -FLICK : g.vx > FLICK
+      if (opening || progressRef.current > 0.5) {
         if (onRequestOpenRef.current) onRequestOpenRef.current()
         else settleTo(anim, 0, CANCEL_MS) // unwired owner: spring back, no stuck state
       } else {
@@ -732,14 +856,16 @@ export function Sidebar({
     return PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_e, g) =>
-        !openRef.current && g.dx > EDGE_CLAIM && g.dx > Math.abs(g.dy) * DOMINANCE,
+        !openRef.current &&
+        (dir.rtl ? g.dx < -EDGE_CLAIM : g.dx > EDGE_CLAIM) &&
+        Math.abs(g.dx) > Math.abs(g.dy) * DOMINANCE,
       onPanResponderGrant: () => {
         // Wake the display:none'd subtree (web) so the drag is visible.
         if (Platform.OS === 'web') setDormant(false)
         captureProgress(anim, progressRef, moveSeenRef)
       },
       onPanResponderMove: (_e, g) => {
-        const p = clamp01(g.dx / panelWidthRef.current)
+        const p = clamp01((dir.rtl ? -g.dx : g.dx) / panelWidthRef.current)
         progressRef.current = p
         moveSeenRef.current = true
         anim.setValue(p)
@@ -748,17 +874,18 @@ export function Sidebar({
       // Stolen mid-gesture: settle by the same rule instead of sticking half-open.
       onPanResponderTerminate: settle,
     })
-  }, [anim])
+  }, [anim, dir.rtl])
 
-  // ── A2-21: drag left on the panel/scrim to close ──────────────────────────
+  // ── A2-21: drag toward the leading edge to close (mirrored in RTL) ────────
   // Capture-phase so it beats the row Pressables, the 350ms long-press, the
   // scrim tap and SectionList scrolling — but only on horizontal-dominant
-  // leftward drags while open, with no dialog up and the search field not
-  // focused (text-selection drags must keep selecting). Dialogs render as
-  // later siblings above the panel, so they never even reach these handlers.
+  // drags while open, with no dialog up and the search field not focused
+  // (text-selection drags must keep selecting). Dialogs render as later
+  // siblings above the panel, so they never even reach these handlers.
   const panelPan = useMemo(() => {
     const settle = (_e: GestureResponderEvent, g: PanResponderGestureState) => {
-      if (g.vx < -FLICK || progressRef.current < 0.5) onCloseRef.current?.()
+      const closing = dir.rtl ? g.vx > FLICK : g.vx < -FLICK
+      if (closing || progressRef.current < 0.5) onCloseRef.current?.()
       else settleTo(anim, 1, SNAP_MS)
     }
     return PanResponder.create({
@@ -767,11 +894,11 @@ export function Sidebar({
         openRef.current &&
         !dialogActiveRef.current &&
         !searchFocusRef.current &&
-        g.dx < -EDGE_CLAIM &&
+        (dir.rtl ? g.dx > EDGE_CLAIM : g.dx < -EDGE_CLAIM) &&
         Math.abs(g.dx) > Math.abs(g.dy) * DOMINANCE,
       onPanResponderGrant: () => captureProgress(anim, progressRef, moveSeenRef),
       onPanResponderMove: (_e, g) => {
-        const p = clamp01(1 + g.dx / panelWidthRef.current)
+        const p = clamp01(1 + (dir.rtl ? -g.dx : g.dx) / panelWidthRef.current)
         progressRef.current = p
         moveSeenRef.current = true
         anim.setValue(p)
@@ -779,7 +906,7 @@ export function Sidebar({
       onPanResponderRelease: settle,
       onPanResponderTerminate: settle,
     })
-  }, [anim])
+  }, [anim, dir.rtl])
 
   // ── A2-18: stable identities for everything the SectionList re-renders ────
   const handleCloseDrawer = useCallback(() => onCloseRef.current?.(), [])
@@ -789,45 +916,59 @@ export function Sidebar({
     ({ item: c }: { item: RecentChat }) => (
       <RecentRow
         c={c}
+        locale={locale}
         isPinned={pinned.includes(c.id)}
         onOpenChat={handleOpenChat}
         onCloseDrawer={handleCloseDrawer}
         onMenu={handleRowMenu}
       />
     ),
-    [pinned, handleOpenChat, handleCloseDrawer, handleRowMenu],
+    [pinned, handleOpenChat, handleCloseDrawer, handleRowMenu, locale],
   )
 
   const renderSectionHeader = useCallback(
     ({ section }: { section: Section }) => {
+      // `locale` is read through tr() below, not as a value — keep it in the
+      // deps so a language switch re-renders the section headers.
+      void locale
       if (!section.label) return null
+      const labelKey = SECTION_LABEL_KEYS[section.key]
+      const label = labelKey ? tr(labelKey) : section.label
       if (section.collapsible) {
         return (
           <Pressable
-            style={s.sectionLabelRow}
+            style={[s.sectionLabelRow, { flexDirection: dir.row }]}
             onPress={() => setArchOpen((v) => !v)}
             accessibilityLabel={`${tr(archOpen ? 'sidebar.collapse' : 'sidebar.expand')} ${tr('sidebar.archivedChats')}`}
           >
-            <Text style={s.sectionLabel}>{section.label} ({section.count ?? 0})</Text>
+            <Kicker style={s.sectionKicker}>
+              {label} ({section.count ?? 0})
+            </Kicker>
             <Icon name={archOpen ? 'chevron-up' : 'chevron-down'} size={12} color={C.textFaint} />
           </Pressable>
         )
       }
       return (
-        <View style={s.sectionLabelRow}>
-          <Text style={s.sectionLabel}>{section.label}</Text>
+        <View style={[s.sectionLabelRow, { flexDirection: dir.row }]}>
+          <Kicker style={s.sectionKicker}>{label}</Kicker>
         </View>
       )
     },
-    [archOpen],
+    [archOpen, dir.row, locale, s.sectionKicker, s.sectionLabelRow],
   )
 
-  const renderSectionFooter = useCallback(() => <View style={s.sectionGap} />, [])
+  const renderSectionFooter = useCallback(() => <View style={s.sectionGap} />, [s.sectionGap])
 
-  const listEmpty = useCallback(
-    () => (searching ? <Text style={s.noMatch}>{tr('sidebar.noMatch', { query: query.trim() })}</Text> : null),
-    [searching, query],
-  )
+  const listEmpty = useCallback(() => {
+    // `locale` keeps the empty-state copy in the deps (tr() reads the atom).
+    void locale
+    if (!searching) return null
+    return (
+      <Txt size={13} color={C.textFaint} style={s.noMatch}>
+        {tr('sidebar.noMatch', { query: query.trim() })}
+      </Txt>
+    )
+  }, [searching, query, locale, s.noMatch])
 
   // A2-22: memoized dialog scales — stable interpolation nodes.
   const menuScale = useMemo(() => menuAnim.interpolate({ inputRange: [0, 1], outputRange: [0.88, 1] }), [menuAnim])
@@ -850,7 +991,11 @@ export function Sidebar({
     return (
       <View style={[StyleSheet.absoluteFill, s.layerZ]} pointerEvents="box-none">
         <View
-          style={[s.edgeStrip, { top: insets.top + EDGE_TOP_GAP }]}
+          style={[
+            s.edgeStrip,
+            { top: insets.top + EDGE_TOP_GAP },
+            dir.rtl ? { right: 0 } : { left: 0 },
+          ]}
           pointerEvents="box-only"
           {...edgePan.panHandlers}
         />
@@ -861,23 +1006,85 @@ export function Sidebar({
   const menuPinned = shownMenu ? pinned.includes(shownMenu.chat.id) : false
   const menuArchived = shownMenu ? archived.includes(shownMenu.chat.id) : false
 
-  // Popover geometry: right edge hugs the press point (the ⋯ button), growing
-  // leftward; falls back to the left edge for long-presses mid-row. Vertically
-  // it aligns just above the press point and clamps to the window.
+  // Popover geometry: in LTR its right edge hugs the press point (the ⋯
+  // button) growing leftward — in RTL the press point is on the panel's left
+  // side, so it grows rightward. Vertically it aligns just above the press
+  // point and clamps to the window.
   const MENU_W = 240
   const MENU_H = 4 * 46 + 12
   const anchor = shownMenu?.anchor
-  const menuLeft = anchor ? Math.max(8, Math.min(anchor.x - MENU_W - 6, width - MENU_W - 8)) : 0
+  const menuLeft = anchor
+    ? dir.rtl
+      ? Math.max(8, Math.min(anchor.x + 6, width - MENU_W - 8))
+      : Math.max(8, Math.min(anchor.x - MENU_W - 6, width - MENU_W - 8))
+    : 0
   const menuTop = anchor ? Math.max(insets.top + 8, Math.min(anchor.y - 10, height - MENU_H - 16)) : 0
+
+  // The panel docks to the leading physical edge and carries its hairline on
+  // the inner side (mockup .drawer-panel: border-right in LTR; mirrored for
+  // Arabic so the drawer slides in from the RIGHT).
+  const panelEdge: ViewStyle = dir.rtl
+    ? {
+        right: 0,
+        borderLeftWidth: 1,
+        borderLeftColor: C.border,
+        shadowOffset: { width: -12, height: 0 },
+      }
+    : { left: 0, borderRightWidth: 1, borderRightColor: C.border }
+
+  const showSearchButton = ocMode || identity === 'sessions'
+  const showChatList = ocMode || identity === 'sessions'
+  const showBots = !ocMode && identity === 'bots'
+  const showFooter = !ocMode && identity === 'sessions' && footer != null
+
+  // Drawer section header rows (mockup order): Projects, Workspace, chats.
+  const chatsHeading = (
+    <View style={[s.chatsHead, { flexDirection: dir.row }]}>
+      <Kicker style={s.chatsKicker}>
+        {ocMode ? tr('chrome.drawer.ocSessions') : tr('chrome.drawer.recentChats')}
+      </Kicker>
+      <Pressable
+        onPress={() => {
+          onNewChat()
+          onClose()
+        }}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={tr('sidebar.newChat')}
+      >
+        <Txt size={11} weight="700" color={C.accent}>{tr('chrome.drawer.newChat')}</Txt>
+      </Pressable>
+    </View>
+  )
+
+  const navAndProjects = (
+    <>
+      <Kicker style={s.firstKicker}>{tr('sidebar.projects')}</Kicker>
+      <ProjectList
+        projects={projects}
+        activeProjectId={activeProjectId}
+        onSelect={onProject}
+        onNewProject={onNewProject}
+        onProjectMenu={onProjectMenu}
+        active={open}
+      />
+      <Kicker>{tr('chrome.drawer.workspace')}</Kicker>
+      {renderNavGrid(shownNav)}
+    </>
+  )
 
   return (
     // box-none: the overlay itself never blocks the screen underneath — only
     // the edge strip (while closed) and the scrim/panel (while open) catch.
     <View style={[StyleSheet.absoluteFill, s.layerZ]} pointerEvents="box-none">
-      {/* Left-edge catch strip (A2-21). Starts below the top bar so it never
+      {/* Leading-edge catch strip (A2-21). Starts below the top bar so it never
           covers the hamburger; 28dp wide, no hitSlop (accepted dead zone). */}
       <View
-        style={[s.edgeStrip, { top: insets.top + EDGE_TOP_GAP }]}
+        style={[
+          s.edgeStrip,
+          { top: insets.top + EDGE_TOP_GAP },
+          dir.rtl ? { right: 0 } : { left: 0 },
+        ]}
         pointerEvents={open ? 'none' : 'box-only'}
         {...edgePan.panHandlers}
       />
@@ -892,7 +1099,13 @@ export function Sidebar({
       <Animated.View
         style={[
           s.panel,
-          { width: panelWidth, paddingTop: insets.top + 6, paddingBottom: insets.bottom + 10, transform: [{ translateX }] },
+          panelEdge,
+          {
+            width: panelWidth,
+            paddingTop: insets.top + 8,
+            paddingBottom: Math.max(insets.bottom, 10) + 12,
+            transform: [{ translateX }],
+          },
           dormantStyle,
         ]}
         pointerEvents={open ? 'auto' : 'none'}
@@ -900,103 +1113,83 @@ export function Sidebar({
         importantForAccessibility={open ? 'auto' : 'no-hide-descendants'}
         {...panelPan.panHandlers}
       >
-        <View style={s.header}>
-          <View style={s.brandRow}>
-            <Image source={require('../../assets/logo.png')} style={s.brandLogo} />
-            <Text style={s.brand}>Moch</Text>
+        {/* ── Brand row: MochiMark + Moch + search affordance + close ─────── */}
+        <View style={[s.header, { flexDirection: dir.row }]}>
+          <View style={[s.brandRow, { flexDirection: dir.row }]}>
+            <MochiMark size={26} />
+            <Txt size={15} weight="800">Moch</Txt>
           </View>
-          <Pressable
-            style={({ pressed }) => [s.iconBtn, pressed && s.iconBtnPressed]}
-            onPress={onClose}
-            hitSlop={10}
-            accessibilityLabel={tr('sidebar.closeMenu')}
-          >
-            <Icon name="close" size={20} color={C.textDim} />
-          </Pressable>
+          <View style={[s.headerActions, { flexDirection: dir.row }]}>
+            {showSearchButton ? (
+              <HeaderButton
+                onPress={toggleSearch}
+                style={s.headerBtn}
+                accessibilityLabel={
+                  searchOpen ? tr('chrome.drawer.searchClose') : tr('chrome.drawer.searchOpen')
+                }
+              >
+                <Icon name="search" size={15} color={searchOpen ? C.accent : C.textDim} />
+              </HeaderButton>
+            ) : null}
+            <HeaderButton
+              onPress={onClose}
+              style={s.headerBtn}
+              accessibilityLabel={tr('sidebar.closeMenu')}
+            >
+              <Icon name="close" size={14} color={C.textDim} />
+            </HeaderButton>
+          </View>
         </View>
+
+        {/* Compact search affordance expanded from the header (mockup keeps
+            search out of the drawer body; the behaviour is preserved). */}
+        {searchOpen && showSearchButton ? (
+          <View style={[s.searchRow, { flexDirection: dir.row }]}>
+            <Field
+              ref={searchInputRef}
+              value={query}
+              onChangeText={setQuery}
+              placeholder={ocMode ? tr('chrome.drawer.searchOc') : tr('sidebar.searchChats')}
+              autoCorrect={false}
+              autoCapitalize="none"
+              editable={open}
+              returnKeyType="search"
+              accessibilityLabel={ocMode ? tr('chrome.drawer.searchOc') : tr('sidebar.searchChats')}
+              onFocus={() => {
+                searchFocusRef.current = true
+              }}
+              onBlur={() => {
+                searchFocusRef.current = false
+              }}
+              wrapStyle={s.searchField}
+            />
+            {query ? (
+              <Pressable
+                onPress={() => setQuery('')}
+                hitSlop={8}
+                style={({ pressed }) => [s.clearBtn, pressed && s.iconBtnPressed]}
+                accessibilityLabel={tr('sidebar.clearSearch')}
+              >
+                <Icon name="close" size={14} color={C.textFaint} />
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
 
         {/* Identity (Sessions | Bots) — the drawer's top-level switch. OpenCode
             mode has no Bots surface: the switch stays on Sessions and the
             Bots segment is inert (no dead tap). */}
-        <IdentitySwitch identity={ocMode ? 'sessions' : identity} onChange={ocMode ? () => {} : onIdentity} />
+        <IdentitySwitch
+          identity={ocMode ? 'sessions' : identity}
+          onChange={ocMode ? () => {} : onIdentity}
+          botsCount={botsN}
+        />
 
-        <View>{renderNavRows(shownNav)}</View>
-
-        {/* Sessions mode owns the project rail; Bots mode replaces that whole
-            body with the roster (one row per bot, no per-bot chat list — a
-            bot IS one canonical `Bot Chat`) and stays hidden in OpenCode mode
-            — bots are hermes profiles. Projects, though, organize this app's
-            own chats in BOTH thinkers: every chat is created with a project
-            cwd (lib/chat, mode-agnostic) and the embedded gateway serves
-            `projects.tree` regardless of thinker, so the rail shows in
-            OpenCode mode too. `ocMode ||` mirrors the switch's locked
-            Sessions segment above (a persisted 'bots' identity must not hide
-            the rail while the oc chat list renders). Grouping the OpenCode
-            server's own session list under projects is BUG-149. */}
-        {ocMode || identity === 'sessions' ? (
-          <ProjectList
-            projects={projects}
-            activeProjectId={activeProjectId}
-            onSelect={onProject}
-            onNewProject={onNewProject}
-            onProjectMenu={onProjectMenu}
-            active={open}
-          />
-        ) : null}
-
-        {!ocMode && identity === 'bots' ? (
-          <BotsRoster
-            profiles={profiles ?? []}
-            onOpenBot={(key) => {
-              onOpenBot?.(key)
-              onClose()
-            }}
-            onNewBot={() => {
-              onNewBot?.()
-              onClose()
-            }}
-            onCloseDrawer={onClose}
-            active={open}
-          />
-        ) : null}
-
-        {(ocMode || identity === 'sessions') && (ocMode || recent.length > 0) ? (
-          <>
-            <View style={s.searchWrap}>
-              <Icon name="search" size={14} color={C.textFaint} />
-              <TextInput
-                ref={searchInputRef}
-                style={s.searchInput}
-                value={query}
-                onChangeText={setQuery}
-                placeholder={tr('sidebar.searchChats')}
-                placeholderTextColor={C.textFaint}
-                autoCorrect={false}
-                autoCapitalize="none"
-                editable={open}
-                accessibilityLabel={ocMode ? 'Search OpenCode chats' : tr('sidebar.searchChats')}
-                onFocus={() => {
-                  searchFocusRef.current = true
-                }}
-                onBlur={() => {
-                  searchFocusRef.current = false
-                }}
-              />
-              {query ? (
-                <Pressable
-                  onPress={() => setQuery('')}
-                  hitSlop={8}
-                  style={({ pressed }) => [s.clearBtn, pressed && s.iconBtnPressed]}
-                  accessibilityLabel={tr('sidebar.clearSearch')}
-                >
-                  <Icon name="close" size={14} color={C.textFaint} />
-                </Pressable>
-              ) : null}
-            </View>
-            {/* BUG-133: chat-pad pattern on the LIST only — the drawer's
-                search field stays at the panel top while chat results render
-                above the keys instead of behind them. */}
-            <RAnimated.View style={[{ flex: 1 }, drawerListKbPad]}>
+        {/* BUG-133: chat-pad pattern on the LIST only — the drawer's search
+            field stays at the panel top while chat results render above the
+            keys instead of behind them. */}
+        {showChatList ? (
+          <RAnimated.View style={[{ flex: 1 }, drawerListKbPad]}>
             {ocMode ? (
               // OpenCode sessions: rows come from the OpenCode server, keyed
               // by oc id. Tapping opens a fresh chat window bound to that
@@ -1006,16 +1199,18 @@ export function Sidebar({
               // project's name (same section shape as the hermes list);
               // everything else stays flat below.
               <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
-                <View style={s.sectionLabelRow}>
-                  <Text style={s.sectionLabel}>OpenCode sessions</Text>
-                </View>
+                {navAndProjects}
+                {chatsHeading}
                 {ocLoading ? (
                   // Skeleton rows while the agent boots (or the list loads):
                   // placeholder bars in the row rhythm — no spinner, no error
                   // copy that reads like a failure before anything failed.
-                  <View accessibilityLabel="OpenCode sessions loading">
+                  <View accessibilityLabel={tr('chrome.drawer.ocLoading')}>
                     {[0, 1, 2].map((i) => (
-                      <View key={i} style={[s.recentRow, { opacity: 0.55 - i * 0.15 }]}>
+                      <View
+                        key={i}
+                        style={[s.recentRow, { flexDirection: dir.row }, { opacity: 0.55 - i * 0.15 }]}
+                      >
                         <View style={{ flex: 1, gap: 7 }}>
                           <View style={{ height: 12, width: `${74 - i * 16}%`, borderRadius: 6, backgroundColor: C.border }} />
                           <View style={{ height: 9, width: '38%', borderRadius: 5, backgroundColor: C.border, opacity: 0.6 }} />
@@ -1024,13 +1219,13 @@ export function Sidebar({
                     ))}
                   </View>
                 ) : ocError ? (
-                  <Text style={s.ocStateText}>{ocError}</Text>
+                  <Txt size={13} color={C.textFaint} style={s.ocStateText}>{ocError}</Txt>
                 ) : ocFiltered.length ? (
                   <>
                     {ocGroups.groups.map((g) => (
                       <View key={g.id}>
-                        <View style={s.sectionLabelRow}>
-                          <Text style={s.sectionLabel}>{g.name}</Text>
+                        <View style={[s.sectionLabelRow, { flexDirection: dir.row }]}>
+                          <Kicker style={s.sectionKicker}>{g.name}</Kicker>
                         </View>
                         {g.rows.map(renderOcRow)}
                       </View>
@@ -1038,8 +1233,8 @@ export function Sidebar({
                     {ocGroups.flat.length ? (
                       <View>
                         {ocGroups.groups.length ? (
-                          <View style={s.sectionLabelRow}>
-                            <Text style={s.sectionLabel}>{tr('oc.otherSessions')}</Text>
+                          <View style={[s.sectionLabelRow, { flexDirection: dir.row }]}>
+                            <Kicker style={s.sectionKicker}>{tr('oc.otherSessions')}</Kicker>
                           </View>
                         ) : null}
                         {ocGroups.flat.map(renderOcRow)}
@@ -1047,60 +1242,89 @@ export function Sidebar({
                     ) : null}
                   </>
                 ) : (
-                  <Text style={s.ocStateText}>No OpenCode sessions yet</Text>
+                  <Txt size={13} color={C.textFaint} style={s.ocStateText}>
+                    {tr('chrome.drawer.ocEmpty')}
+                  </Txt>
                 )}
                 <View style={{ height: 12 }} />
               </ScrollView>
             ) : (
               <SectionList<RecentChat, Section>
-              sections={sections}
-              keyExtractor={chatKey}
-              style={{ flex: 1 }}
-              contentContainerStyle={{ paddingBottom: 8 }}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-              // A2-17: a drawer doesn't need ~20 viewports of pre-render —
-              // 44dp rows make windowSize=5 plenty.
-              windowSize={5}
-              maxToRenderPerBatch={8}
-              updateCellsBatchingPeriod={50}
-              initialNumToRender={12}
-              renderItem={renderItem}
-              renderSectionHeader={renderSectionHeader}
-              renderSectionFooter={renderSectionFooter}
-              ListEmptyComponent={listEmpty}
-            />
+                sections={sections}
+                keyExtractor={chatKey}
+                style={{ flex: 1 }}
+                contentContainerStyle={{ paddingBottom: 8 }}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                // A2-17: a drawer doesn't need ~20 viewports of pre-render —
+                // 44dp rows make windowSize=5 plenty.
+                windowSize={5}
+                maxToRenderPerBatch={8}
+                updateCellsBatchingPeriod={50}
+                initialNumToRender={12}
+                renderItem={renderItem}
+                renderSectionHeader={renderSectionHeader}
+                renderSectionFooter={renderSectionFooter}
+                ListHeaderComponent={
+                  <>
+                    {navAndProjects}
+                    {chatsHeading}
+                  </>
+                }
+                ListEmptyComponent={listEmpty}
+              />
             )}
-            </RAnimated.View>
-          </>
-        ) : (ocMode || identity === 'sessions') ? (
-          <View style={{ flex: 1 }} />
+          </RAnimated.View>
         ) : null}
 
-        {/* The pending-questions note counts CHATS waiting on you; in Bots
-            mode the drawer shows no chats, so it would be unexplainable.
-            Hermes-only: OpenCode questions render in the chat itself. */}
-        {!ocMode && identity === 'sessions' ? footer : null}
+        {showBots ? (
+          <View style={s.botsBody}>
+            <BotsRoster
+              profiles={profiles ?? []}
+              onOpenBot={(key) => {
+                onOpenBot?.(key)
+                onClose()
+              }}
+              onNewBot={() => {
+                onNewBot?.()
+                onClose()
+              }}
+              onCloseDrawer={onClose}
+              active={open}
+            />
+          </View>
+        ) : null}
 
-        {/* Bottom-docked nav (Settings) + primary action, pinned like
-            ChatGPT's blue button at the panel's bottom edge. */}
-        {shownBottomNav?.length ? <View>{renderNavRows(shownBottomNav)}</View> : null}
-        {/* Bots mode has no "New chat": its primary action is the roster's
-            `+ New bot` (which opens the Fleet create flow). OpenCode mode
-            starts chats like Sessions — newChat is the local window the OC
-            session binds to. */}
-        {ocMode || identity === 'sessions' ? (
+        {/* The pending-questions note counts CHATS waiting on you, so it is
+            Sessions-only (mockup: the amber bottom card). Hermes-only:
+            OpenCode questions render in the chat itself. */}
+        {showFooter ? (
           <Pressable
-            style={({ pressed }) => [s.newChat, pressed && { opacity: 0.85 }]}
+            style={({ pressed }) => [
+              s.pendingCard,
+              { flexDirection: dir.row },
+              pressed && s.rowPressed,
+            ]}
             onPress={() => {
-              onNewChat()
+              onNav('inbox')
               onClose()
             }}
-            accessibilityLabel={tr('sidebar.newChat')}
+            accessibilityRole="button"
+            accessibilityLabel={tr('chrome.drawer.pendingView')}
           >
-            <Icon name="add" size={20} color={C.onAccent} />
-            <Text style={s.newChatText}>{tr('sidebar.newChat')}</Text>
+            <View style={s.pendingBody}>{footer}</View>
+            <Txt size={11} color={C.amber}>
+              {tr('chrome.drawer.view')} {dir.rtl ? '←' : '→'}
+            </Txt>
           </Pressable>
+        ) : null}
+
+        {/* Bottom-docked nav (Settings), pinned like ChatGPT's primary action.
+            Bots mode has no "New chat": its primary action is the roster's
+            `+ New bot`. Evidence of the mockup's Settings-in-the-grid lives
+            here so it stays reachable from every drawer mode. */}
+        {shownBottomNav?.length ? (
+          <View style={s.bottomNav}>{renderNavGrid(shownBottomNav, 1)}</View>
         ) : null}
       </Animated.View>
 
@@ -1148,9 +1372,12 @@ export function Sidebar({
           </Animated.View>
           <RAnimated.View style={renameKbPad}>
             <Animated.View style={[s.dialogCard, { opacity: renameAnim, transform: [{ scale: renameScale }] }]}>
-              <Text style={s.dialogTitle}>{tr('sidebar.renameChatTitle')}</Text>
+              <Txt style={s.dialogTitle}>{tr('sidebar.renameChatTitle')}</Txt>
               <TextInput
-                style={s.dialogInput}
+                style={[
+                  s.dialogInput,
+                  { textAlign: dir.textAlign, writingDirection: dir.writingDirection },
+                ]}
                 value={renameText}
                 onChangeText={setRenameText}
                 autoFocus
@@ -1159,17 +1386,17 @@ export function Sidebar({
                 onSubmitEditing={() => void saveRename()}
                 accessibilityLabel={tr('sidebar.chatName')}
               />
-              {dialogError ? <Text style={s.dialogError}>{dialogError}</Text> : null}
-              <View style={s.dialogButtons}>
+              {dialogError ? <Txt style={s.dialogError}>{dialogError}</Txt> : null}
+              <View style={[s.dialogButtons, { flexDirection: dir.row }]}>
                 <Pressable style={[s.dialogBtn, dialogBusy && s.dialogBtnBusy]} onPress={closeDialogs} disabled={dialogBusy}>
-                  <Text style={s.dialogBtnText}>{tr('sidebar.cancel')}</Text>
+                  <Txt style={s.dialogBtnText}>{tr('sidebar.cancel')}</Txt>
                 </Pressable>
                 <Pressable
                   style={[s.dialogBtnPrimary, (dialogBusy || !renameText.trim()) && s.dialogBtnBusy]}
                   onPress={() => void saveRename()}
                   disabled={dialogBusy || !renameText.trim()}
                 >
-                  <Text style={s.dialogBtnPrimaryText}>{tr('sidebar.save')}</Text>
+                  <Txt style={s.dialogBtnPrimaryText}>{tr('sidebar.save')}</Txt>
                 </Pressable>
               </View>
             </Animated.View>
@@ -1184,21 +1411,21 @@ export function Sidebar({
             <Pressable style={StyleSheet.absoluteFill} onPress={closeDialogs} accessibilityLabel={tr('sidebar.cancel')} />
           </Animated.View>
           <Animated.View style={[s.dialogCard, { opacity: confirmAnim, transform: [{ scale: confirmScale }] }]}>
-            <Text style={s.dialogTitle}>{tr('sidebar.deleteChatTitle')}</Text>
-            <Text style={s.dialogBody}>
+            <Txt style={s.dialogTitle}>{tr('sidebar.deleteChatTitle')}</Txt>
+            <Txt style={s.dialogBody}>
               {tr('sidebar.deleteChatBody', { title: shownConfirm.title })}
-            </Text>
-            {dialogError ? <Text style={s.dialogError}>{dialogError}</Text> : null}
-            <View style={s.dialogButtons}>
+            </Txt>
+            {dialogError ? <Txt style={s.dialogError}>{dialogError}</Txt> : null}
+            <View style={[s.dialogButtons, { flexDirection: dir.row }]}>
               <Pressable style={[s.dialogBtn, dialogBusy && s.dialogBtnBusy]} onPress={closeDialogs} disabled={dialogBusy}>
-                <Text style={s.dialogBtnText}>{tr('sidebar.cancel')}</Text>
+                <Txt style={s.dialogBtnText}>{tr('sidebar.cancel')}</Txt>
               </Pressable>
               <Pressable
                 style={[s.dialogBtnDanger, dialogBusy && s.dialogBtnBusy]}
                 onPress={() => void runDelete()}
                 disabled={dialogBusy}
               >
-                <Text style={s.dialogBtnDangerText}>{tr('sidebar.delete')}</Text>
+                <Txt style={s.dialogBtnDangerText}>{tr('sidebar.delete')}</Txt>
               </Pressable>
             </View>
           </Animated.View>
@@ -1254,14 +1481,15 @@ function MenuRow({
   onPress: () => void
 }) {
   const s = useStyles(makeS)
+  const dir = useDir()
   return (
     <Pressable
-      style={({ pressed }) => [s.menuRow, pressed && s.menuRowPressed]}
+      style={({ pressed }) => [s.menuRow, { flexDirection: dir.row }, pressed && s.menuRowPressed]}
       onPress={onPress}
       accessibilityLabel={label}
     >
       <MaterialCommunityIcons name={icon} size={18} color={danger ? C.red : C.text} />
-      <Text style={[s.menuRowLabel, danger && { color: C.red }]}>{label}</Text>
+      <Txt size={14.5} color={danger ? C.red : C.text} style={s.menuRowLabel}>{label}</Txt>
     </Pressable>
   )
 }
@@ -1270,22 +1498,28 @@ function MenuRow({
  * One recent-chat row (A2-18): memoized and handed stable callbacks, so search
  * keystrokes, dialog state and store ticks only re-render rows whose props
  * actually changed. The row calls back with primitives (ids) instead of
- * receiving fresh closures per render.
+ * receiving fresh closures per render. `locale` is passed purely so a
+ * language switch re-renders the age / a11y copy.
  */
 const RecentRow = React.memo(function RecentRow({
   c,
+  locale,
   isPinned,
   onOpenChat,
   onCloseDrawer,
   onMenu,
 }: {
   c: RecentChat
+  locale: string
   isPinned: boolean
   onOpenChat: (id: string) => void
   onCloseDrawer: () => void
   onMenu: (c: RecentChat, e?: GestureResponderEvent) => void
 }) {
   const s = useStyles(makeS)
+  const dir = useDir()
+  void locale
+  const age = ageLabel(c.ts)
   return (
     <Pressable
       onPress={() => {
@@ -1294,14 +1528,27 @@ const RecentRow = React.memo(function RecentRow({
       }}
       onLongPress={(e) => onMenu(c, e)}
       delayLongPress={350}
-      style={({ pressed }) => [s.recentRow, pressed && s.recentRowPressed]}
+      style={({ pressed }) => [
+        s.recentRow,
+        { flexDirection: dir.row },
+        c.active && s.recentRowActive,
+        pressed && s.recentRowPressed,
+      ]}
+      accessibilityRole="button"
       accessibilityLabel={tr('sidebar.openChat', { title: c.title })}
     >
-      <Text style={[s.recentTitle, c.active && s.recentTitleActive]} numberOfLines={1}>
-        {c.title}
-      </Text>
-      {isPinned ? <Icon name="pin" size={11} color={C.textFaint} /> : null}
       <StatusDot status={c.status} />
+      <Txt
+        size={12}
+        weight="600"
+        color={c.active ? C.text : C.textDim}
+        numberOfLines={1}
+        style={s.recentTitle}
+      >
+        {c.title}
+      </Txt>
+      {isPinned ? <Icon name="pin" size={11} color={C.textFaint} /> : null}
+      {age ? <Txt size={10} color={C.textFaint}>{age}</Txt> : null}
       <Pressable
         style={s.rowMenu}
         hitSlop={6}
@@ -1317,7 +1564,8 @@ const RecentRow = React.memo(function RecentRow({
 /**
  * The drawer's dialog card language (title / input / body / buttons), shared
  * by the chat dialogs and the project dialogs (ProjectList). One definition,
- * so a second dialog style can never drift in.
+ * so a second dialog style can never drift in. Values mirror the mockup's
+ * sheet card + ghost/primary buttons.
  */
 function makeDialogStyles() {
   // `satisfies` (not a `: Type` annotation) keeps the literal types — a widened
@@ -1325,53 +1573,58 @@ function makeDialogStyles() {
   // every style in this sheet.
   return {
     dialogCard: {
-      width: '86%',
+      width: '88%',
       maxWidth: 400,
       alignSelf: 'center',
-      backgroundColor: C.bgCard,
-      borderRadius: 16,
+      backgroundColor: C.bgElev,
+      borderWidth: 1,
+      borderColor: C.border,
+      borderRadius: 20,
       padding: 18,
       gap: 12,
     },
-    dialogTitle: { color: C.text, fontSize: 16, fontWeight: '700' },
-    dialogBody: { color: C.textDim, fontSize: 13.5 },
-    dialogError: { color: C.red, fontSize: 12.5 },
+    dialogTitle: { color: C.text, fontSize: 15, fontWeight: '800' },
+    dialogBody: { color: C.textDim, fontSize: 12.5, lineHeight: 18 },
+    dialogError: { color: C.red, fontSize: 12 },
     dialogInput: {
       backgroundColor: C.inputBg,
-      borderRadius: 10,
+      borderRadius: 11,
       borderWidth: 1,
-      borderColor: C.borderSoft,
+      borderColor: C.border,
       color: C.text,
-      fontSize: 15,
-      paddingHorizontal: 12,
-      minHeight: 44,
+      fontSize: 13,
+      paddingHorizontal: 11,
+      paddingVertical: 9,
+      minHeight: 38,
     },
-    dialogButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },
+    dialogButtons: { justifyContent: 'flex-end', gap: 8, marginTop: 4 },
     dialogBtn: {
-      minHeight: 40,
-      paddingHorizontal: 16,
-      borderRadius: 20,
+      minHeight: 34,
+      paddingHorizontal: 12,
+      borderRadius: 11,
       justifyContent: 'center',
-      backgroundColor: C.bgHover,
+      backgroundColor: C.bgElev,
+      borderWidth: 1,
+      borderColor: C.border,
     },
     dialogBtnBusy: { opacity: 0.5 },
-    dialogBtnText: { color: C.text, fontSize: 14.5, fontWeight: '600' },
+    dialogBtnText: { color: C.text, fontSize: 12.5, fontWeight: '600' },
     dialogBtnPrimary: {
-      minHeight: 40,
-      paddingHorizontal: 18,
-      borderRadius: 20,
+      minHeight: 36,
+      paddingHorizontal: 14,
+      borderRadius: 11,
       justifyContent: 'center',
       backgroundColor: C.accent,
     },
-    dialogBtnPrimaryText: { color: C.onAccent, fontSize: 14.5, fontWeight: '700' },
+    dialogBtnPrimaryText: { color: C.onAccent, fontSize: 13, fontWeight: '700' },
     dialogBtnDanger: {
-      minHeight: 40,
-      paddingHorizontal: 18,
-      borderRadius: 20,
+      minHeight: 36,
+      paddingHorizontal: 14,
+      borderRadius: 11,
       justifyContent: 'center',
       backgroundColor: C.red,
     },
-    dialogBtnDangerText: { color: '#FFFFFF', fontSize: 14.5, fontWeight: '700' },
+    dialogBtnDangerText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
   } satisfies Record<string, ViewStyle | TextStyle>
 }
 
@@ -1391,11 +1644,11 @@ const makeS = () => StyleSheet.create({
   // screen's floating elements (the model chip carries a zIndex of its own
   // and was drawing over the open drawer on Android).
   layerZ: { zIndex: 50, elevation: 50 },
-  // Left-edge catch strip for the swipe-to-open gesture. `top` is set inline
-  // (insets.top + EDGE_TOP_GAP) to clear the top bar/hamburger.
+  // Leading-edge catch strip for the swipe-to-open gesture. `top` is set
+  // inline (insets.top + EDGE_TOP_GAP); left/right is set inline so it mirrors
+  // in RTL.
   edgeStrip: {
     position: 'absolute',
-    left: 0,
     bottom: 0,
     width: EDGE_W,
   },
@@ -1403,129 +1656,112 @@ const makeS = () => StyleSheet.create({
     position: 'absolute',
     top: 0,
     bottom: 0,
-    left: 0,
-    backgroundColor: C.bgElev,
-    borderRightWidth: 1,
-    borderRightColor: S.drawerRoundedCap ? C.border : C.borderSoft,
-    borderTopRightRadius: S.drawerRoundedCap ? 28 : 0,
-    borderBottomRightRadius: S.drawerRoundedCap ? 28 : 0,
+    backgroundColor: C.bgCard,
+    paddingHorizontal: 12,
     shadowColor: '#000',
-    shadowOpacity: S.drawerRoundedCap ? 0.45 : 0,
+    shadowOpacity: 0.45,
     shadowRadius: 40,
     shadowOffset: { width: 12, height: 0 },
-    elevation: S.drawerRoundedCap ? 16 : 0,
+    elevation: 16,
   },
   header: {
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    marginBottom: 4,
-  },
-  brand: { color: C.text, fontSize: 17, fontWeight: '700', letterSpacing: 0.2 },
-  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  brandLogo: { width: 34, height: 26, resizeMode: 'contain' },
-  iconBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
-  iconBtnPressed: { opacity: 0.5 },
-  clearBtn: { width: 26, height: 26, alignItems: 'center', justifyContent: 'center' },
-  navRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingHorizontal: 16,
-    minHeight: 48,
-    justifyContent: 'flex-start',
-    marginHorizontal: S.drawerRoundedCap ? 10 : 0,
-    borderRadius: S.drawerRoundedCap ? 16 : 0,
-  },
-  // Mocheme's active nav row: a soft wash of the accent instead of nothing.
-  navRowOn: { backgroundColor: C.accentSoft },
-  rowPressed: { backgroundColor: C.bgHover },
-  navLabel: { color: C.text, fontSize: 15.5, fontWeight: '500', flex: 1 },
-  badge: {
-    minWidth: 20,
-    height: 20,
-    borderRadius: 10,
-    paddingHorizontal: 6,
-    backgroundColor: C.red,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badgeText: { color: C.onAccent, fontSize: 11, fontWeight: '800' },
-  // Mini Mochi run-counter next to "Automations": up to three overlapping
-  // faces, then a +N suffix.
-  mochiRunRow: { flexDirection: 'row', alignItems: 'center' },
-  mochiMini: { width: 32, height: 32, resizeMode: 'contain' },
-  mochiMiniOverlap: { marginLeft: -10 },
-  mochiMore: { color: C.textFaint, fontSize: 12.5, fontWeight: '800', marginLeft: 3 },
-  searchWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: 8,
-    marginHorizontal: 12,
-    marginVertical: 8,
-    paddingHorizontal: 12,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: C.bgCard,
+    marginBottom: 10,
+  },
+  brandRow: { alignItems: 'center', gap: 8, flexShrink: 0 },
+  headerActions: { alignItems: 'center', gap: 4 },
+  headerBtn: { width: 26, height: 26, borderRadius: 8 },
+  searchRow: { alignItems: 'center', gap: 6, marginBottom: 10 },
+  searchField: { flex: 1 },
+  clearBtn: { width: 26, height: 26, alignItems: 'center', justifyContent: 'center' },
+  iconBtnPressed: { opacity: 0.5 },
+  // "Workspace" 2-column nav grid (mockup: bgElev tiles, borderSoft hairline).
+  navGrid: { gap: 4, marginBottom: 10 },
+  navGridRow: { gap: 4 },
+  navTile: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    minHeight: 32,
+    borderRadius: 8,
+    backgroundColor: C.bgElev,
     borderWidth: 1,
     borderColor: C.borderSoft,
   },
-  searchInput: { flex: 1, color: C.text, fontSize: 14, paddingVertical: 0, minHeight: 36 },
-  // Section headers: the "gaps" between time groups.
+  navTileOn: { backgroundColor: C.accentSoft, borderColor: C.border },
+  navTileLabel: { flexShrink: 1 },
+  navTileSpacer: { flex: 1 },
+  navBadge: {
+    minWidth: 18,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 99,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navBadgeTint: { backgroundColor: C.btnTint },
+  navBadgeAmber: { backgroundColor: C.amberSoft },
+  // Mini Mochi run-counter on the Automations tile: up to three overlapping
+  // faces at tile scale, then a +N suffix.
+  mochiRunRow: { alignItems: 'center' },
+  mochiMini: { width: 16, height: 16, resizeMode: 'contain' },
+  mochiMiniOverlap: { marginLeft: -5 },
+  mochiMiniOverlapRtl: { marginRight: -5 },
+  mochiMore: { marginHorizontal: 2 },
+  firstKicker: { marginTop: 2 },
+  chatsHead: { alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 12, marginBottom: 6 },
+  chatsKicker: { flex: 1, marginTop: 0, marginBottom: 0 },
+  botsBody: { flex: 1 },
   sectionLabelRow: {
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 4,
+    paddingHorizontal: 8,
   },
-  sectionLabel: {
-    color: C.textFaint,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-  },
-  sectionGap: { height: 6 },
+  sectionKicker: { flex: 1, marginHorizontal: 0, marginBottom: 2 },
+  sectionGap: { height: 4 },
   recentRow: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingLeft: 16,
-    paddingRight: 8,
-    minHeight: 44,
-    borderRadius: 10,
+    gap: 7,
+    paddingVertical: 7,
+    paddingHorizontal: 8,
+    minHeight: 38,
+    borderRadius: 9,
   },
   recentRowPressed: { backgroundColor: C.bgHover },
-  recentTitle: { flex: 1, color: C.textDim, fontSize: 14.5, fontWeight: '400' },
-  recentTitleActive: { color: C.text, fontWeight: '600' },
+  recentRowActive: { backgroundColor: C.bgHover },
+  recentTitle: { flex: 1 },
   rowMenu: {
-    width: 28,
-    height: 28,
+    width: 24,
+    height: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  noMatch: { color: C.textFaint, fontSize: 13, paddingHorizontal: 16, paddingVertical: 12 },
-  // OpenCode sessions list — same row language as RecentRow, plus a time
-  // subtitle and honest loading/error/empty states.
-  ocRowSub: { color: C.textFaint, fontSize: 11.5, marginTop: 1 },
-  ocState: { paddingVertical: 28, alignItems: 'center' },
-  ocStateText: { color: C.textFaint, fontSize: 13, paddingHorizontal: 16, paddingVertical: 12 },
-  newChat: {
-    flexDirection: 'row',
+  rowPressed: { backgroundColor: C.bgHover },
+  noMatch: { paddingHorizontal: 8, paddingVertical: 12 },
+  // OpenCode sessions list — honest loading/error/empty states.
+  ocStateText: { paddingHorizontal: 8, paddingVertical: 12 },
+  // Amber pending-questions card at the panel's bottom edge (mockup footer).
+  pendingCard: {
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginHorizontal: 16,
+    gap: 6,
     marginTop: 8,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: C.accent,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: C.amberSoft,
+    // The mockup's amber hairline (rgba(245,165,36,0.28)); amber is identical
+    // in both themes, so this literal is theme-safe.
+    borderWidth: 1,
+    borderColor: 'rgba(245,165,36,0.28)',
   },
-  newChatText: { color: C.onAccent, fontSize: 15.5, fontWeight: '700' },
+  pendingBody: { flex: 1, minWidth: 0 },
+  bottomNav: { marginTop: 8 },
 
   // Anchored chat menu + dialogs — in-app overlays (Alert.alert is a no-op on
   // web). The container carries no background: each overlay fades its own
@@ -1545,7 +1781,7 @@ const makeS = () => StyleSheet.create({
     borderRadius: 12,
     backgroundColor: C.bgElev,
     borderWidth: 1,
-    borderColor: C.borderSoft,
+    borderColor: C.border,
     paddingVertical: 6,
     shadowColor: '#000000',
     shadowOpacity: 0.45,
@@ -1554,7 +1790,6 @@ const makeS = () => StyleSheet.create({
     elevation: 16,
   },
   menuRow: {
-    flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
     minHeight: 46,
@@ -1562,7 +1797,7 @@ const makeS = () => StyleSheet.create({
     borderRadius: 8,
   },
   menuRowPressed: { backgroundColor: C.bgHover },
-  menuRowLabel: { color: C.text, fontSize: 15.5, flex: 1 },
+  menuRowLabel: { flex: 1 },
 
   // Chat dialogs + project dialogs: one shared definition (makeDialogStyles).
   ...makeDialogStyles(),

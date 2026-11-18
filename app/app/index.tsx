@@ -1,16 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { View, Text, StyleSheet, ActivityIndicator, Pressable } from 'react-native'
+import { View, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
-import { MochiStage } from '../src/components/Mascot'
+import { MochiMark } from '../src/components/MochiMark'
+import { Card, GhostBtn, PrimaryBtn, Txt } from '../src/components/ui'
+import { C, useStyles } from '../src/lib/theme'
+import { useDir, useT } from '../src/lib/strings'
 import { connectThisPhone, connect, loadSavedConfig, type ConnConfig } from '../src/lib/gateway'
 import { getEmbeddedGateway } from '../src/lib/mochiRuntime'
-import { C, useStyles } from '../src/lib/theme'
 import { loadOnboarded, onboardedAtom } from '../src/lib/aboutMe'
-import { useStore } from '@nanostores/react'
 
 /**
- * Entry screen — local only (2026-11-15).
+ * Entry screen (mockup 14) — local only (2026-11-15).
  *
  * Boots the embedded runtime and then either resumes chat (returning user) or
  * starts the four-step onboarding: environment → thinker → providers → about
@@ -21,10 +22,11 @@ import { useStore } from '@nanostores/react'
  */
 export default function Onboarding() {
   const s = useStyles(makeS)
+  const t = useT()
+  const dir = useDir()
   const [phase, setPhase] = useState<'starting' | 'error'>('starting')
   const [detail, setDetail] = useState('')
   const [legacy, setLegacy] = useState<ConnConfig | null>(null)
-  const onboarded = useStore(onboardedAtom)
   const mounted = useRef(true)
 
   useEffect(() => {
@@ -54,7 +56,7 @@ export default function Onboarding() {
       void connectThisPhone().catch(() => {})
     })
     return () => { alive = false }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   const openAgent = async () => {
     setPhase('starting')
@@ -72,7 +74,7 @@ export default function Onboarding() {
     }
   }
 
-  useEffect(() => { void openAgent() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void openAgent() }, [])
 
   const retry = async () => {
     setPhase('starting')
@@ -93,39 +95,81 @@ export default function Onboarding() {
     setPhase('error')
   }
 
+  const legacyName = legacy ? legacy.name || legacy.host : ''
+
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
       <View style={s.body}>
-        <MochiStage state={phase === 'error' ? 'mochi-confused' : 'mochi-waking-up'} size={168} marginBottom={8} />
-        <Text style={s.kicker}>YOUR AGENT, ON THIS PHONE</Text>
-        <Text style={s.title}>Moch</Text>
+        <MochiMark size={112} mood={phase === 'error' ? 'sleepy' : 'happy'} />
+        <Txt
+          size={10.5}
+          weight="800"
+          color={C.accent}
+          center
+          style={[s.kicker, { letterSpacing: dir.rtl ? 0 : 1.26 }]}
+        >
+          {t('setup.entry.kicker')}
+        </Txt>
+        <Txt size={32} weight="800" center style={[s.title, { letterSpacing: dir.rtl ? 0 : -0.96 }]}>
+          Moch
+        </Txt>
+
         {phase === 'starting' ? (
           <>
-            <Text style={s.sub}>Starting your agent…</Text>
-            <ActivityIndicator color={C.accent} style={{ marginTop: 18 }} />
-            <Text style={s.hint}>First launch takes a minute — the runtime is unpacking itself.</Text>
+            <View style={[s.pill, { flexDirection: dir.row }]}>
+              <View style={s.pillDot} />
+              <Txt size={12.5} weight="600">{t('setup.entry.starting')}</Txt>
+            </View>
+            <Txt size={11.5} color={C.textFaint} center style={s.hint}>
+              {t('setup.entry.hint')}
+            </Txt>
           </>
         ) : (
           <>
-            <Text style={s.sub}>The agent couldn't start.</Text>
-            <Text style={s.error} numberOfLines={4}>{detail}</Text>
-            <Pressable style={({ pressed }) => [s.btn, pressed && s.pressed]} onPress={() => void retry()} accessibilityRole="button">
-              <Text style={s.btnText}>Try again</Text>
-            </Pressable>
-            <Pressable style={s.link} onPress={() => router.replace('/(tabs)/chat')} accessibilityRole="button">
-              <Text style={s.linkText}>Open Moch anyway</Text>
-            </Pressable>
+            <Card style={s.errCard}>
+              <Txt size={13} weight="700" color={C.red} style={s.errTitle}>
+                {t('setup.entry.gatewayFailed')}
+              </Txt>
+              {detail ? (
+                <Txt size={11.5} color={C.textDim} numberOfLines={4}>
+                  {detail}
+                </Txt>
+              ) : null}
+            </Card>
+            {legacy ? (
+              <Card style={s.legacyCard}>
+                <Txt size={11.5} weight="700" color={C.amber} style={s.legacyTitle}>
+                  {t('setup.entry.legacy.title')}
+                </Txt>
+                <Txt size={11} color={C.textDim}>
+                  {t('setup.entry.legacy.body', { name: legacyName })}
+                </Txt>
+              </Card>
+            ) : null}
+            <PrimaryBtn
+              onPress={() => void retry()}
+              label={t('setup.entry.tryAgain')}
+              style={s.primary}
+            />
+            <GhostBtn
+              onPress={() => router.replace('/(tabs)/chat')}
+              label={t('setup.entry.openAnyway')}
+              style={s.ghost}
+            />
           </>
         )}
 
-        {legacy ? (
-          <View style={s.notice}>
-            <Text style={s.noticeTitle}>Remote pairing is gone</Text>
-            <Text style={s.noticeBody}>
-              This build runs the agent on your phone only. The saved computer
-              {' '}{legacy.name || legacy.host} is no longer used — you can forget it in Settings → Runtime.
-            </Text>
-          </View>
+        {/* A legacy config can surface before the boot already failed — the
+            notice is not tied to the error phase. */}
+        {phase === 'starting' && legacy ? (
+          <Card style={[s.legacyCard, s.legacyStandalone]}>
+            <Txt size={11.5} weight="700" color={C.amber} style={s.legacyTitle}>
+              {t('setup.entry.legacy.title')}
+            </Txt>
+            <Txt size={11} color={C.textDim}>
+              {t('setup.entry.legacy.body', { name: legacyName })}
+            </Txt>
+          </Card>
         ) : null}
       </View>
     </SafeAreaView>
@@ -134,18 +178,46 @@ export default function Onboarding() {
 
 const makeS = () => StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
-  body: { flex: 1, padding: 24, paddingTop: 18, justifyContent: 'flex-start' },
-  kicker: { color: C.accent, fontSize: 11, fontWeight: '700', letterSpacing: 2.5, marginBottom: 10, marginTop: 10 },
-  title: { color: C.text, fontSize: 46, fontWeight: '800', lineHeight: 52, marginBottom: 10 },
-  sub: { color: C.textDim, fontSize: 15, lineHeight: 21, marginBottom: 8 },
-  hint: { color: C.textFaint, fontSize: 12.5, lineHeight: 18, marginTop: 14 },
-  error: { color: C.red, fontSize: 12.5, lineHeight: 18, marginTop: 6, marginBottom: 18 },
-  btn: { backgroundColor: C.accent, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 8 },
-  pressed: { opacity: 0.7 },
-  btnText: { color: C.onAccent, fontSize: 15, fontWeight: '800' },
-  link: { paddingVertical: 14, alignItems: 'center' },
-  linkText: { color: C.textDim, fontSize: 13.5, fontWeight: '600' },
-  notice: { marginTop: 26, backgroundColor: C.bgCard, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 14 },
-  noticeTitle: { color: C.amber, fontSize: 13, fontWeight: '800', marginBottom: 4 },
-  noticeBody: { color: C.textDim, fontSize: 12.5, lineHeight: 18 },
+  body: {
+    flex: 1,
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  kicker: {
+    textTransform: 'uppercase',
+    marginTop: 14,
+  },
+  title: {
+    marginTop: 2,
+    marginBottom: 14,
+  },
+  pill: {
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: C.bgCard,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  pillDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: C.accent },
+  hint: { marginTop: 12, maxWidth: 240 },
+  errCard: {
+    width: '100%',
+    backgroundColor: C.redSoft,
+    borderColor: 'rgba(255,90,90,0.35)',
+  },
+  errTitle: { marginBottom: 3 },
+  legacyCard: {
+    width: '100%',
+    backgroundColor: C.amberSoft,
+    borderColor: 'rgba(245,165,36,0.3)',
+    marginBottom: 14,
+  },
+  legacyStandalone: { marginTop: 18, marginBottom: 0 },
+  legacyTitle: { marginBottom: 3 },
+  primary: { width: '100%', marginBottom: 8, marginTop: 2 },
+  ghost: { width: '100%' },
 })

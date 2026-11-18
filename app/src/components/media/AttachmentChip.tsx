@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react'
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
 import { Image } from 'expo-image'
-import { Ionicons } from '@expo/vector-icons'
 import { Icon } from '../Icon'
 import { C, useStyles } from '../../lib/theme'
 import { ATTACH_RATE_KBPS, estSecondsFor, formatBytes, formatDuration, mediaKindForPath } from '../../lib/media'
 import type { PendingAttachment } from '../../lib/mediaSend'
+import { useDir, useT } from '../../lib/strings'
 
 /**
  * Composer preview chip: thumbnail, name+size, remove ×, and the send state
@@ -24,31 +24,33 @@ export function AttachmentChip({
   onRetry?: () => void
 }) {
   const s = useStyles(makeS)
+  const dir = useDir()
+  const t = useT()
   const active = att.state === 'preparing' || att.state === 'uploading'
   const [elapsed, setElapsed] = useState(0)
 
   useEffect(() => {
     if (!active) return
     setElapsed(0)
-    const t = setInterval(() => setElapsed((n) => n + 1), 1000)
-    return () => clearInterval(t)
+    const timer = setInterval(() => setElapsed((n) => n + 1), 1000)
+    return () => clearInterval(timer)
   }, [active, att.id])
 
   const isImage = att.kind === 'image' || mediaKindForPath(att.name) === 'image'
   const estS = att.size ? estSecondsFor(att.size, ATTACH_RATE_KBPS) : null
   const stateLabel =
     att.state === 'preparing'
-      ? 'preparing…'
+      ? t('chat.attachChip.preparing')
       : att.state === 'uploading'
         ? `${formatDuration(elapsed)}${estS != null && Number.isFinite(estS) ? ` / ~${formatDuration(estS)}` : ''} · ${formatBytes(att.size ?? 0)}`
         : att.state === 'ready'
-          ? 'sent'
+          ? t('chat.attachChip.sent')
           : att.state === 'failed'
-            ? (att.error ?? 'failed')
+            ? (att.error ?? t('chat.attachChip.failed'))
             : formatBytes(att.size ?? 0)
 
   return (
-    <View style={[s.chip, att.state === 'failed' && s.chipFailed]}>
+    <View style={[s.chip, { flexDirection: dir.row }, att.state === 'failed' && s.chipFailed]}>
       {isImage ? (
         <Image source={{ uri: att.uri }} style={s.thumb} contentFit="cover" transition={100} />
       ) : (
@@ -64,11 +66,11 @@ export function AttachmentChip({
       </View>
       {active ? <ActivityIndicator size="small" color={C.accent} /> : null}
       {att.state === 'failed' && onRetry ? (
-        <Pressable onPress={onRetry} hitSlop={6} accessibilityLabel="Retry attachment">
+        <Pressable onPress={onRetry} hitSlop={6} accessibilityLabel={t('chat.attachChip.retryA11y')}>
           <Icon name="refresh" size={14} color={C.accent} />
         </Pressable>
       ) : null}
-      <Pressable onPress={onRemove} hitSlop={6} accessibilityLabel={`Remove ${att.name}`}>
+      <Pressable onPress={onRemove} hitSlop={6} accessibilityLabel={t('chat.attachChip.removeA11y', { name: att.name })}>
         <Icon name="close" size={14} color={C.textDim} />
       </Pressable>
     </View>
@@ -77,11 +79,10 @@ export function AttachmentChip({
 
 const makeS = () => StyleSheet.create({
   chip: {
-    flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     backgroundColor: C.bgElev,
-    borderRadius: 14,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: C.border,
     padding: 8,
@@ -89,9 +90,9 @@ const makeS = () => StyleSheet.create({
     maxWidth: 280,
   },
   thumb: {
-    width: 38,
-    height: 38,
-    borderRadius: 10,
+    width: 36,
+    height: 36,
+    borderRadius: 8,
     backgroundColor: C.bgCard,
     alignItems: 'center',
     justifyContent: 'center',
@@ -99,7 +100,7 @@ const makeS = () => StyleSheet.create({
   },
   chipFailed: { backgroundColor: C.redSoft, borderColor: C.red },
   meta: { flex: 1 },
-  name: { color: C.text, fontSize: 12.5, fontWeight: '600' },
-  state: { color: C.textFaint, fontSize: 11, marginTop: 1 },
+  name: { color: C.text, fontSize: 12, fontWeight: '600' },
+  state: { color: C.textFaint, fontSize: 10.5, marginTop: 1 },
   stateFailed: { color: C.red },
 })

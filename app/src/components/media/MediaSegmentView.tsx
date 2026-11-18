@@ -1,6 +1,5 @@
 import React from 'react'
 import { StyleSheet, Text, View } from 'react-native'
-import { Ionicons } from '@expo/vector-icons'
 import { Icon } from '../Icon'
 import { C, useStyles } from '../../lib/theme'
 import type { ChatSegment } from '../../lib/chat'
@@ -8,6 +7,7 @@ import { ImageBubble } from './ImageBubble'
 import { VideoBubble } from './VideoBubble'
 import { AudioBubble } from './AudioBubble'
 import { FileCard } from './FileCard'
+import { useT } from '../../lib/strings'
 
 /**
  * The one seam MessageBubble renders media through — both roles, all kinds.
@@ -16,11 +16,14 @@ import { FileCard } from './FileCard'
  */
 export function MediaSegmentView({ seg }: { seg: ChatSegment }) {
   const s = useStyles(makeS)
+  const t = useT()
   if (seg.state === 'missing' && !seg.localUri) {
     return (
       <View style={s.errorTile}>
         <Icon name="cloud-offline-outline" size={18} color={C.textFaint} />
-        <Text style={s.errorText}>{seg.name ? `${seg.name} is no longer on the gateway` : 'No longer on gateway'}</Text>
+        <Text style={s.errorText}>
+          {seg.name ? t('chat.media.goneNamed', { name: seg.name }) : t('chat.media.gone')}
+        </Text>
       </View>
     )
   }
@@ -40,12 +43,12 @@ export function MediaSegmentView({ seg }: { seg: ChatSegment }) {
 const makeS = () => StyleSheet.create({
   errorTile: {
     minHeight: 60,
-    borderRadius: 16,
+    borderRadius: 13,
     backgroundColor: C.bgElev,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
     padding: 12,
   },
-  errorText: { color: C.textFaint, fontSize: 12 },
+  errorText: { color: C.textFaint, fontSize: 12, textAlign: 'center' },
 })

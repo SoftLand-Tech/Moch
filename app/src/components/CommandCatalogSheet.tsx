@@ -1,7 +1,8 @@
 /**
  * CommandCatalogSheet — the command browser. Anatomy-copied from
- * ModelPickerSheet (slide Modal, scrim tap-to-close, bgElev radius-20 sheet,
- * search field, sectioned Pressable rows).
+ * ModelPickerSheet (slide Modal, scrim tap-to-close, bgElev sheet, search
+ * field, sectioned Pressable rows), now on the redesign sheet language
+ * (SheetCard/SheetGrabber + pill tags + mono command names).
  *
  * Renders the gateway-owned registry atoms — commandCategories for the
  * sectioned commands, skillCommands for the skills — and self-loads them via
@@ -19,14 +20,15 @@
  * bare /help into this same sheet.
  */
 import React, { useEffect, useMemo, useState } from 'react'
-import { Modal, View, Text, Pressable, TextInput, SectionList, StyleSheet, ActivityIndicator } from 'react-native'
+import { Modal, View, Text, Pressable, TextInput, SectionList, StyleSheet } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
-import { Ionicons } from '@expo/vector-icons'
 import { Icon } from './Icon'
+import { Pill, SheetGrabber, Txt } from './ui'
 import * as Haptics from 'expo-haptics'
 import { useStore } from '@nanostores/react'
 import { loadCatalog, loadSkillDescriptions, commandCategories, commandCatalog, skillCommands, skillDescriptions, catalogWarning, slashLabel } from '../lib/slash'
-import { C, pill, useStyles } from '../lib/theme'
+import { C, useStyles } from '../lib/theme'
+import { useDir, useT } from '../lib/strings'
 
 interface CatalogSection {
   name: string
@@ -44,6 +46,8 @@ export function CommandCatalogSheet({
   onRunFallback: () => void
 }) {
   const s = useStyles(makeS)
+  const dir = useDir()
+  const t = useT()
   const categories = useStore(commandCategories)
   const catalog = useStore(commandCatalog)
   const skills = useStore(skillCommands)
@@ -103,15 +107,20 @@ export function CommandCatalogSheet({
       if (skillMatches(q, key, skill.origin)) {
         const bare = key.replace(/^\//, '')
         // Real description once the scrape lands; the origin tag until then.
-        skillRows.push({ key, label: slashLabel(key), desc: skillDescs[bare.toLowerCase()] ?? `skill · ${skill.origin ?? 'local'}`, kind: 'skill' })
+        skillRows.push({ key, label: slashLabel(key), desc: skillDescs[bare.toLowerCase()] ?? t('chat.catalog.skillOrigin', { origin: skill.origin ?? 'local' }), kind: 'skill' })
       }
     }
-    if (skillRows.length) out.push({ name: 'Skills', data: skillRows })
+    if (skillRows.length) out.push({ name: t('chat.catalog.skills'), data: skillRows })
     return out
     // `matches` closes over q only — recompute on query/registry change.
-  }, [categories, skills, skillDescs, q])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categories, skills, skillDescs, q, t])
 
   const registryEmpty = cmdCount === 0 && skillCount === 0
+  const countsLabel = [
+    cmdCount ? (cmdCount === 1 ? t('chat.cmd.commandOne') : t('chat.cmd.commandMany', { n: cmdCount })) : '',
+    skillCount ? (skillCount === 1 ? t('chat.cmd.skillOne') : t('chat.cmd.skillMany', { n: skillCount })) : '',
+  ].filter(Boolean).join(' · ')
 
   const pick = (row: CatalogSection['data'][number]) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
@@ -131,50 +140,53 @@ export function CommandCatalogSheet({
           leaving the bottom rows under the IME. 'padding' on the Modal's
           full-screen root is the connectors-proven exact variant. */}
       <KeyboardAvoidingView style={s.flex} behavior="padding">
-        <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: C.scrim }]} onPress={onClose} accessibilityLabel="Close command browser" />
+        <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: C.scrim }]} onPress={onClose} accessibilityLabel={t('chat.catalog.closeA11y')} />
         <View style={s.sheet}>
+          <SheetGrabber />
           {/* Header */}
-          <View style={s.head}>
+          <View style={[s.head, { flexDirection: dir.row }]}>
             <Icon name="terminal-outline" size={15} color={C.accent} />
-            <View style={{ flex: 1 }}>
-              <Text style={s.headTitle}>Commands</Text>
-              <Text style={s.headSub} numberOfLines={1}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Txt size={14} weight="800">{t('chat.catalog.title')}</Txt>
+              <Txt size={11} color={C.textDim} numberOfLines={1}>
                 {loading
-                  ? 'Loading…'
+                  ? t('chat.catalog.loading')
                   : registryEmpty
-                    ? 'Registry not loaded'
-                    : `${cmdCount ? `${cmdCount} command${cmdCount === 1 ? '' : 's'}` : ''}${cmdCount && skillCount ? ' · ' : ''}${skillCount ? `${skillCount} skill${skillCount === 1 ? '' : 's'}` : ''}`}
-              </Text>
+                    ? t('chat.catalog.notLoaded')
+                    : countsLabel}
+              </Txt>
             </View>
             <Pressable
               style={({ pressed }) => [s.close, pressed && s.iconPressed]}
               hitSlop={8}
               onPress={onClose}
-              accessibilityLabel="Close"
+              accessibilityRole="button"
+              accessibilityLabel={t('common.close')}
             >
-              <Icon name="close" size={20} color={C.textDim} />
+              <Icon name="close" size={18} color={C.textDim} />
             </Pressable>
           </View>
 
           {/* Search */}
-          <View style={s.searchWrap}>
+          <View style={[s.searchWrap, { flexDirection: dir.row }]}>
             <Icon name="search" size={15} color={C.textFaint} />
             <TextInput
               style={s.search}
               value={query}
               onChangeText={setQuery}
-              placeholder="Filter commands…"
+              placeholder={t('chat.slash.filterPlaceholder')}
               placeholderTextColor={C.textFaint}
               autoCapitalize="none"
               autoCorrect={false}
-              accessibilityLabel="Filter commands"
+              accessibilityLabel={t('chat.slash.filterPlaceholder')}
             />
             {query ? (
               <Pressable
                 hitSlop={6}
                 style={({ pressed }) => [s.clear, pressed && s.iconPressed]}
                 onPress={() => setQuery('')}
-                accessibilityLabel="Clear filter"
+                accessibilityRole="button"
+                accessibilityLabel={t('chat.catalog.clearA11y')}
               >
                 <Icon name="close-circle" size={15} color={C.textFaint} />
               </Pressable>
@@ -185,20 +197,21 @@ export function CommandCatalogSheet({
 
           {registryEmpty && loading ? (
             <View style={s.emptyWrap}>
-              <ActivityIndicator color={C.accent} />
-              <Text style={s.empty}>Loading command catalog…</Text>
+              <Icon name="time-outline" size={16} color={C.accent} />
+              <Txt size={11.5} color={C.textFaint} center>{t('chat.catalog.loadingCatalog')}</Txt>
             </View>
           ) : registryEmpty ? (
             <View style={s.emptyWrap}>
-              <Text style={s.empty}>Command catalog not loaded yet.</Text>
+              <Txt size={12} color={C.textFaint} center>{t('chat.catalog.empty')}</Txt>
               <Pressable
                 onPress={runFallback}
-                style={({ pressed }) => [s.fallbackRow, pressed && s.rowPressed]}
-                accessibilityLabel="Run /help without the native browser"
+                style={({ pressed }) => [s.fallbackRow, { flexDirection: dir.row }, pressed && s.rowPressed]}
+                accessibilityRole="button"
+                accessibilityLabel={t('chat.catalog.runFallbackA11y')}
               >
                 <Icon name="terminal-outline" size={15} color={C.accent} />
-                <Text style={s.fallbackText}>Run /help anyway</Text>
-                <Icon name="chevron-forward" size={15} color={C.textFaint} />
+                <Txt size={12.5} weight="700" color={C.accent} style={{ flex: 1 }}>{t('chat.catalog.runFallback')}</Txt>
+                <Icon name={dir.icon.forward} size={14} color={C.textFaint} />
               </Pressable>
             </View>
           ) : (
@@ -212,8 +225,9 @@ export function CommandCatalogSheet({
               keyExtractor={(row) => row.key}
               renderItem={({ item: row }) => (
                 <Pressable
-                  style={({ pressed }) => [s.row, pressed && s.rowPressed]}
+                  style={({ pressed }) => [s.row, { flexDirection: dir.row }, pressed && s.rowPressed]}
                   onPress={() => pick(row)}
+                  accessibilityRole="button"
                   accessibilityLabel={`${row.label}${row.desc ? `, ${row.desc.slice(0, 80)}` : ''}`}
                 >
                   <Icon
@@ -221,13 +235,15 @@ export function CommandCatalogSheet({
                     size={14}
                     color={row.kind === 'skill' ? C.accent : C.textFaint}
                   />
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.rowTitle} numberOfLines={1}>{row.label}</Text>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Txt size={12.5} weight="700" color={C.accent} mono ltr numberOfLines={1}>{row.label}</Txt>
                     {row.desc ? (
                       <Text style={s.rowSub} numberOfLines={2}>{row.desc}</Text>
                     ) : null}
                   </View>
-                  <Text style={s.kindTag}>{row.kind.toUpperCase()}</Text>
+                  <Pill kind="neutral" style={s.kindPill}>
+                    {row.kind === 'skill' ? t('chat.catalog.kindSkill') : t('chat.catalog.kindCommand')}
+                  </Pill>
                 </Pressable>
               )}
               renderSectionHeader={({ section }) => (
@@ -239,7 +255,7 @@ export function CommandCatalogSheet({
               stickySectionHeadersEnabled={false}
               initialNumToRender={14}
               windowSize={9}
-              ListEmptyComponent={<Text style={s.empty}>Nothing matches “{query}”.</Text>}
+              ListEmptyComponent={<Text style={s.empty}>{t('chat.catalog.noMatches', { query })}</Text>}
               ListFooterComponent={<View style={{ height: 24 }} />}
             />
           )}
@@ -257,45 +273,44 @@ function skillMatches(q: string, key: string, origin?: string): boolean {
 
 const makeS = () => StyleSheet.create({
   flex: { flex: 1, justifyContent: 'flex-end' },
+  // sheet-card: bgElev, radius 24 top, padding 10 14 26.
   sheet: {
     backgroundColor: C.bgElev,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderTopWidth: 1,
+    borderColor: C.border,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     maxHeight: '82%',
-    borderWidth: 1,
-    borderColor: C.borderSoft,
-    paddingBottom: 12,
+    paddingTop: 10,
+    paddingHorizontal: 14,
+    paddingBottom: 26,
   },
-  head: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingTop: 14, paddingBottom: 8 },
-  headTitle: { color: C.text, fontSize: 16.5, fontWeight: '700' },
-  headSub: { color: C.textFaint, fontSize: 12, marginTop: 1 },
-  close: { width: 30, height: 30, borderRadius: 15, backgroundColor: C.bgCard, alignItems: 'center', justifyContent: 'center' },
+  head: { alignItems: 'center', gap: 8, marginBottom: 8 },
+  close: { width: 28, height: 28, borderRadius: 9, backgroundColor: C.btnTint, alignItems: 'center', justifyContent: 'center' },
   iconPressed: { opacity: 0.55 },
   searchWrap: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    marginHorizontal: 14, marginBottom: 6,
-    backgroundColor: C.bgCard, borderRadius: 12, borderWidth: 1, borderColor: C.border,
-    paddingHorizontal: 10, minHeight: 40,
+    alignItems: 'center', gap: 8,
+    marginBottom: 6,
+    backgroundColor: C.inputBg, borderRadius: 11, borderWidth: 1, borderColor: C.border,
+    paddingHorizontal: 10, minHeight: 38,
   },
-  search: { flex: 1, color: C.text, fontSize: 14.5, paddingVertical: 9 },
-  clear: { width: 26, height: 26, alignItems: 'center', justifyContent: 'center' },
-  warning: { color: C.amber, fontSize: 11.5, lineHeight: 16, paddingHorizontal: 14, paddingBottom: 6 },
-  list: { paddingHorizontal: 6 },
-  sectionLabel: { color: C.textFaint, fontSize: 10.5, fontWeight: '800', letterSpacing: 1.5, paddingHorizontal: 12, paddingTop: 14, paddingBottom: 4, textTransform: 'uppercase' },
+  search: { flex: 1, color: C.text, fontSize: 13, paddingVertical: 9 },
+  clear: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
+  warning: { color: C.amber, fontSize: 11, lineHeight: 15, paddingBottom: 6 },
+  list: { paddingHorizontal: 0 },
+  sectionLabel: { color: C.textFaint, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, paddingTop: 12, paddingBottom: 4, textTransform: 'uppercase' },
   row: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 10, paddingVertical: 11, borderRadius: 12, minHeight: 52,
+    alignItems: 'center', gap: 8,
+    paddingHorizontal: 6, paddingVertical: 8, borderRadius: 9, minHeight: 44,
   },
   rowPressed: { backgroundColor: C.bgHover },
-  rowTitle: { color: C.text, fontSize: 14.5, fontWeight: '600', flexShrink: 1 },
-  rowSub: { color: C.textFaint, fontSize: 11.5, marginTop: 2 },
-  kindTag: { color: C.textFaint, fontSize: 9.5, fontWeight: '800', letterSpacing: 1 },
-  emptyWrap: { padding: 24, gap: 12, alignItems: 'center' },
-  empty: { color: C.textFaint, fontSize: 13, textAlign: 'center' },
+  rowSub: { color: C.textFaint, fontSize: 11, marginTop: 2 },
+  kindPill: { paddingVertical: 1, paddingHorizontal: 6 },
+  emptyWrap: { paddingVertical: 24, paddingHorizontal: 4, gap: 12, alignItems: 'center' },
+  empty: { color: C.textFaint, fontSize: 12, textAlign: 'center', paddingVertical: 20 },
   fallbackRow: {
-    ...pill(44),
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: C.bgCard, paddingHorizontal: 16,
+    alignItems: 'center', gap: 8,
+    backgroundColor: C.bgCard, borderWidth: 1, borderColor: C.border,
+    borderRadius: 11, paddingHorizontal: 12, minHeight: 40,
   },
-  fallbackText: { color: C.accent, fontSize: 13.5, fontWeight: '700' },
 })

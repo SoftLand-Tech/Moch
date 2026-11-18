@@ -1,13 +1,28 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { View, Text, FlatList, StyleSheet, Pressable, TextInput, ActivityIndicator } from 'react-native'
+import { FlatList, Pressable, StyleSheet, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
 import Animated, { useAnimatedStyle } from 'react-native-reanimated'
 import { useStore } from '@nanostores/react'
-import { ScreenShell } from '../../src/components/ScreenShell'
-import { C, useStyles } from '../../src/lib/theme'
 import { useRouter } from 'expo-router'
+import { ScreenShell } from '../../src/components/ScreenShell'
+import {
+  Card,
+  Dot,
+  Elev,
+  Field,
+  GhostBtn,
+  HeaderButton,
+  Pill,
+  PrimaryBtn,
+  Spinner,
+  Txt,
+} from '../../src/components/ui'
+import { Icon } from '../../src/components/Icon'
+import { MochiMark } from '../../src/components/MochiMark'
+import { C, useStyles } from '../../src/lib/theme'
+import { useDir, useT } from '../../src/lib/strings'
 import {
   CreateChecklist,
   DEFAULT_CHECKLIST,
@@ -27,25 +42,30 @@ import {
   FleetProfile,
 } from '../../src/lib/fleet'
 import { isConnected } from '../../src/lib/gateway'
-import { tr, isRTL } from '../../src/lib/strings'
 import { showAlert } from '../../src/components/AlertDialog'
-import { BotAvatar } from '../../src/components/BotAvatar'
 
 /** §2.7 starter templates: tappable job seeds — zero typing path. */
-const STARTERS: { label: string; job: string }[] = [
-  { label: 'Research', job: 'Research assistant: read my saved sources daily and brief me on what changed.' },
-  { label: 'Deals', job: 'Deal watcher: track product pages I name and notify me on price drops.' },
-  { label: 'Code (PC)', job: 'Code helper bound to my linked PC: work in my repos on request.' },
-  { label: 'Private journal', job: 'Private journal/finance watcher over my own local files only — never sends anything anywhere.' },
+const STARTERS: { labelKey: string; jobKey: string }[] = [
+  { labelKey: 'fleet.starter.research', jobKey: 'fleet.starter.research.job' },
+  { labelKey: 'fleet.starter.deals', jobKey: 'fleet.starter.deals.job' },
+  { labelKey: 'fleet.starter.code', jobKey: 'fleet.starter.code.job' },
+  { labelKey: 'fleet.starter.journal', jobKey: 'fleet.starter.journal.job' },
 ]
 
 /**
  * Fleet (M9.2): the bots surface. Feature-detected (B12): with no profiles the
  * screen is a friendly entry point; the chat experience never changes. Runtime
  * status (queue/waiting) renders only when the gateway runs the fleet runtime.
+ *
+ * Redesign (mockup screen 7): runtime queue strip → bot cards (status dot +
+ * name + Active/Frozen pill, description, Chat / Freeze-Unfreeze row) →
+ * create-bot card (idea chips, job field, suggested name, BUG-139 checklist,
+ * Cancel/Create) or a full-width "+ New Bot" button.
  */
 export default function Fleet() {
   const s = useStyles(makeS)
+  const t = useT()
+  const dir = useDir()
   const router = useRouter()
   const online = useStore(isConnected)
   const profiles = useStore(fleetProfiles)
@@ -100,12 +120,12 @@ export default function Fleet() {
         checklist,
       })
       if (!r.ok) {
-        setCreateErr(tr('fleet.create.err', { why: r.error ?? 'profiles.create refused' }))
+        setCreateErr(t('fleet.create.err', { why: r.error ?? 'profiles.create refused' }))
         return
       }
       // Bot exists — seeding outcome is best-effort and reported, never fatal.
       if (r.seedError) {
-        setCreateErr(tr('fleet.create.err', { why: r.seedError }))
+        setCreateErr(t('fleet.create.err', { why: r.seedError }))
       } else if (r.seed && seedHasSkips(r.seed)) {
         setPartial(true)
       }
@@ -113,7 +133,7 @@ export default function Fleet() {
       setJob('')
       setCreating(false)
     } catch (e) {
-      setCreateErr(tr('fleet.create.err', { why: e instanceof Error ? e.message : String(e) }))
+      setCreateErr(t('fleet.create.err', { why: e instanceof Error ? e.message : String(e) }))
     } finally {
       setBusy(null)
     }
@@ -127,7 +147,7 @@ export default function Fleet() {
     } catch (e) {
       // #106: freeze/unfreeze failure used to vanish (no catch) — the row
       // just went back to normal with no hint the state never changed.
-      showAlert(tr('fleet.freeze.failed', { name: pf.name, why: e instanceof Error ? e.message : String(e) }))
+      showAlert(t('fleet.freeze.failed', { name: pf.name, why: e instanceof Error ? e.message : String(e) }))
     } finally {
       setBusy(null)
     }
@@ -149,237 +169,302 @@ export default function Fleet() {
     paddingBottom: Math.max(Math.max(insets.bottom, 10) + kb.height.value, 0),
   }))
 
+  const toggleCheck = (key: 'copyUserMemory' | 'copyMemory') =>
+    setChecklist((c) => ({ ...c, [key]: !c[key] }))
+
+  const checkRow = (
+    checked: boolean,
+    label: string,
+    hint: string,
+    onToggle: () => void,
+  ) => (
+    <Pressable
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked }}
+      accessibilityHint={hint}
+      style={[s.checkRow, { flexDirection: dir.row }]}
+      onPress={onToggle}
+    >
+      <Ionicons
+        name={checked ? 'checkbox-outline' : 'square-outline'}
+        size={16}
+        color={checked ? C.accent : C.textFaint}
+      />
+      <Txt size={11.5} color={C.textDim} style={s.checkLabel}>{label}</Txt>
+    </Pressable>
+  )
+
   return (
     <SafeAreaView style={s.safe} edges={[]}>
       <ScreenShell
-        title={tr("fleet.title")}
+        title={t('fleet.title')}
         showBrand
         right={
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={tr('fleet.refresh')}
-            onPress={refresh}
-            hitSlop={8}
-          >
-            <Ionicons name="refresh" size={22} color={C.textDim} />
-          </Pressable>
+          <HeaderButton onPress={refresh} accessibilityLabel={t('fleet.refresh')} style={s.refreshBtn}>
+            <Icon name="refresh" size={16} color={C.textDim} />
+          </HeaderButton>
         }
       >
         <Animated.View style={[s.body, kbPad]}>
-        {error ? <Text style={s.banner}>{tr("fleet.offline")}: {error}</Text> : null}
-        {status ? (
-          <View style={s.statusRow}>
-            <Text style={s.statusText}>
-              {status.fleetEnabled
-                ? tr('fleet.runtime.active', { active: status.queue.active, slots: status.queue.slots })
-                : tr('fleet.runtime.idle')}
-            </Text>
-            {waiting.length > 0 ? (
-              <Text style={s.statusText}>
-                {tr('fleet.waiting', { n: waiting.length, prios: waiting.map((w) => w.priority).join(', ') })}
-              </Text>
-            ) : null}
-          </View>
-        ) : null}
-        {partial ? <Text style={s.notice}>{tr('fleet.create.partial')}</Text> : null}
+          {error ? (
+            <View style={[s.banner, { flexDirection: dir.row }]}>
+              <Icon name="alert-circle" size={14} color={C.red} />
+              <Txt size={11.5} color={C.red} numberOfLines={2} style={s.bannerText}>
+                {`${t('fleet.offline')}: ${error}`}
+              </Txt>
+            </View>
+          ) : null}
 
-        {loading && online ? (
-          <ActivityIndicator style={s.spin} />
-        ) : (
-          <FlatList
-            data={profiles}
-            keyExtractor={(item) => item.name}
-            ListEmptyComponent={
-              <View style={s.empty}>
-                <Ionicons name="people-outline" size={40} color={C.textDim} />
-                <Text style={s.emptyTitle}>{tr("fleet.empty.title")}</Text>
-                <Text style={s.emptyBody}>{tr("fleet.empty.body")}</Text>
-              </View>
-            }
-            renderItem={({ item }) => {
-              const frozen = frozenSet.has(item.name)
-              return (
-                <Pressable
-                  style={s.card}
-                  onPress={() => router.push({ pathname: '/bot', params: { name: item.name } } as never)}
-                >
-                  <View style={s.cardHead}>
-                    <BotAvatar profile={item.name} size={32} frozen={frozen} />
-                    <View style={s.cardTitles}>
-                      <Text style={s.cardName}>{item.name}</Text>
-                      {!!item.description && (
-                        <Text style={s.cardDesc} numberOfLines={2}>
-                          {item.description}
-                        </Text>
-                      )}
-                    </View>
-                    <Pressable
-                      accessibilityLabel={tr("fleet.chat", { name: item.name })}
-                      onPress={() => router.navigate({
-                        pathname: '/(tabs)/chat',
-                        params: { botProfile: item.name },
-                      } as never)}
-                      style={s.freezeBtn}
-                      hitSlop={6}
-                    >
-                      <Ionicons name="chatbubble-outline" size={18} color={C.textDim} />
-                    </Pressable>
-                    <Pressable
-                      accessibilityLabel={frozen ? tr("fleet.unfreeze", { name: item.name }) : tr("fleet.freeze", { name: item.name })}
-                      onPress={() => toggleFreeze(item)}
-                      disabled={busy === item.name}
-                      style={s.freezeBtn}
-                      hitSlop={6}
-                    >
-                      {busy === item.name ? (
-                        <ActivityIndicator size="small" />
-                      ) : (
-                        <Ionicons
-                          name={frozen ? 'play-outline' : 'pause-outline'}
-                          size={20}
-                          color={C.textDim}
-                        />
-                      )}
-                    </Pressable>
-                  </View>
-                </Pressable>
-              )
-            }}
-          />
-        )}
-
-        <Animated.View style={[s.createWrap, createPad]}>
-          {creating ? (
-            <View style={s.createBox}>
-              <View style={[s.chips, isRTL() && { flexDirection: 'row-reverse' }]}>
-                {STARTERS.map((st) => (
-                  <Pressable
-                    key={st.label}
-                    style={[s.chip, job === st.job && s.chipActive]}
-                    onPress={() => setJob(st.job)}
-                  >
-                    <Text style={s.chipText}>{st.label}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <TextInput
-                style={s.input}
-                placeholder={tr("fleet.create.job")}
-                placeholderTextColor={C.textDim}
-                value={job}
-                onChangeText={setJob}
-                multiline
-                autoFocus
-              />
-              <Text style={s.hint}>{tr("fleet.create.suggested")}: {slugifyName(job) || "…"}</Text>
-
-              {/* BUG-139 checklist: context/skills enter as FILES (USER.md,
-                  skills/), never prompt-stuffing — files persist, are
-                  visible/editable in bot detail, and ride hermes' memory
-                  machinery. Existing files are never overwritten. */}
-              <Pressable
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: checklist.copyUserMemory }}
-                style={[s.checkRow, isRTL() && { flexDirection: 'row-reverse' }]}
-                onPress={() =>
-                  setChecklist((c) => ({ ...c, copyUserMemory: !c.copyUserMemory }))}
-              >
-                <Ionicons
-                  name={checklist.copyUserMemory ? 'checkbox-outline' : 'square-outline'}
-                  size={18}
-                  color={checklist.copyUserMemory ? C.accent : C.textDim}
-                />
-                <View style={s.checkText}>
-                  <Text style={s.checkLabel}>{tr('fleet.create.ideas')}</Text>
-                  <Text style={s.checkHint}>{tr('fleet.create.ideas.hint')}</Text>
-                </View>
-              </Pressable>
-              <Pressable
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: checklist.copyMemory }}
-                style={[s.checkRow, isRTL() && { flexDirection: 'row-reverse' }]}
-                onPress={() =>
-                  setChecklist((c) => ({ ...c, copyMemory: !c.copyMemory }))}
-              >
-                <Ionicons
-                  name={checklist.copyMemory ? 'checkbox-outline' : 'square-outline'}
-                  size={18}
-                  color={checklist.copyMemory ? C.accent : C.textDim}
-                />
-                <View style={s.checkText}>
-                  <Text style={s.checkLabel}>{tr('fleet.create.memory')}</Text>
-                  <Text style={s.checkHint}>{tr('fleet.create.memory.hint')}</Text>
-                </View>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ expanded: skillsOpen }}
-                style={[s.checkRow, isRTL() && { flexDirection: 'row-reverse' }]}
-                onPress={() => setSkillsOpen((v) => !v)}
-              >
-                <Ionicons
-                  name={skillsOpen ? 'chevron-down-outline' : 'chevron-forward-outline'}
-                  size={16}
-                  color={C.textDim}
-                />
-                <Text style={s.checkLabel}>{tr('fleet.create.skills')}</Text>
-                {checklist.skills.length > 0 ? (
-                  <Text style={s.checkCount}>{checklist.skills.length}</Text>
-                ) : null}
-              </Pressable>
-              {skillsOpen ? (
-                skillsLoaded && skillsList.length === 0 ? (
-                  <Text style={s.checkHint}>{tr('fleet.create.skills.empty')}</Text>
-                ) : (
-                  <View style={[s.chips, isRTL() && { flexDirection: 'row-reverse' }]}>
-                    {skillsList.map((sk) => {
-                      const on = checklist.skills.includes(sk.name)
-                      return (
-                        <Pressable
-                          key={sk.path}
-                          accessibilityRole="checkbox"
-                          accessibilityState={{ checked: on }}
-                          style={[s.chip, on && s.chipActive]}
-                          onPress={() =>
-                            setChecklist((c) => ({
-                              ...c,
-                              skills: on
-                                ? c.skills.filter((n) => n !== sk.name)
-                                : [...c.skills, sk.name],
-                            }))}
-                        >
-                          <Text style={s.chipText} numberOfLines={1}>{sk.name}</Text>
-                        </Pressable>
-                      )
-                    })}
-                  </View>
-                )
-              ) : null}
-              {createErr ? <Text style={s.createErr}>{createErr}</Text> : null}
-              <View style={s.rowBtns}>
-                <Pressable style={s.btnGhost} onPress={() => setCreating(false)}>
-                  <Text style={s.btnGhostText}>{tr("fleet.cancel")}</Text>
-                </Pressable>
-                <Pressable
-                  style={[s.btn, !job.trim() && s.btnDisabled]}
-                  onPress={create}
-                  disabled={!job.trim() || busy === 'create'}
-                >
-                  {busy === 'create' ? (
-                    <ActivityIndicator size="small" />
-                  ) : (
-                    <Text style={s.btnText}>{tr("fleet.create.cta")}</Text>
-                  )}
-                </Pressable>
-              </View>
+          {loading && online ? (
+            <View style={s.spinWrap}>
+              <Spinner />
             </View>
           ) : (
-            <Pressable accessibilityRole="button" style={s.fab} onPress={() => { setCreateErr(''); setPartial(false); setCreating(true) }} disabled={!online}>
-              <Ionicons name="add" size={20} color={C.bg} />
-              <Text style={s.fabText}>{tr("fleet.create")}</Text>
-            </Pressable>
+            <FlatList
+              data={profiles}
+              keyExtractor={(item) => item.name}
+              contentContainerStyle={s.listContent}
+              ListHeaderComponent={
+                <>
+                  {status ? (
+                    <Elev style={[s.strip, { flexDirection: dir.row }]}>
+                      <View style={[s.stripLeft, { flexDirection: dir.row }]}>
+                        <Dot kind={status.fleetEnabled ? 'green' : 'idle'} />
+                        <Txt
+                          size={11.5}
+                          weight="700"
+                          color={status.fleetEnabled ? C.greenSoft : C.textDim}
+                          numberOfLines={1}
+                          style={s.stripText}
+                        >
+                          {status.fleetEnabled
+                            ? t('fleet.runtime.slots', {
+                              active: status.queue.active,
+                              slots: status.queue.slots,
+                            })
+                            : t('fleet.runtime.idle')}
+                        </Txt>
+                      </View>
+                      {waiting.length > 0 ? (
+                        <Txt
+                          size={11.5}
+                          color={C.textFaint}
+                          accessibilityLabel={t('fleet.waiting', {
+                            n: waiting.length,
+                            prios: waiting.map((w) => w.priority).join(', '),
+                          })}
+                        >
+                          {t('fleet.runtime.waiting', { n: waiting.length })}
+                        </Txt>
+                      ) : null}
+                    </Elev>
+                  ) : null}
+                  {partial ? (
+                    <Txt size={11.5} color={C.accent} style={s.partial}>
+                      {t('fleet.create.partial')}
+                    </Txt>
+                  ) : null}
+                </>
+              }
+              ListEmptyComponent={
+                <View style={s.empty}>
+                  <MochiMark size={56} />
+                  <Txt size={15} weight="700" center style={s.emptyTitle}>
+                    {t('fleet.empty.title')}
+                  </Txt>
+                  <Txt size={11.5} color={C.textDim} center style={s.emptyBody}>
+                    {t('fleet.empty.body')}
+                  </Txt>
+                </View>
+              }
+              renderItem={({ item }) => {
+                const frozen = frozenSet.has(item.name)
+                return (
+                  <Card style={frozen ? s.cardFrozen : null}>
+                    <View style={[s.cardHead, { flexDirection: dir.row }]}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={item.name}
+                        hitSlop={4}
+                        onPress={() => router.push({ pathname: '/bot', params: { name: item.name } } as never)}
+                        style={[s.nameHit, { flexDirection: dir.row }]}
+                      >
+                        <Dot kind={frozen ? 'idle' : 'green'} />
+                        <Txt size={13.5} weight="800" numberOfLines={1} style={s.cardName}>
+                          {item.name}
+                        </Txt>
+                      </Pressable>
+                      <Pill kind={frozen ? 'amber' : 'green'}>
+                        {frozen ? t('fleet.frozen') : t('common.active')}
+                      </Pill>
+                    </View>
+                    {item.description ? (
+                      <Txt size={12} color={C.textDim} numberOfLines={2} style={s.cardDesc}>
+                        {item.description}
+                      </Txt>
+                    ) : null}
+                    <View style={[s.cardBtns, { flexDirection: dir.row }]}>
+                      <PrimaryBtn
+                        small
+                        label={t('fleet.chat.cta')}
+                        accessibilityLabel={t('fleet.chat', { name: item.name })}
+                        onPress={() => router.navigate({
+                          pathname: '/(tabs)/chat',
+                          params: { botProfile: item.name },
+                        } as never)}
+                        style={s.chatBtn}
+                      />
+                      <GhostBtn
+                        small
+                        disabled={busy === item.name}
+                        accessibilityLabel={frozen
+                          ? t('fleet.unfreeze', { name: item.name })
+                          : t('fleet.freeze', { name: item.name })}
+                        onPress={() => toggleFreeze(item)}
+                        style={s.freezeBtn}
+                      >
+                        {busy === item.name ? (
+                          <Spinner size="small" />
+                        ) : (
+                          <Txt size={11.5} weight="600" color={C.text}>
+                            {frozen ? t('fleet.unfreeze.cta') : t('fleet.freeze.cta')}
+                          </Txt>
+                        )}
+                      </GhostBtn>
+                    </View>
+                  </Card>
+                )
+              }}
+            />
           )}
-        </Animated.View>
+
+          <Animated.View style={[s.createWrap, createPad]}>
+            {creating ? (
+              <Card style={s.createBox}>
+                <Txt size={13} weight="800" style={s.createTitle}>{t('fleet.create.title')}</Txt>
+                <View style={[s.chips, { flexDirection: dir.row }]}>
+                  {STARTERS.map((st) => {
+                    const active = job === t(st.jobKey)
+                    return (
+                      <Pill
+                        key={st.labelKey}
+                        kind={active ? 'accent' : 'neutral'}
+                        onPress={() => setJob(t(st.jobKey))}
+                      >
+                        {t(st.labelKey)}
+                      </Pill>
+                    )
+                  })}
+                </View>
+                <Field
+                  value={job}
+                  onChangeText={setJob}
+                  placeholder={t('fleet.create.job')}
+                  multiline
+                  autoFocus
+                  style={s.jobInput}
+                  wrapStyle={s.jobInputWrap}
+                />
+                <Txt size={10.5} color={C.textFaint} style={s.suggested}>
+                  {t('fleet.create.suggested')}:{' '}
+                  <Txt size={10.5} weight="700" color={C.text}>
+                    {`@${slugifyName(job) || '…'}`}
+                  </Txt>
+                </Txt>
+
+                {/* BUG-139 checklist: context/skills enter as FILES (USER.md,
+                    skills/), never prompt-stuffing — files persist, are
+                    visible/editable in bot detail, and ride hermes' memory
+                    machinery. Existing files are never overwritten. */}
+                {checkRow(
+                  checklist.copyUserMemory,
+                  t('fleet.create.copyUser'),
+                  t('fleet.create.ideas.hint'),
+                  () => toggleCheck('copyUserMemory'),
+                )}
+                {checkRow(
+                  checklist.copyMemory,
+                  t('fleet.create.copyMemory'),
+                  t('fleet.create.memory.hint'),
+                  () => toggleCheck('copyMemory'),
+                )}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: skillsOpen }}
+                  style={[s.checkRow, { flexDirection: dir.row }]}
+                  onPress={() => setSkillsOpen((v) => !v)}
+                >
+                  <Ionicons
+                    name={skillsOpen ? 'chevron-down-outline' : 'chevron-forward-outline'}
+                    size={14}
+                    color={C.textFaint}
+                  />
+                  <Txt size={11.5} color={C.textDim} style={s.checkLabel}>
+                    {t('fleet.create.skill')}
+                  </Txt>
+                  {checklist.skills.length > 0 ? (
+                    <Pill kind="accent">{String(checklist.skills.length)}</Pill>
+                  ) : null}
+                </Pressable>
+                {skillsOpen ? (
+                  skillsLoaded && skillsList.length === 0 ? (
+                    <Txt size={10.5} color={C.textFaint} style={s.skillsHint}>
+                      {t('fleet.create.skills.empty')}
+                    </Txt>
+                  ) : (
+                    <View style={[s.chips, { flexDirection: dir.row }]}>
+                      {skillsList.map((sk) => {
+                        const on = checklist.skills.includes(sk.name)
+                        return (
+                          <Pill
+                            key={sk.path}
+                            kind={on ? 'accent' : 'neutral'}
+                            onPress={() =>
+                              setChecklist((c) => ({
+                                ...c,
+                                skills: on
+                                  ? c.skills.filter((n) => n !== sk.name)
+                                  : [...c.skills, sk.name],
+                              }))}
+                          >
+                            {sk.name}
+                          </Pill>
+                        )
+                      })}
+                    </View>
+                  )
+                ) : null}
+                {createErr ? (
+                  <Txt size={11} color={C.red} style={s.createErr}>{createErr}</Txt>
+                ) : null}
+                <View style={[s.rowBtns, { flexDirection: dir.row }]}>
+                  <GhostBtn
+                    label={t('fleet.cancel')}
+                    onPress={() => setCreating(false)}
+                    style={s.rowBtn}
+                  />
+                  <PrimaryBtn
+                    label={t('fleet.create.submit')}
+                    onPress={create}
+                    disabled={!job.trim() || busy === 'create'}
+                    style={s.rowBtn}
+                    children={busy === 'create' ? <Spinner size="small" color={C.onAccent} /> : undefined}
+                  />
+                </View>
+              </Card>
+            ) : (
+              <PrimaryBtn
+                label={t('fleet.create.new')}
+                onPress={() => {
+                  setCreateErr('')
+                  setPartial(false)
+                  setCreating(true)
+                }}
+                disabled={!online}
+                style={s.newBtn}
+              />
+            )}
+          </Animated.View>
         </Animated.View>
       </ScreenShell>
     </SafeAreaView>
@@ -390,74 +475,55 @@ const makeS = () =>
   StyleSheet.create({
     safe: { flex: 1, backgroundColor: C.bg },
     body: { flex: 1 },
-    banner: { color: C.red, fontSize: 12, paddingHorizontal: 16, paddingVertical: 6 },
-    statusRow: { paddingHorizontal: 16, paddingBottom: 6 },
-    statusText: { color: C.textDim, fontSize: 12 },
-    spin: { marginTop: 24 },
-    empty: { alignItems: 'center', paddingHorizontal: 32, paddingTop: 48 },
-    emptyTitle: { color: C.text, fontSize: 18, fontWeight: '600', marginTop: 12 },
-    emptyBody: { color: C.textDim, fontSize: 13, textAlign: 'center', marginTop: 8, lineHeight: 19 },
-    card: {
-      backgroundColor: C.bgCard,
-      borderRadius: 14,
-      marginHorizontal: 16,
-      marginTop: 10,
-      padding: 14,
-    },
-    cardHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-    cardTitles: { flex: 1 },
-    cardName: { color: C.text, fontSize: 15, fontWeight: '600' },
-    cardDesc: { color: C.textDim, fontSize: 12, marginTop: 2 },
-    freezeBtn: { padding: 6 },
-    createWrap: { padding: 16 },
-    chips: { flexDirection: isRTL() ? 'row-reverse' : 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 },
-    chip: { borderRadius: 999, borderWidth: 1, borderColor: C.border, paddingHorizontal: 10, paddingVertical: 5 },
-    chipActive: { backgroundColor: C.accentSoft, borderColor: C.accent },
-    chipText: { color: C.textDim, fontSize: 11 },
-    createBox: {
-      backgroundColor: C.bgCard,
-      borderRadius: 14,
-      padding: 12,
-    },
-    input: {
-      color: C.text,
-      minHeight: 60,
-      fontSize: 14,
-      textAlignVertical: 'top',
-      padding: 8,
-      borderRadius: 8,
-      backgroundColor: C.bg,
-    },
-    hint: { color: C.textDim, fontSize: 11, marginTop: 6 },
-    checkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginTop: 10 },
-    checkText: { flex: 1 },
-    checkLabel: { color: C.text, fontSize: 13, fontWeight: '500' },
-    checkHint: { color: C.textFaint, fontSize: 11, marginTop: 2, lineHeight: 15 },
-    checkCount: {
-      color: C.bg, backgroundColor: C.accent, borderRadius: 8,
-      paddingHorizontal: 7, paddingVertical: 1, fontSize: 11, overflow: 'hidden',
-    },
-    createErr: { color: C.red, fontSize: 11, marginTop: 8 },
-    notice: { color: C.accent, fontSize: 12, paddingHorizontal: 16, paddingBottom: 6 },
-    rowBtns: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 10 },
-    btn: {
-      backgroundColor: C.accent,
-      borderRadius: 10,
-      paddingHorizontal: 16,
-      paddingVertical: 9,
-    },
-    btnDisabled: { opacity: 0.5 },
-    btnText: { color: C.bg, fontWeight: '600', fontSize: 13 },
-    btnGhost: { paddingHorizontal: 12, paddingVertical: 9 },
-    btnGhostText: { color: C.textDim, fontSize: 13 },
-    fab: {
-      flexDirection: 'row',
+    banner: {
       alignItems: 'center',
-      justifyContent: 'center',
       gap: 6,
-      backgroundColor: C.accent,
-      borderRadius: 12,
-      paddingVertical: 12,
+      paddingHorizontal: 14,
+      paddingTop: 8,
     },
-    fabText: { color: C.bg, fontWeight: '700' },
+    bannerText: { flex: 1 },
+    spinWrap: { marginTop: 24, alignItems: 'center' },
+    refreshBtn: { width: 28, height: 28 },
+    listContent: { paddingTop: 10, paddingHorizontal: 14, paddingBottom: 4 },
+    strip: {
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+      marginBottom: 10,
+    },
+    stripLeft: { alignItems: 'center', gap: 6, flexShrink: 1 },
+    stripText: { flexShrink: 1 },
+    partial: { marginBottom: 8 },
+    empty: { alignItems: 'center', paddingHorizontal: 12, paddingTop: 32, paddingBottom: 20 },
+    emptyTitle: { marginTop: 12 },
+    emptyBody: { marginTop: 6, lineHeight: 17 },
+    cardFrozen: { opacity: 0.68 },
+    cardHead: {
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+      marginBottom: 4,
+    },
+    nameHit: { alignItems: 'center', gap: 7, flexShrink: 1, flexGrow: 1 },
+    cardName: { flexShrink: 1 },
+    cardDesc: { marginTop: 4, marginBottom: 10, lineHeight: 17 },
+    cardBtns: { gap: 6 },
+    // Mockup card buttons are compact (padding 6×10) — the kit's 36dp minimum
+    // would make the footer taller than the reference.
+    chatBtn: { flex: 1, minHeight: 28 },
+    freezeBtn: { minHeight: 28 },
+    createWrap: { paddingTop: 8, paddingHorizontal: 14 },
+    createBox: { borderColor: C.accent, marginBottom: 0 },
+    createTitle: { marginBottom: 6 },
+    chips: { flexWrap: 'wrap', gap: 4, marginBottom: 7 },
+    jobInput: { fontSize: 12, minHeight: 60 },
+    jobInputWrap: { marginBottom: 5 },
+    suggested: { marginBottom: 8 },
+    checkRow: { alignItems: 'center', gap: 4, paddingVertical: 3 },
+    checkLabel: { flexShrink: 1 },
+    skillsHint: { marginTop: 2, marginBottom: 6 },
+    createErr: { marginTop: 6 },
+    rowBtns: { gap: 6, marginTop: 10 },
+    rowBtn: { flex: 1 },
+    newBtn: { width: '100%' },
   })

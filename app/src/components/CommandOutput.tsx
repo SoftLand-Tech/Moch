@@ -2,7 +2,7 @@
  * CommandOutput — the one card family every slash-command output renders as.
  *
  * Card variants (result/error/usage/status/list/catalog) share one shell
- * (inset bgCard card, hairline border, header = status icon + `/command` chip
+ * (inset bgCard card, hairline border, header = status icon + `/command` pill
  * + time) with a body renderer keyed by the CommandVariant slash.ts already
  * classified — this component never looks at the raw text to decide what it
  * is. notice and success are local-notice surfaces: bare, headerless rows
@@ -15,17 +15,19 @@
  * omitted — machine output, not prose.
  */
 import React, { useState } from 'react'
-import { View, Text, StyleSheet, Pressable } from 'react-native'
+import { View, Text, StyleSheet, Pressable, Platform } from 'react-native'
 import { useStore } from '@nanostores/react'
 import { Ionicons } from '@expo/vector-icons'
 import { Icon } from './Icon'
+import { Pill, Txt } from './ui'
 import * as Clipboard from 'expo-clipboard'
 import * as Haptics from 'expo-haptics'
 import Markdown from '@ronradtke/react-native-markdown-display'
 import type { ChatMessage } from '../lib/chat'
 import { commandCatalog, skillCommands, slashLabel, parseStatusPairs, type CommandMeta, type CommandVariant } from '../lib/slash'
-import { C, pill, useStyles } from '../lib/theme'
-import { makeCardMdStyles, mdLinkified, onMdLinkPress } from './Chat'
+import { C, useStyles } from '../lib/theme'
+import { makeCardMdStyles, mdLinkified, onMdLinkPress, withDir } from './Chat'
+import { useDir, useT } from '../lib/strings'
 
 function fmtTime(ts: number): string {
   try {
@@ -44,15 +46,25 @@ const COLLAPSIBLE_VARIANTS: ReadonlySet<CommandVariant> = new Set(['result', 'er
 /** Collapse kicks in past this many lines (or 1600 chars), showing the first 24. */
 const COLLAPSE_LINES = 24
 
-const THEME_BY_VARIANT: Record<CommandVariant, { icon: keyof typeof Ionicons.glyphMap; color: string }> = {
-  result: { icon: 'terminal-outline', color: C.accent },
-  error: { icon: 'alert-circle', color: C.red },
-  usage: { icon: 'warning-outline', color: C.amber },
-  status: { icon: 'list-outline', color: C.accent },
-  list: { icon: 'list-outline', color: C.accent },
-  notice: { icon: 'information-circle-outline', color: C.textFaint },
-  success: { icon: 'checkmark-circle', color: C.greenSoft },
-  catalog: { icon: 'grid-outline', color: C.accent },
+/** Theme-reactive icon/tone per variant (tokens must never be snapshotted). */
+const toneFor = (variant: CommandVariant): { icon: keyof typeof Ionicons.glyphMap; color: string } => {
+  switch (variant) {
+    case 'result':
+      return { icon: 'terminal-outline', color: C.accent }
+    case 'error':
+      return { icon: 'alert-circle', color: C.red }
+    case 'usage':
+      return { icon: 'warning-outline', color: C.amber }
+    case 'status':
+    case 'list':
+      return { icon: 'list-outline', color: C.accent }
+    case 'notice':
+      return { icon: 'information-circle-outline', color: C.textFaint }
+    case 'success':
+      return { icon: 'checkmark-circle', color: C.greenSoft }
+    default:
+      return { icon: 'grid-outline', color: C.accent }
+  }
 }
 
 /** Split a description at the first ' — ' or ': ' into title + sub. */
@@ -88,6 +100,12 @@ function resolvesInRegistry(token: string, cmds: Record<string, unknown>, skills
   return !!(cmds[bare] || cmds[`/${bare}`] || skills[bare] || skills[`/${bare}`])
 }
 
+/** Command/skill count label — singular/plural handled by the catalog. */
+function countLabel(t: (key: string, vars?: Record<string, string | number>) => string, n: number, kind: 'command' | 'skill'): string {
+  if (kind === 'command') return n === 1 ? t('chat.cmd.commandOne') : t('chat.cmd.commandMany', { n })
+  return n === 1 ? t('chat.cmd.skillOne') : t('chat.cmd.skillMany', { n })
+}
+
 /**
  * Memoized like MessageBubble (it renders inside one): classification and the
  * message object are write-once, so a card only re-renders on row recycle.
@@ -104,6 +122,8 @@ export const CommandCard = React.memo(function CommandCard({
 }) {
   const s = useStyles(makeS)
   const md = useStyles(makeCardMdStyles)
+  const dir = useDir()
+  const t = useT()
   const [copied, setCopied] = useState(false)
   const [expanded, setExpanded] = useState(false)
   // Subscribed, not .get(): the memoized row never re-reads, so a card restored
@@ -117,17 +137,18 @@ export const CommandCard = React.memo(function CommandCard({
   if (!cmd || !m.text.trim()) return null
 
   const variant = cmd.variant
-  const tone = THEME_BY_VARIANT[variant]
+  const tone = toneFor(variant)
   // Defensive slashLabel — cmd.name is normalized at the push site, but the
   // card never trusts its inputs (ModelPickerSheet pushes a bare 'model').
   const chipLabel = slashLabel(cmd.name)
-  const state = variant === 'error' ? 'failed' : 'completed'
+  const stateLabel = t(variant === 'error' ? 'chat.cmd.state.failed' : 'chat.cmd.state.completed')
+  const a11y = t('chat.cmd.outputA11y', { command: chipLabel, state: stateLabel })
   const allLines = m.text.split(/\r?\n/)
 
   // ── Local-notice surfaces: bare rows, deliberately outside the card shell ──
   if (variant === 'notice') {
     return (
-      <View style={s.bareRow} accessibilityLabel={`${chipLabel} output, ${state}`}>
+      <View style={[s.bareRow, { flexDirection: dir.row }]} accessibilityLabel={a11y}>
         <Icon name="information-circle-outline" size={13} color={C.textFaint} />
         <Text style={s.noticeText} selectable>{m.text}</Text>
       </View>
@@ -135,7 +156,7 @@ export const CommandCard = React.memo(function CommandCard({
   }
   if (variant === 'success') {
     return (
-      <View style={s.successRow} accessibilityLabel={`${chipLabel} output, ${state}`}>
+      <View style={[s.successRow, { flexDirection: dir.row }]} accessibilityLabel={a11y}>
         <Icon name="checkmark-circle" size={14} color={C.greenSoft} />
         <Text style={s.successText} selectable>{m.text}</Text>
         <Text style={s.successTime}>{fmtTime(m.ts)}</Text>
@@ -150,13 +171,10 @@ export const CommandCard = React.memo(function CommandCard({
   const showToggle = COLLAPSIBLE_VARIANTS.has(variant) && overLimit && allLines.length > COLLAPSE_LINES
   const truncated = COLLAPSIBLE_VARIANTS.has(variant) && overLimit && !expanded
   const shown = truncated ? allLines.slice(0, COLLAPSE_LINES) : allLines
-  const headMeta = `${fmtTime(m.ts)}${COLLAPSIBLE_VARIANTS.has(variant) && allLines.length > COLLAPSE_LINES ? ` · ${allLines.length} lines` : ''}`
-  const chipTone =
-    variant === 'error'
-      ? { bg: C.redSoft, fg: C.red }
-      : variant === 'usage'
-        ? { bg: C.amberSoft, fg: C.amber }
-        : { bg: C.accentSoft, fg: C.accent }
+  const headMeta = COLLAPSIBLE_VARIANTS.has(variant) && allLines.length > COLLAPSE_LINES
+    ? `${fmtTime(m.ts)} · ${t('chat.cmd.lines', { n: allLines.length })}`
+    : fmtTime(m.ts)
+  const chipKind = variant === 'error' ? 'red' : variant === 'usage' ? 'amber' : 'accent'
   // Status degrades to the result body when the lines don't actually parse.
   const statusUsable = variant === 'status' && parseStatusPairs(m.text).length >= 2
 
@@ -174,20 +192,18 @@ export const CommandCard = React.memo(function CommandCard({
   return (
     <View
       style={[
-        // marginHorizontal 16 mirrors MessageBubble's botWrap paddingHorizontal
-        // (Chat.tsx) — the card owns its inset because it replaces that wrapper.
         s.card,
         (variant === 'error' || variant === 'usage') && { borderLeftWidth: 3, borderLeftColor: variant === 'error' ? C.red : C.amber },
       ]}
-      accessibilityLabel={`${chipLabel} output, ${state}`}
+      accessibilityLabel={a11y}
     >
-      {/* Header: status icon + /command chip + time */}
-      <View style={s.head}>
-        <Icon name={tone.icon} size={14} color={tone.color} />
-        <View style={[s.chip, { backgroundColor: chipTone.bg }]}>
-          <Text style={[s.chipText, { color: chipTone.fg }]}>{chipLabel}</Text>
-        </View>
-        <Text style={s.headTime}>{headMeta}</Text>
+      {/* Header: status icon + /command pill + time */}
+      <View style={[s.head, { flexDirection: dir.row }]}>
+        <Icon name={tone.icon} size={13} color={tone.color} />
+        <Pill kind={chipKind} style={s.chip} textStyle={s.chipText}>
+          {chipLabel}
+        </Pill>
+        <Txt size={10} mono ltr color={C.textFaint} style={s.headTime}>{headMeta}</Txt>
       </View>
 
       <View style={s.body}>
@@ -195,7 +211,7 @@ export const CommandCard = React.memo(function CommandCard({
           // BUG-135: linkified markdown-it + in-app link handler (shared
           // instance exported from Chat.tsx) — result bodies often carry
           // bare URLs, previously dead text.
-          <Markdown style={md} markdownit={mdLinkified} onLinkPress={onMdLinkPress}>
+          <Markdown style={withDir(md as Record<string, object>, dir)} markdownit={mdLinkified} onLinkPress={onMdLinkPress}>
             {shown.join('\n')}
           </Markdown>
         ) : variant === 'error' || variant === 'usage' ? (
@@ -206,21 +222,23 @@ export const CommandCard = React.memo(function CommandCard({
             {cmd.suggestion && onInsert ? (
               <Pressable
                 onPress={() => insert(slashLabel(cmd.suggestion!))}
-                style={({ pressed }) => [s.suggestRow, pressed && s.pressedSoft]}
+                style={({ pressed }) => [s.suggestRow, { flexDirection: dir.row }, pressed && s.pressedSoft]}
                 hitSlop={6}
-                accessibilityLabel={`Use suggested command ${slashLabel(cmd.suggestion)}`}
+                accessibilityRole="button"
+                accessibilityLabel={t('chat.cmd.useSuggestionA11y', { command: slashLabel(cmd.suggestion) })}
               >
-                <Icon name="return-down-back" size={14} color={C.textFaint} />
+                <Icon name="return-down-back" size={13} color={C.textFaint} />
                 <Text style={s.suggestLead}>
-                  Did you mean <Text style={s.suggestCmd}>{slashLabel(cmd.suggestion)}</Text>
+                  {t('chat.cmd.didYouMeanLead')}{' '}
+                  <Text style={s.suggestCmd}>{slashLabel(cmd.suggestion)}</Text>
                 </Text>
-                <Icon name="chevron-forward" size={13} color={C.textFaint} />
+                <Icon name={dir.icon.forward} size={12} color={C.textFaint} />
               </Pressable>
             ) : cmd.suggestion ? (
-              <Text style={s.leftoverText}>Did you mean {slashLabel(cmd.suggestion)}?</Text>
+              <Text style={s.leftoverText}>{t('chat.cmd.didYouMean', { command: slashLabel(cmd.suggestion) })}</Text>
             ) : null}
             {cmd.hint ? (
-              <View style={s.hintRow}>
+              <View style={[s.hintRow, { flexDirection: dir.row }]}>
                 <Text style={s.hintText}>{cmd.hint}</Text>
                 {onOpenCatalog ? (
                   <Pressable
@@ -230,10 +248,11 @@ export const CommandCard = React.memo(function CommandCard({
                     }}
                     style={({ pressed }) => [s.hintChip, pressed && s.pressedSoft]}
                     hitSlop={6}
-                    accessibilityLabel="Browse all commands"
+                    accessibilityRole="button"
+                    accessibilityLabel={t('chat.cmd.browseAllA11y')}
                   >
                     <Icon name="terminal-outline" size={12} color={C.textDim} />
-                    <Text style={s.hintChipText}>Browse all commands</Text>
+                    <Txt size={11.5} weight="700" color={C.textDim}>{t('chat.cmd.browseAll')}</Txt>
                   </Pressable>
                 ) : null}
               </View>
@@ -247,9 +266,9 @@ export const CommandCard = React.memo(function CommandCard({
             return rows.map((r, i) => {
               const last = i === rows.length - 1
               return r.pair ? (
-                <View key={i} style={[s.statusRow, !last && s.statusRowLine]}>
+                <View key={i} style={[s.statusRow, { flexDirection: dir.row }, !last && s.statusRowLine]}>
                   <Text style={s.statusLabel}>{r.pair[0]}</Text>
-                  <Text style={s.statusValue} selectable numberOfLines={3}>{r.pair[1]}</Text>
+                  <Text style={[s.statusValue, { textAlign: dir.rtl ? 'left' : 'right' }]} selectable numberOfLines={3}>{r.pair[1]}</Text>
                 </View>
               ) : (
                 <View key={i} style={[s.statusLeftover, !last && s.statusRowLine]}>
@@ -268,32 +287,35 @@ export const CommandCard = React.memo(function CommandCard({
               const tappable = !!(row.token && onInsert && resolvesInRegistry(row.token, catalog, skills))
               const body = (
                 <>
-                  {row.marker ? <Text style={s.listIndex}>{row.marker}</Text> : null}
+                  {row.marker ? (
+                    <Text style={[s.listIndex, s.mono, { textAlign: dir.rtl ? 'left' : 'right' }]}>{row.marker}</Text>
+                  ) : null}
                   <View style={{ flex: 1 }}>
                     <Text style={s.listTitle} numberOfLines={1}>{row.title}</Text>
                     {row.sub ? <Text style={s.listSub} numberOfLines={1}>{row.sub}</Text> : null}
                   </View>
-                  {tappable ? <Icon name="chevron-forward" size={13} color={C.textFaint} /> : null}
+                  {tappable ? <Icon name={dir.icon.forward} size={13} color={C.textFaint} /> : null}
                 </>
               )
               return tappable ? (
                 <Pressable
                   key={i}
                   onPress={() => insert(row.token!)}
-                  style={({ pressed }) => [s.listRow, pressed && s.listRowPressed]}
-                  accessibilityLabel={`Insert ${row.title}`}
+                  style={({ pressed }) => [s.listRow, { flexDirection: dir.row }, pressed && s.listRowPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('chat.cmd.useSuggestionA11y', { command: row.title })}
                 >
                   {body}
                 </Pressable>
               ) : (
-                <View key={i} style={s.listRow}>{body}</View>
+                <View key={i} style={[s.listRow, { flexDirection: dir.row }]}>{body}</View>
               )
             })}
           </>
         ) : (
           // catalog — the raw dump is never rendered (it stays in m.text for
           // copy/persistence); the body is a summary plus the browser footer.
-          <Text style={s.catalogSummary} selectable>{catalogSummaryText(catalog, skills)}</Text>
+          <Text style={s.catalogSummary} selectable>{catalogSummaryText(catalog, skills, t)}</Text>
         )}
 
         {showToggle ? (
@@ -301,9 +323,12 @@ export const CommandCard = React.memo(function CommandCard({
             onPress={() => setExpanded(!expanded)}
             style={({ pressed }) => [s.moreBtn, pressed && s.pressedSoft]}
             hitSlop={6}
-            accessibilityLabel={expanded ? 'Collapse output' : `Show all ${allLines.length} lines`}
+            accessibilityRole="button"
+            accessibilityLabel={expanded ? t('chat.cmd.collapse') : t('chat.cmd.showAll', { n: allLines.length })}
           >
-            <Text style={s.moreText}>{expanded ? 'Collapse output' : `Show all ${allLines.length} lines`}</Text>
+            <Txt size={11.5} weight="700" color={C.accent}>
+              {expanded ? t('chat.cmd.collapse') : t('chat.cmd.showAll', { n: allLines.length })}
+            </Txt>
           </Pressable>
         ) : null}
       </View>
@@ -311,26 +336,28 @@ export const CommandCard = React.memo(function CommandCard({
       {variant === 'catalog' && onOpenCatalog ? (
         <Pressable
           onPress={onOpenCatalog}
-          style={({ pressed }) => [s.footer, pressed && s.footerPressed]}
-          accessibilityLabel="Open command browser"
+          style={({ pressed }) => [s.footer, { flexDirection: dir.row }, pressed && s.footerPressed]}
+          accessibilityRole="button"
+          accessibilityLabel={t('chat.cmd.openBrowserA11y')}
         >
           <Icon name="grid-outline" size={14} color={C.accent} />
-          <Text style={s.footerText}>Open command browser</Text>
-          <Icon name="chevron-forward" size={14} color={C.textFaint} style={s.footerChevron} />
+          <Txt size={12.5} weight="700" color={C.accent}>{t('chat.cmd.openBrowser')}</Txt>
+          <Icon name={dir.icon.forward} size={13} color={C.textFaint} style={s.footerChevron} />
         </Pressable>
       ) : null}
 
       {COPY_VARIANTS.has(variant) ? (
-        <View style={s.actions}>
+        <View style={[s.actions, { flexDirection: dir.row }]}>
           <Pressable
             onPress={copy}
             hitSlop={8}
             style={({ pressed }) => [s.iconBtn, pressed && s.iconPressed]}
-            accessibilityLabel={`Copy ${chipLabel} output`}
+            accessibilityRole="button"
+            accessibilityLabel={t('chat.cmd.copyA11y', { command: chipLabel })}
           >
             <Icon name={copied ? 'checkmark' : 'copy-outline'} size={14} color={copied ? C.greenSoft : C.textFaint} />
           </Pressable>
-          {copied ? <Text style={s.copiedText}>Copied</Text> : null}
+          {copied ? <Text style={s.copiedText}>{t('common.copied')}</Text> : null}
         </View>
       ) : null}
     </View>
@@ -338,83 +365,84 @@ export const CommandCard = React.memo(function CommandCard({
 })
 
 /** Live registry counts for the catalog summary. */
-function catalogSummaryText(cmds: Record<string, unknown>, skills: Record<string, unknown>): string {
+function catalogSummaryText(
+  cmds: Record<string, unknown>,
+  skills: Record<string, unknown>,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+): string {
   const cmdCount = Object.keys(cmds).length
   const skillCount = Object.keys(skills).length
   const counts = [
-    cmdCount ? `${cmdCount} command${cmdCount === 1 ? '' : 's'}` : '',
-    skillCount ? `${skillCount} skill${skillCount === 1 ? '' : 's'}` : '',
+    cmdCount ? countLabel(t, cmdCount, 'command') : '',
+    skillCount ? countLabel(t, skillCount, 'skill') : '',
   ].filter(Boolean).join(' · ')
-  return `${counts ? `${counts} in the gateway catalog` : 'The gateway catalog is not loaded'}. Open the browser to browse or insert.`
+  const status = counts ? t('chat.cmd.catalogCounted', { counts }) : t('chat.cmd.catalogNotLoaded')
+  return t('chat.cmd.catalogSummary', { status, hint: t('chat.cmd.catalogHint') })
 }
 
 const makeS = () => StyleSheet.create({
+  mono: { fontFamily: Platform.select({ android: 'monospace', ios: 'Menlo', default: 'monospace' }) },
   card: {
     backgroundColor: C.bgCard,
-    borderRadius: 14,
+    borderRadius: 13,
     borderWidth: 1,
     borderColor: C.borderSoft,
-    marginHorizontal: 16,
-    marginVertical: 6,
+    marginVertical: 5,
     overflow: 'hidden',
   },
-  head: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 4 },
-  chip: { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  chipText: { fontSize: 12.5, fontWeight: '800' },
-  headTime: { marginLeft: 'auto', color: C.textFaint, fontSize: 11 },
-  body: { paddingHorizontal: 12, paddingTop: 2, paddingBottom: 8, gap: 6 },
-  alertBox: { borderRadius: 12, padding: 10 },
-  alertText: { color: C.textDim, fontSize: 13.5, lineHeight: 19 },
+  head: { alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 2 },
+  chip: { paddingVertical: 1, paddingHorizontal: 6 },
+  chipText: { fontSize: 10.5, fontWeight: '800' },
+  headTime: { marginLeft: 'auto' },
+  body: { paddingHorizontal: 10, paddingTop: 2, paddingBottom: 8, gap: 6 },
+  alertBox: { borderRadius: 10, padding: 9 },
+  alertText: { color: C.textDim, fontSize: 12, lineHeight: 17 },
   suggestRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
-    backgroundColor: C.bgElev, borderRadius: 10, minHeight: 44, paddingHorizontal: 10, marginTop: 8,
+    alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+    backgroundColor: C.bgElev, borderRadius: 999, minHeight: 30, paddingHorizontal: 10, marginTop: 4,
   },
-  suggestLead: { color: C.textDim, fontSize: 12.5 },
-  suggestCmd: { color: C.accent, fontSize: 13, fontWeight: '700' },
-  hintRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-  hintText: { color: C.textFaint, fontSize: 12, flexShrink: 1 },
+  suggestLead: { color: C.textDim, fontSize: 11.5 },
+  suggestCmd: { color: C.accent, fontSize: 11.5, fontWeight: '700' },
+  hintRow: { alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  hintText: { color: C.textFaint, fontSize: 11, flexShrink: 1 },
   hintChip: {
-    ...pill(28),
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: C.bgElev, borderWidth: 1, borderColor: C.border, paddingHorizontal: 10,
+    backgroundColor: C.bgElev, borderWidth: 1, borderColor: C.border,
+    borderRadius: 999, paddingHorizontal: 10, height: 28,
   },
-  hintChipText: { color: C.textDim, fontSize: 12.5, fontWeight: '700' },
-  statusRow: { flexDirection: 'row', gap: 10, paddingVertical: 7, alignItems: 'flex-start' },
+  statusRow: { gap: 10, paddingVertical: 6, alignItems: 'flex-start' },
   statusRowLine: { borderBottomWidth: 1, borderBottomColor: C.borderSoft },
-  statusLabel: { flex: 1, color: C.textFaint, fontSize: 12.5, fontWeight: '600' },
-  statusValue: { flex: 1.4, color: C.text, fontSize: 13, fontWeight: '500', textAlign: 'right' },
-  statusLeftover: { paddingVertical: 7 },
-  leftoverText: { color: C.textFaint, fontSize: 12, lineHeight: 17 },
+  statusLabel: { flex: 1, color: C.textFaint, fontSize: 11.5, fontWeight: '600' },
+  statusValue: { flex: 1.4, color: C.text, fontSize: 11.5, fontWeight: '500', textAlign: 'right' },
+  statusLeftover: { paddingVertical: 6 },
+  leftoverText: { color: C.textFaint, fontSize: 11, lineHeight: 16 },
   listRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    borderRadius: 12, minHeight: 44, paddingHorizontal: 8, marginHorizontal: -8,
+    alignItems: 'center', gap: 8, borderRadius: 9, minHeight: 40, paddingHorizontal: 6, marginHorizontal: -6,
   },
   listRowPressed: { backgroundColor: C.bgHover },
-  listIndex: { minWidth: 22, textAlign: 'right', color: C.textFaint, fontSize: 11.5, fontWeight: '800' },
-  listTitle: { color: C.text, fontSize: 13.5, fontWeight: '600' },
-  listSub: { color: C.textFaint, fontSize: 11.5, marginTop: 1 },
-  catalogSummary: { color: C.textFaint, fontSize: 12.5, lineHeight: 18 },
-  bareRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, paddingHorizontal: 16, paddingVertical: 8 },
-  noticeText: { color: C.textDim, fontSize: 13, lineHeight: 18, flex: 1 },
+  listIndex: { minWidth: 20, color: C.textFaint, fontSize: 10.5, fontWeight: '800' },
+  listTitle: { color: C.text, fontSize: 12, fontWeight: '600' },
+  listSub: { color: C.textFaint, fontSize: 10.5, marginTop: 1 },
+  catalogSummary: { color: C.textFaint, fontSize: 11.5, lineHeight: 17 },
+  bareRow: { alignItems: 'flex-start', gap: 6, paddingVertical: 6 },
+  noticeText: { color: C.textDim, fontSize: 12, lineHeight: 17, flex: 1 },
   successRow: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
-    backgroundColor: C.greenTint, borderWidth: 1, borderColor: C.borderSoft, borderRadius: 12,
-    paddingHorizontal: 12, paddingVertical: 10, marginHorizontal: 16, marginVertical: 6,
+    alignItems: 'flex-start', gap: 8,
+    backgroundColor: C.greenTint, borderWidth: 1, borderColor: C.borderSoft, borderRadius: 11,
+    paddingHorizontal: 10, paddingVertical: 8, marginVertical: 5,
   },
-  successText: { color: C.text, fontSize: 13, fontWeight: '500', lineHeight: 18, flex: 1 },
-  successTime: { color: C.textFaint, fontSize: 11 },
+  successText: { color: C.text, fontSize: 12, fontWeight: '500', lineHeight: 17, flex: 1 },
+  successTime: { color: C.textFaint, fontSize: 10.5 },
   moreBtn: { alignSelf: 'flex-start' },
-  moreText: { color: C.accent, fontSize: 12.5, fontWeight: '700' },
   footer: {
     borderTopWidth: 1, borderTopColor: C.borderSoft,
-    flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, minHeight: 42,
+    alignItems: 'center', gap: 7, paddingHorizontal: 10, minHeight: 38,
   },
   footerPressed: { backgroundColor: C.bgHover },
-  footerText: { color: C.accent, fontSize: 13, fontWeight: '700' },
   footerChevron: { marginLeft: 'auto' },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingBottom: 6 },
-  iconBtn: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center', borderRadius: 15 },
+  actions: { alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingBottom: 4 },
+  iconBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 14 },
   iconPressed: { opacity: 0.55 },
   pressedSoft: { opacity: 0.55 },
-  copiedText: { color: C.textFaint, fontSize: 11 },
+  copiedText: { color: C.textFaint, fontSize: 10.5 },
 })

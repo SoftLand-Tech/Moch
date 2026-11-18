@@ -24,7 +24,7 @@ import { loadAttention, pendingOpenStoredId, requestOpenSession } from '../src/l
 import { flushDrafts, loadDrafts } from '../src/lib/drafts'
 import { flushSendQueue, loadSendQueue } from '../src/lib/sendQueue'
 import { initShareIn, deliverSharedNow, shareInInbox } from '../src/lib/shareIn'
-import { loadLocale, tr } from '../src/lib/strings'
+import { loadLocale, tr, useDir, useT } from '../src/lib/strings'
 import { linkToast } from '../src/lib/linkToast'
 import { AgentBrowserHost } from '../src/components/AgentBrowserHost'
 import { syncBackendIdentity } from '../src/lib/backendIdentity'
@@ -43,12 +43,13 @@ SplashScreen.preventAutoHideAsync().catch(() => {})
  * passive View nothing could remove), one component for both root branches. */
 function LinkToast({ msg, onDismiss }: { msg: string; onDismiss: () => void }) {
   const s = useStyles(makeS)
+  const t = useT()
   return (
     <Pressable
       style={({ pressed }) => [s.toast, pressed && s.pressed]}
       onPress={onDismiss}
       accessibilityRole="button"
-      accessibilityLabel="Dismiss message"
+      accessibilityLabel={t('setup.link.dismiss')}
     >
       <Text style={s.toastText}>{msg}</Text>
     </Pressable>
@@ -57,6 +58,8 @@ function LinkToast({ msg, onDismiss }: { msg: string; onDismiss: () => void }) {
 
 export default function RootLayout() {
   const s = useStyles(makeS)
+  const t = useT()
+  const dir = useDir()
   const state = useStore(connectionState)
   const cfg = useStore(connConfig)
   const err = useStore(gatewayError)
@@ -168,7 +171,7 @@ export default function RootLayout() {
       setLinkMsg((m) =>
         linkToast(m, {
           type: 'error',
-          message: 'Pairing to a computer is no longer supported — this build runs the agent on your phone.',
+          message: tr('setup.link.pairingGone'),
         }))
     }
     void Linking.getInitialURL().then((u) => { if (!cancelled && u) void handleUrl(u) })
@@ -270,7 +273,7 @@ export default function RootLayout() {
       setLinkMsg((m) =>
         linkToast(m, {
           type: 'error',
-          message: "That chat couldn't be opened — the connection took too long. Try the notification again.",
+          message: tr('setup.link.staleChat'),
         }))
       return
     }
@@ -292,8 +295,8 @@ export default function RootLayout() {
   // link, successful connect) funnels through the pure linkToast table.
   useEffect(() => {
     if (!linkMsg) return
-    const t = setTimeout(() => setLinkMsg((m) => linkToast(m, { type: 'timeout' })), 7_000)
-    return () => clearTimeout(t)
+    const timer = setTimeout(() => setLinkMsg((m) => linkToast(m, { type: 'timeout' })), 7_000)
+    return () => clearTimeout(timer)
   }, [linkMsg])
   const dismissLinkMsg = useCallback(
     () => setLinkMsg((m) => linkToast(m, { type: 'dismiss' })),
@@ -368,23 +371,25 @@ export default function RootLayout() {
           <MochiStage state={connecting ? 'mochi-waiting' : 'mochi-offline'} size={168} />
           {failed ? (
             <>
-              <Text style={s.errTitle}>Connection failed</Text>
+              <Text style={s.errTitle}>{t('setup.boot.connectionFailed')}</Text>
               <Text style={s.errDetail}>
                 {cfg ? redactedUrl(cfg) : ''}
-                {attempt > 0 ? `\nRetry #${attempt} — auto-retrying…` : ''}
+                {attempt > 0 ? `\n${t('setup.boot.retryCount', { n: attempt })}` : ''}
                 {err ? `\n${err.slice(0, 300)}` : ''}
               </Text>
-              <View style={s.btnRow}>
+              <View style={[s.btnRow, { flexDirection: dir.row }]}>
                 <Pressable style={({ pressed }) => [s.btn, pressed && s.pressed]} onPress={() => { void retryNow().catch(() => {}) }}>
-                  <Text style={s.btnText}>Retry</Text>
+                  <Text style={s.btnText}>{t('common.retry')}</Text>
                 </Pressable>
               </View>
             </>
           ) : connecting ? (
             <>
-              <Text style={s.connecting}>Connecting to your agent…{attempt > 0 ? ` (try ${attempt + 1})` : ''}</Text>
+              <Text style={s.connecting}>
+                {attempt > 0 ? t('setup.boot.connectingTry', { n: attempt + 1 }) : t('setup.boot.connecting')}
+              </Text>
               <Pressable style={({ pressed }) => [s.ghostBtn, pressed && s.pressed]} onPress={() => { disconnect() }}>
-                <Text style={s.ghostText}>Cancel</Text>
+                <Text style={s.ghostText}>{t('common.cancel')}</Text>
               </Pressable>
             </>
           ) : null}
@@ -414,20 +419,21 @@ export default function RootLayout() {
  * to this screen and Retry remounts the layout fresh.
  */
 export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
+  const t = useT()
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: 30 }}>
       <StatusBar style="light" />
-      <Text style={{ color: C.red, fontSize: 19, fontWeight: '800', marginBottom: 12 }}>Something went wrong</Text>
+      <Text style={{ color: C.red, fontSize: 19, fontWeight: '800', marginBottom: 12 }}>{t('setup.error.title')}</Text>
       <Text style={{ color: C.textDim, fontSize: 13, textAlign: 'center', marginBottom: 24, lineHeight: 19 }}>
-        {error?.message ?? 'Unexpected render error'}
+        {error?.message ?? t('setup.error.body')}
       </Text>
       <Pressable
         style={({ pressed }) => [{ backgroundColor: C.accent, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 28 }, pressed && { opacity: 0.6 }]}
         onPress={retry}
         accessibilityRole="button"
-        accessibilityLabel="Retry"
+        accessibilityLabel={t('common.retry')}
       >
-        <Text style={{ color: C.onAccent, fontSize: 15, fontWeight: '800' }}>Retry</Text>
+        <Text style={{ color: C.onAccent, fontSize: 15, fontWeight: '800' }}>{t('common.retry')}</Text>
       </Pressable>
     </View>
   )
@@ -438,7 +444,7 @@ const makeS = () => StyleSheet.create({
   pressed: { opacity: 0.6 },
   errTitle: { color: C.red, fontSize: 19, fontWeight: '800', marginBottom: 12 },
   errDetail: { color: C.textDim, fontSize: 13, textAlign: 'center', marginBottom: 24, lineHeight: 19 },
-  btnRow: { flexDirection: 'row', gap: 12 },
+  btnRow: { gap: 12 },
   btn: { backgroundColor: C.accent, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 28 },
   btnText: { color: C.onAccent, fontSize: 15, fontWeight: '800' },
   ghostBtn: { borderRadius: 12, paddingVertical: 14, paddingHorizontal: 22, borderWidth: 1, borderColor: C.border, marginTop: 12 },

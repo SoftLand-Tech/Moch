@@ -1,23 +1,40 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useFocusEffect } from 'expo-router'
-import { View, Text, FlatList, StyleSheet, Pressable, TextInput, ActivityIndicator, Modal, ScrollView, Image, Linking } from 'react-native'
-import { Ionicons } from '@expo/vector-icons'
-import { MCP_LOGOS } from '../../src/lib/mcpLogos'
+import { View, FlatList, StyleSheet, Pressable, Modal, ScrollView, Linking } from 'react-native'
 import { KeyboardAvoidingView, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
 import Animated, { useAnimatedStyle } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useStore } from '@nanostores/react'
 import { ScreenShell } from '../../src/components/ScreenShell'
+import { MochiMark } from '../../src/components/MochiMark'
 import { showAlert } from '../../src/components/AlertDialog'
+import { Icon } from '../../src/components/Icon'
 import { C, useStyles } from '../../src/lib/theme'
-import { tr } from '../../src/lib/strings'
+import { tr, useDir, useT } from '../../src/lib/strings'
+import {
+  Card,
+  Dot,
+  Elev,
+  Field,
+  GhostBtn,
+  HeaderButton,
+  Pill,
+  PrimaryBtn,
+  Segmented,
+  SheetBackdrop,
+  SheetCard,
+  SheetGrabber,
+  Spinner,
+  Txt,
+  type DotKind,
+} from '../../src/components/ui'
 import { connConfig, isConnected as isConnectedAtom } from '../../src/lib/gateway'
 import {
   mcpServers, mcpRuntime, mcpCatalog, mcpUnsupported, mcpLoading, catalogLoading, mcpListError,
   loadMcpServers, loadMcpCatalog, refreshMcpRuntime, installCatalogServer, addCustomServer,
   removeMcpServer, testMcpServer, saveMcpApiKey, reloadAgentMcp,
   startMcpOauth, pollMcpOauth, cancelMcpOauth,
-  type McpServer, type McpTestResult,
+  type McpServer, type McpRuntime, type McpTestResult,
 } from '../../src/lib/mcpState'
 
 /**
@@ -25,21 +42,54 @@ import {
  * `mcp.*` RPCs are the same surface as `hermes mcp` on the machine, so
  * everything done here lands in that machine's config.yaml / .env — the app
  * holds no connector state of its own.
+ *
+ * Redesign pass (mockup screen 11): search + "+ Add" row, a Yours (n) |
+ * Browse segmented switch, server cards with an accent letter tile, mono
+ * transport badge, amber desktop-only pill and a colored status line;
+ * a two-column browse grid with full-width Install buttons; and the server
+ * detail / add / API-key bottom sheets rebuilt on the shared sheet kit.
+ * Every behavior is unchanged: refresh-on-focus + 5s runtime poll, the
+ * deduped refresh, OAuth sign-in/poll/cancel, API-key save, tool tester,
+ * remove confirm, custom-server form, desktop-only flags, the offline and
+ * unsupported states, and the BUG-133 keyboard-avoidance patterns (kbPad on
+ * the lists, RNKC KeyboardAvoidingView as every sheet Modal's full-screen
+ * root).
  */
 
-/** Running-state line under a server name — from cached runtime, never a probe. */
-function statusLine(srv: McpServer, rt?: { status?: string; error?: string; tools?: number }): { text: string; color: string } {
+// ── Status line ─────────────────────────────────────────────────────────────
+
+type StatusInfo = { key: string; vars?: Record<string, string | number>; color: string; dot: DotKind }
+
+/**
+ * Running-state line under a server name — from cached runtime, never a probe.
+ * Returns a translation key (+ vars) so the caller translates at render time.
+ */
+function statusOf(
+  srv: McpServer,
+  rt?: { status?: string; error?: string; tools?: number },
+): StatusInfo {
   if (srv.auth === 'oauth' && srv.oauth_tokens_present === false) {
-    return { text: 'sign-in needed', color: C.amber }
+    return { key: 'connectors.status.oauthNeeded', color: C.amber, dot: 'amber' }
   }
-  if (!srv.enabled) return { text: 'disabled', color: C.textFaint }
+  if (!srv.enabled) return { key: 'connectors.status.disabled', color: C.textFaint, dot: 'idle' }
   switch (rt?.status) {
-    case 'connected': return { text: `connected${rt.tools ? ` · ${rt.tools} tools` : ''}`, color: C.greenSoft }
-    case 'connecting': return { text: 'connecting…', color: C.textFaint }
-    case 'failed': return { text: rt.error ? `failed — ${rt.error}` : 'failed', color: C.red }
+    case 'connected':
+      return rt.tools
+        ? { key: 'connectors.status.connectedTools', vars: { n: rt.tools }, color: C.greenSoft, dot: 'green' }
+        : { key: 'connectors.status.connected', color: C.greenSoft, dot: 'green' }
+    case 'connecting':
+      return { key: 'connectors.status.connecting', color: C.textFaint, dot: 'idle' }
+    case 'failed':
+      return rt.error
+        ? { key: 'connectors.status.failedWhy', vars: { why: rt.error }, color: C.red, dot: 'red' }
+        : { key: 'connectors.status.failed', color: C.red, dot: 'red' }
     // Registered but not spawned: the process starts on first use.
-    case 'lazy': return { text: `idle · starts on first use${rt.tools ? ` · ${rt.tools} tools` : ''}`, color: C.textDim }
-    default: return { text: 'not running yet', color: C.textFaint }
+    case 'lazy':
+      return rt.tools
+        ? { key: 'connectors.status.lazyTools', vars: { n: rt.tools }, color: C.textDim, dot: 'idle' }
+        : { key: 'connectors.status.lazy', color: C.textDim, dot: 'idle' }
+    default:
+      return { key: 'connectors.status.notRunning', color: C.textFaint, dot: 'idle' }
   }
 }
 
@@ -53,48 +103,38 @@ function isCommandServer(srv: McpServer): boolean {
   return srv.transport === 'stdio' || !!srv.command
 }
 
-/**
- * App-icon-style letter tile — the catalog RPC carries no brand art (and the
- * app talks only to your machine, never to a favicon service), so each
- * service gets a stable hue from its name: same tile everywhere, every run.
- */
-const TILE_COLORS = ['#E8720C', '#1FA7C4', '#10A37F', '#8B5CF6', '#DB2777', '#D97706', '#3B6FE0', '#0D9488', '#E23838', '#6D5AE0']
+// ── Brand-less letter tile (mockup: accentSoft square, accent ink) ──────────
 
-function tileColor(name: string): string {
-  let h = 0
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
-  return TILE_COLORS[h % TILE_COLORS.length]
-}
-
-function TileAvatar({ name, size = 48, installed }: { name: string; size?: number; installed?: boolean }) {
+function LetterTile({ name, size }: { name: string; size: number }) {
   const s = useStyles(makeS)
-  const logo = MCP_LOGOS[name]
   const letter = name.replace(/[^a-z0-9]/gi, '').charAt(0).toUpperCase() || '?'
   return (
     <View
-      style={[s.tile, { width: size, height: size, borderRadius: size * 0.28, backgroundColor: logo ? 'transparent' : tileColor(name) }]}
-      accessibilityLabel={name}
+      style={[s.tile, { width: size, height: size, borderRadius: size >= 36 ? 10 : 8 }]}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
     >
-      {logo ? (
-        // Favicons assume a light background — dark logos (Square, Vercel…)
-        // vanish on the app's dark cards, so every logo sits on a white chip.
-        <View style={[s.tileLogoChip, { width: size, height: size, borderRadius: size * 0.28 }]}>
-          <Image source={logo} style={{ width: size * 0.78, height: size * 0.78 }} resizeMode="contain" />
-        </View>
-      ) : (
-        <Text style={[s.tileText, { fontSize: size * 0.44 }]}>{letter}</Text>
-      )}
-      {installed ? (
-        <View style={[s.tileCheck, { top: -4, right: -4 }]}>
-          <Ionicons name="checkmark-circle" size={16} color={C.greenSoft} />
-        </View>
-      ) : null}
+      <Txt size={size * 0.42} weight="800" color={C.accent}>
+        {letter}
+      </Txt>
     </View>
   )
 }
 
+// ── Form error (validation key, or a raw RPC message) ──────────────────────
+
+type FormError = { key: string } | { text: string }
+
+function errText(err: FormError, t: (key: string) => string): string {
+  return 'key' in err ? t(err.key) : err.text
+}
+
+// ── Screen ──────────────────────────────────────────────────────────────────
+
 export default function Connectors() {
   const s = useStyles(makeS)
+  const t = useT()
+  const dir = useDir()
   // BUG-133: chat-pad pattern on the LISTS only — the filter field stays
   // top-anchored while the results viewport ends at the keyboard's top edge.
   const kb = useReanimatedKeyboardAnimation()
@@ -173,16 +213,17 @@ export default function Connectors() {
 
   /** Config changed — offer the one-tap `/reload-mcp` so the running agent picks it up. */
   const offerReload = useCallback(async (what: string) => {
-    const btn = await showAlert(what, 'Reload the agent now so the new tools are available? This restarts its MCP connections.', [
-      { text: 'Not now', style: 'cancel' },
-      { text: 'Reload', style: 'default' },
+    const reloadLabel = tr('connectors.alert.reload.reload')
+    const btn = await showAlert(what, tr('connectors.alert.reload.body'), [
+      { text: tr('connectors.alert.reload.notNow'), style: 'cancel' },
+      { text: reloadLabel, style: 'default' },
     ])
-    if (btn.text !== 'Reload') return
+    if (btn.text !== reloadLabel) return
     try {
       await reloadAgentMcp()
       void loadMcpServers()
     } catch (err) {
-      void showAlert('Reload failed', err instanceof Error ? err.message : String(err))
+      void showAlert(tr('connectors.alert.reloadFailed'), err instanceof Error ? err.message : String(err))
     }
   }, [])
 
@@ -193,13 +234,16 @@ export default function Connectors() {
       await loadMcpServers()
       void loadMcpCatalog()
       if (requires.length > 0) {
-        void showAlert(`Installed ${name}`, `It needs an API key (${requires.join(', ')}) before it can connect.`)
+        void showAlert(
+          tr('connectors.alert.installed', { name }),
+          tr('connectors.alert.installedNeedsKey', { keys: requires.join(', ') }),
+        )
         setKeyFor(name)
       } else {
-        void offerReload(`Installed ${name}`)
+        void offerReload(tr('connectors.alert.installed', { name }))
       }
     } catch (err) {
-      void showAlert('Install failed', err instanceof Error ? err.message : String(err))
+      void showAlert(tr('connectors.alert.installFailed'), err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(null)
     }
@@ -207,68 +251,96 @@ export default function Connectors() {
 
   const onRemoved = useCallback((name: string) => {
     setOpen(null)
-    void offerReload(`Removed ${name}`)
+    void offerReload(tr('connectors.alert.removed', { name }))
   }, [offerReload])
 
   if (unsupported) {
     return (
       <SafeAreaView style={s.safe} edges={['bottom']}>
-        <ScreenShell title="Connectors" showBrand>
-          <View style={s.center}>
-            <Text style={s.emptyTitle}>Not available on this machine</Text>
-            <Text style={s.emptyBody}>
-              The connected Mochi doesn't expose connector management yet. Update Mochi on that
-              machine, then reconnect.
-            </Text>
+        <ScreenShell title={t('connectors.title')} showBrand>
+          <View style={s.unsupported}>
+            <MochiMark size={64} mood="sleepy" />
+            <Txt size={16} weight="700" center style={s.unsupportedTitle}>
+              {t('connectors.unsupported.title')}
+            </Txt>
+            <Txt size={13.5} color={C.textDim} center style={s.unsupportedBody}>
+              {t('connectors.unsupported.body')}
+            </Txt>
           </View>
         </ScreenShell>
       </SafeAreaView>
     )
   }
 
+  const emptyYours = loading || listError
+    ? null
+    : online
+      ? query
+        ? <Txt size={13} color={C.textFaint} center style={s.emptyText}>{t('connectors.empty.noMatches')}</Txt>
+        : (
+          <View style={s.emptyState}>
+            <MochiMark size={56} />
+            <Txt size={13} color={C.textFaint} center>{t('connectors.empty.noServers')}</Txt>
+          </View>
+        )
+      : <Txt size={13} color={C.textFaint} center style={s.emptyText}>{t('common.offline')}</Txt>
+
+  const emptyBrowse = catLoading
+    ? null
+    : online
+      ? query
+        ? <Txt size={13} color={C.textFaint} center style={s.emptyText}>{t('connectors.empty.noMatches')}</Txt>
+        : <Txt size={13} color={C.textFaint} center style={s.emptyText}>{t('connectors.empty.browse')}</Txt>
+      : <Txt size={13} color={C.textFaint} center style={s.emptyText}>{t('common.offline')}</Txt>
+
   return (
     <SafeAreaView style={s.safe} edges={['bottom']}>
-      <ScreenShell title="Connectors" showBrand>
-        <View style={s.headRow}>
-          <View style={s.searchWrap}>
-            <TextInput
-              style={s.search}
-              value={query}
-              onChangeText={setQuery}
-              placeholder={tab === 'yours' ? 'Filter your servers…' : 'Search the catalog…'}
-              placeholderTextColor={C.textFaint}
-              autoCorrect={false}
-              accessibilityLabel="Filter"
-            />
-          </View>
-          <Pressable style={({ pressed }) => [s.addBtn, pressed && s.pressed]} onPress={() => setAdding(true)} accessibilityLabel="Add server">
-            <Text style={s.addBtnText}>＋ Add</Text>
-          </Pressable>
+      <ScreenShell title={t('connectors.title')} showBrand>
+        {/* Search + Add (mockup: 14px gutter, 6px gap, compact primary) */}
+        <View style={[s.searchRow, { flexDirection: dir.row }]}>
+          <Field
+            value={query}
+            onChangeText={setQuery}
+            placeholder={t('connectors.searchPlaceholder')}
+            autoCorrect={false}
+            accessibilityLabel={t('common.filter')}
+            wrapStyle={s.searchWrap}
+          />
+          <PrimaryBtn
+            onPress={() => setAdding(true)}
+            accessibilityLabel={t('connectors.addA11y')}
+            style={s.addBtn}
+          >
+            <Txt size={13} weight="700" color={C.onAccent}>{`+ ${t('common.add')}`}</Txt>
+          </PrimaryBtn>
         </View>
 
-        <View style={s.tabs}>
-          {(['yours', 'browse'] as const).map((t) => (
-            <Pressable
-              key={t}
-              style={({ pressed }) => [s.tab, tab === t && s.tabOn, pressed && s.tabPressed]}
-              onPress={() => setTab(t)}
-              accessibilityRole="button"
-            >
-              <Text style={[s.tabText, tab === t && s.tabTextOn]}>
-                {t === 'yours' ? `Yours (${servers.length})` : 'Browse'}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        {/* Yours (n) | Browse */}
+        <Segmented
+          options={[
+            { key: 'yours', label: t('connectors.tab.yours', { n: servers.length }) },
+            { key: 'browse', label: t('connectors.tab.browse') },
+          ]}
+          value={tab}
+          onChange={setTab}
+          style={s.segmented}
+        />
 
         {listError ? (
-          <View style={s.errBanner}>
-            <Ionicons name="alert-circle" size={16} color={C.amber} />
-            <Text style={s.errBannerText} numberOfLines={2}>Couldn't load servers — {listError}</Text>
-            <Pressable style={({ pressed }) => [pressed && s.pressed]} onPress={refresh} accessibilityLabel="Retry loading servers">
-              <Text style={s.errRetry}>Retry</Text>
+          <Elev style={[s.errBanner, { flexDirection: dir.row }]}>
+            <Icon name="alert-circle" size={14} color={C.amber} />
+            <Txt size={12.5} color={C.textDim} numberOfLines={2} style={s.errBannerText}>
+              {t('connectors.error.load', { why: listError })}
+            </Txt>
+            <Pressable
+              onPress={refresh}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={t('connectors.error.retryA11y')}
+            >
+              <Txt size={13} weight="800" color={C.accent}>{t('common.retry')}</Txt>
             </Pressable>
-          </View>
+          </Elev>
         ) : null}
 
         {tab === 'yours' ? (
@@ -276,83 +348,111 @@ export default function Connectors() {
           // one instance across the tab switch, and numColumns can't change
           // on the fly (RN throws).
           <Animated.View style={[s.kbListWrap, kbPad]}>
-          <FlatList
-            key="yours"
-            data={serverList}
-            keyExtractor={(x) => x.name}
-            keyboardShouldPersistTaps="handled"
-            refreshing={loading && online}
-            onRefresh={refresh}
-            contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 32 }}
-            ListEmptyComponent={
-              <Text style={s.empty}>
-                {loading || listError ? '' : online ? (query ? 'No matches' : 'No MCP servers yet — browse the catalog or add one') : 'Offline'}
-              </Text>
-            }
-            renderItem={({ item }) => {
-              const st = statusLine(item, runtime[item.name])
-              const desktopOnly = loopbackHost && isCommandServer(item)
-              return (
-                <Pressable style={({ pressed }) => [s.row, pressed && s.rowPressed]} onPress={() => setOpen(item)} accessibilityLabel={item.name}>
-                  <TileAvatar name={item.name} size={42} />
-                  <View style={{ flex: 1 }}>
-                    <View style={s.rowHead}>
-                      <Text style={s.rowName} numberOfLines={1}>{item.name}</Text>
-                      {desktopOnly ? (
-                        <View style={s.amberBadge}><Text style={s.amberBadgeText}>Desktop only</Text></View>
-                      ) : null}
-                      <Text style={s.badge}>{item.transport}</Text>
+            <FlatList
+              key="yours"
+              data={serverList}
+              keyExtractor={(x) => x.name}
+              keyboardShouldPersistTaps="handled"
+              refreshing={loading && online}
+              onRefresh={refresh}
+              contentContainerStyle={s.listContent}
+              ListEmptyComponent={emptyYours}
+              renderItem={({ item }) => {
+                const st = statusOf(item, runtime[item.name])
+                const desktopOnly = loopbackHost && isCommandServer(item)
+                return (
+                  <Card
+                    style={s.serverCard}
+                    onPress={() => setOpen(item)}
+                    accessibilityLabel={item.name}
+                  >
+                    <View style={[s.serverRow, { flexDirection: dir.row }]}>
+                      <LetterTile name={item.name} size={36} />
+                      <View style={s.serverBody}>
+                        <View style={[s.serverHead, { flexDirection: dir.row }]}>
+                          <Txt size={13} weight="700" numberOfLines={1} style={s.serverName}>
+                            {item.name}
+                          </Txt>
+                          <View style={s.transportBadge}>
+                            <Txt size={9.5} mono color={C.textDim}>
+                              {item.transport.toUpperCase()}
+                            </Txt>
+                          </View>
+                          {desktopOnly ? (
+                            <Pill kind="amber" style={s.desktopPill} textStyle={s.desktopPillText}>
+                              {t('connectors.desktopOnly')}
+                            </Pill>
+                          ) : null}
+                        </View>
+                        <Txt size={11} weight="600" color={st.color} numberOfLines={2} style={s.serverStatus}>
+                          {t(st.key, st.vars)}
+                        </Txt>
+                        {item.url ? (
+                          <Txt size={10} mono ltr color={C.textFaint} numberOfLines={1}>
+                            {item.url}
+                          </Txt>
+                        ) : null}
+                        {item.command ? (
+                          <Txt size={10} mono ltr color={C.textFaint} numberOfLines={1}>
+                            {[item.command, ...(item.args ?? [])].join(' ')}
+                          </Txt>
+                        ) : null}
+                      </View>
                     </View>
-                    <Text style={[s.rowDesc, { color: st.color }]} numberOfLines={2}>{st.text}</Text>
-                    {item.url ? <Text style={s.rowSub} numberOfLines={1}>{item.url}</Text> : null}
-                    {item.command ? <Text style={s.rowSub} numberOfLines={1}>{[item.command, ...(item.args ?? [])].join(' ')}</Text> : null}
-                  </View>
-                </Pressable>
-              )
-            }}
-          />
+                  </Card>
+                )
+              }}
+            />
           </Animated.View>
         ) : (
           <Animated.View style={[s.kbListWrap, kbPad]}>
-          <FlatList
-            key="browse"
-            data={catalogList}
-            keyExtractor={(x) => x.name}
-            numColumns={2}
-            columnWrapperStyle={{ gap: 10, paddingHorizontal: 8 }}
-            contentContainerStyle={{ gap: 10, paddingBottom: 32 }}
-            keyboardShouldPersistTaps="handled"
-            refreshing={catLoading && online}
-            onRefresh={refresh}
-            ListEmptyComponent={<Text style={s.empty}>{catLoading ? '' : online ? (query ? tr('connectors.empty.matches') : tr('connectors.browse.empty')) : tr('connectors.offline')}</Text>}
-            renderItem={({ item }) => (
-              <View style={s.gridCard}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  <TileAvatar name={item.name} size={44} installed={item.installed} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.rowName} numberOfLines={2}>{item.name}</Text>
+            <FlatList
+              key="browse"
+              data={catalogList}
+              keyExtractor={(x) => x.name}
+              numColumns={2}
+              columnWrapperStyle={s.gridRow}
+              contentContainerStyle={s.gridContent}
+              keyboardShouldPersistTaps="handled"
+              refreshing={catLoading && online}
+              onRefresh={refresh}
+              ListEmptyComponent={emptyBrowse}
+              renderItem={({ item }) => (
+                <Card style={s.gridCard}>
+                  <View style={[s.gridTop, { flexDirection: dir.row }]}>
+                    <LetterTile name={item.name} size={30} />
                     {item.requires.length > 0 ? (
-                      <Text style={s.keyChip} numberOfLines={1}>API key</Text>
+                      <Txt size={9.5} mono color={C.textFaint} numberOfLines={1}>
+                        {t('connectors.apiKeyTag')}
+                      </Txt>
                     ) : null}
                   </View>
-                </View>
-                <Pressable
-                  style={({ pressed }) => [s.installBtn, item.installed && s.installOff, pressed && s.pressed]}
-                  disabled={item.installed || busy === item.name}
-                  onPress={() => void install(item.name, item.requires)}
-                  accessibilityLabel={item.installed ? 'Installed' : `Install ${item.name}`}
-                >
-                  {busy === item.name ? (
-                    <ActivityIndicator size="small" color={C.textDim} />
+                  <Txt size={13} weight="700" numberOfLines={2}>{item.name}</Txt>
+                  {item.installed ? (
+                    <GhostBtn
+                      label={t('connectors.browse.installed')}
+                      disabled
+                      style={[s.installBtn, s.installedBtn]}
+                      textStyle={s.installBtnText}
+                      accessibilityLabel={t('connectors.browse.installed')}
+                    />
                   ) : (
-                    <Text style={[s.installText, item.installed && { color: C.textFaint }]}>
-                      {item.installed ? 'Installed' : 'Install'}
-                    </Text>
+                    <PrimaryBtn
+                      onPress={() => void install(item.name, item.requires)}
+                      disabled={busy === item.name}
+                      style={s.installBtn}
+                      accessibilityLabel={t('connectors.browse.installA11y', { name: item.name })}
+                    >
+                      {busy === item.name ? (
+                        <Spinner size="small" color={C.onAccent} />
+                      ) : (
+                        <Txt size={11} weight="700" color={C.onAccent}>{t('common.install')}</Txt>
+                      )}
+                    </PrimaryBtn>
                   )}
-                </Pressable>
-              </View>
-            )}
-          />
+                </Card>
+              )}
+            />
           </Animated.View>
         )}
       </ScreenShell>
@@ -374,7 +474,7 @@ export default function Connectors() {
           setAdding(false)
           await loadMcpServers()
           void loadMcpCatalog()
-          void offerReload(`Added ${name}`)
+          void offerReload(tr('connectors.alert.added', { name }))
         }}
       />
 
@@ -384,7 +484,7 @@ export default function Connectors() {
         onSaved={async (name) => {
           setKeyFor(null)
           await loadMcpServers()
-          void offerReload(`${name} key saved`)
+          void offerReload(tr('connectors.alert.keySaved', { name }))
         }}
       />
     </SafeAreaView>
@@ -397,7 +497,7 @@ function ServerSheet({
   server, runtime, desktopOnly, onClose, onChanged, onRemoved, onNeedKey,
 }: {
   server: McpServer | null
-  runtime?: { status?: string; tools?: number; connected?: boolean; error?: string }
+  runtime?: McpRuntime
   /** Loopback pairing + command transport — can't run on the phone. */
   desktopOnly?: boolean
   onClose: () => void
@@ -406,6 +506,8 @@ function ServerSheet({
   onNeedKey: (name: string) => void
 }) {
   const s = useStyles(makeS)
+  const t = useT()
+  const dir = useDir()
   const [testing, setTesting] = useState(false)
   const [result, setResult] = useState<McpTestResult | null>(null)
   const [removing, setRemoving] = useState(false)
@@ -452,7 +554,12 @@ function ServerSheet({
   )
 
   if (!server) return null
-  const st = statusLine(server, runtime)
+  const st = statusOf(server, runtime)
+  // Mockup detail status: "● Connected · N tools exposed".
+  const statusText =
+    (st.key === 'connectors.status.connected' || st.key === 'connectors.status.connectedTools') && (runtime?.tools ?? 0) > 0
+      ? t('connectors.status.exposed', { n: runtime?.tools ?? 0 })
+      : t(st.key, st.vars)
 
   const startSignIn = async () => {
     stopOauthPolling()
@@ -479,7 +586,7 @@ function ServerSheet({
         const name = server.name
         stopOauthPolling()
         void cancelMcpOauth(name, session).catch(() => {})
-        setOauthFlow({ phase: 'timeout', message: 'Sign-in timed out after 5 minutes — try again.' })
+        setOauthFlow({ phase: 'timeout' })
         return
       }
       void pollMcpOauth(server.name, session)
@@ -492,7 +599,7 @@ function ServerSheet({
             onChanged()
           } else if (status.status === 'error') {
             stopOauthPolling()
-            setOauthFlow({ phase: 'error', message: status.error ?? 'Sign-in failed' })
+            setOauthFlow({ phase: 'error', message: status.error })
           }
         })
         .catch(() => { /* transient RPC hiccup — keep polling */ })
@@ -507,7 +614,6 @@ function ServerSheet({
     setOauthFlow(null)
   }
 
-
   const runTest = async () => {
     setTesting(true)
     setResult(null)
@@ -521,90 +627,141 @@ function ServerSheet({
   }
 
   const runRemove = async () => {
-    const btn = await showAlert(`Remove ${server.name}?`, 'The machine forgets this server and its config entry. Secrets in .env are kept.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive' },
-    ])
-    if (btn.text !== 'Remove') return
+    const removeLabel = tr('common.remove')
+    const btn = await showAlert(
+      tr('connectors.remove.title', { name: server.name }),
+      tr('connectors.remove.body'),
+      [
+        { text: tr('common.cancel'), style: 'cancel' },
+        { text: removeLabel, style: 'destructive' },
+      ],
+    )
+    if (btn.text !== removeLabel) return
     setRemoving(true)
     try {
       await removeMcpServer(server.name)
       onChanged()
       onRemoved(server.name)
     } catch (err) {
-      void showAlert('Remove failed', err instanceof Error ? err.message : String(err))
+      void showAlert(tr('connectors.alert.removeFailed'), err instanceof Error ? err.message : String(err))
     } finally {
       setRemoving(false)
     }
   }
 
   const oauthMissing = server.auth === 'oauth' && server.oauth_tokens_present === false
+  let testLine = ''
+  if (result?.ok) {
+    testLine = t('connectors.detail.testOk', { n: result.tools.length })
+    if (result.prompts) testLine += t('connectors.detail.testPrompts', { n: result.prompts })
+    if (result.resources) testLine += t('connectors.detail.testResources', { n: result.resources })
+  }
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={s.sheetScrim} behavior="padding">
-        <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Close" onPress={onClose} />
-        <View style={s.sheetCard}>
-          <View style={s.sheetHead}>
-            <TileAvatar name={server.name} size={44} />
-            <View style={{ flex: 1 }}>
-              <Text style={s.sheetTitle} numberOfLines={1}>{server.name}</Text>
-              <Text style={[s.rowDesc, { color: st.color }]}>{st.text}</Text>
+      <KeyboardAvoidingView style={s.sheetRoot} behavior="padding">
+        <SheetBackdrop onPress={onClose} />
+        <SheetCard style={s.sheetCard}>
+          <SheetGrabber />
+          <View style={[s.sheetHead, { flexDirection: dir.row }]}>
+            <LetterTile name={server.name} size={36} />
+            <View style={s.sheetHeadBody}>
+              <View style={[s.sheetTitleRow, { flexDirection: dir.row }]}>
+                <Txt size={13.5} weight="800" numberOfLines={1} style={s.sheetTitleText}>{server.name}</Txt>
+                <View style={s.transportBadge}>
+                  <Txt size={9} mono color={C.textDim}>{server.transport.toUpperCase()}</Txt>
+                </View>
+              </View>
+              <View style={[s.detailStatusRow, { flexDirection: dir.row }]}>
+                <Dot kind={st.dot} size={7} />
+                <Txt size={11.5} weight="600" color={st.color} numberOfLines={1} style={s.detailStatusText}>
+                  {statusText}
+                </Txt>
+              </View>
             </View>
-            <Text style={s.badge}>{server.transport}</Text>
+            <HeaderButton style={s.sheetClose} onPress={onClose} accessibilityLabel={t('common.close')}>
+              <Icon name="close" size={13} color={C.textDim} />
+            </HeaderButton>
           </View>
 
-          <ScrollView style={{ maxHeight: 320 }} contentContainerStyle={{ gap: 6 }}>
-            {server.url ? <Text style={s.cfgLine} numberOfLines={2}>{server.url}</Text> : null}
+          <ScrollView style={s.sheetScroll} contentContainerStyle={s.sheetScrollBody} keyboardShouldPersistTaps="handled">
+            {server.url ? (
+              <Txt size={12.5} mono ltr color={C.textDim} numberOfLines={2}>{server.url}</Txt>
+            ) : null}
             {server.command ? (
-              <Text style={s.cfgLine} numberOfLines={3}>{[server.command, ...(server.args ?? [])].join(' ')}</Text>
+              <Txt size={12.5} mono ltr color={C.textDim} numberOfLines={3}>
+                {[server.command, ...(server.args ?? [])].join(' ')}
+              </Txt>
             ) : null}
             {server.auth === 'oauth' ? (
-              <Text style={s.cfgLine}>OAuth{server.oauth_tokens_present ? ' · signed in' : ''}</Text>
+              <Txt size={12.5} color={C.textDim}>
+                {server.oauth_tokens_present ? t('connectors.oauth.labelSignedIn') : t('connectors.oauth.label')}
+              </Txt>
             ) : null}
             {server.env && server.env.length > 0 ? (
-              <Text style={s.cfgLine} numberOfLines={2}>env: {server.env.join(', ')}</Text>
+              <Txt size={12.5} color={C.textDim} numberOfLines={2}>
+                {t('connectors.detail.env', { keys: server.env.join(', ') })}
+              </Txt>
             ) : null}
 
             {desktopOnly ? (
-              <Text style={s.hint}>Command-based servers run on your computer, not on the phone.</Text>
+              <Txt size={12.5} color={C.textFaint}>{t('connectors.detail.desktopHint')}</Txt>
             ) : null}
 
             {oauthMissing ? (
               oauthFlow ? (
                 oauthFlow.phase === 'waiting' ? (
-                  <View style={s.oauthRow}>
-                    <ActivityIndicator size="small" color={C.textDim} />
-                    <Text style={s.rowDesc}>Waiting for browser approval…</Text>
-                    <Pressable style={({ pressed }) => [s.oauthCancel, pressed && s.pressed]} onPress={cancelSignIn} accessibilityLabel="Cancel sign-in">
-                      <Text style={s.oauthCancelText}>Cancel</Text>
+                  <View style={[s.oauthRow, { flexDirection: dir.row }]}>
+                    <Spinner size="small" color={C.textDim} />
+                    <Txt size={12.5} color={C.textDim} style={s.oauthMsg}>{t('connectors.oauth.waiting')}</Txt>
+                    <Pressable
+                      onPress={cancelSignIn}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('connectors.oauth.cancelA11y')}
+                    >
+                      <Txt size={12.5} weight="700" color={C.accent}>{t('common.cancel')}</Txt>
                     </Pressable>
                   </View>
                 ) : (
-                  <View style={s.oauthRow}>
-                    <Ionicons name={oauthFlow.phase === 'timeout' ? 'time-outline' : 'alert-circle'} size={16} color={C.amber} />
-                    <Text style={[s.rowDesc, { color: C.amber, flex: 1 }]} numberOfLines={3}>
-                      {oauthFlow.message ?? 'Sign-in failed'}
-                    </Text>
-                    <Pressable style={({ pressed }) => [s.oauthCancel, pressed && s.pressed]} onPress={() => void startSignIn()} accessibilityLabel="Try again">
-                      <Text style={s.oauthCancelText}>Try again</Text>
+                  <View style={[s.oauthRow, { flexDirection: dir.row }]}>
+                    <Icon name={oauthFlow.phase === 'timeout' ? 'time-outline' : 'alert-circle'} size={14} color={C.amber} />
+                    <Txt size={12.5} color={C.amber} numberOfLines={3} style={s.oauthMsg}>
+                      {oauthFlow.message
+                        ? oauthFlow.message
+                        : oauthFlow.phase === 'timeout'
+                          ? t('connectors.oauth.timeout')
+                          : t('connectors.oauth.failed')}
+                    </Txt>
+                    <Pressable
+                      onPress={() => void startSignIn()}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('connectors.oauth.tryAgain')}
+                    >
+                      <Txt size={12.5} weight="700" color={C.accent}>{t('connectors.oauth.tryAgain')}</Txt>
                     </Pressable>
                   </View>
                 )
               ) : (
-                <View style={s.oauthRow}>
-                  <Text style={[s.hint, { flex: 1 }]}>This server uses OAuth. Sign in from your phone's browser.</Text>
-                  <Pressable style={({ pressed }) => [s.signInBtn, pressed && s.pressed]} onPress={() => void startSignIn()} accessibilityLabel="Sign in">
-                    <Text style={s.signInText}>Sign in</Text>
-                  </Pressable>
+                <View style={[s.oauthRow, { flexDirection: dir.row }]}>
+                  <Txt size={12.5} color={C.textFaint} style={s.oauthMsg}>{t('connectors.oauth.hint')}</Txt>
+                  <PrimaryBtn
+                    onPress={() => void startSignIn()}
+                    small
+                    accessibilityLabel={t('connectors.oauth.signIn')}
+                    textStyle={s.sheetBtnText}
+                  >
+                    <Txt size={11.5} weight="700" color={C.onAccent}>{t('connectors.oauth.signIn')}</Txt>
+                  </PrimaryBtn>
                 </View>
               )
             ) : null}
 
             {testing ? (
-              <View style={s.testingRow}>
-                <ActivityIndicator size="small" color={C.textDim} />
-                <Text style={s.rowDesc}>Testing — can take a minute on a cold start…</Text>
+              <View style={[s.oauthRow, { flexDirection: dir.row }]}>
+                <Spinner size="small" color={C.textDim} />
+                <Txt size={12.5} color={C.textDim} style={s.oauthMsg}>{t('connectors.detail.testProgress')}</Txt>
               </View>
             ) : null}
 
@@ -612,38 +769,60 @@ function ServerSheet({
               <View style={s.testResult}>
                 {result.ok ? (
                   <>
-                    <Text style={[s.rowDesc, { color: C.greenSoft }]}>
-                      Connected — {result.tools.length} tools{result.prompts ? `, ${result.prompts} prompts` : ''}{result.resources ? `, ${result.resources} resources` : ''}
-                    </Text>
-                    {result.tools.slice(0, 20).map((t) => (
-                      <Text key={t.name} style={s.toolLine} numberOfLines={1}>
-                        <Text style={s.toolName}>{t.name}</Text>
-                        {t.description ? ` — ${t.description}` : ''}
-                      </Text>
+                    <Txt size={12.5} color={C.greenSoft}>{testLine}</Txt>
+                    {result.tools.slice(0, 20).map((tool) => (
+                      <Txt key={tool.name} size={12} color={C.textFaint} numberOfLines={1}>
+                        <Txt size={12} weight="600" color={C.textDim}>{tool.name}</Txt>
+                        {tool.description ? ` — ${tool.description}` : ''}
+                      </Txt>
                     ))}
                     {result.tools.length > 20 ? (
-                      <Text style={s.rowSub}>…and {result.tools.length - 20} more</Text>
+                      <Txt size={11.5} color={C.textFaint}>
+                        {t('connectors.detail.moreTools', { n: result.tools.length - 20 })}
+                      </Txt>
                     ) : null}
                   </>
                 ) : (
-                  <Text style={[s.rowDesc, { color: C.red }]}>Failed — {result.error}</Text>
+                  <Txt size={12.5} color={C.red}>
+                    {t('connectors.detail.testFailed', { why: result.error ?? '' })}
+                  </Txt>
                 )}
               </View>
             ) : null}
           </ScrollView>
 
-          <View style={s.sheetActions}>
-            <Pressable style={({ pressed }) => [s.actBtn, pressed && s.pressed]} onPress={() => void runTest()} disabled={testing} accessibilityLabel="Test connection">
-              <Text style={s.actText}>{testing ? 'Testing…' : 'Test'}</Text>
-            </Pressable>
-            <Pressable style={({ pressed }) => [s.actBtn, pressed && s.pressed]} onPress={() => onNeedKey(server.name)} accessibilityLabel="Set API key">
-              <Text style={s.actText}>API key</Text>
-            </Pressable>
-            <Pressable style={({ pressed }) => [s.actBtn, s.actDanger, pressed && s.pressed]} onPress={() => void runRemove()} disabled={removing} accessibilityLabel="Remove server">
-              <Text style={[s.actText, { color: C.red }]}>{removing ? 'Removing…' : 'Remove'}</Text>
-            </Pressable>
+          <View style={[s.sheetActions, { flexDirection: dir.row }]}>
+            <PrimaryBtn
+              onPress={() => void runTest()}
+              disabled={testing}
+              style={s.actionPrimary}
+              accessibilityLabel={t('connectors.detail.testA11y')}
+            >
+              <Txt size={11.5} weight="700" color={C.onAccent} numberOfLines={1}>
+                {testing ? t('connectors.detail.testing') : t('connectors.detail.test')}
+              </Txt>
+            </PrimaryBtn>
+            <GhostBtn
+              onPress={() => onNeedKey(server.name)}
+              small
+              style={s.actionGhost}
+              accessibilityLabel={t('connectors.detail.apiKeyA11y')}
+            >
+              <Txt size={11.5} weight="600" color={C.text} numberOfLines={1}>{t('connectors.apiKeyTag')}</Txt>
+            </GhostBtn>
+            <GhostBtn
+              onPress={() => void runRemove()}
+              disabled={removing}
+              small
+              style={s.actionGhost}
+              accessibilityLabel={t('connectors.detail.removeA11y')}
+            >
+              <Txt size={11.5} weight="600" color={C.red} numberOfLines={1}>
+                {removing ? t('connectors.detail.removing') : t('common.remove')}
+              </Txt>
+            </GhostBtn>
           </View>
-        </View>
+        </SheetCard>
       </KeyboardAvoidingView>
     </Modal>
   )
@@ -659,13 +838,15 @@ function AddSheet({
   onAdded: (name: string) => void | Promise<void>
 }) {
   const s = useStyles(makeS)
+  const t = useT()
+  const dir = useDir()
   const [kind, setKind] = useState<'url' | 'command'>('url')
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
   const [command, setCommand] = useState('')
   const [bearer, setBearer] = useState('')
   const [saving, setSaving] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
+  const [err, setErr] = useState<FormError | null>(null)
 
   useEffect(() => {
     if (open) setErr(null)
@@ -674,15 +855,15 @@ function AddSheet({
   const submit = async () => {
     const trimmed = name.trim().toLowerCase().replace(/\s+/g, '-')
     if (!/^[a-z0-9][a-z0-9_.-]*$/.test(trimmed)) {
-      setErr('Name: letters, digits, dashes (e.g. my-search).')
+      setErr({ key: 'connectors.add.errName' })
       return
     }
     if (kind === 'url' && !/^https?:\/\//i.test(url.trim())) {
-      setErr('Enter the server URL (https://…).')
+      setErr({ key: 'connectors.add.errUrl' })
       return
     }
     if (kind === 'command' && !command.trim()) {
-      setErr('Enter the command that starts the server (e.g. npx -y …).')
+      setErr({ key: 'connectors.add.errCommand' })
       return
     }
     setSaving(true)
@@ -700,7 +881,7 @@ function AddSheet({
       setName(''); setUrl(''); setCommand(''); setBearer('')
       await onAdded(trimmed)
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setErr({ text: e instanceof Error ? e.message : String(e) })
     } finally {
       setSaving(false)
     }
@@ -710,60 +891,89 @@ function AddSheet({
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={s.sheetScrim} behavior="padding">
-        <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Close" onPress={onClose} />
-        <View style={s.sheetCard}>
-          <Text style={s.sheetTitle}>Add a server</Text>
-
-          <View style={s.tabs}>
-            {(['url', 'command'] as const).map((k) => (
-              <Pressable
-                key={k}
-                style={({ pressed }) => [s.tab, kind === k && s.tabOn, pressed && s.tabPressed]}
-                onPress={() => setKind(k)}
-                accessibilityRole="button"
-              >
-                <Text style={[s.tabText, kind === k && s.tabTextOn]}>{k === 'url' ? 'HTTP URL' : 'Command'}</Text>
-              </Pressable>
-            ))}
+      <KeyboardAvoidingView style={s.sheetRoot} behavior="padding">
+        <SheetBackdrop onPress={onClose} />
+        <SheetCard style={s.sheetCard}>
+          <SheetGrabber />
+          <View style={[s.sheetHead, { flexDirection: dir.row }]}>
+            <Txt size={13.5} weight="800" style={s.sheetTitleFlex}>{t('connectors.add.title')}</Txt>
+            <HeaderButton style={s.sheetClose} onPress={onClose} accessibilityLabel={t('common.close')}>
+              <Icon name="close" size={13} color={C.textDim} />
+            </HeaderButton>
           </View>
 
-          <ScrollView contentContainerStyle={{ gap: 8 }}>
-            <TextInput style={s.input} value={name} onChangeText={setName} placeholder="Name (e.g. deepwiki)" placeholderTextColor={C.textFaint} autoCapitalize="none" autoCorrect={false} />
+          <Segmented
+            options={[
+              { key: 'url', label: t('connectors.add.kindUrl') },
+              { key: 'command', label: t('connectors.add.kindCommand') },
+            ]}
+            value={kind}
+            onChange={setKind}
+          />
+
+          <ScrollView contentContainerStyle={s.formBody} keyboardShouldPersistTaps="handled">
+            <Field
+              value={name}
+              onChangeText={setName}
+              placeholder={t('connectors.add.namePlaceholder')}
+              autoCapitalize="none"
+              autoCorrect={false}
+              accessibilityLabel={t('connectors.field.nameA11y')}
+            />
             {kind === 'url' ? (
-              <TextInput
-                style={s.input} value={url} onChangeText={setUrl}
-                placeholder="https://mcp.example.com/mcp" placeholderTextColor={C.textFaint}
-                autoCapitalize="none" autoCorrect={false} keyboardType="url"
+              <Field
+                value={url}
+                onChangeText={setUrl}
+                placeholder={t('connectors.add.urlPlaceholder')}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                accessibilityLabel={t('connectors.field.urlA11y')}
               />
             ) : (
-              <TextInput
-                style={s.input} value={command} onChangeText={setCommand}
-                placeholder="npx -y @example/mcp-server" placeholderTextColor={C.textFaint}
-                autoCapitalize="none" autoCorrect={false}
-                multiline={false}
+              <Field
+                value={command}
+                onChangeText={setCommand}
+                placeholder={t('connectors.add.commandPlaceholder')}
+                autoCapitalize="none"
+                autoCorrect={false}
+                accessibilityLabel={t('connectors.field.commandA11y')}
               />
             )}
-            <TextInput
-              style={s.input} value={bearer} onChangeText={setBearer}
-              placeholder="Bearer token (optional)" placeholderTextColor={C.textFaint}
-              autoCapitalize="none" autoCorrect={false} secureTextEntry
+            <Field
+              value={bearer}
+              onChangeText={setBearer}
+              placeholder={t('connectors.add.bearerPlaceholder')}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+              accessibilityLabel={t('connectors.field.bearerA11y')}
             />
             {kind === 'command' ? (
-              <Text style={s.hint}>The machine must have the command available (node/npm for npx…).</Text>
+              <Txt size={12.5} color={C.textFaint} style={s.hint}>{t('connectors.add.commandHint')}</Txt>
             ) : null}
-            {err ? <Text style={s.errText}>{err}</Text> : null}
+            {err ? <Txt size={13} color={C.red} style={s.hint}>{errText(err, t)}</Txt> : null}
           </ScrollView>
 
-          <View style={s.sheetActions}>
-            <Pressable style={({ pressed }) => [s.actBtn, pressed && s.pressed]} onPress={onClose} disabled={saving}>
-              <Text style={[s.actText, { color: C.textDim }]}>Cancel</Text>
-            </Pressable>
-            <Pressable style={({ pressed }) => [s.actBtn, s.actPrimary, pressed && s.pressed]} onPress={() => void submit()} disabled={saving} accessibilityLabel="Add server">
-              <Text style={[s.actText, { color: C.onAccent }]}>{saving ? 'Adding…' : 'Add'}</Text>
-            </Pressable>
+          <View style={[s.sheetActions, { flexDirection: dir.row }]}>
+            <GhostBtn
+              label={t('common.cancel')}
+              onPress={onClose}
+              disabled={saving}
+              style={s.formBtn}
+            />
+            <PrimaryBtn
+              onPress={() => void submit()}
+              disabled={saving}
+              style={s.formBtn}
+              accessibilityLabel={t('connectors.addA11y')}
+            >
+              <Txt size={13} weight="700" color={C.onAccent}>
+                {saving ? t('connectors.add.adding') : t('common.add')}
+              </Txt>
+            </PrimaryBtn>
           </View>
-        </View>
+        </SheetCard>
       </KeyboardAvoidingView>
     </Modal>
   )
@@ -779,17 +989,22 @@ function KeySheet({
   onSaved: (name: string) => void | Promise<void>
 }) {
   const s = useStyles(makeS)
+  const t = useT()
+  const dir = useDir()
   const [value, setValue] = useState('')
   const [saving, setSaving] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
+  const [err, setErr] = useState<FormError | null>(null)
 
   useEffect(() => { if (name) { setValue(''); setErr(null) } }, [name])
 
   if (!name) return null
 
+  // `${MCP_<NAME>_API_KEY}` — the .env KEY reference, not a secret value.
+  const envRef = `\${MCP_${name.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY}`
+
   const submit = async () => {
     if (!value.trim()) {
-      setErr('Paste the key first.')
+      setErr({ key: 'connectors.key.errEmpty' })
       return
     }
     setSaving(true)
@@ -798,7 +1013,7 @@ function KeySheet({
       await saveMcpApiKey(name, value.trim())
       await onSaved(name)
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setErr({ text: e instanceof Error ? e.message : String(e) })
     } finally {
       setSaving(false)
     }
@@ -806,118 +1021,138 @@ function KeySheet({
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={s.sheetScrim} behavior="padding">
-        <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Close" onPress={onClose} />
-        <View style={s.sheetCard}>
-          <Text style={s.sheetTitle} numberOfLines={1}>API key — {name}</Text>
-          <Text style={s.hint}>
-            Saved to the machine's .env as a {'${'}MCP_{name.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY{'}'} reference — it never leaves that machine.
-          </Text>
-          <TextInput
-            style={s.input} value={value} onChangeText={setValue}
-            placeholder="Paste the API key" placeholderTextColor={C.textFaint}
-            autoCapitalize="none" autoCorrect={false} secureTextEntry
-          />
-          {err ? <Text style={s.errText}>{err}</Text> : null}
-          <View style={s.sheetActions}>
-            <Pressable style={({ pressed }) => [s.actBtn, pressed && s.pressed]} onPress={onClose} disabled={saving}>
-              <Text style={[s.actText, { color: C.textDim }]}>Cancel</Text>
-            </Pressable>
-            <Pressable style={({ pressed }) => [s.actBtn, s.actPrimary, pressed && s.pressed]} onPress={() => void submit()} disabled={saving} accessibilityLabel="Save key">
-              <Text style={[s.actText, { color: C.onAccent }]}>{saving ? 'Saving…' : 'Save'}</Text>
-            </Pressable>
+      <KeyboardAvoidingView style={s.sheetRoot} behavior="padding">
+        <SheetBackdrop onPress={onClose} />
+        <SheetCard style={s.sheetCard}>
+          <SheetGrabber />
+          <View style={[s.sheetHead, { flexDirection: dir.row }]}>
+            <Txt size={13.5} weight="800" numberOfLines={1} style={s.sheetTitleFlex}>
+              {t('connectors.key.title', { name })}
+            </Txt>
+            <HeaderButton style={s.sheetClose} onPress={onClose} accessibilityLabel={t('common.close')}>
+              <Icon name="close" size={13} color={C.textDim} />
+            </HeaderButton>
           </View>
-        </View>
+          <Txt size={12.5} color={C.textFaint} style={s.hint}>
+            {t('connectors.key.hintPre')}
+            <Txt size={12.5} mono ltr color={C.textFaint}>{envRef}</Txt>
+            {t('connectors.key.hintPost')}
+          </Txt>
+          <Field
+            value={value}
+            onChangeText={setValue}
+            placeholder={t('connectors.key.placeholder')}
+            autoCapitalize="none"
+            autoCorrect={false}
+            secureTextEntry
+            accessibilityLabel={t('connectors.key.fieldA11y')}
+          />
+          {err ? <Txt size={13} color={C.red} style={s.hint}>{errText(err, t)}</Txt> : null}
+          <View style={[s.sheetActions, { flexDirection: dir.row }]}>
+            <GhostBtn
+              label={t('common.cancel')}
+              onPress={onClose}
+              disabled={saving}
+              style={s.formBtn}
+            />
+            <PrimaryBtn
+              onPress={() => void submit()}
+              disabled={saving}
+              style={s.formBtn}
+              accessibilityLabel={t('common.save')}
+            >
+              <Txt size={13} weight="700" color={C.onAccent}>
+                {saving ? t('connectors.key.saving') : t('common.save')}
+              </Txt>
+            </PrimaryBtn>
+          </View>
+        </SheetCard>
       </KeyboardAvoidingView>
     </Modal>
   )
 }
 
+// ── Styles ──────────────────────────────────────────────────────────────────
+
 const makeS = () => StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
   kbListWrap: { flex: 1 },
-  headRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8, gap: 8 },
-  searchWrap: { flex: 1 },
-  search: { backgroundColor: C.bgCard, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 12, color: C.text, fontSize: 15, minHeight: 44 },
-  addBtn: { backgroundColor: C.accentSoft, borderWidth: 1, borderColor: C.border, borderRadius: 20, paddingHorizontal: 14, height: 44, alignItems: 'center', justifyContent: 'center' },
-  addBtnText: { color: C.accent, fontSize: 14, fontWeight: '700' },
-  tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingBottom: 10 },
-  tab: { paddingHorizontal: 14, height: 34, borderRadius: 17, backgroundColor: C.bgCard, alignItems: 'center', justifyContent: 'center' },
-  tabOn: { backgroundColor: C.accent },
-  tabPressed: { opacity: 0.6 },
-  tabText: { color: C.textDim, fontSize: 13, fontWeight: '600' },
-  tabTextOn: { color: C.onAccent },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 10, paddingVertical: 11, borderRadius: 10, minHeight: 48 },
-  rowPressed: { backgroundColor: C.bgCard },
-  rowHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  rowName: { color: C.text, fontSize: 15, fontWeight: '600', flexShrink: 1 },
-  rowDesc: { color: C.textFaint, fontSize: 12.5, marginTop: 2, lineHeight: 17 },
-  rowSub: { color: C.textFaint, fontSize: 11.5, marginTop: 1, opacity: 0.8 },
-  badge: { color: C.textFaint, fontSize: 10.5, fontWeight: '700', textTransform: 'uppercase' },
-  gridCard: {
-    flex: 1, backgroundColor: C.bgCard, borderRadius: 16, borderWidth: 1, borderColor: C.borderSoft,
-    padding: 12, gap: 10,
-  },
-  keyChip: { color: C.amber, fontSize: 10.5, fontWeight: '700', textTransform: 'uppercase', marginTop: 2 },
-  tile: { alignItems: 'center', justifyContent: 'center' },
-  tileLogoChip: { backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
-  tileText: { color: '#FFFFFF', fontWeight: '800' },
-  tileCheck: { position: 'absolute' },
-  installBtn: { minHeight: 34, borderRadius: 17, paddingHorizontal: 12, backgroundColor: C.accentSoft, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
-  installOff: { backgroundColor: C.bgCard },
-  installText: { color: C.accent, fontSize: 12.5, fontWeight: '700' },
-  empty: { color: C.textFaint, textAlign: 'center', marginTop: 48, fontSize: 14 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 8 },
-  emptyTitle: { color: C.text, fontSize: 16, fontWeight: '700', textAlign: 'center' },
-  emptyBody: { color: C.textDim, fontSize: 13.5, lineHeight: 19, textAlign: 'center' },
-  pressed: { opacity: 0.55 },
-  errBanner: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    marginHorizontal: 16, marginBottom: 8, padding: 10,
-    backgroundColor: C.bgCard, borderRadius: 12, borderWidth: 1, borderColor: C.borderSoft,
-  },
-  errBannerText: { color: C.textDim, fontSize: 12.5, flex: 1, lineHeight: 17 },
-  errRetry: { color: C.accent, fontSize: 13, fontWeight: '800' },
-  amberBadge: {
-    backgroundColor: C.amberSoft, borderRadius: 8,
-    paddingHorizontal: 6, paddingVertical: 2,
-  },
-  amberBadgeText: { color: C.amber, fontSize: 10.5, fontWeight: '800', textTransform: 'uppercase' },
-  oauthRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  signInBtn: {
-    backgroundColor: C.accent, borderRadius: 12, paddingHorizontal: 16,
-    minHeight: 40, alignItems: 'center', justifyContent: 'center',
-  },
-  signInText: { color: C.onAccent, fontSize: 14, fontWeight: '800' },
-  oauthCancel: { paddingHorizontal: 10, minHeight: 36, alignItems: 'center', justifyContent: 'center' },
-  oauthCancelText: { color: C.accent, fontSize: 13, fontWeight: '700' },
 
-  // sheets
-  sheetScrim: { flex: 1, justifyContent: 'flex-end', backgroundColor: C.scrim },
-  sheetCard: {
-    backgroundColor: C.bgElev, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    borderWidth: 1, borderColor: C.borderSoft, padding: 18, gap: 10, paddingBottom: 26,
+  // Search + "+ Add" (mockup: flex row, gap 6, margin-bottom 8)
+  searchRow: { alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingTop: 10, marginBottom: 8 },
+  searchWrap: { flex: 1 },
+  addBtn: { paddingHorizontal: 12, paddingVertical: 0, height: 36, flexShrink: 0 },
+
+  // Yours (n) | Browse segmented
+  segmented: { marginHorizontal: 14, marginBottom: 10 },
+
+  // Lists
+  listContent: { paddingHorizontal: 14, paddingBottom: 18 },
+  gridContent: { paddingHorizontal: 14, paddingBottom: 18, gap: 8 },
+  gridRow: { gap: 8 },
+
+  // Server cards (mockup: m-card row, 36px tile, gap 10)
+  serverCard: { padding: 12 },
+  serverRow: { alignItems: 'center', gap: 10 },
+  serverBody: { flex: 1, minWidth: 0 },
+  serverHead: { alignItems: 'center', gap: 5, flexWrap: 'wrap' },
+  serverName: { flexShrink: 1 },
+  serverStatus: { marginTop: 2 },
+  transportBadge: {
+    paddingVertical: 1,
+    paddingHorizontal: 5,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.bgElev,
   },
-  sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  sheetTitle: { color: C.text, fontSize: 17, fontWeight: '800' },
-  cfgLine: { color: C.textDim, fontSize: 12.5, lineHeight: 17, fontFamily: undefined },
-  hint: { color: C.textFaint, fontSize: 12.5, lineHeight: 17 },
-  code: { color: C.accent, fontWeight: '600' },
-  testingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
+  desktopPill: { paddingVertical: 1, paddingHorizontal: 5 },
+  desktopPillText: { fontSize: 9 },
+
+  // Browse grid cards (mockup: m-card column, gap 8, full-width CTA)
+  gridCard: { flex: 1, marginBottom: 0, gap: 8, justifyContent: 'space-between' },
+  gridTop: { alignItems: 'center', justifyContent: 'space-between', gap: 6 },
+  installBtn: { width: '100%', minHeight: 30, paddingVertical: 5, paddingHorizontal: 5 },
+  installedBtn: { opacity: 0.8 },
+  installBtnText: { fontSize: 11 },
+
+  // Letter tile (accentSoft square, accent ink — the mockup's brand-less tile)
+  tile: { alignItems: 'center', justifyContent: 'center', backgroundColor: C.accentSoft, flexShrink: 0 },
+
+  // Empty / centered states
+  emptyText: { marginTop: 48 },
+  emptyState: { alignItems: 'center', marginTop: 40, gap: 10, paddingHorizontal: 24 },
+  unsupported: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 8 },
+  unsupportedTitle: { marginTop: 8 },
+  unsupportedBody: { marginTop: 2 },
+
+  // Error banner
+  errBanner: { alignItems: 'center', gap: 8, marginHorizontal: 14, marginBottom: 8, padding: 10 },
+  errBannerText: { flex: 1 },
+
+  pressed: { opacity: 0.55 },
+
+  // Sheets
+  sheetRoot: { flex: 1, justifyContent: 'flex-end' },
+  sheetCard: { gap: 10 },
+  sheetHead: { alignItems: 'center', gap: 10 },
+  sheetHeadBody: { flex: 1, minWidth: 0 },
+  sheetTitleRow: { alignItems: 'center', gap: 5 },
+  sheetTitleText: { flexShrink: 1 },
+  sheetTitleFlex: { flex: 1 },
+  sheetClose: { width: 26, height: 26, borderRadius: 8, flexShrink: 0 },
+  detailStatusRow: { alignItems: 'center', gap: 4, marginTop: 2 },
+  detailStatusText: { flexShrink: 1 },
+  sheetScroll: { maxHeight: 320, flexGrow: 0 },
+  sheetScrollBody: { gap: 6 },
+  hint: { lineHeight: 17 },
+  oauthRow: { alignItems: 'center', gap: 8 },
+  oauthMsg: { flex: 1 },
   testResult: { gap: 4, paddingTop: 4 },
-  toolLine: { color: C.textFaint, fontSize: 12, lineHeight: 16 },
-  toolName: { color: C.textDim, fontWeight: '600' },
-  sheetActions: { flexDirection: 'row', gap: 8, marginTop: 6 },
-  actBtn: {
-    flex: 1, minHeight: 46, borderRadius: 14, backgroundColor: C.bgCard,
-    alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.borderSoft,
-  },
-  actPrimary: { backgroundColor: C.accent, borderColor: 'transparent' },
-  actDanger: { backgroundColor: C.redSoft },
-  actText: { color: C.accent, fontSize: 14.5, fontWeight: '800' },
-  input: {
-    backgroundColor: C.bgCard, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12,
-    color: C.text, fontSize: 15, minHeight: 46, borderWidth: 1, borderColor: C.borderSoft,
-  },
-  errText: { color: C.red, fontSize: 13, lineHeight: 18 },
+  sheetActions: { gap: 8, marginTop: 6 },
+  actionPrimary: { flex: 1, minHeight: 36, paddingVertical: 6, paddingHorizontal: 10 },
+  actionGhost: { minHeight: 36, paddingVertical: 6, paddingHorizontal: 10, flexShrink: 0 },
+  sheetBtnText: { fontSize: 11.5 },
+  formBody: { gap: 8 },
+  formBtn: { flex: 1, minHeight: 40 },
 })

@@ -1,18 +1,22 @@
-import React, { useCallback, useEffect, useState } from 'react'
-import { View, Text, ScrollView, StyleSheet, Pressable, RefreshControl, ActivityIndicator, Modal, TextInput } from 'react-native'
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
-import { Ionicons } from '@expo/vector-icons'
-import { Icon } from '../../src/components/Icon'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { View, StyleSheet, Pressable, RefreshControl } from 'react-native'
+import {
+  KeyboardAwareScrollView,
+  type KeyboardAwareScrollViewRef,
+} from 'react-native-keyboard-controller'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useStore } from '@nanostores/react'
 import * as Clipboard from 'expo-clipboard'
-import { rpc, isConnected as isConnectedAtom } from '../../src/lib/gateway'
-import { ensureSession } from '../../src/lib/chat'
-import { runningAutomationCount, countRunningJobs } from '../../src/lib/automationsState'
-import { tr } from '../../src/lib/strings'
+import { Icon } from '../../src/components/Icon'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
+import { MochiMark } from '../../src/components/MochiMark'
+import { Card, Field, GhostBtn, Kicker, Pill, PrimaryBtn, Spinner, Txt } from '../../src/components/ui'
 import { C, useStyles } from '../../src/lib/theme'
+import { rpc, isConnected as isConnectedAtom, retryNow } from '../../src/lib/gateway'
+import { ensureSession } from '../../src/lib/chat'
+import { runningAutomationCount, countRunningJobs } from '../../src/lib/automationsState'
+import { localeAtom, tr, useDir, useT } from '../../src/lib/strings'
 
 interface Job {
   job_id: string
@@ -32,28 +36,40 @@ interface Job {
   paused_reason?: string | null
 }
 
+type TFn = (key: string, vars?: Record<string, string | number>) => string
+
 /** Shell-quote a value for /cron edit flags — schedules contain spaces ("every 30m"). */
 function shq(v: string): string {
   return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
 }
 
-function when(iso?: string | null): string {
+/**
+ * Localized "next run" pill label. Same buckets as the pre-redesign helper, but
+ * the copy now comes from the automations catalog so zh/fr/ar read naturally.
+ */
+function nextLabel(iso: string | null | undefined, t: TFn): string {
   if (!iso) return ''
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return ''
-  const diff = t - Date.now()
-  if (diff < 0) return 'due'
-  if (diff < 3_600_000) return `in ${Math.round(diff / 60_000)}m`
-  if (diff < 86_400_000) return `in ${Math.round(diff / 3_600_000)}h`
-  return `in ${Math.round(diff / 86_400_000)}d`
+  const at = Date.parse(iso)
+  if (Number.isNaN(at)) return ''
+  const diff = at - Date.now()
+  if (diff < 0) return t('automations.next.due')
+  if (diff < 3_600_000) return t('automations.next.minutes', { n: Math.round(diff / 60_000) })
+  if (diff < 86_400_000) return t('automations.next.hours', { n: Math.round(diff / 3_600_000) })
+  return t('automations.next.days', { n: Math.round(diff / 86_400_000) })
 }
 
-function fmtFull(iso?: string | null): string {
+/** Absolute timestamp for the expanded detail block, localized (SPEC §3). */
+function fmtFull(iso: string | null | undefined, locale: string): string {
   if (!iso) return '—'
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return '—'
+  const at = Date.parse(iso)
+  if (Number.isNaN(at)) return '—'
   try {
-    return new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    return new Date(at).toLocaleString(locale, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
   } catch {
     return iso
   }
@@ -63,9 +79,28 @@ function fmtFull(iso?: string | null): string {
  * Scheduled automations — the Hermes equivalent of ChatGPT's "Scheduled".
  * Backed by the real surface: `cron.manage` (list/add/get/remove/pause/resume)
  * and `slash.exec /cron` for run-now and edit (edit flags are shell-quoted).
+ *
+ * Redesign (mockup screen 9): the new/edit form is an accent-bordered Card at
+ * the top of the app-scroll (it used to be a full-screen Modal), the whole
+ * scroll is a KeyboardAwareScrollView so the multiline prompt clears the IME
+ * (BUG-133 form pattern), and every visible string is localized in four
+ * locales.
  */
 export default function Automations() {
   const s = useStyles(makeS)
+  return (
+    <SafeAreaView style={s.frame} edges={['bottom']}>
+      <AutomationsInner />
+    </SafeAreaView>
+  )
+}
+
+function AutomationsInner() {
+  const s = useStyles(makeS)
+  // useT subscribes: an open screen re-translates on a language switch.
+  const t = useT()
+  const dir = useDir()
+  const locale = useStore(localeAtom)
   const online = useStore(isConnectedAtom)
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(true)
@@ -74,7 +109,10 @@ export default function Automations() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [busyJob, setBusyJob] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
-  // Add/edit form. editing === null → closed; job_id set → edit mode.
+  // Which job id was just copied — drives the mockup's "Copied ✓" chip state.
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const scrollRef = useRef<KeyboardAwareScrollViewRef>(null)
+  // Add/edit form. jobId === null → add mode; set → edit mode.
   // loadedPrompt: the prompt exactly as loaded from the gateway (full text
   // after the 'get' fetch) — the save dirty-check compares against it so a
   // schedule-only edit never re-sends --prompt. promptDegraded: the full
@@ -96,7 +134,7 @@ export default function Automations() {
       // resume / remove / add update it instantly.
       runningAutomationCount.set(countRunningJobs(res?.jobs ?? []))
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load automations')
+      setError(e instanceof Error ? e.message : tr('automations.error.load'))
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -111,9 +149,16 @@ export default function Automations() {
   // Transient status line ("Saved", "Queued to run") fades after a few seconds.
   useEffect(() => {
     if (!status) return
-    const t = setTimeout(() => setStatus(null), 4000)
-    return () => clearTimeout(t)
+    const timer = setTimeout(() => setStatus(null), 4000)
+    return () => clearTimeout(timer)
   }, [status])
+
+  // "Copied ✓" chip label returns to "Tap to copy" after a moment.
+  useEffect(() => {
+    if (!copiedId) return
+    const timer = setTimeout(() => setCopiedId(null), 2000)
+    return () => clearTimeout(timer)
+  }, [copiedId])
 
   /** Run a /cron subcommand through slash.exec; it needs a live session id. */
   const cronSlash = useCallback(async (command: string): Promise<string> => {
@@ -127,7 +172,7 @@ export default function Automations() {
     try {
       await fn()
     } catch (e) {
-      showAlert('Action failed', e instanceof Error ? e.message : String(e))
+      showAlert(tr('automations.alert.actionFailed'), e instanceof Error ? e.message : String(e))
     } finally {
       setBusyJob(null)
     }
@@ -137,26 +182,30 @@ export default function Automations() {
     withBusy(j.job_id, async () => {
       const action = j.enabled === false ? 'resume' : 'pause'
       await rpc('cron.manage', { action, name: j.job_id })
-      setStatus(action === 'pause' ? `Paused “${j.name ?? j.job_id}”` : `Resumed “${j.name ?? j.job_id}”`)
+      setStatus(
+        tr(action === 'pause' ? 'automations.status.paused' : 'automations.status.resumed', {
+          name: j.name ?? j.job_id,
+        }),
+      )
       await load()
     })
 
   const runNow = (j: Job) =>
     withBusy(j.job_id, async () => {
       const out = await cronSlash(`/cron run ${j.job_id}`)
-      setStatus(out.split('\n')[0] || `Queued “${j.name ?? j.job_id}” to run`)
+      setStatus(out.split('\n')[0] || tr('automations.status.queued', { name: j.name ?? j.job_id }))
     })
 
   const remove = (j: Job) =>
-    showAlert('Delete this automation?', j.name ?? j.job_id, [
-      { text: 'Cancel', style: 'cancel' },
+    showAlert(tr('automations.alert.deleteTitle'), j.name ?? j.job_id, [
+      { text: tr('common.cancel'), style: 'cancel' },
       {
-        text: 'Delete',
+        text: tr('common.delete'),
         style: 'destructive',
         onPress: () =>
           withBusy(j.job_id, async () => {
             await rpc('cron.manage', { action: 'remove', name: j.job_id })
-            setStatus(`Deleted “${j.name ?? j.job_id}”`)
+            setStatus(tr('automations.status.deleted', { name: j.name ?? j.job_id }))
             await load()
           }),
       },
@@ -173,7 +222,9 @@ export default function Automations() {
     // the truncated preview).
     const promptUnchanged = !!form.jobId && form.loadedPrompt !== null && prompt === form.loadedPrompt.trim()
     if (!schedule || (!prompt && !promptUnchanged) || (!form.jobId && !name)) {
-      showAlert('Missing fields', 'Name, schedule and prompt are all needed.')
+      showAlert(tr('automations.alert.missing.title'), tr('automations.alert.missing.body'), [
+        { text: tr('chrome.alert.ok') },
+      ])
       return
     }
     setForm({ ...form, saving: true })
@@ -182,20 +233,33 @@ export default function Automations() {
         // /cron edit has no --name; schedule + prompt are the editable levers.
         const promptFlag = promptUnchanged ? '' : ` --prompt ${shq(prompt)}`
         const out = await cronSlash(`/cron edit ${form.jobId} --schedule ${shq(schedule)}${promptFlag}`)
-        setStatus(out.split('\n')[0] || 'Updated')
+        setStatus(out.split('\n')[0] || tr('automations.status.updated'))
       } else {
         await rpc('cron.manage', { action: 'add', name, schedule, prompt })
-        setStatus(`Created “${name}”`)
+        setStatus(tr('automations.status.created', { name }))
       }
       setForm(null)
       await load()
     } catch (e) {
-      showAlert(form.jobId ? 'Edit failed' : 'Create failed', e instanceof Error ? e.message : String(e))
+      showAlert(
+        form.jobId ? tr('automations.alert.editFailed') : tr('automations.alert.createFailed'),
+        e instanceof Error ? e.message : String(e),
+        [{ text: tr('chrome.alert.ok') }],
+      )
       setForm({ ...form, saving: false })
     }
   }
 
-  const openAdd = () => setForm({ jobId: null, name: '', schedule: '', prompt: '', loadedPrompt: null, promptDegraded: false, saving: false })
+  /** Form sits at the top of the scroll — make sure it is on screen. */
+  const revealForm = () => {
+    requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: true }))
+  }
+
+  const openAdd = () => {
+    if (form?.saving) return
+    setForm({ jobId: null, name: '', schedule: '', prompt: '', loadedPrompt: null, promptDegraded: false, saving: false })
+    revealForm()
+  }
 
   /**
    * #108: prompt_preview is truncated at 100 chars — opening the editor from
@@ -206,6 +270,7 @@ export default function Automations() {
    */
   const openEdit = async (j: Job) => {
     setForm({ jobId: j.job_id, name: j.name ?? '', schedule: j.schedule ?? '', prompt: j.prompt_preview ?? '', loadedPrompt: null, promptDegraded: false, saving: false })
+    revealForm()
     try {
       const r = await rpc<{ job?: { prompt?: string } }>('cron.manage', { action: 'get', name: j.job_id })
       const full = r?.job?.prompt
@@ -220,292 +285,452 @@ export default function Automations() {
 
   const copyId = async (j: Job) => {
     await Clipboard.setStringAsync(j.job_id)
-    setStatus('Job ID copied')
+    setCopiedId(j.job_id)
   }
 
+  // Only claim "nothing scheduled" when the gateway could actually answer —
+  // offline keeps the offline notice as the single explanation.
+  const showEmpty = online && !loading && jobs.length === 0 && !error && !form
+
   return (
-    <SafeAreaView style={s.safe} edges={['bottom']}>
-      <ScreenShell
-        title="Automations"
-        showBrand
-        right={
-          <Pressable
-            style={({ pressed }) => [s.addBtn, pressed && s.btnPressed]}
-            onPress={openAdd}
-            hitSlop={8}
-            accessibilityLabel="New automation"
-          >
-            <Icon name="add" size={20} color={C.onAccent} />
-          </Pressable>
+    <ScreenShell
+      title={t('automations.title')}
+      showBrand
+      right={
+        <Pressable
+          onPress={openAdd}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={t('automations.newA11y')}
+          style={({ pressed }) => [s.fab, pressed && s.pressed]}
+        >
+          <Icon name="add" size={18} color={C.onAccent} />
+        </Pressable>
+      }
+    >
+      {/* BUG-133: scrollable forms use KeyboardAwareScrollView with
+          keyboardShouldPersistTaps="handled" so the cron/prompt fields clear
+          the IME (the repo's proven form pattern, mockup §7). */}
+      <KeyboardAwareScrollView
+        ref={scrollRef}
+        style={s.scroll}
+        contentContainerStyle={s.content}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            tintColor={C.textDim}
+            onRefresh={async () => {
+              setRefreshing(true)
+              await load()
+            }}
+          />
         }
       >
-        <ScrollView
-          contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 32 }}
-          keyboardShouldPersistTaps="handled"
-          refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.textDim} onRefresh={async () => { setRefreshing(true); await load() }} />}
-        >
-          <Text style={s.intro}>Scheduled jobs run on your gateway, so they work even when this app is closed.</Text>
+        <Txt size={11.5} color={C.textDim} style={s.intro}>
+          {t('automations.intro')}
+        </Txt>
 
-          {status ? (
-            <View style={s.statusRow}>
-              <Icon name="checkmark-circle" size={13} color={C.greenSoft} />
-              <Text style={s.statusText}>{status}</Text>
+        {status ? (
+          <View style={[s.statusRow, { flexDirection: dir.row }]}>
+            <Icon name="checkmark-circle" size={13} color={C.greenSoft} />
+            <Txt size={12} weight="600" color={C.greenSoft} style={s.statusText}>
+              {status}
+            </Txt>
+          </View>
+        ) : null}
+
+        {error ? (
+          <Pressable
+            style={({ pressed }) => [s.notice, s.noticeError, pressed && s.pressed]}
+            onPress={() => {
+              setLoading(true)
+              void load()
+            }}
+            accessibilityRole="button"
+          >
+            <Txt size={12} weight="700" color={C.red} center>
+              {t('automations.error.retry', { error })}
+            </Txt>
+          </Pressable>
+        ) : null}
+
+        {!online ? (
+          <Pressable
+            style={({ pressed }) => [s.notice, s.noticeOffline, pressed && s.pressed]}
+            onPress={() => {
+              void retryNow().catch(() => {})
+            }}
+            accessibilityRole="button"
+          >
+            <Txt size={12} weight="700" color={C.amber} center>
+              {t('automations.offline')}
+            </Txt>
+          </Pressable>
+        ) : null}
+
+        {loading ? (
+          <View style={s.loadWrap}>
+            <Spinner color={C.accent} />
+          </View>
+        ) : null}
+
+        {/* New / edit automation — accent-bordered Card at the top of the
+            scroll (mockup screen 9 `stateKey === 'modal'`). */}
+        {form ? (
+          <Card style={s.formCard}>
+            <Txt size={13.5} weight="800" style={s.formTitle}>
+              {form.jobId ? t('automations.form.editTitle') : t('automations.form.newTitle')}
+            </Txt>
+
+            <Kicker style={s.formKicker}>{t('automations.form.name')}</Kicker>
+            {form.jobId ? (
+              <Txt size={13} color={C.textDim} numberOfLines={1} style={s.formLocked}>
+                {form.name || form.jobId}
+              </Txt>
+            ) : (
+              <Field
+                value={form.name}
+                onChangeText={(v) => setForm((f) => (f ? { ...f, name: v } : f))}
+                placeholder={t('automations.form.name.placeholder')}
+                autoCapitalize="none"
+                accessibilityLabel={t('automations.form.nameA11y')}
+              />
+            )}
+
+            <Kicker style={s.formKicker}>{t('automations.form.schedule')}</Kicker>
+            <Field
+              value={form.schedule}
+              onChangeText={(v) => setForm((f) => (f ? { ...f, schedule: v } : f))}
+              placeholder={t('automations.form.schedule.placeholder')}
+              mono
+              ltr
+              autoCapitalize="none"
+              autoCorrect={false}
+              accessibilityLabel={t('automations.form.scheduleA11y')}
+            />
+            <Txt size={10.5} color={C.textFaint} style={s.formHint}>
+              {t('automations.form.schedule.hint')}
+            </Txt>
+
+            <Kicker style={s.formKicker}>{t('automations.form.prompt')}</Kicker>
+            {form.promptDegraded ? (
+              <Txt size={10.5} color={C.amber} style={s.formWarn}>
+                {tr('automations.promptLoadFailed')}
+              </Txt>
+            ) : null}
+            <Field
+              value={form.prompt}
+              onChangeText={(v) => setForm((f) => (f ? { ...f, prompt: v } : f))}
+              placeholder={t('automations.form.prompt.placeholder')}
+              multiline
+              accessibilityLabel={t('automations.form.promptA11y')}
+            />
+            <Txt size={10.5} color={C.textFaint} style={s.formHint}>
+              {t('automations.form.prompt.hint')}
+            </Txt>
+
+            <View style={[s.formActions, { flexDirection: dir.row }]}>
+              <GhostBtn
+                label={t('common.cancel')}
+                onPress={() => {
+                  if (!form.saving) setForm(null)
+                }}
+                disabled={form.saving}
+                style={s.formBtn}
+              />
+              <PrimaryBtn
+                onPress={() => {
+                  void saveForm()
+                }}
+                disabled={form.saving}
+                style={s.formBtn}
+              >
+                {form.saving ? (
+                  <Spinner size="small" color={C.onAccent} />
+                ) : (
+                  <Txt size={13} weight="700" color={C.onAccent}>
+                    {form.jobId ? t('common.save') : t('automations.form.create')}
+                  </Txt>
+                )}
+              </PrimaryBtn>
             </View>
-          ) : null}
+          </Card>
+        ) : null}
 
-          {error ? (
-            <Pressable style={({ pressed }) => [s.retryRow, pressed && s.btnPressed]} onPress={() => { setLoading(true); void load() }}>
-              <Text style={s.error}>{error} — tap to retry</Text>
-            </Pressable>
-          ) : null}
-
-          {loading ? <ActivityIndicator color={C.textDim} style={{ marginTop: 24 }} /> : null}
-
-          {!loading && jobs.length === 0 && !error ? (
-            <View style={s.empty}>
-              <Icon name="timer-outline" size={28} color={C.textFaint} />
-              <Text style={s.emptyTitle}>No automations yet</Text>
-              <Text style={s.emptyBody}>Tap + to schedule your first job,{'\n'}or create one from chat with /cron add</Text>
-              <Pressable style={({ pressed }) => [s.emptyBtn, pressed && s.btnPressed]} onPress={openAdd} accessibilityLabel="New automation">
-                <Icon name="add" size={16} color={C.onAccent} />
-                <Text style={s.emptyBtnText}>New automation</Text>
-              </Pressable>
-            </View>
-          ) : null}
-
-          {jobs.map((j) => {
-            const paused = j.enabled === false || j.state === 'paused'
-            const open = expanded === j.job_id
-            const busy = busyJob === j.job_id
-            const lastError = j.last_fire_error || j.last_delivery_error || j.last_error
-            return (
-              <View key={j.job_id} style={[s.card, paused && s.cardPaused]}>
-                <Pressable
-                  style={({ pressed }) => [s.cardHead, pressed && s.btnPressed]}
-                  onPress={() => setExpanded(open ? null : j.job_id)}
-                  accessibilityLabel={open ? `Collapse ${j.name ?? j.job_id}` : `Expand ${j.name ?? j.job_id}`}
-                >
-                  <Icon name={paused ? 'pause-circle-outline' : 'timer-outline'} size={17} color={paused ? C.textFaint : C.accent} />
-                  <Text style={[s.name, paused && { color: C.textDim }]} numberOfLines={1}>
+        {jobs.map((j) => {
+          const paused = j.enabled === false || j.state === 'paused'
+          const open = expanded === j.job_id
+          const busy = busyJob === j.job_id
+          const lastError = j.last_fire_error || j.last_delivery_error || j.last_error
+          const next = paused ? '' : nextLabel(j.next_run_at, t)
+          const details: { key: string; value: string; danger?: boolean }[] = []
+          if (j.next_run_at) details.push({ key: 'automations.detail.next', value: fmtFull(j.next_run_at, locale) })
+          if (j.last_run_at) details.push({ key: 'automations.detail.last', value: fmtFull(j.last_run_at, locale) })
+          if (j.repeat) details.push({ key: 'automations.detail.repeat', value: j.repeat })
+          if (j.paused_reason) details.push({ key: 'automations.detail.pausedBecause', value: j.paused_reason })
+          if (lastError) details.push({ key: 'automations.detail.lastError', value: String(lastError).slice(0, 300), danger: true })
+          return (
+            <Card key={j.job_id} style={[s.jobCard, paused && s.jobPaused]}>
+              {/* Tap-to-expand summary. Kept as its own Pressable (not the Card
+                  itself) so the copy chip and action buttons inside the
+                  expanded section are not nested in a pressable parent. */}
+              <Pressable
+                onPress={() => setExpanded(open ? null : j.job_id)}
+                accessibilityRole="button"
+                accessibilityLabel={t(
+                  open ? 'automations.card.collapseA11y' : 'automations.card.expandA11y',
+                  { name: j.name ?? j.job_id },
+                )}
+                style={({ pressed }) => [pressed && s.pressed]}
+              >
+                <View style={[s.jobHead, { flexDirection: dir.row }]}>
+                  <Txt size={13.5} weight="800" numberOfLines={1} style={s.jobName}>
                     {j.name ?? j.job_id}
-                  </Text>
-                  {j.next_run_at && !paused ? (
-                    <Text style={s.nextChip}>{when(j.next_run_at)}</Text>
-                  ) : paused ? (
-                    <Text style={s.pausedChip}>paused</Text>
+                  </Txt>
+                  {paused ? (
+                    <Pill kind="amber">{t('automations.card.paused')}</Pill>
+                  ) : next ? (
+                    <Pill kind="accent">{next}</Pill>
                   ) : null}
-                  <Icon name={open ? 'chevron-up' : 'chevron-down'} size={14} color={C.textFaint} />
-                </Pressable>
+                </View>
 
                 {j.prompt_preview ? (
-                  <Text style={s.prompt} numberOfLines={open ? undefined : 2}>{j.prompt_preview}</Text>
+                  <Txt size={12} color={C.textDim} numberOfLines={open ? undefined : 2} style={s.jobPrompt}>
+                    {j.prompt_preview}
+                  </Txt>
                 ) : null}
 
-                <View style={s.metaRow}>
-                  {j.schedule ? <Text style={s.meta}>{j.schedule}</Text> : null}
-                  {j.last_status ? <Text style={s.meta}>last: {j.last_status}</Text> : null}
-                </View>
-
-                {open ? (
-                  <View style={s.detail}>
-                    <Detail label="Job ID" value={j.job_id} onCopy={() => { void copyId(j) }} />
-                    <Detail label="Next run" value={j.next_run_at ? fmtFull(j.next_run_at) : '—'} />
-                    <Detail label="Last run" value={j.last_run_at ? fmtFull(j.last_run_at) : '—'} />
-                    <Detail label="Repeat" value={j.repeat ?? '—'} />
-                    <Detail label="Deliver" value={j.deliver ?? '—'} />
-                    {j.paused_reason ? <Detail label="Paused because" value={j.paused_reason} /> : null}
-                    {lastError ? <Detail label="Last error" value={String(lastError).slice(0, 300)} danger /> : null}
+                {j.schedule || j.last_status ? (
+                  <View style={[s.metaRow, { flexDirection: dir.row }]}>
+                    {j.schedule ? (
+                      <Txt size={10.5} mono ltr color={C.textFaint}>
+                        {j.schedule}
+                      </Txt>
+                    ) : null}
+                    {j.schedule && j.last_status ? (
+                      <Txt size={10.5} color={C.textFaint}>
+                        ·
+                      </Txt>
+                    ) : null}
+                    {j.last_status ? (
+                      <Txt size={10.5} color={C.textFaint} numberOfLines={1} style={s.metaLast}>
+                        {t('automations.card.last', { status: j.last_status })}
+                      </Txt>
+                    ) : null}
                   </View>
                 ) : null}
-
-                <View style={s.actions}>
-                  {busy ? (
-                    <ActivityIndicator size="small" color={C.accent} style={{ marginRight: 'auto' }} />
-                  ) : (
-                    <>
-                      <Action icon="play-outline" label="Run now" onPress={() => { void runNow(j) }} />
-                      <Action
-                        icon={paused ? 'play-skip-forward-outline' : 'pause-outline'}
-                        label={paused ? 'Resume' : 'Pause'}
-                        onPress={() => { void toggle(j) }}
-                      />
-                      <Action icon="create-outline" label="Edit" onPress={() => { void openEdit(j) }} />
-                      <Action icon="trash-outline" label="Delete" danger onPress={() => remove(j)} />
-                    </>
-                  )}
-                </View>
-              </View>
-            )
-          })}
-        </ScrollView>
-      </ScreenShell>
-
-      {/* Add / edit sheet */}
-      <Modal visible={!!form} animationType="slide" onRequestClose={() => { if (!form?.saving) setForm(null) }}>
-        {/* BUG-133: the KAV used to nest INSIDE the SafeAreaView with
-            behavior 'height' — parent-relative frame math (the variant this
-            repo rejected in terminal.tsx) undershooting by the top inset, so
-            the prompt's lower rows could sit under the IME. As the Modal's
-            full-screen root with 'padding' (connectors-proven shape) the lift
-            is exact: form fields and hints clear the keyboard on any device. */}
-        <KeyboardAvoidingView style={s.modalSafe} behavior="padding">
-          <SafeAreaView style={s.modalRoot}>
-            <View style={s.modalHead}>
-              <Pressable
-                style={({ pressed }) => [s.modalTextBtn, pressed && s.btnPressed]}
-                onPress={() => { if (!form?.saving) setForm(null) }}
-                disabled={form?.saving}
-                accessibilityLabel="Cancel"
-              >
-                <Text style={s.modalCancel}>Cancel</Text>
               </Pressable>
-              <Text style={s.modalTitle}>{form?.jobId ? 'Edit automation' : 'New automation'}</Text>
-              <Pressable
-                style={({ pressed }) => [s.modalTextBtn, pressed && s.btnPressed]}
-                onPress={() => { void saveForm() }}
-                disabled={form?.saving}
-                accessibilityLabel="Save automation"
-              >
-                {form?.saving ? (
-                  <ActivityIndicator size="small" color={C.accent} />
-                ) : (
-                  <Text style={s.modalSave}>{form?.jobId ? 'Save' : 'Create'}</Text>
-                )}
-              </Pressable>
-            </View>
 
-            <ScrollView contentContainerStyle={{ padding: 16, gap: 14 }} keyboardShouldPersistTaps="handled">
-              {form?.jobId ? (
-                <View>
-                  <Text style={s.fieldLabel}>NAME</Text>
-                  <Text style={s.fieldLocked}>{form.name || form.jobId}</Text>
+              {open ? (
+                <View style={s.detailWrap}>
+                  <View style={[s.detailTop, { flexDirection: dir.row }]}>
+                    <Pressable
+                      onPress={() => {
+                        void copyId(j)
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('automations.card.copyA11y', { id: j.job_id })}
+                      style={({ pressed }) => [s.idChip, pressed && s.pressed]}
+                    >
+                      {/* Mixed bidi: the id is a mono LTR run, the localized
+                          label/hint sit in their own non-mono runs so Arabic
+                          keeps natural reading order. */}
+                      <View style={[s.idChipInner, { flexDirection: dir.row }]}>
+                        <Txt size={10.5} color={C.textDim}>
+                          {t('automations.card.idLabel')}
+                        </Txt>
+                        <Txt size={10.5} mono ltr color={C.textDim} numberOfLines={1} style={s.idChipId}>
+                          {j.job_id}
+                        </Txt>
+                        <Txt
+                          size={10.5}
+                          color={copiedId === j.job_id ? C.greenSoft : C.textFaint}
+                          numberOfLines={1}
+                          style={s.idChipHint}
+                        >
+                          {t(copiedId === j.job_id ? 'automations.card.copied' : 'automations.card.tapToCopy')}
+                        </Txt>
+                      </View>
+                    </Pressable>
+                    <Txt size={10.5} color={C.greenSoft} numberOfLines={1} style={s.deliver}>
+                      {t('automations.card.deliver', { target: j.deliver ?? '—' })}
+                    </Txt>
+                  </View>
+
+                  {details.length > 0 ? (
+                    <View style={s.detailRows}>
+                      {details.map((d) => (
+                        <View key={d.key} style={[s.detailRow, { flexDirection: dir.row }]}>
+                          <Txt size={10.5} color={C.textFaint} style={s.detailLabel}>
+                            {t(d.key)}
+                          </Txt>
+                          <Txt
+                            size={10.5}
+                            color={d.danger ? C.red : C.textDim}
+                            numberOfLines={2}
+                            style={s.detailValue}
+                          >
+                            {d.value}
+                          </Txt>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+
+                  <View style={[s.actions, { flexDirection: dir.row }]}>
+                    {busy ? (
+                      <View style={s.busyWrap}>
+                        <Spinner size="small" color={C.accent} />
+                      </View>
+                    ) : (
+                      <>
+                        <PrimaryBtn
+                          small
+                          label={t('automations.action.run')}
+                          onPress={() => {
+                            void runNow(j)
+                          }}
+                          style={s.actionGrow}
+                        />
+                        <GhostBtn
+                          small
+                          label={t(paused ? 'automations.action.resume' : 'automations.action.pause')}
+                          onPress={() => {
+                            void toggle(j)
+                          }}
+                          style={s.actionGrow}
+                        />
+                        <GhostBtn
+                          small
+                          label={t('automations.action.edit')}
+                          onPress={() => {
+                            void openEdit(j)
+                          }}
+                          style={s.actionEdit}
+                        />
+                        <GhostBtn
+                          small
+                          label={t('automations.action.delete')}
+                          onPress={() => remove(j)}
+                          textStyle={s.actionDelete}
+                          style={s.actionEdit}
+                        />
+                      </>
+                    )}
+                  </View>
                 </View>
-              ) : (
-                <View>
-                  <Text style={s.fieldLabel}>NAME</Text>
-                  <TextInput
-                    style={s.field}
-                    value={form?.name ?? ''}
-                    onChangeText={(t) => setForm((f) => (f ? { ...f, name: t } : f))}
-                    placeholder="daily-standup"
-                    placeholderTextColor={C.textFaint}
-                    autoCapitalize="none"
-                    accessibilityLabel="Automation name"
-                  />
-                </View>
-              )}
+              ) : null}
+            </Card>
+          )
+        })}
 
-              <View>
-                <Text style={s.fieldLabel}>SCHEDULE</Text>
-                <TextInput
-                  style={s.field}
-                  value={form?.schedule ?? ''}
-                  onChangeText={(t) => setForm((f) => (f ? { ...f, schedule: t } : f))}
-                  placeholder="every 30m"
-                  placeholderTextColor={C.textFaint}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  accessibilityLabel="Schedule"
-                />
-                <Text style={s.fieldHint}>Intervals: every 30m · every 2h — one-shot: in 45m — weekly: every monday 9:00</Text>
-              </View>
-
-              <View>
-                <Text style={s.fieldLabel}>PROMPT</Text>
-                {form?.promptDegraded ? (
-                  <Text style={s.warnLine}>{tr('automations.promptLoadFailed')}</Text>
-                ) : null}
-                <TextInput
-                  style={[s.field, s.fieldMulti]}
-                  value={form?.prompt ?? ''}
-                  onChangeText={(t) => setForm((f) => (f ? { ...f, prompt: t } : f))}
-                  placeholder="Check my inbox and summarize what needs a reply today."
-                  placeholderTextColor={C.textFaint}
-                  multiline
-                  accessibilityLabel="Prompt"
-                />
-                <Text style={s.fieldHint}>Jobs run in a fresh session with no chat context — write self-contained prompts.</Text>
-              </View>
-            </ScrollView>
-          </SafeAreaView>
-        </KeyboardAvoidingView>
-      </Modal>
-    </SafeAreaView>
-  )
-}
-
-function Detail({ label, value, onCopy, danger }: { label: string; value: string; onCopy?: () => void; danger?: boolean }) {
-  const s = useStyles(makeS)
-  return (
-    <View style={s.detailRow}>
-      <Text style={s.detailLabel}>{label}</Text>
-      <Pressable disabled={!onCopy} onPress={onCopy} style={{ flex: 1 }} accessibilityLabel={onCopy ? `${label}, tap to copy` : label}>
-        <Text style={[s.detailValue, danger && { color: C.red }]} selectable={!!onCopy}>
-          {value}
-          {onCopy ? ' ⧉' : ''}
-        </Text>
-      </Pressable>
-    </View>
-  )
-}
-
-function Action({ icon, label, onPress, danger }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; danger?: boolean }) {
-  const s = useStyles(makeS)
-  return (
-    <Pressable
-      style={({ pressed }) => [s.actionBtn, pressed && s.actionPressed]}
-      onPress={onPress}
-      hitSlop={4}
-      accessibilityLabel={label}
-    >
-      <Icon name={icon} size={14} color={danger ? C.red : C.textDim} />
-      <Text style={[s.actionLabel, danger && { color: C.red }]}>{label}</Text>
-    </Pressable>
+        {showEmpty ? (
+          <View style={s.empty}>
+            <MochiMark size={72} />
+            <Txt size={16} weight="800" center style={s.emptyTitle}>
+              {t('automations.empty.title')}
+            </Txt>
+            <Txt size={12.5} color={C.textDim} center style={s.emptyBody}>
+              {t('automations.empty.body')}
+            </Txt>
+            <PrimaryBtn
+              label={t('automations.empty.cta')}
+              onPress={openAdd}
+              style={s.emptyBtn}
+            />
+          </View>
+        ) : null}
+      </KeyboardAwareScrollView>
+    </ScreenShell>
   )
 }
 
 const makeS = () => StyleSheet.create({
-  safe: { flex: 1, backgroundColor: C.bg },
-  intro: { color: C.textDim, fontSize: 13, lineHeight: 19, marginBottom: 4 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(74,222,128,0.08)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
-  statusText: { color: C.greenSoft, fontSize: 12.5, fontWeight: '600' },
-  error: { color: C.red, fontSize: 13, paddingVertical: 8 },
-  retryRow: { alignItems: 'center' },
-  empty: { alignItems: 'center', marginTop: 48, gap: 8 },
-  emptyTitle: { color: C.text, fontSize: 16, fontWeight: '700', marginTop: 4 },
-  emptyBody: { color: C.textFaint, fontSize: 13, textAlign: 'center', lineHeight: 19 },
-  emptyBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.accent, borderRadius: 20, paddingHorizontal: 16, height: 40, marginTop: 10 },
-  emptyBtnText: { color: C.onAccent, fontSize: 14, fontWeight: '700' },
-  addBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center' },
-  btnPressed: { opacity: 0.6 },
-  card: { backgroundColor: C.bgCard, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: C.borderSoft },
-  cardPaused: { opacity: 0.75 },
-  cardHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  name: { flex: 1, color: C.text, fontSize: 15, fontWeight: '600' },
-  nextChip: { color: C.accent, fontSize: 11, fontWeight: '700' },
-  pausedChip: { color: C.textFaint, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  prompt: { color: C.textDim, fontSize: 13, lineHeight: 18, marginTop: 6 },
-  metaRow: { flexDirection: 'row', gap: 12, marginTop: 8, flexWrap: 'wrap' },
-  meta: { color: C.textFaint, fontSize: 11.5 },
-  detail: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: C.borderSoft, gap: 6 },
-  detailRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
-  detailLabel: { color: C.textFaint, fontSize: 11, fontWeight: '700', width: 88, paddingTop: 1 },
-  detailValue: { color: C.textDim, fontSize: 12.5, flex: 1, lineHeight: 17 },
-  actions: { flexDirection: 'row', gap: 6, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: C.borderSoft },
-  actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, height: 32, borderRadius: 16, backgroundColor: C.bgHover },
-  actionPressed: { opacity: 0.6 },
-  actionLabel: { color: C.textDim, fontSize: 12, fontWeight: '600' },
-  modalSafe: { flex: 1, backgroundColor: C.bg },
-  modalRoot: { flex: 1 },
-  modalHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: C.borderSoft },
-  modalTitle: { color: C.text, fontSize: 15.5, fontWeight: '700' },
-  modalTextBtn: { justifyContent: 'center' },
-  modalCancel: { color: C.textDim, fontSize: 14.5, fontWeight: '600', paddingTop: 12, minHeight: 44 },
-  modalSave: { color: C.accent, fontSize: 14.5, fontWeight: '800', paddingTop: 12, minHeight: 44 },
-  fieldLabel: { color: C.textFaint, fontSize: 10.5, fontWeight: '800', letterSpacing: 1.5, marginBottom: 6 },
-  field: { backgroundColor: C.bgCard, borderRadius: 12, borderWidth: 1, borderColor: C.borderSoft, paddingHorizontal: 14, paddingVertical: 12, color: C.text, fontSize: 15, minHeight: 48 },
-  fieldMulti: { minHeight: 120, textAlignVertical: 'top' },
-  fieldLocked: { color: C.textDim, fontSize: 15 },
-  fieldHint: { color: C.textFaint, fontSize: 11.5, lineHeight: 16, marginTop: 6 },
-  warnLine: { color: C.amber, fontSize: 11.5, lineHeight: 16, marginBottom: 6 },
+  frame: { flex: 1, backgroundColor: C.bg },
+  scroll: { flex: 1 },
+  content: { paddingTop: 10, paddingHorizontal: 14, paddingBottom: 28 },
+  intro: { marginHorizontal: 2, marginBottom: 10 },
+  pressed: { opacity: 0.72 },
+  fab: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: C.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusRow: {
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: C.greenTint,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginBottom: 10,
+  },
+  statusText: { flexShrink: 1 },
+  notice: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    marginBottom: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noticeError: { backgroundColor: C.redSoft },
+  noticeOffline: { backgroundColor: C.amberSoft },
+  loadWrap: { paddingVertical: 28, alignItems: 'center' },
+  // New / edit form
+  formCard: { borderColor: C.accent, marginBottom: 10 },
+  formTitle: { marginBottom: 2 },
+  formKicker: { marginTop: 10, marginBottom: 5, marginHorizontal: 0 },
+  formLocked: { paddingVertical: 4 },
+  formHint: { marginTop: 5, lineHeight: 15 },
+  formWarn: { marginBottom: 5, lineHeight: 15 },
+  formActions: { gap: 6, marginTop: 12 },
+  formBtn: { flex: 1 },
+  // Job cards
+  jobCard: { marginBottom: 10 },
+  jobPaused: { opacity: 0.72 },
+  jobHead: { alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 },
+  jobName: { flexShrink: 1 },
+  jobPrompt: { lineHeight: 17, marginBottom: 6 },
+  metaRow: { alignItems: 'center', gap: 4, flexWrap: 'wrap' },
+  metaLast: { flexShrink: 1 },
+  detailWrap: {
+    marginTop: 9,
+    paddingTop: 9,
+    borderTopWidth: 1,
+    borderTopColor: C.borderSoft,
+  },
+  detailTop: { alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 },
+  idChip: {
+    flexShrink: 1,
+    backgroundColor: C.bgElev,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  idChipInner: { alignItems: 'center', gap: 4 },
+  idChipId: { flexShrink: 1 },
+  idChipHint: { flexShrink: 1 },
+  deliver: { flexShrink: 1, maxWidth: '45%' },
+  detailRows: { gap: 4, marginBottom: 9 },
+  detailRow: { alignItems: 'flex-start', gap: 8 },
+  detailLabel: { width: 96, flexShrink: 0 },
+  detailValue: { flex: 1, lineHeight: 15 },
+  actions: { gap: 5 },
+  actionGrow: { flex: 1 },
+  actionEdit: { paddingHorizontal: 9 },
+  actionDelete: { color: C.red },
+  busyWrap: { flex: 1, alignItems: 'center', paddingVertical: 8 },
+  empty: { alignItems: 'center', paddingTop: 32, paddingHorizontal: 20 },
+  emptyTitle: { marginTop: 10 },
+  emptyBody: { marginTop: 4, lineHeight: 18, maxWidth: 280 },
+  emptyBtn: { marginTop: 14 },
 })

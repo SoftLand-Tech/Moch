@@ -9,6 +9,7 @@ import type { ChatSegment } from '../../lib/chat'
 import { imageSource } from '../../lib/mediaCache'
 import { isDataUrlPath } from '../../lib/media'
 import { mediaCachePathFor } from './share'
+import { useDir, useT } from '../../lib/strings'
 
 /**
  * Fullscreen image viewer: RN Modal (no extra deps), solid brand scrim,
@@ -26,6 +27,8 @@ export function MediaViewerModal({
   onClose: () => void
 }) {
   const s = useStyles(makeS)
+  const dir = useDir()
+  const t = useT()
   const [sharing, setSharing] = useState(false)
   // A % height inside a ScrollView contentContainer measures as 0 on Android
   // (the container's size depends on its content), which laid the image out
@@ -73,14 +76,14 @@ export function MediaViewerModal({
   return (
     <Modal visible animationType="fade" transparent onRequestClose={onClose} statusBarTranslucent>
       <View style={s.scrim}>
-        <View style={s.header}>
-          <Pressable onPress={onClose} hitSlop={10} accessibilityLabel="Close viewer">
+        <View style={[s.header, { flexDirection: dir.row }]}>
+          <Pressable onPress={onClose} hitSlop={10} accessibilityLabel={t('chat.media.closeViewerA11y')}>
             <Icon name="close" size={22} color={C.text} />
           </Pressable>
           <Text style={s.name} numberOfLines={1}>
-            {seg.name ?? 'Image'}
+            {seg.name ?? t('chat.media.imageLabel')}
           </Text>
-          <Pressable onPress={() => void share()} hitSlop={10} accessibilityLabel="Share image">
+          <Pressable onPress={() => void share()} hitSlop={10} accessibilityLabel={t('chat.media.shareImageA11y')}>
             {sharing ? <Icon name="hourglass-outline" size={20} color={C.textFaint} /> : <Icon name="share-outline" size={20} color={C.text} />}
           </Pressable>
         </View>
@@ -96,7 +99,7 @@ export function MediaViewerModal({
           {source ? (
             // Tap the image to dismiss (ChatGPT's tap-out) — single taps only;
             // the scroll view's native pinch/pan keeps winning multi-touch.
-            <Pressable onPress={onClose} accessibilityLabel="Close viewer">
+            <Pressable onPress={onClose} accessibilityLabel={t('chat.media.closeViewerA11y')}>
               <Image
                 source={source}
                 style={{ width: vp.width, height: vp.height }}
@@ -123,6 +126,9 @@ const makeS = () => StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 52,
     paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: C.borderSoft,
+    backgroundColor: C.bgCard,
   },
   name: { flex: 1, color: C.text, fontSize: 14, fontWeight: '600' },
   zoom: { flex: 1 },

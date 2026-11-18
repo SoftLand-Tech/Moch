@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Switch, TextInput } from 'react-native'
+import { View, Pressable, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 // BUG-133: the provider search + inline API-key form had no avoidance (form
 // and everything below sat under the IME), and the missing
@@ -19,13 +19,29 @@ import {
 } from '../../src/lib/modelState'
 import { log } from '../../src/lib/log'
 import { C, useStyles } from '../../src/lib/theme'
+import { useDir, useT } from '../../src/lib/strings'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { ModelPickerSheet } from '../../src/components/ModelPickerSheet'
 import { showAlert } from '../../src/components/AlertDialog'
 import { ProviderKeyForm } from '../../src/components/ProviderKeyForm'
+import { Card, Divider, Field, Kicker, Pill, PrimaryBtn, Spinner, Toggle, Txt } from '../../src/components/ui'
+
+/** Reasoning levels render four per row (mockup grid), labels localized. */
+const EFFORT_LABEL_KEYS: Record<string, string> = {
+  none: 'agent.effort.none',
+  minimal: 'agent.effort.minimal',
+  low: 'agent.effort.low',
+  medium: 'agent.effort.medium',
+  high: 'agent.effort.high',
+  xhigh: 'agent.effort.xhigh',
+  max: 'agent.effort.max',
+  ultra: 'agent.effort.ultra',
+}
 
 export default function Controls() {
   const s = useStyles(makeS)
+  const t = useT()
+  const dir = useDir()
   const online = useStore(isConnectedAtom)
   const sid = useStore(activeSession)
   const model = useStore(liveModel)
@@ -51,6 +67,8 @@ export default function Controls() {
   const [providerQuery, setProviderQuery] = useState('')
   /** "Not set up" starts collapsed — it can be dozens of rows. */
   const [unconfiguredOpen, setUnconfiguredOpen] = useState(false)
+
+  const effortLabel = (value: string) => (EFFORT_LABEL_KEYS[value] ? t(EFFORT_LABEL_KEYS[value]) : value)
 
   const refresh = React.useCallback(async () => {
     if (!online) return
@@ -111,7 +129,7 @@ export default function Controls() {
         try {
           target = await ensureSession()
         } catch {
-          throw new Error('This chat is not ready yet — try again in a moment.')
+          throw new Error(t('agent.alert.chatNotReady'))
         }
       }
       const res = await applyReasoning({ value: v as ReasoningEffort, scope: effortScope, sessionId: target ?? undefined })
@@ -119,7 +137,7 @@ export default function Controls() {
       await refresh()
     } catch (e) {
       setEffort(prev)
-      void showAlert('Failed to save', e instanceof Error ? e.message : '')
+      void showAlert(t('agent.alert.saveFailed'), e instanceof Error ? e.message : '')
     } finally {
       setSaving(null)
     }
@@ -139,7 +157,7 @@ export default function Controls() {
       await rpc('config.set', { key: 'reasoning', value: next ? 'show' : 'hide', ...(liveSid ? { session_id: liveSid } : {}) })
     } catch (e) {
       liveReasoningDisplay.set(prev)
-      void showAlert('Failed to save', e instanceof Error ? e.message : '')
+      void showAlert(t('agent.alert.saveFailed'), e instanceof Error ? e.message : '')
     }
   }
 
@@ -150,15 +168,20 @@ export default function Controls() {
   const unconfigured = React.useMemo(() => providers.filter((p) => !p.authenticated), [providers])
 
   const pq = providerQuery.trim().toLowerCase()
-  const matches = (p: ProviderOption) => !pq || p.name.toLowerCase().includes(pq) || p.slug.includes(pq)
-  const shownConnected = React.useMemo(() => connected.filter(matches), [connected, pq])
-  const shownUnconfigured = React.useMemo(() => unconfigured.filter(matches), [unconfigured, pq])
+  const shownConnected = React.useMemo(
+    () => connected.filter((p) => !pq || p.name.toLowerCase().includes(pq) || p.slug.includes(pq)),
+    [connected, pq],
+  )
+  const shownUnconfigured = React.useMemo(
+    () => unconfigured.filter((p) => !pq || p.name.toLowerCase().includes(pq) || p.slug.includes(pq)),
+    [unconfigured, pq],
+  )
   // Searching implies browsing: keep the collapsed group forced open while typing.
   const unconfiguredVisible = unconfiguredOpen || !!pq
 
   /** Connect a provider from this screen; null = connected, string = why not. */
   const connectKey = async (apiKey: string): Promise<string | null> => {
-    if (!keyFor) return 'No provider selected'
+    if (!keyFor) return t('agent.noProvider')
     setSavingKey(true)
     try {
       // BH-000088: same rule as every write here — a provisional window's
@@ -181,6 +204,11 @@ export default function Controls() {
     }
   }
 
+  const openPickerFor = (slug: string | null) => {
+    setPickerSlug(slug)
+    setPickerOpen(true)
+  }
+
   const tapProvider = (p: ProviderOption) => {
     if (!p.authenticated) {
       // api_key providers connect right here; OAuth/etc must run on the host.
@@ -189,25 +217,21 @@ export default function Controls() {
       } else {
         // BUG-053: no dead CLI references — the npm `moch` package is
         // deprecated; sign-in flows live on the computer's agent settings.
-        void showAlert(p.name, p.warning ?? 'This provider signs in another way (OAuth or a host tool) — set it up on the computer, in the agent\'s own settings screen.')
+        void showAlert(p.name, p.warning ?? t('agent.providers.oauthHint'))
       }
       return
     }
-    const count = p.total_models ?? p.models?.length ?? 0
-    void showAlert(p.name, `Connected · ${count} model${count === 1 ? '' : 's'}`, [
-      { text: 'Pick a model', onPress: () => { setPickerSlug(p.slug); setPickerOpen(true) } },
-      { text: 'Disconnect', style: 'destructive', onPress: () => confirmDisconnect(p) },
-      { text: 'Cancel', style: 'cancel' },
-    ])
+    // Connected rows open their model list directly (mockup's "Pick a model").
+    openPickerFor(p.slug)
   }
 
   const confirmDisconnect = (p: ProviderOption) => {
     void showAlert(
-      `Disconnect ${p.name}?`,
-      'Removes its saved key from the server. Your chats keep working on your other providers.',
+      t('agent.alert.disconnectTitle', { name: p.name }),
+      t('agent.alert.disconnectBody'),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Disconnect', style: 'destructive', onPress: () => { void doDisconnect(p) } },
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('agent.alert.disconnectCta'), style: 'destructive', onPress: () => { void doDisconnect(p) } },
       ],
     )
   }
@@ -218,217 +242,363 @@ export default function Controls() {
       await disconnectProvider(p.slug)
       await fetchModelOptions(liveWriteSid(sid, sid ? sessionsById.get()[sid] : undefined) ?? undefined, { force: true }).catch(() => {})
     } catch (e) {
-      void showAlert('Disconnect failed', e instanceof Error ? e.message : String(e))
+      void showAlert(t('agent.alert.disconnectFailed'), e instanceof Error ? e.message : String(e))
     } finally {
       setBusySlug(null)
     }
   }
 
-  const openPickerFromCard = () => {
-    setPickerSlug(null)
-    setPickerOpen(true)
+  const openPickerFromCard = () => openPickerFor(null)
+
+  // "Provider · scope" line under the mono model id. The saved-everywhere
+  // default comes from config.yaml; a live model that differs is a
+  // session/once-scoped pick.
+  const providerLabel = provider
+    ? (options?.providers.find((p) => p.slug === provider)?.name ?? provider)
+    : ''
+  const scopeLabel = model
+    ? defaultModel?.model
+      ? (defaultModel.model === model ? t('agent.model.savedEverywhere') : t('agent.model.thisChat'))
+      : ''
+    : t('agent.model.tapChange')
+  const modelSub = [providerLabel, scopeLabel].filter(Boolean).join(' · ')
+
+  const effortRows = React.useMemo(() => {
+    const rows: ReasoningEffort[][] = []
+    for (let i = 0; i < REASONING_EFFORTS.length; i += 4) rows.push(REASONING_EFFORTS.slice(i, i + 4))
+    return rows
+  }, [])
+
+  const renderUnconfiguredRow = (p: ProviderOption) => {
+    const open = keyFor != null && keyFor.slug === p.slug
+    return (
+      <React.Fragment key={p.slug}>
+        <UnconfiguredProviderRow p={p} open={open} onPress={() => tapProvider(p)} />
+        {open && keyFor ? (
+          <View style={s.keyFormWrap}>
+            <ProviderKeyForm provider={keyFor} busy={savingKey} onSave={connectKey} onCancel={() => setKeyFor(null)} />
+          </View>
+        ) : null}
+      </React.Fragment>
+    )
   }
-
-  const body = !online ? (
-    <View style={s.root}>
-      <Text style={s.offline}>Not connected</Text>
-      <Pressable style={({ pressed }) => [s.retry, pressed && s.pressed]} onPress={() => { void retryNow().catch(() => {}) }}>
-        <Text style={s.retryText}>Reconnect</Text>
-      </Pressable>
-    </View>
-  ) : (
-    <KeyboardAwareScrollView style={s.root} contentContainerStyle={{ padding: 16, gap: 24, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-      <View>
-        <View style={s.sectionRow}>
-          <Text style={s.section}>MODEL</Text>
-          {loading ? <ActivityIndicator color={C.accent} size="small" /> : null}
-        </View>
-        <Pressable
-          style={({ pressed }) => [s.modelCard, pressed && s.pressed]}
-          onPress={openPickerFromCard}
-          accessibilityLabel={`Current model ${model || 'default'}. Tap to change`}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={s.modelName} numberOfLines={1}>{model || 'default'}</Text>
-            <Text style={s.modelSub}>
-              {provider ? `${provider} · ` : ''}tap to pick a provider, model and scope
-            </Text>
-          </View>
-          <View style={s.modelChevron}>
-            <Icon name="options-outline" size={16} color={C.accent} />
-            <Text style={s.modelChevronText}>CHANGE</Text>
-          </View>
-        </Pressable>
-        {defaultModel?.model ? (
-          <Text style={s.defaultLine} numberOfLines={1}>
-            Saved everywhere: {defaultModel.model}
-            {defaultModel.provider && defaultModel.provider !== 'unknown' ? ` · ${defaultModel.provider}` : ''}
-          </Text>
-        ) : null}
-      </View>
-
-      <View>
-        <View style={s.sectionRow}>
-          <Text style={s.section}>PROVIDERS</Text>
-          {optsLoading ? <ActivityIndicator color={C.accent} size="small" /> : null}
-        </View>
-        <View style={s.searchWrap}>
-          <Icon name="search" size={15} color={C.textFaint} />
-          <TextInput
-            style={s.search}
-            value={providerQuery}
-            onChangeText={setProviderQuery}
-            placeholder="Search providers…"
-            placeholderTextColor={C.textFaint}
-            accessibilityLabel="Filter providers"
-          />
-          {providerQuery ? (
-            <Pressable
-              hitSlop={6}
-              style={({ pressed }) => [s.clear, pressed && s.pressed]}
-              onPress={() => setProviderQuery('')}
-              accessibilityLabel="Clear provider search"
-            >
-              <Icon name="close-circle" size={15} color={C.textFaint} />
-            </Pressable>
-          ) : null}
-        </View>
-        {shownConnected.map((p) => (
-          <React.Fragment key={p.slug}>
-            <ProviderRow
-              p={p}
-              busy={busySlug === p.slug}
-              currentModel={p.slug === provider ? model : ''}
-              onPress={() => tapProvider(p)}
-            />
-            {keyFor?.slug === p.slug ? (
-              <View style={{ marginBottom: 10 }}>
-                <ProviderKeyForm provider={keyFor} busy={savingKey} onSave={connectKey} onCancel={() => setKeyFor(null)} />
-              </View>
-            ) : null}
-          </React.Fragment>
-        ))}
-        {unconfigured.length && !pq ? (
-          <Pressable
-            style={({ pressed }) => [s.collapseCard, pressed && s.pressed]}
-            onPress={() => setUnconfiguredOpen((v) => !v)}
-            accessibilityLabel={unconfiguredOpen ? 'Hide providers not set up' : `Show ${unconfigured.length} providers not set up`}
-          >
-            <Text style={s.collapseTitle}>Not set up</Text>
-            <Text style={s.collapseSub}>{unconfigured.length} available</Text>
-            <Icon name={unconfiguredOpen ? 'chevron-up' : 'chevron-down'} size={16} color={C.textFaint} />
-          </Pressable>
-        ) : null}
-        {unconfiguredVisible ? shownUnconfigured.map((p) => (
-          <React.Fragment key={p.slug}>
-            <ProviderRow p={p} busy={false} currentModel="" onPress={() => tapProvider(p)} />
-            {keyFor?.slug === p.slug ? (
-              <View style={{ marginBottom: 10 }}>
-                <ProviderKeyForm provider={keyFor} busy={savingKey} onSave={connectKey} onCancel={() => setKeyFor(null)} />
-              </View>
-            ) : null}
-          </React.Fragment>
-        )) : null}
-        {pq && !shownConnected.length && !shownUnconfigured.length ? (
-          <Text style={s.empty}>No providers match “{providerQuery}”.</Text>
-        ) : null}
-        {!providers.length && !optsLoading ? (
-          <Text style={s.empty}>No provider inventory yet — reconnect or reopen this screen.</Text>
-        ) : null}
-      </View>
-
-      <View>
-        <View style={s.sectionRow}>
-          <Text style={s.section}>REASONING EFFORT</Text>
-          {saving?.startsWith('effort:') ? <ActivityIndicator color={C.accent} size="small" /> : null}
-        </View>
-        {prefs ? (
-          <Text style={s.defaultLine}>
-            Default: {prefs.global || '—'}
-            {prefs.effective && prefs.global && prefs.effective !== prefs.global ? ` · This chat: ${prefs.effective}` : ''}
-          </Text>
-        ) : null}
-        <View style={s.scopeRow}>
-          <Text style={s.scopeLabel}>SAVE AS</Text>
-          {(['global', 'session'] as const).map((sc) => (
-            <Pressable
-              key={sc}
-              style={({ pressed }) => [s.scopePill, effortScope === sc && s.scopePillOn, pressed && s.pressed]}
-              onPress={() => setEffortScope(sc)}
-              accessibilityLabel={sc === 'global' ? 'Save thinking everywhere' : 'Save thinking in this chat'}
-              accessibilityState={{ selected: effortScope === sc }}
-            >
-              <Text style={[s.scopeText, effortScope === sc && s.scopeTextOn]}>
-                {sc === 'global' ? 'Everywhere' : 'This chat'}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={s.effortRow}>
-          {REASONING_EFFORTS.map((e) => (
-            <Pressable
-              key={e}
-              style={({ pressed }) => [s.effortPill, effort === e && s.effortOn, pressed && s.pressed]}
-              onPress={() => void setAndSave(e)}
-              accessibilityLabel={`Reasoning effort ${e}`}
-              accessibilityState={{ selected: effort === e }}
-              hitSlop={4}
-            >
-              <Text style={[s.effortText, effort === e && s.effortTextOn]}>{e}</Text>
-            </Pressable>
-          ))}
-        </View>
-      </View>
-
-      <View>
-        <Text style={s.section}>SHOW REASONING</Text>
-        <View style={s.toggleRow}>
-          <Text style={s.toggleLabel}>Show thinking in the chat</Text>
-          <Switch
-            value={showReasoning === 'show'}
-            onValueChange={(v) => void toggleReasoning(v)}
-            trackColor={{ true: C.accent, false: C.border }}
-            accessibilityLabel="Show reasoning"
-          />
-        </View>
-      </View>
-    </KeyboardAwareScrollView>
-  )
 
   return (
     <SafeAreaView style={s.frame} edges={['bottom']}>
-      <ScreenShell title="Models" showBrand>
-        {body}
+      <ScreenShell title={t('agent.title')} showBrand>
+        <KeyboardAwareScrollView
+          style={s.root}
+          contentContainerStyle={s.content}
+          keyboardShouldPersistTaps="handled"
+        >
+          {!online ? (
+            <Card style={s.offlineCard}>
+              <View style={[s.offlineRow, { flexDirection: dir.row }]}>
+                <Txt size={12.5} weight="700" color={C.amber} style={s.flex} numberOfLines={2}>
+                  {t('agent.offline')}
+                </Txt>
+                <PrimaryBtn
+                  small
+                  label={t('agent.reconnect')}
+                  onPress={() => { void retryNow().catch(() => {}) }}
+                  style={s.offlineBtn}
+                />
+              </View>
+            </Card>
+          ) : null}
+
+          {/* ── Model ───────────────────────────────────────────────────── */}
+          <View style={[s.kickerRow, { flexDirection: dir.row }]}>
+            <Kicker style={s.firstKicker}>{t('agent.model.kicker')}</Kicker>
+            {loading ? <Spinner /> : null}
+          </View>
+          <Card
+            onPress={openPickerFromCard}
+            accessibilityLabel={t('agent.model.a11y', { model: model || t('agent.model.default') })}
+          >
+            <View style={[s.modelRow, { flexDirection: dir.row }]}>
+              <View style={s.modelText}>
+                <Txt mono ltr size={13.5} weight="700" numberOfLines={1}>
+                  {model || t('agent.model.default')}
+                </Txt>
+                <Txt size={11.5} color={C.textDim} numberOfLines={1} style={s.modelSub}>
+                  {modelSub}
+                </Txt>
+              </View>
+              <PrimaryBtn
+                small
+                label={t('agent.model.change')}
+                accessibilityLabel={t('agent.model.changeA11y')}
+                onPress={openPickerFromCard}
+                style={s.changeBtn}
+              />
+            </View>
+          </Card>
+          {defaultModel?.model && defaultModel.model !== model ? (
+            <Txt size={11.5} color={C.textFaint} numberOfLines={1} style={s.defaultLine}>
+              {t('agent.model.savedEverywhereLine', { model: defaultModel.model })}
+              {defaultModel.provider && defaultModel.provider !== 'unknown' ? ` · ${defaultModel.provider}` : ''}
+            </Txt>
+          ) : null}
+
+          {/* ── Providers ───────────────────────────────────────────────── */}
+          <View style={[s.kickerRow, { flexDirection: dir.row }]}>
+            <Kicker>{t('agent.providers.kicker')}</Kicker>
+            {optsLoading ? <Spinner /> : null}
+          </View>
+          <View style={[s.filterRow, { flexDirection: dir.row }]}>
+            <Field
+              value={providerQuery}
+              onChangeText={setProviderQuery}
+              placeholder={t('agent.providers.filter')}
+              accessibilityLabel={t('agent.providers.filterA11y')}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              wrapStyle={s.flex}
+            />
+            {providerQuery ? (
+              <Pressable
+                hitSlop={8}
+                onPress={() => setProviderQuery('')}
+                accessibilityRole="button"
+                accessibilityLabel={t('agent.providers.clear')}
+                style={({ pressed }) => [s.clearBtn, pressed && s.pressed]}
+              >
+                <Icon name="close-circle" size={16} color={C.textFaint} />
+              </Pressable>
+            ) : null}
+          </View>
+
+          {shownConnected.length ? (
+            <Card style={s.providerCard}>
+              {shownConnected.map((p, i) => (
+                <React.Fragment key={p.slug}>
+                  {i > 0 ? <Divider style={s.providerDivider} /> : null}
+                  <ConnectedProviderRow
+                    p={p}
+                    busy={busySlug === p.slug}
+                    onPick={() => openPickerFor(p.slug)}
+                    onDisconnect={() => confirmDisconnect(p)}
+                  />
+                </React.Fragment>
+              ))}
+            </Card>
+          ) : null}
+
+          {unconfigured.length && !pq ? (
+            <Card style={s.notSetupCard}>
+              <Pressable
+                style={({ pressed }) => [s.notSetupHead, { flexDirection: dir.row }, pressed && s.pressed]}
+                onPress={() => setUnconfiguredOpen((v) => !v)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: unconfiguredOpen }}
+                accessibilityLabel={
+                  unconfiguredOpen
+                    ? t('agent.providers.hideNotSetUp')
+                    : t('agent.providers.showNotSetUp', { n: unconfigured.length })
+                }
+              >
+                <Txt size={12} weight="700" color={C.textDim} style={s.flex}>
+                  {t('agent.providers.notSetUp', { n: unconfigured.length })}
+                </Txt>
+                <Icon name={unconfiguredOpen ? 'chevron-up' : dir.icon.forward} size={15} color={C.textFaint} />
+              </Pressable>
+              {unconfiguredVisible ? (
+                <View>
+                  <Divider style={s.notSetupDivider} />
+                  {shownUnconfigured.map(renderUnconfiguredRow)}
+                </View>
+              ) : null}
+            </Card>
+          ) : null}
+
+          {pq && shownUnconfigured.length ? (
+            <Card style={s.providerCard}>{shownUnconfigured.map(renderUnconfiguredRow)}</Card>
+          ) : null}
+
+          {pq && !shownConnected.length && !shownUnconfigured.length ? (
+            <Txt size={12.5} color={C.textFaint} style={s.empty}>
+              {t('agent.providers.noMatch', { query: providerQuery })}
+            </Txt>
+          ) : null}
+          {!providers.length && !optsLoading ? (
+            <Txt size={12.5} color={C.textFaint} style={s.empty}>
+              {t('agent.providers.empty')}
+            </Txt>
+          ) : null}
+
+          {/* ── Reasoning effort ────────────────────────────────────────── */}
+          <View style={[s.kickerRow, { flexDirection: dir.row }]}>
+            <Kicker>{t('agent.reasoning.kicker')}</Kicker>
+            {saving?.startsWith('effort:') ? <Spinner /> : null}
+          </View>
+          <Card>
+            {prefs ? (
+              <Txt size={11.5} color={C.textDim} style={s.prefsLine} numberOfLines={2}>
+                {t('agent.reasoning.default', { value: prefs.global ? effortLabel(prefs.global) : '—' })}
+                {prefs.effective && prefs.global && prefs.effective !== prefs.global
+                  ? ` · ${t('agent.reasoning.thisChat', { value: effortLabel(prefs.effective) })}`
+                  : ''}
+              </Txt>
+            ) : null}
+            <View style={[s.scopeRow, { flexDirection: dir.row }]}>
+              {(['global', 'session'] as const).map((sc) => {
+                const on = effortScope === sc
+                return (
+                  <Pressable
+                    key={sc}
+                    onPress={() => setEffortScope(sc)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: on }}
+                    accessibilityLabel={sc === 'global' ? t('agent.reasoning.scopeGlobalA11y') : t('agent.reasoning.scopeSessionA11y')}
+                    style={({ pressed }) => [s.scopePill, on && s.scopePillOn, pressed && s.pressed]}
+                  >
+                    <Txt size={11} weight="700" color={on ? C.accent : C.textDim}>
+                      {sc === 'global' ? t('agent.reasoning.scopeGlobal') : t('agent.reasoning.scopeSession')}
+                    </Txt>
+                  </Pressable>
+                )
+              })}
+            </View>
+            <View style={s.effortGrid}>
+              {effortRows.map((row) => (
+                <View key={row.join('-')} style={[s.effortRow, { flexDirection: dir.row }]}>
+                  {row.map((e) => {
+                    const on = effort === e
+                    return (
+                      <Pressable
+                        key={e}
+                        onPress={() => void setAndSave(e)}
+                        hitSlop={2}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: on }}
+                        accessibilityLabel={t('agent.reasoning.effortA11y', { level: effortLabel(e) })}
+                        style={({ pressed }) => [s.effortPill, on && s.effortPillOn, pressed && s.pressed]}
+                      >
+                        <Txt size={11.5} weight="700" color={on ? C.onAccent : C.text} numberOfLines={1}>
+                          {effortLabel(e)}
+                        </Txt>
+                      </Pressable>
+                    )
+                  })}
+                </View>
+              ))}
+            </View>
+          </Card>
+
+          {/* ── Show reasoning ──────────────────────────────────────────── */}
+          <Card>
+            <View style={[s.toggleRow, { flexDirection: dir.row }]}>
+              <View style={s.flex}>
+                <Txt size={13} weight="700">{t('agent.reasoning.showTitle')}</Txt>
+                <Txt size={11} color={C.textDim} style={s.subLine} numberOfLines={2}>
+                  {t('agent.reasoning.showSub')}
+                </Txt>
+              </View>
+              <Toggle
+                value={showReasoning === 'show'}
+                onChange={(v) => void toggleReasoning(v)}
+                accessibilityLabel={t('agent.reasoning.showA11y')}
+                style={dir.rtl ? s.toggleRtl : undefined}
+              />
+            </View>
+          </Card>
+        </KeyboardAwareScrollView>
       </ScreenShell>
       <ModelPickerSheet open={pickerOpen} initialSlug={pickerSlug} onClose={() => setPickerOpen(false)} />
     </SafeAreaView>
   )
 }
 
-function ProviderRow({
-  p, onPress, currentModel, busy,
-}: { p: ProviderOption; onPress: () => void; currentModel: string; busy: boolean }) {
+function ConnectedProviderRow({
+  p,
+  busy,
+  onPick,
+  onDisconnect,
+}: {
+  p: ProviderOption
+  busy: boolean
+  onPick: () => void
+  onDisconnect: () => void
+}) {
   const s = useStyles(makeS)
+  const t = useT()
+  const dir = useDir()
   const count = p.total_models ?? p.models?.length ?? 0
-  const status = p.authenticated
-    ? `Connected · ${count} model${count === 1 ? '' : 's'}${currentModel ? ` · ${currentModel}` : ''}`
-    : p.auth_type === 'api_key'
-      ? 'Not connected · tap to add an API key'
-      : 'Set up on the computer'
+  const status = count === 1
+    ? t('agent.providers.connectedOne', { n: count })
+    : t('agent.providers.connectedMany', { n: count })
+  return (
+    <View style={[s.providerRow, { flexDirection: dir.row }]}>
+      <Pressable
+        style={({ pressed }) => [s.providerMain, { flexDirection: dir.row }, pressed && s.pressed]}
+        onPress={onPick}
+        accessibilityRole="button"
+        accessibilityLabel={t('agent.providers.rowA11y', { name: p.name, status })}
+      >
+        <View style={s.flex}>
+          <View style={[s.providerNameLine, { flexDirection: dir.row }]}>
+            <Txt size={13} weight="700" numberOfLines={1} style={s.providerName}>{p.name}</Txt>
+            {p.is_current ? <Pill kind="accent">{t('agent.providers.active')}</Pill> : null}
+          </View>
+          <Txt size={11} color={C.greenSoft} numberOfLines={1} style={s.providerSub}>{status}</Txt>
+        </View>
+      </Pressable>
+      {busy ? (
+        <Spinner />
+      ) : (
+        <View style={[s.providerActions, { flexDirection: dir.row }]}>
+          <Pill
+            kind="accent"
+            onPress={onPick}
+            accessibilityLabel={t('agent.providers.pickModelA11y', { name: p.name })}
+          >
+            {t('agent.providers.pickModel')}
+          </Pill>
+          <Pressable
+            onPress={onDisconnect}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={t('agent.providers.disconnectA11y', { name: p.name })}
+            style={({ pressed }) => [s.disconnectLink, pressed && s.pressed]}
+          >
+            <Txt size={11} color={C.textFaint}>{t('agent.providers.disconnect')}</Txt>
+          </Pressable>
+        </View>
+      )}
+    </View>
+  )
+}
+
+function UnconfiguredProviderRow({
+  p,
+  open,
+  onPress,
+}: {
+  p: ProviderOption
+  open: boolean
+  onPress: () => void
+}) {
+  const s = useStyles(makeS)
+  const t = useT()
+  const dir = useDir()
+  const status = p.auth_type === 'api_key'
+    ? t('agent.providers.notConnected')
+    : t('agent.providers.hostSetup')
   return (
     <Pressable
-      style={({ pressed }) => [s.providerCard, pressed && s.pressed]}
+      style={({ pressed }) => [s.unconfiguredRow, { flexDirection: dir.row }, pressed && s.pressed]}
       onPress={onPress}
-      accessibilityLabel={`Provider ${p.name}, ${status}`}
+      accessibilityRole="button"
+      accessibilityLabel={t('agent.providers.rowA11y', { name: p.name, status })}
+      accessibilityState={{ expanded: open }}
     >
-      <View style={{ flex: 1 }}>
-        <View style={s.providerTitleLine}>
-          <Text style={s.providerName} numberOfLines={1}>{p.name}</Text>
-          {p.is_current ? <Text style={s.badge}>ACTIVE</Text> : null}
-        </View>
-        <Text style={s.providerSub} numberOfLines={1}>{status}</Text>
+      <View style={s.flex}>
+        <Txt size={13} weight="700" numberOfLines={1} style={s.providerName}>{p.name}</Txt>
+        <Txt size={11} color={C.textDim} numberOfLines={1} style={s.providerSub}>{status}</Txt>
       </View>
-      {busy ? <ActivityIndicator size="small" color={C.accent} /> : <Icon name="chevron-forward" size={16} color={C.textFaint} />}
+      <Icon name={open ? 'chevron-up' : dir.icon.forward} size={14} color={C.textFaint} />
     </Pressable>
   )
 }
@@ -436,61 +606,75 @@ function ProviderRow({
 const makeS = () => StyleSheet.create({
   frame: { flex: 1, backgroundColor: C.bg },
   root: { flex: 1, backgroundColor: C.bg },
+  content: { paddingTop: 10, paddingHorizontal: 14, paddingBottom: 18 },
   pressed: { opacity: 0.6 },
-  offline: { color: C.textDim, textAlign: 'center', marginTop: 80, fontSize: 15 },
-  retry: { backgroundColor: C.accent, borderRadius: 12, paddingVertical: 13, marginHorizontal: 40, marginTop: 16, alignItems: 'center', minHeight: 48, justifyContent: 'center' },
-  retryText: { color: C.onAccent, fontWeight: '800' },
-  sectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  section: { color: C.accent, fontSize: 11, fontWeight: '800', letterSpacing: 2, marginBottom: 10 },
-  empty: { color: C.textFaint, fontSize: 13, padding: 8 },
-  searchWrap: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    marginBottom: 10,
-    backgroundColor: C.inputBg, borderRadius: 12, borderWidth: 1, borderColor: C.border,
-    paddingHorizontal: 10, minHeight: 40,
+  flex: { flex: 1, minWidth: 0 },
+
+  kickerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  firstKicker: { marginTop: 2 },
+
+  offlineCard: {
+    backgroundColor: C.amberSoft,
+    borderColor: 'rgba(245,165,36,0.35)',
   },
-  search: { flex: 1, color: C.text, fontSize: 14.5, paddingVertical: 9 },
-  clear: { width: 26, height: 26, alignItems: 'center', justifyContent: 'center' },
-  collapseCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: C.bgCard, borderRadius: 14, borderWidth: 1, borderColor: C.border, borderStyle: 'dashed',
-    paddingHorizontal: 14, paddingVertical: 12, minHeight: 52, marginBottom: 8, marginTop: 2,
-  },
-  collapseTitle: { color: C.textDim, fontSize: 14, fontWeight: '700' },
-  collapseSub: { color: C.textFaint, fontSize: 12, flex: 1 },
-  modelCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: C.bgCard, borderRadius: 14, borderWidth: 1, borderColor: C.border,
-    paddingHorizontal: 15, paddingVertical: 14, minHeight: 68,
-  },
-  modelName: { color: C.text, fontSize: 16, fontWeight: '700' },
-  modelSub: { color: C.textFaint, fontSize: 12, marginTop: 3 },
-  modelChevron: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  modelChevronText: { color: C.accent, fontSize: 10.5, fontWeight: '800', letterSpacing: 1 },
-  defaultLine: { color: C.textDim, fontSize: 12, marginTop: 8 },
-  providerCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: C.bgCard, borderRadius: 14, borderWidth: 1, borderColor: C.border,
-    paddingHorizontal: 14, paddingVertical: 12, minHeight: 62, marginBottom: 8,
-  },
-  providerTitleLine: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  providerName: { color: C.text, fontSize: 14.5, fontWeight: '600', flexShrink: 1 },
-  providerSub: { color: C.textFaint, fontSize: 11.5, marginTop: 2 },
-  badge: { color: C.accent, fontSize: 9.5, fontWeight: '800', letterSpacing: 1 },
-  scopeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  scopeLabel: { color: C.textFaint, fontSize: 10.5, fontWeight: '800', letterSpacing: 1.5, marginRight: 2 },
+  offlineRow: { alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  offlineBtn: { paddingVertical: 5, paddingHorizontal: 10 },
+
+  modelRow: { alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  modelText: { flex: 1, minWidth: 0 },
+  modelSub: { marginTop: 2 },
+  changeBtn: { paddingVertical: 7, paddingHorizontal: 12 },
+  defaultLine: { marginTop: -2, marginBottom: 6, marginHorizontal: 2 },
+
+  filterRow: { alignItems: 'center', gap: 8, marginBottom: 8 },
+  clearBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
+
+  providerCard: { paddingVertical: 10, paddingHorizontal: 12 },
+  providerDivider: { marginVertical: 8 },
+  providerRow: { alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  providerMain: { flex: 1, minWidth: 0 },
+  providerNameLine: { alignItems: 'center', gap: 7 },
+  providerName: { flexShrink: 1 },
+  providerSub: { marginTop: 2 },
+  providerActions: { alignItems: 'center', gap: 8 },
+  disconnectLink: { paddingVertical: 2 },
+
+  notSetupCard: { paddingVertical: 10, paddingHorizontal: 12 },
+  notSetupHead: { alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 30, paddingVertical: 2 },
+  notSetupDivider: { marginTop: 8 },
+  keyFormWrap: { paddingTop: 2, paddingBottom: 6 },
+
+  unconfiguredRow: { alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingVertical: 8 },
+
+  empty: { padding: 8 },
+
+  prefsLine: { marginBottom: 8 },
+  scopeRow: { gap: 6, marginBottom: 8, flexWrap: 'wrap' },
   scopePill: {
-    paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18,
-    backgroundColor: C.inputBg, borderWidth: 1, borderColor: C.border,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: 'transparent',
   },
-  scopePillOn: { backgroundColor: C.accent, borderColor: C.accent },
-  scopeText: { color: C.textDim, fontSize: 12.5, fontWeight: '700' },
-  scopeTextOn: { color: C.onAccent, fontWeight: '800' },
-  effortRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  effortPill: { paddingHorizontal: 15, paddingVertical: 11, borderRadius: 22, backgroundColor: C.inputBg, borderWidth: 1, borderColor: C.border, minHeight: 44, justifyContent: 'center' },
-  effortOn: { backgroundColor: C.accent, borderColor: C.accent },
-  effortText: { color: C.textDim, fontSize: 13.5, fontWeight: '600' },
-  effortTextOn: { color: C.onAccent, fontWeight: '800' },
-  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: C.bgCard, borderRadius: 12, borderWidth: 1, borderColor: C.border, paddingHorizontal: 14, minHeight: 56 },
-  toggleLabel: { color: C.text, fontSize: 14.5, flex: 1 },
+  scopePillOn: { borderColor: C.accent, backgroundColor: C.accentSoft },
+  effortGrid: { gap: 5 },
+  effortRow: { gap: 5 },
+  effortPill: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.bgElev,
+    minHeight: 32,
+  },
+  effortPillOn: { backgroundColor: C.accent, borderColor: C.accent },
+
+  toggleRow: { alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  subLine: { marginTop: 2 },
+  toggleRtl: { transform: [{ scaleX: -1 }] },
 })

@@ -1,9 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { View, Text, FlatList, Pressable, TextInput, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native'
+import { View, FlatList, Pressable, TextInput, StyleSheet, RefreshControl } from 'react-native'
 import { Icon } from '../../src/components/Icon'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
-import Animated, { useAnimatedStyle } from 'react-native-reanimated'
+import Animated, {
+  cancelAnimation,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated'
 import { useStore } from '@nanostores/react'
 import { router } from 'expo-router'
 import { rpc, isConnected as isConnectedAtom, retryNow } from '../../src/lib/gateway'
@@ -20,12 +26,22 @@ import {
 } from '../../src/lib/chat'
 import { forgetChatMarks } from '../../src/lib/chatListState'
 import { C, useStyles } from '../../src/lib/theme'
-import { attentionById, rowStatus } from '../../src/lib/attention'
-import { tr } from '../../src/lib/strings'
+import { attentionById, rowStatus, type RowStatus } from '../../src/lib/attention'
+import { localeAtom, tr, useDir, useT } from '../../src/lib/strings'
 import { log } from '../../src/lib/log'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
-import { StatusDot } from '../../src/components/Sidebar'
+import { useReduceMotion } from '../../src/components/useReduceMotion'
+import {
+  Card,
+  Dot,
+  Field,
+  Pill,
+  PrimaryBtn,
+  Spinner,
+  Txt,
+  type DotKind,
+} from '../../src/components/ui'
 import {
   loadSessions, sessionRows, sessionListLoading, sessionListError, toMs,
   refreshRunningSessions, runningStoredIds, type SessionRow,
@@ -41,22 +57,19 @@ type Sess = SessionRow
 // Timestamp normalisation lives in the session-list store (shared with the
 // drawer) so both agree on the unit.
 
-function fmtWhen(ts?: number): string {
-  const ms = toMs(ts)
-  if (!ms) return ''
-  const d = new Date(ms)
-  // BUG-058: clamp negative diffs — a future/clock-skewed timestamp passed
-  // the `diff < 60_000` check forever, pinning the label at "just now".
-  const diff = Math.max(0, Date.now() - ms)
-  if (diff < 60_000) return 'just now'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
-  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d ago`
-  try {
-    return d.toLocaleDateString()
-  } catch {
-    return ''
-  }
+/** Row status → the mockup's `status-dot` vocabulary. */
+const STATUS_KIND: Record<Exclude<RowStatus, 'busy'>, DotKind> = {
+  input: 'amber',
+  done: 'green',
+  error: 'red',
+}
+
+/** Row status → its already-translated accessibility label (legacy keys). */
+const STATUS_A11Y: Record<RowStatus, string> = {
+  input: 'status.input',
+  done: 'status.done',
+  error: 'status.error',
+  busy: 'status.busy',
 }
 
 export default function Sessions() {
@@ -70,6 +83,10 @@ export default function Sessions() {
 
 function SessionsInner() {
   const s = useStyles(makeS)
+  // Locale subscription: tr() reads the atom lazily, so without a render on
+  // a language switch an open screen would keep the previous locale.
+  const t = useT()
+  const dir = useDir()
   // BUG-133: chat-pad pattern on the LIST only — the search field stays
   // top-anchored while the results viewport ends at the keyboard's top edge,
   // so matches render above the keys instead of behind them.
@@ -129,7 +146,7 @@ function SessionsInner() {
       return
     }
     let alive = true
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       void (async () => {
         try {
           const res = await apiFetch<{ results?: Record<string, unknown>[] }>(
@@ -157,7 +174,7 @@ function SessionsInner() {
     }, 300)
     return () => {
       alive = false
-      clearTimeout(t)
+      clearTimeout(timer)
     }
   }, [query])
 
@@ -173,14 +190,39 @@ function SessionsInner() {
     return [...titleMatches, ...hits.filter((h) => !seen.has(h.id))]
   }, [list, query, hits])
 
+  /**
+   * Localized relative time. BUG-058: clamp negative diffs — a future/clock-
+   * skewed timestamp passed the `diff < 60_000` check forever, pinning the
+   * label at "just now". The old inline version returned English literals;
+   * the copy now comes from the sessions catalog so all four locales read it.
+   */
+  const fmtWhen = useCallback(
+    (ts?: number): string => {
+      const ms = toMs(ts)
+      if (!ms) return ''
+      const d = new Date(ms)
+      const diff = Math.max(0, Date.now() - ms)
+      if (diff < 60_000) return t('sessions.time.now')
+      if (diff < 3_600_000) return t('sessions.time.minutes', { n: Math.floor(diff / 60_000) })
+      if (diff < 86_400_000) return t('sessions.time.hours', { n: Math.floor(diff / 3_600_000) })
+      if (diff < 7 * 86_400_000) return t('sessions.time.days', { n: Math.floor(diff / 86_400_000) })
+      try {
+        return d.toLocaleDateString(localeAtom.get())
+      } catch {
+        return ''
+      }
+    },
+    [t],
+  )
+
   const openSession = useCallback(
-    (s: Sess) => {
+    (item: Sess) => {
       // Navigate first — the content swap is synchronous inside
       // switchToSession (entry reuse or placeholder + cached transcript),
       // with the resume RPC backgrounded. On failure the user is already on
       // the chat tab, where its retry banner surfaces the error.
       router.navigate('/(tabs)/chat')
-      void switchToSession(s.id).catch(() => {
+      void switchToSession(item.id).catch(() => {
         // The chat screen's banner owns the failure.
       })
     },
@@ -194,11 +236,11 @@ function SessionsInner() {
     })
   }, [])
 
-  const removeSession = useCallback((s: Sess) => {
-    showAlert('Delete this conversation?', s.title || s.preview || 'This permanently removes it from Moch.', [
-      { text: 'Cancel', style: 'cancel' },
+  const removeSession = useCallback((item: Sess) => {
+    showAlert(tr('sessions.delete.title'), item.title || item.preview || tr('sessions.delete.body'), [
+      { text: tr('common.cancel'), style: 'cancel' },
       {
-        text: 'Delete',
+        text: tr('common.delete'),
         style: 'destructive',
         onPress: async () => {
           // BUG-004: mirror the drawer's flow — the gateway refuses to delete
@@ -209,8 +251,8 @@ function SessionsInner() {
           // cleanup; 'not found' (deleted elsewhere) means the goal is
           // already achieved — clean up locally instead of failing.
           try {
-            const live = Object.values(sessionsById.get()).find((x) => x.storedId === s.id)?.id
-            if (activeStoredId.get() === s.id) await newChat()
+            const live = Object.values(sessionsById.get()).find((x) => x.storedId === item.id)?.id
+            if (activeStoredId.get() === item.id) await newChat()
             if (live) {
               try {
                 await rpc('session.close', { session_id: live })
@@ -219,14 +261,14 @@ function SessionsInner() {
               }
             }
             try {
-              await rpc('session.delete', { session_id: s.id })
+              await rpc('session.delete', { session_id: item.id })
             } catch (err) {
               if (!isSessionNotFound(err)) throw err
             }
-            await forgetSession(live ?? s.id)
-            forgetChatMarks(s.id)
+            await forgetSession(live ?? item.id)
+            forgetChatMarks(item.id)
             // Drop it from the shared store so the drawer updates too.
-            sessionRows.set(sessionRows.get().filter((x) => x.id !== s.id))
+            sessionRows.set(sessionRows.get().filter((x) => x.id !== item.id))
           } catch (e) {
             // BUG-074: the known refusal ("cannot delete an active session"
             // — the gateway refuses while a live handle persists, and the
@@ -245,162 +287,310 @@ function SessionsInner() {
     ])
   }, [])
 
+  const emptyTitle = error
+    ? t('sessions.empty.error')
+    : !online
+      ? t('sessions.empty.offline')
+      : query.trim()
+        ? t('sessions.empty.matches')
+        : t('sessions.empty.none')
+  const emptyBody =
+    online && !error && !query.trim() ? t('sessions.empty.body') : ''
+  const canStartFromEmpty = online && !error && !query.trim()
+
   return (
-    <ScreenShell title="Chats" showBrand onSearch={() => searchRef.current?.focus()}>
+    <ScreenShell title={t('sessions.title')} showBrand onSearch={() => searchRef.current?.focus()}>
       <View style={s.root}>
-        <View style={s.searchRow}>
-          <TextInput
-            ref={searchRef}
-            style={s.search}
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Search conversations…"
-            placeholderTextColor={C.textFaint}
-            autoCorrect={false}
-            autoCapitalize="none"
-            returnKeyType="search"
-            onSubmitEditing={() => searchRef.current?.blur()}
-            accessibilityLabel="Search sessions"
-          />
-          <Pressable
-            style={({ pressed }) => [s.newBtn, pressed && s.btnPressed]}
-            onPress={startNew}
-            accessibilityLabel="New chat"
-          >
-            <Icon name="add" size={20} color={C.onAccent} />
-          </Pressable>
+        {/* app-scroll's padded top block (mockup screen 2): search + new chat,
+            pending banner. Kept OUTSIDE the keyboard-padded list wrap so the
+            field stays put (BUG-133) while results rise above the keys. */}
+        <View style={s.header}>
+          <View style={[s.searchRow, { flexDirection: dir.row }]}>
+            <View style={s.searchField}>
+              <Field
+                ref={searchRef}
+                value={query}
+                onChangeText={setQuery}
+                placeholder={t('sessions.search.placeholder')}
+                autoCorrect={false}
+                autoCapitalize="none"
+                returnKeyType="search"
+                onSubmitEditing={() => searchRef.current?.blur()}
+                accessibilityLabel={t('sessions.search.a11y')}
+              />
+            </View>
+            <PrimaryBtn
+              onPress={startNew}
+              accessibilityLabel={t('sessions.newChat')}
+              style={s.newBtn}
+            >
+              <Icon name="add" size={18} color={C.onAccent} />
+            </PrimaryBtn>
+          </View>
+
+          {pending > 0 ? (
+            <Pressable
+              style={({ pressed }) => [s.banner, { flexDirection: dir.row }, pressed && s.pressed]}
+              onPress={() => {
+                // BUG-023: land on the blocking chat itself, not whatever chat
+                // happens to be active.
+                const first = pendingStored[0]
+                router.navigate('/(tabs)/chat')
+                if (first) void switchToSession(first).catch(() => {})
+              }}
+              accessibilityRole="button"
+            >
+              <Txt size={12} weight="700" color={C.amber} style={s.bannerText}>
+                {pending > 1
+                  ? t('sessions.pending.many', { n: pending })
+                  : t('sessions.pending.one')}
+              </Txt>
+              <Icon name={dir.icon.forward} size={14} color={C.amber} />
+            </Pressable>
+          ) : null}
+
+          {/* BUG-022: while offline this row's retry is a dead button (load
+              early-returns) and it stacked on top of the offline row — the
+              offline row covers the offline state, so this one yields. */}
+          {error && online ? (
+            <Pressable
+              style={({ pressed }) => [s.notice, s.noticeError, pressed && s.pressed]}
+              onPress={() => { void load(true) }}
+              accessibilityRole="button"
+            >
+              <Txt size={12} weight="700" color={C.red} center>
+                {t('sessions.error.retry', { error })}
+              </Txt>
+            </Pressable>
+          ) : null}
+
+          {!online && !loading ? (
+            <Pressable
+              style={({ pressed }) => [s.notice, s.noticeOffline, pressed && s.pressed]}
+              onPress={() => { void retryNow().catch(() => {}) }}
+              accessibilityRole="button"
+            >
+              <Txt size={12} weight="700" color={C.amber} center>
+                {t('sessions.offline.retry')}
+              </Txt>
+            </Pressable>
+          ) : null}
         </View>
 
-      {pending > 0 ? (
-        <Pressable
-          style={({ pressed }) => [s.alertRow, pressed && s.btnPressed]}
-          onPress={() => {
-            // BUG-023: land on the blocking chat itself, not whatever chat
-            // happens to be active.
-            const first = pendingStored[0]
-            router.navigate('/(tabs)/chat')
-            if (first) void switchToSession(first).catch(() => {})
-          }}
-        >
-          <Text style={s.alertText}>
-            {pending} question{pending > 1 ? 's' : ''} waiting on you — tap to answer
-          </Text>
-        </Pressable>
-      ) : null}
-
-      {/* BUG-022: while offline this row's retry is a dead button (load
-          early-returns) and it stacked on top of the offline row — the
-          offline row covers the offline state, so this one yields. */}
-      {error && online ? (
-        <Pressable style={({ pressed }) => [s.errRow, pressed && s.btnPressed]} onPress={() => { void load(true) }}>
-          <Text style={s.errText}>{error} — tap to retry</Text>
-        </Pressable>
-      ) : null}
-
-      {!online && !loading ? (
-        <Pressable style={({ pressed }) => [s.errRow, pressed && s.btnPressed]} onPress={() => { void retryNow().catch(() => {}) }}>
-          <Text style={s.errText}>Not connected — tap to reconnect</Text>
-        </Pressable>
-      ) : null}
-
-      <Animated.View style={[s.kbListWrap, kbPad]}>
-      <FlatList
-        data={shown}
-        keyExtractor={(x) => x.id}
-        // BUG-027: with the search field focused, the first tap used to only
-        // dismiss the keyboard — a second tap opened the chat.
-        keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.textDim} onRefresh={async () => { setRefreshing(true); await load(true); setRefreshing(false) }} />}
-        renderItem={({ item }) => {
-          // `session.list` yields stored ids; all our per-session state is
-          // keyed by the same stored id, so compare in that space.
-          const isCurrent = !!currentStored && currentStored === item.id
-          // BUG-131: gateway-running rows join the local busy set — same
-          // pulsing dot, sourced from session.active_list.
-          const status = rowStatus(
-            busy.includes(item.id) || running.has(item.id),
-            attention[item.id],
-            pendingStored.includes(item.id),
-          )
-          const label = item.title || item.preview?.slice(0, 80) || 'Untitled'
-          const src = sourceLabel(item.source, tr)
-          return (
-            <Pressable
-              style={({ pressed }) => [s.row, pressed && s.rowPressed, isCurrent && s.rowActive]}
-              onPress={() => openSession(item)}
-              onLongPress={() => void removeSession(item)}
-              accessibilityLabel={`Open ${label}`}
-            >
-              <View style={{ flex: 1 }}>
-                <View style={s.titleRow}>
-                  <Text style={[s.title, isCurrent && s.titleActive]} numberOfLines={1}>
-                    {label}
-                  </Text>
-                  {isCurrent ? <Text style={s.hereTag}>open</Text> : null}
-                  <StatusDot status={status} />
+        <Animated.View style={[s.kbListWrap, kbPad]}>
+          <FlatList
+            data={shown}
+            keyExtractor={(x) => x.id}
+            style={s.list}
+            contentContainerStyle={s.listContent}
+            // BUG-027: with the search field focused, the first tap used to
+            // only dismiss the keyboard — a second tap opened the chat.
+            keyboardShouldPersistTaps="handled"
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                tintColor={C.textDim}
+                onRefresh={async () => {
+                  setRefreshing(true)
+                  await load(true)
+                  setRefreshing(false)
+                }}
+              />
+            }
+            renderItem={({ item, index }) => {
+              // `session.list` yields stored ids; all our per-session state is
+              // keyed by the same stored id, so compare in that space.
+              const isCurrent = !!currentStored && currentStored === item.id
+              // BUG-131: gateway-running rows join the local busy set — same
+              // pulsing dot, sourced from session.active_list.
+              const status = rowStatus(
+                busy.includes(item.id) || running.has(item.id),
+                attention[item.id],
+                pendingStored.includes(item.id),
+              )
+              const label = item.title || item.preview?.slice(0, 80) || t('sessions.untitled')
+              const src = sourceLabel(item.source, tr)
+              // Mockup meta line: "mobile · 24 msgs · started 12m ago", built
+              // from the real row metadata; BUG-012 labels started_at as the
+              // CREATION time it is. BUG-111: unknown counts read "—".
+              const meta: string[] = []
+              if (src) meta.push(src)
+              meta.push(t('sessions.meta.messages', { n: messageCountText(item.message_count) }))
+              const when = fmtWhen(item.started_at)
+              if (when) meta.push(t('sessions.meta.started', { age: when }))
+              return (
+                <Card
+                  onPress={() => openSession(item)}
+                  onLongPress={() => void removeSession(item)}
+                  accessibilityLabel={t('sessions.openRow', { title: label })}
+                  style={[s.rowCard, index === shown.length - 1 && s.rowCardLast]}
+                >
+                  <View style={[s.rowInner, { flexDirection: dir.row }]}>
+                    <View style={s.rowMain}>
+                      <View style={[s.titleRow, { flexDirection: dir.row }]}>
+                        <SessionDot status={status} />
+                        <Txt size={13} weight="700" numberOfLines={1} style={s.title}>
+                          {label}
+                        </Txt>
+                        {isCurrent ? (
+                          <Pill
+                            kind="accent"
+                            style={s.openPill}
+                            textStyle={s.openPillText}
+                          >
+                            {t('sessions.open')}
+                          </Pill>
+                        ) : null}
+                      </View>
+                      <Txt
+                        size={11}
+                        color={C.textFaint}
+                        numberOfLines={1}
+                        style={[
+                          s.meta,
+                          { paddingLeft: dir.rtl ? 0 : 14, paddingRight: dir.rtl ? 14 : 0 },
+                        ]}
+                      >
+                        {meta.join(' · ')}
+                      </Txt>
+                    </View>
+                    <Icon name={dir.icon.forward} size={16} color={C.textFaint} />
+                  </View>
+                </Card>
+              )
+            }}
+            ListEmptyComponent={
+              loading && !list.length ? (
+                // BUG-021: first open shows a spinner instead of a blank void.
+                <View style={s.emptyLoad}>
+                  <Spinner color={C.accent} />
                 </View>
-                <Text style={s.meta} numberOfLines={1}>
-                  {/* BUG-074: known source tokens localized (raw fallback);
-                      BUG-111: unknown counts read "—", never a lying "0". */}
-                  {src ? `${src} · ` : ''}
-                  {messageCountText(item.message_count)} msgs
-                  {/* BUG-012: the only server timestamp is CREATION time —
-                      label it honestly instead of implying last-used. */}
-                  {fmtWhen(item.started_at) ? ` · started ${fmtWhen(item.started_at)}` : ''}
-                </Text>
-              </View>
-            </Pressable>
-          )
-        }}
-        ListEmptyComponent={
-          loading && !list.length ? (
-            // BUG-021: first open shows a spinner instead of a blank void.
-            <View style={s.emptyWrap}>
-              <ActivityIndicator color={C.accent} />
-            </View>
-          ) : !loading ? (
-            <View style={s.emptyWrap}>
-              {/* BUG-021: an error is not emptiness — don't claim "No
-                  conversations yet" while the retry banner is up. */}
-              <Text style={s.empty}>
-                {error ? 'Could not load chats' : online ? (query ? 'No matches' : 'No conversations yet') : 'Offline'}
-              </Text>
-              {online && !query && !error ? (
-                <Pressable style={({ pressed }) => [s.newBtn, pressed && s.btnPressed]} onPress={startNew}>
-                  <Text style={s.newText}>Start chatting</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          ) : null
-        }
-        />
-      </Animated.View>
+              ) : !loading ? (
+                <Card style={s.emptyCard}>
+                  {/* BUG-021: an error is not emptiness — don't claim "No
+                      conversations yet" while the retry banner is up. */}
+                  <Txt size={14} weight="700" center>
+                    {emptyTitle}
+                  </Txt>
+                  {emptyBody ? (
+                    <Txt size={12} color={C.textDim} center style={s.emptyBody}>
+                      {emptyBody}
+                    </Txt>
+                  ) : null}
+                  {canStartFromEmpty ? (
+                    <PrimaryBtn
+                      label={t('sessions.empty.start')}
+                      onPress={startNew}
+                      style={s.emptyBtn}
+                    />
+                  ) : null}
+                </Card>
+              ) : null
+            }
+          />
+        </Animated.View>
       </View>
     </ScreenShell>
+  )
+}
+
+/**
+ * The row's status dot: the mockup's 8px `status-dot`, with busy keeping the
+ * BUG-056 reduce-motion-aware pulse that separates "working" from "finished,
+ * unread". Static states render the ui-kit Dot; no status = the mockup's idle
+ * dot. Accessibility labels reuse the already-translated `status.*` keys.
+ */
+function SessionDot({ status }: { status?: RowStatus }) {
+  const reduceMotion = useReduceMotion()
+  const pulse = useSharedValue(1)
+  useEffect(() => {
+    if (status !== 'busy' || reduceMotion) {
+      cancelAnimation(pulse)
+      pulse.value = 1
+      return
+    }
+    pulse.value = withRepeat(withTiming(0.25, { duration: 650 }), -1, true)
+    return () => {
+      cancelAnimation(pulse)
+      pulse.value = 1
+    }
+  }, [status, reduceMotion, pulse])
+  const busyStyle = useAnimatedStyle(() => ({ opacity: pulse.value }))
+  if (!status) return <Dot kind="idle" />
+  const label = tr(STATUS_A11Y[status])
+  if (status === 'busy') {
+    return (
+      <Animated.View
+        accessible
+        accessibilityLabel={label}
+        style={[
+          { width: 8, height: 8, borderRadius: 4, backgroundColor: C.accent },
+          busyStyle,
+        ]}
+      />
+    )
+  }
+  return (
+    <View accessible accessibilityLabel={label}>
+      <Dot kind={STATUS_KIND[status]} />
+    </View>
   )
 }
 
 const makeS = () => StyleSheet.create({
   frame: { flex: 1, backgroundColor: C.bg },
   root: { flex: 1, backgroundColor: C.bg },
+  header: { paddingHorizontal: 14, paddingTop: 10 },
+  searchRow: { alignItems: 'center', gap: 7, marginBottom: 10 },
+  searchField: { flex: 1 },
+  newBtn: { paddingHorizontal: 12, paddingVertical: 0, height: 36, minHeight: 36 },
+  pressed: { opacity: 0.7 },
+  banner: {
+    backgroundColor: C.amberSoft,
+    borderWidth: 1,
+    borderColor: 'rgba(245,165,36,0.32)',
+    borderRadius: 12,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    marginBottom: 10,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  bannerText: { flexShrink: 1 },
+  notice: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    marginBottom: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noticeError: { backgroundColor: C.redSoft },
+  noticeOffline: { backgroundColor: C.amberSoft },
   kbListWrap: { flex: 1 },
-  searchRow: { paddingHorizontal: 16, paddingBottom: 10, flexDirection: 'row', gap: 8 },
-  search: { flex: 1, backgroundColor: C.bgCard, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 12, color: C.text, fontSize: 15, minHeight: 44 },
-  newBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.accent, justifyContent: 'center', alignItems: 'center' },
-  btnPressed: { opacity: 0.6 },
-  newText: { color: C.onAccent, fontSize: 14, fontWeight: '700' },
-  alertRow: { paddingVertical: 10, paddingHorizontal: 14, backgroundColor: C.amberSoft },
-  alertText: { color: C.amber, fontSize: 13, fontWeight: '700', textAlign: 'center' },
-  errRow: { padding: 12, alignItems: 'center' },
-  errText: { color: C.red, fontSize: 13 },
-  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13, minHeight: 58, gap: 8 },
-  rowPressed: { backgroundColor: C.bgHover },
-  rowActive: { backgroundColor: C.bgCard },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  title: { color: C.text, fontSize: 15, fontWeight: '600', flexShrink: 1 },
-  titleActive: { color: C.accent },
-  hereTag: { color: C.textFaint, fontSize: 10, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
-  meta: { color: C.textFaint, fontSize: 12, marginTop: 3 },
-  empty: { color: C.textFaint, textAlign: 'center', marginTop: 60, marginBottom: 16, fontSize: 14 },
-  emptyWrap: { alignItems: 'center' },
+  list: { flex: 1 },
+  listContent: { paddingHorizontal: 14, paddingTop: 2, paddingBottom: 18 },
+  // Mockup screen 2: conversation cards sit 7px apart (the list container's
+  // `gap:7px`), not the m-card default 10 — and no gap trails the last row.
+  rowCard: { marginBottom: 7 },
+  rowCardLast: { marginBottom: 0 },
+  rowInner: { alignItems: 'center', gap: 8 },
+  rowMain: { flex: 1, minWidth: 0 },
+  titleRow: { alignItems: 'center', gap: 6 },
+  title: { flexShrink: 1 },
+  openPill: { paddingVertical: 1, paddingHorizontal: 6, alignSelf: 'center' },
+  openPillText: { fontSize: 9.5 },
+  meta: { marginTop: 3, flexShrink: 1 },
+  emptyLoad: { paddingTop: 40, alignItems: 'center' },
+  emptyCard: {
+    marginTop: 8,
+    paddingVertical: 28,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  emptyBody: { marginTop: 4 },
+  emptyBtn: { marginTop: 14 },
 })
