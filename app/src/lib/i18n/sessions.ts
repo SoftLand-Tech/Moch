@@ -35,6 +35,8 @@ export const sessions: Catalog = {
     'sessions.error.retry': '{error} — tap to retry',
     'sessions.delete.title': 'Delete this conversation?',
     'sessions.delete.body': 'This permanently removes it from Moch.',
+    // ── [12] active-project filter chip ───────────────────────────────────
+    'sessions.filter.clear': 'Clear project filter',
   },
   ar: {
     'sessions.title': 'المحادثات',
@@ -62,6 +64,8 @@ export const sessions: Catalog = {
     'sessions.error.retry': '{error} — اضغط لإعادة المحاولة',
     'sessions.delete.title': 'حذف هذه المحادثة؟',
     'sessions.delete.body': 'سيُحذف نهائيًا من Moch.',
+    // ── [12] active-project filter chip ───────────────────────────────────
+    'sessions.filter.clear': 'مسح تصفية المشروع',
   },
   zh: {
     'sessions.title': '对话',
@@ -89,6 +93,8 @@ export const sessions: Catalog = {
     'sessions.error.retry': '{error} — 点击重试',
     'sessions.delete.title': '删除此对话？',
     'sessions.delete.body': '将从 Moch 中永久删除。',
+    // ── [12] active-project filter chip ───────────────────────────────────
+    'sessions.filter.clear': '清除项目筛选',
   },
   fr: {
     'sessions.title': 'Discussions',
@@ -116,5 +122,7 @@ export const sessions: Catalog = {
     'sessions.error.retry': '{error} — appuyez pour réessayer',
     'sessions.delete.title': 'Supprimer cette discussion ?',
     'sessions.delete.body': 'Elle sera définitivement supprimée de Moch.',
+    // ── [12] active-project filter chip ───────────────────────────────────
+    'sessions.filter.clear': 'Effacer le filtre de projet',
   },
 }

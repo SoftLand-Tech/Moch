@@ -100,7 +100,10 @@ STAMP_MECHANISM = 2
 # bind-mounted), so every $HOME-resolved credential (gh auth hosts.yml,
 # ~/.gitconfig, ~/.ssh, ~/.netrc, ~/.aws, ~/.npmrc, ~/.config/*) read
 # ENOENT in agent-exec'd commands while the user's Terminal saw them.
-SHIM_FORMAT = 6
+# v7 (GH issue 13): the guest start workdir moves /root → /workspace (the
+# bind of MOCH_WORKSPACE) so `ls` in a fresh terminal shows the project
+# folders the app creates there. HOME stays /root (credentials).
+SHIM_FORMAT = 7
 _SHIM_MARKER = f"# moch-shim-format: {SHIM_FORMAT}"
 
 # proot-distro parity on Android (proot_distro/commands/login/proot_cmd.py
@@ -260,7 +263,10 @@ def build_guest_launch(guest_argv: list[str]) -> tuple[list[str], dict]:
         "-b", "/proc",
         "-0",
         *PROOT_PARITY_FLAGS,
-        "-w", "/root",
+        # Start in /workspace (the bind of MOCH_WORKSPACE) so `ls` shows the
+        # project folders the app creates; /workspace always exists in the
+        # guest because proot creates every bind target. HOME stays /root.
+        "-w", "/workspace",
         *guest_argv,
     ]
     return argv, env
@@ -295,7 +301,7 @@ export PATH="{GUEST_PATH_PREFIX}:$PATH"
 exec /system/bin/linker64 "$LD/bin/proot" -r "$LD/rootfs" \\
   -b "$WS:/workspace" -b "$WS:$WS" -b "$SC:$SC" -b /dev -b /proc -0 \\
   --link2symlink --sysvipc -L --kernel-release='{FAKE_UTSNAME}' \\
-  -w /root /bin/bash "$@"
+  -w /workspace /bin/bash "$@"
 """
 
 

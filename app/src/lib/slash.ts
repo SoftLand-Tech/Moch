@@ -34,6 +34,48 @@ async function gw(): Promise<GatewayModule> {
   return gwOverride ?? import('./gateway')
 }
 
+// ── OpenCode thinker (issue 16) ────────────────────────────────────────────
+// When the active thinker is `opencode`, the palette serves the OFFICIAL
+// opencode commands fetched from the OC server (lib/ocCommands) instead of
+// the hermes gateway registry. Both ./thinker and ./ocCommands pull RN-only
+// transport chains, so they are imported lazily and a failure (plain-node
+// tests, scripts) keeps the hermes behavior byte-for-byte. The sync
+// completion path reads the cached module/flag set by the last async call
+// (completeSlash/resolveSlashRoute run before every palette keystroke
+// resolves, so the flag is warm in practice).
+type OcCommandsModule = typeof import('./ocCommands')
+let ocMod: OcCommandsModule | null = null
+let ocThinkerActive = false
+/** Test seam — force the OC branch without the RN module graph. */
+export function _setOcCommandModuleForTests(m: OcCommandsModule | null, active: boolean) {
+  ocMod = m
+  ocThinkerActive = active
+}
+async function ocContext(): Promise<OcCommandsModule | null> {
+  try {
+    const [thinker, mod] = await Promise.all([import('./thinker'), import('./ocCommands')])
+    ocMod = mod
+    ocThinkerActive = thinker.thinkerAtom.get() === 'opencode'
+    return ocThinkerActive ? mod : null
+  } catch {
+    ocThinkerActive = false
+    return null
+  }
+}
+
+/** OC completion items: text=name (no slash), display=/name, meta=description. */
+function ocComplete(text: string): CompletionItem[] {
+  if (!ocMod) return []
+  const body = text.startsWith('/') ? text.slice(1) : text
+  const namePart = body.split(/\s/)[0].toLowerCase().replace(/^\/+/, '')
+  return ocMod.filterOcCommands(namePart).slice(0, 60).map((c) => ({
+    text: c.name,
+    display: `/${c.name}`,
+    kind: 'command',
+    meta: c.description?.slice(0, 90),
+  }))
+}
+
 export interface CatalogCommand {
   description: string
   argument_mode?: string
@@ -298,6 +340,16 @@ export function slashRouteFor(text: string): SlashRoute {
  *    + outbox retry) instead of a dead-end "Command failed" alert.
  */
 export async function resolveSlashRoute(text: string): Promise<'command' | 'message'> {
+  // OC thinker: everything submits as a chat message — the OpenCode send
+  // path (runOpencodeTurn) itself dispatches a leading /name whose token is
+  // a known official OC command (lib/ocCommands.ocCommandTurnPayload), so
+  // the hermes command pipeline never fires here. Load the registry first so
+  // the dispatch check has data (it never throws).
+  const oc = await ocContext()
+  if (oc) {
+    await oc.loadOcCommands()
+    return 'message'
+  }
   const route = slashRouteFor(text)
   if (route !== 'hold') return route
   try {
@@ -393,6 +445,13 @@ export function interactiveTarget(
  * fails, so the palette still works offline.
  */
 export async function completeSlash(prefix: string, sessionId?: string): Promise<CompletionItem[]> {
+  const oc = await ocContext()
+  if (oc) {
+    // OC thinker: the official opencode commands from the OC server, locally
+    // filtered by the typed prefix (no hermes catalog RPC).
+    await oc.loadOcCommands()
+    return ocComplete(prefix)
+  }
   const text = prefix.startsWith('/') ? prefix : `/${prefix}`
   try {
     const { rpc } = await gw()
@@ -413,6 +472,9 @@ export async function completeSlash(prefix: string, sessionId?: string): Promise
  * refines it when it lands.
  */
 export function localCompleteSync(text: string): CompletionItem[] {
+  // OC thinker: serve the cached official OC command list synchronously (the
+  // flag/module are set by the async calls above; hermes palette otherwise).
+  if (ocThinkerActive && ocMod) return ocComplete(text)
   return localComplete(text)
 }
 

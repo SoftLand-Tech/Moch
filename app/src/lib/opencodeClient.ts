@@ -251,6 +251,33 @@ export const ocSetModel = (sessionId: string, providerID: string, modelId: strin
 
 export const ocIntegrations = () => ocFetch<OcIntegration[]>('/api/integration', { timeoutMs: 20_000 })
 
+/**
+ * The official slash-command registry (opencode 2.x, verified against
+ * .research/opencode: `command.list` → Command.Info = { name, description? }).
+ * ocFetch unwraps the `{ location, data: [...] }` envelope, so this is the
+ * bare array — kept tolerant of a bare array too (lib/ocCommands re-checks).
+ */
+export interface OcCommand {
+  name: string
+  description?: string
+}
+
+export const ocCommands = () => ocFetch<OcCommand[]>('/api/command', { timeoutMs: 20_000 })
+
+/**
+ * Run a registered command in a session (opencode 2.x `session.command`):
+ * POST /api/session/:sessionID/command { name, text } → 204 empty. The
+ * streamed output arrives over the SAME /api/event SSE pump a prompt uses,
+ * so callers keep the turn runner unchanged. `text` is the free-form
+ * argument text after the command name ('' for a bare /command).
+ */
+export const ocRunCommand = (sessionId: string, name: string, text: string) =>
+  ocFetch<unknown>(`/api/session/${encodeURIComponent(sessionId)}/command`, {
+    method: 'POST',
+    body: { name, text },
+    timeoutMs: 20_000,
+  })
+
 export const ocConnectKey = (integrationID: string, key: string) =>
   ocFetch<unknown>(
     `/api/integration/${encodeURIComponent(integrationID)}/connect/key`,

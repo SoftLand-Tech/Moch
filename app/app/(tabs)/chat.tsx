@@ -9,6 +9,7 @@ import {
   Platform,
   ActivityIndicator,
   ScrollView,
+  Modal,
   type NativeSyntheticEvent,
   type NativeScrollEvent,
 } from 'react-native'
@@ -17,7 +18,7 @@ import Animated, { useAnimatedStyle } from 'react-native-reanimated'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useStore } from '@nanostores/react'
 import { Icon } from '../../src/components/Icon'
-import { Dot, GhostBtn, HeaderButton, Pill, PrimaryBtn, Spinner, Txt } from '../../src/components/ui'
+import { Dot, GhostBtn, HeaderButton, Pill, PrimaryBtn, SheetBackdrop, SheetCard, SheetGrabber, Spinner, Txt } from '../../src/components/ui'
 import { MochiMark } from '../../src/components/MochiMark'
 import * as Haptics from 'expo-haptics'
 import * as ImagePicker from 'expo-image-picker'
@@ -70,7 +71,9 @@ import { AttachmentChip } from '../../src/components/media/AttachmentChip'
 import { AttachSheet } from '../../src/components/media/AttachSheet'
 import { chatTabFocused } from '../../src/lib/attention'
 import { draftFor, setDraft } from '../../src/lib/drafts'
-import { activeBotAtom, setActiveBot } from '../../src/lib/fleet'
+import { activeBotAtom, setActiveBot, fleetProfiles, type FleetProfile } from '../../src/lib/fleet'
+import { openBotChat } from '../../src/lib/botChat'
+import { BotAvatar } from '../../src/components/BotAvatar'
 import { shareInInbox, ackShareIn, applySharedToDraft, type SharedFile } from '../../src/lib/shareIn'
 import { isConnected as isConnectedAtom, everConnected, connectionState, gatewayError, retryNow } from '../../src/lib/gateway'
 import { completeSlash, loadCatalog, runCommand, parseSlashCommand, canonicalName, interactiveTarget, describeCommand, subsFor, argumentModeFor, slashLabel, localCompleteSync, resolveSlashRoute, type CompletionItem, type SlashOutcome } from '../../src/lib/slash'
@@ -122,6 +125,12 @@ export default function Chat() {
   const busy = useStore(agentBusy)
   // BUG-111: which bot NEW chats are scoped to (persisted in fleet.ts).
   const activeBot = useStore(activeBotAtom)
+  // Bot Switcher (round-2 feedback): the pill under the header opens this
+  // sheet — the roster lives here instead of a "Switch back" dead end.
+  const profiles = useStore(fleetProfiles)
+  const [botSwitcherOpen, setBotSwitcherOpen] = useState(false)
+  /** The bot currently being switched to ('' = the default agent). */
+  const [switchingBot, setSwitchingBot] = useState<string | null>(null)
   const req = useStore(pendingRequest)
   const td = useStore(todos)
   const qb = useStore(outbox)
@@ -300,6 +309,34 @@ export default function Chat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [botProfile])
   const lastDraft = useRef<string | undefined>(undefined)
+
+  // ── Bot Switcher (round-2 feedback) ─────────────────────────────────────
+  // Direct switching, no confirm: pick a bot → its canonical chat opens;
+  // pick the default agent → a fresh default chat. The sheet stays up with
+  // a spinner while the switch runs, and a failure surfaces as an alert
+  // with the sheet still open (the user can retry or pick another bot).
+  const pickBot = async (name: string | null) => {
+    if (switchingBot !== null) return
+    setSwitchingBot(name ?? '')
+    try {
+      if (name) {
+        await setActiveBot(name)
+        await openBotChat(name)
+      } else {
+        await setActiveBot(null)
+        await newChat()
+      }
+      setBotSwitcherOpen(false)
+    } catch (e) {
+      alertOk(
+        t('chat.bot.switchFailed', { name: name ?? t('chat.bot.defaultLabel') }),
+        e instanceof Error ? e.message : String(e),
+      )
+    } finally {
+      setSwitchingBot(null)
+    }
+  }
+  const closeBotSwitcher = () => { if (switchingBot === null) setBotSwitcherOpen(false) }
 
   // ── Per-chat composer drafts ─────────────────────────────────────────────
   // Leaving a chat (sidebar switch, attention-toast hop, app restart) must
@@ -1232,37 +1269,22 @@ export default function Chat() {
         }
       >
         <Animated.View style={[s.root, kbPad]}>
-          {/* Active-bot profile chip (BUG-111): the chat's bot scoping is the
-              mockup's pill row under the header — green dot, "Bot:", @name, and
-              the one obvious way back. Hermes-only: bots don't exist in OC. */}
+          {/* Active-bot profile chip (BUG-111 → round-2 feedback): the pill
+              IS the bot switcher — tapping it opens the Bot Switcher sheet
+              (the old "Switch back" link is gone; switching is direct).
+              Hermes-only: bots don't exist in OC. */}
           {!ocMode && activeBot ? (
             <View style={[s.botRow, { flexDirection: dir.row }]}>
               <Pressable
                 style={({ pressed }) => [s.botPill, { flexDirection: dir.row }, pressed && s.btnPressed]}
-                onPress={() =>
-                  void showAlert(
-                    t('chat.bot.alertTitle', { name: activeBot }),
-                    t('chat.bot.alertBody'),
-                    [
-                      { text: t('chat.bot.stay'), style: 'cancel' },
-                      { text: t('chat.bot.switchBackAction'), onPress: () => { void setActiveBot(null) } },
-                    ],
-                  )
-                }
+                onPress={() => setBotSwitcherOpen(true)}
                 accessibilityRole="button"
                 accessibilityLabel={t('chat.bot.a11y', { name: activeBot })}
               >
                 <Dot kind="green" size={8} />
                 <Txt size={11} color={C.textDim}>{t('chat.bot.label')}</Txt>
                 <Txt size={11} weight="700" numberOfLines={1} style={s.botName}>@{activeBot}</Txt>
-              </Pressable>
-              <Pressable
-                onPress={() => { void setActiveBot(null) }}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel={t('chat.bot.switchBackAction')}
-              >
-                <Txt size={11} weight="600" color={C.accent}>{t('chat.bot.switchBack')}</Txt>
+                <Icon name="chevron-down" size={12} color={C.textFaint} />
               </Pressable>
             </View>
           ) : null}
@@ -1917,6 +1939,94 @@ export default function Chat() {
               onClose={() => setOptionSheet(null)}
             />
           ) : null}
+
+          {/* Bot Switcher (round-2 feedback): default agent + every named
+              bot, the active one selected and inert. No TextInput inside, so
+              a plain Modal root suffices — no keyboard can rise here. */}
+          <Modal
+            visible={botSwitcherOpen}
+            transparent
+            animationType="slide"
+            onRequestClose={closeBotSwitcher}
+          >
+            <View style={s.botSheetRoot}>
+              <SheetBackdrop onPress={closeBotSwitcher} />
+              <SheetCard style={s.botSheetCard}>
+                <SheetGrabber />
+                <View style={[s.botSheetHead, { flexDirection: dir.row }]}>
+                  <View style={s.botSheetHeadText}>
+                    <Txt size={14} weight="800" numberOfLines={1}>{t('chat.bot.sheetTitle')}</Txt>
+                    <Txt size={11} color={C.textDim} numberOfLines={1}>{t('chat.bot.sheetSubtitle')}</Txt>
+                  </View>
+                  <HeaderButton onPress={closeBotSwitcher} accessibilityLabel={t('common.close')}>
+                    <Icon name="close" size={14} color={C.textDim} />
+                  </HeaderButton>
+                </View>
+                <ScrollView style={s.botSheetList} keyboardShouldPersistTaps="handled">
+                  {/* Default agent row — selected when no bot is active. */}
+                  <Pressable
+                    style={({ pressed }) => [
+                      s.botSheetRow,
+                      { flexDirection: dir.row },
+                      !activeBot && s.botSheetRowOn,
+                      pressed && switchingBot === null && s.btnPressed,
+                    ]}
+                    onPress={() => { if (activeBot !== null) void pickBot(null) }}
+                    disabled={activeBot === null || switchingBot !== null}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('chat.bot.switchTo', { name: t('chat.bot.defaultLabel') })}
+                    accessibilityState={{ selected: activeBot === null, busy: switchingBot === '' }}
+                  >
+                    <BotAvatar profile="default" isDefault size={34} />
+                    <View style={s.botSheetRowText}>
+                      <Txt size={13} weight="700" numberOfLines={1}>{t('chat.bot.defaultLabel')}</Txt>
+                      <Txt size={11} color={C.textDim} numberOfLines={1}>{t('chat.bot.defaultDesc')}</Txt>
+                    </View>
+                    {switchingBot === '' ? (
+                      <Spinner size="small" />
+                    ) : activeBot === null ? (
+                      <Icon name="checkmark-circle" size={18} color={C.accent} />
+                    ) : null}
+                  </Pressable>
+                  {/* Named bots from the fleet roster. */}
+                  {profiles.map((p: FleetProfile) => {
+                    const isOn = activeBot === p.name
+                    const isSwitching = switchingBot === p.name
+                    return (
+                      <Pressable
+                        key={p.name}
+                        style={({ pressed }) => [
+                          s.botSheetRow,
+                          { flexDirection: dir.row },
+                          isOn && s.botSheetRowOn,
+                          pressed && !isOn && switchingBot === null && s.btnPressed,
+                        ]}
+                        onPress={() => { if (!isOn) void pickBot(p.name) }}
+                        disabled={isOn || switchingBot !== null}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('chat.bot.switchTo', { name: p.name })}
+                        accessibilityState={{ selected: isOn, busy: isSwitching }}
+                      >
+                        <BotAvatar profile={p.name} size={34} frozen={p.frozen} />
+                        <View style={s.botSheetRowText}>
+                          <Txt size={13} weight="700" numberOfLines={1}>{p.name}</Txt>
+                          {!!p.description ? (
+                            <Txt size={11} color={C.textDim} numberOfLines={1}>{p.description}</Txt>
+                          ) : null}
+                        </View>
+                        {isSwitching ? (
+                          <Spinner size="small" />
+                        ) : isOn ? (
+                          <Icon name="checkmark-circle" size={18} color={C.accent} />
+                        ) : null}
+                      </Pressable>
+                    )
+                  })}
+                </ScrollView>
+              </SheetCard>
+            </View>
+          </Modal>
+
             {/* Moch floats: NO layout height of his own; the box is the only
                 touch target (tap = wink, press-and-hold = pat). */}
             <View style={s.mochFloat} pointerEvents="box-none">
@@ -1971,6 +2081,28 @@ const makeS = () => StyleSheet.create({
     flexShrink: 1,
   },
   botName: { flexShrink: 1 },
+
+  // ── Bot Switcher sheet (round-2 feedback) ────────────────────────────────
+  // Modal root fills the screen; the backdrop is the scrim, the card docks at
+  // the bottom (ui's SheetCard carries the elevation + top radii).
+  botSheetRoot: { flex: 1, justifyContent: 'flex-end' },
+  botSheetCard: { paddingBottom: 24 },
+  botSheetHead: { alignItems: 'center', gap: 8, marginTop: 6, marginBottom: 8 },
+  botSheetHeadText: { flex: 1, gap: 1 },
+  botSheetList: { maxHeight: 380 },
+  botSheetRow: {
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.bgCard,
+    marginBottom: 6,
+  },
+  botSheetRowOn: { borderColor: C.accent, backgroundColor: C.accentSoft },
+  botSheetRowText: { flex: 1, gap: 1 },
 
   // ── Empty state (mockup: centered MochiMark + starter cards) ────────────
   booting: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 80 },

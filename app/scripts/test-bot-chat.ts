@@ -312,6 +312,85 @@ async function main() {
     check('blank profile: no RPCs', calls.length === 0)
   }
 
+  // ── Stale canonical row: resume fails "session not found" → recover ──────
+  {
+    opened = []
+    active = null
+    const { rpc, calls } = fakeRpc({
+      // First lookup: the stale row exists. After the best-effort delete the
+      // re-lookup (none needed here — the create path succeeds directly) and
+      // the recovery's lookup still report an empty registry.
+      'session.list': (() => {
+        let n = 0
+        return () => (++n === 1
+          ? { sessions: [{ id: 'stale-1', title: 'Bot Chat' }] }
+          : { sessions: [] })
+      })(),
+      'session.delete': (params) => {
+        if (params.session_id !== 'stale-1') throw new Error('unexpected delete target')
+        return { ok: true }
+      },
+      'session.create': () => ({ session_id: 'fresh-live', stored_session_id: 'fresh-stored' }),
+      'session.title': () => ({ title: 'Bot Chat', pending: false }),
+    })
+    mod._useBotChatRpcForTests(rpc)
+    mod._useBotChatRosterForTests(() => false)
+    // The real resume throws "session not found" for the stale row; every
+    // later open (the fresh canonical) succeeds.
+    const realDeps = mod._useBotChatDepsForTests
+    let openCalls = 0
+    let newChats = 0
+    realDeps({
+      setActiveBot: (profile) => { active = profile },
+      openChat: async (storedId) => {
+        openCalls++
+        if (openCalls === 1) throw new Error('session not found: stale-1')
+        opened.push(storedId)
+        active = storedId
+      },
+      newChat: async () => { newChats++; return 'fallback-chat' },
+    })
+
+    let id = ''
+    let err = ''
+    try { id = await openBotChat('stale-bot') } catch (e) { err = e instanceof Error ? e.message : String(e) }
+    check('stale row: no error escapes', !err, err)
+    check('stale row: the FRESH canonical is opened', opened.includes('fresh-stored') && !opened.includes('stale-1'), opened.join(','))
+    check('stale row: resolves to the fresh stored id', id === 'fresh-stored', id)
+    check('stale row: the stale row is deleted', callsTo(calls, 'session.delete').length === 1)
+    check('stale row: delete targets the STALE id', JSON.stringify(callsTo(calls, 'session.delete')[0]?.params) === JSON.stringify({ session_id: 'stale-1' }))
+    check('stale row: a fresh canonical is minted', callsTo(calls, 'session.create').length === 1)
+    check('stale row: bot stays scoped', active === 'fresh-stored', String(active))
+    check('stale row: newChat fallback NOT used (mint succeeded)', newChats === 0)
+
+    // Recovery whose mint ALSO fails falls back to a fresh bot-scoped chat.
+    opened = []
+    const mintBoom = fakeRpc({
+      'session.list': () => ({ sessions: [{ id: 'stale-2', title: 'Bot Chat' }] }),
+      'session.create': () => { throw new Error('gateway down') },
+    })
+    let fellBack = ''
+    mod._useBotChatRpcForTests(mintBoom.rpc)
+    mod._useBotChatDepsForTests({
+      setActiveBot: () => {},
+      openChat: async () => { throw new Error('session not found') },
+      newChat: async () => { fellBack = 'fallback-2'; return 'fallback-2' },
+    })
+    id = ''
+    err = ''
+    try { id = await openBotChat('stale-bot-2') } catch (e) { err = e instanceof Error ? e.message : String(e) }
+    check('stale row: mint failure still resolves via fallback', !err && id === 'fallback-2', err || id)
+    check('stale row: fallback chat is opened in the app too', fellBack === 'fallback-2')
+
+    // Restore the happy-path deps for the suites below.
+    opened = []
+    realDeps({
+      setActiveBot: (profile) => { active = profile },
+      openChat: async (storedId) => { opened.push(storedId); active = storedId },
+      newChat: async () => 'new-chat',
+    })
+  }
+
   // Reset the injected seams so nothing leaks past this suite.
   mod._useBotChatRpcForTests(null)
   mod._useBotChatRosterForTests(null)

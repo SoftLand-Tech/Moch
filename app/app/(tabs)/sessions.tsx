@@ -50,6 +50,14 @@ import {
   searchHitToRow, sourceLabel, messageCountText, isDeleteRefusalBusy,
 } from '../../src/lib/sessionRowMeta'
 import { apiFetch } from '../../src/lib/http'
+import {
+  activeProjectIdAtom,
+  buildSessionOwnerIndex,
+  projectIdForSession,
+  projectSessionIdsAtom,
+  projectsAtom,
+  setActiveProject,
+} from '../../src/lib/workspace'
 
 // BUG-063: the row type IS SessionRow — the local duplicate dropped.
 type Sess = SessionRow
@@ -121,6 +129,32 @@ function SessionsInner() {
   // opened (opening clears the event-driven mark; the question still blocks).
   const pendingStored = useStore(pendingStoredIds)
 
+  // ── [12] active-project filter ─────────────────────────────────────────────
+  // The drawer's "More" (and project selection) activates a project; this
+  // screen then shows only that project's conversations. Same never-hide rule
+  // as the drawer: a row NOTHING can classify (no project_id, no tree
+  // membership, no cwd) stays visible — losing it reads as data loss.
+  const activeProjectId = useStore(activeProjectIdAtom)
+  const projects = useStore(projectsAtom)
+  const projectSessionIds = useStore(projectSessionIdsAtom)
+  const selectedProject = useMemo(
+    () => (activeProjectId == null ? null : projects.find((p) => p.id === activeProjectId) ?? null),
+    [activeProjectId, projects],
+  )
+  const ownerIndex = useMemo(() => buildSessionOwnerIndex(projectSessionIds), [projectSessionIds])
+  const inActiveProject = useCallback(
+    (r: { id?: string; cwd?: string; project_id?: string }) => {
+      if (!selectedProject) return true
+      const owner = projectIdForSession(r, ownerIndex)
+      if (owner === undefined) return true
+      return owner === selectedProject.id
+    },
+    [selectedProject, ownerIndex],
+  )
+  const clearProjectFilter = useCallback(() => {
+    void setActiveProject(null)
+  }, [])
+
   // The store is shared with the drawer, so both show the same list in the
   // same order. `search` is not a valid RPC param (extra="forbid"), so the
   // filter is applied locally on title + preview.
@@ -180,15 +214,17 @@ function SessionsInner() {
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return list
+    if (!q) return selectedProject ? list.filter(inActiveProject) : list
     const titleMatches = list.filter((s) =>
       `${s.title ?? ''} ${s.preview ?? ''} ${s.source ?? ''}`.toLowerCase().includes(q),
     )
-    // BUG-114: content matches the title filter can't see, deduped and after
-    // the title hits (a title match is the stronger signal).
+    // [12] the project filter applies to BOTH title rows and content hits —
+    // it composes after the search merge, so a hit from another project is
+    // dropped here rather than leaking in.
     const seen = new Set(titleMatches.map((s) => s.id))
-    return [...titleMatches, ...hits.filter((h) => !seen.has(h.id))]
-  }, [list, query, hits])
+    const combined = [...titleMatches, ...hits.filter((h) => !seen.has(h.id))]
+    return selectedProject ? combined.filter(inActiveProject) : combined
+  }, [list, query, hits, selectedProject, inActiveProject])
 
   /**
    * Localized relative time. BUG-058: clamp negative diffs — a future/clock-
@@ -327,6 +363,26 @@ function SessionsInner() {
               <Icon name="add" size={18} color={C.onAccent} />
             </PrimaryBtn>
           </View>
+
+          {/* [12] active-project filter chip (set from the drawer's "More").
+              X clears it via setActiveProject(null); the list and search hits
+              above both respect the filter. */}
+          {selectedProject ? (
+            <View style={[s.filterChip, { flexDirection: dir.row }]}>
+              <Icon name="funnel" size={13} color={C.accent} />
+              <Txt size={12} weight="700" color={C.text} numberOfLines={1} style={s.filterText}>
+                {selectedProject.name}
+              </Txt>
+              <Pressable
+                onPress={clearProjectFilter}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={t('sessions.filter.clear')}
+              >
+                <Icon name="close" size={14} color={C.textDim} />
+              </Pressable>
+            </View>
+          ) : null}
 
           {pending > 0 ? (
             <Pressable
@@ -542,6 +598,21 @@ const makeS = () => StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
   header: { paddingHorizontal: 14, paddingTop: 10 },
   searchRow: { alignItems: 'center', gap: 7, marginBottom: 10 },
+  // [12] active-project filter chip.
+  filterChip: {
+    alignSelf: 'flex-start',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 10,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: C.accentSoft,
+    borderWidth: 1,
+    borderColor: C.border,
+    maxWidth: '100%',
+  },
+  filterText: { flexShrink: 1 },
   searchField: { flex: 1 },
   newBtn: { paddingHorizontal: 12, paddingVertical: 0, height: 36, minHeight: 36 },
   pressed: { opacity: 0.7 },

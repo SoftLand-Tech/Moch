@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react'
-import { View, Pressable, StyleSheet, Modal } from 'react-native'
+import { View, Pressable, StyleSheet, Modal, ScrollView } from 'react-native'
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { computed } from 'nanostores'
 import { useStore } from '@nanostores/react'
@@ -24,6 +25,8 @@ import {
   Spinner,
   Toggle,
   Txt,
+  Field,
+  PrimaryBtn,
 } from '../../src/components/ui'
 import { C, useStyles, setTheme, THEME_OPTIONS, themeId, type ThemeId } from '../../src/lib/theme'
 import { LOCALE_OPTIONS, localeAtom, setLocale, useDir, useT, tr } from '../../src/lib/strings'
@@ -39,6 +42,7 @@ import { activeSession, messages } from '../../src/lib/chat'
 import { diagLog, logText } from '../../src/lib/log'
 import {
   notificationsEnabled,
+  notificationPermission,
   setNotificationsEnabled,
   ensureNotificationPermission,
 } from '../../src/lib/push'
@@ -60,7 +64,7 @@ import {
   setOpencodeOneShot,
   stopOpencodeServer,
 } from '../../src/lib/thinker'
-import { readAbout } from '../../src/lib/aboutMe'
+import { parseAbout, readAbout, saveAbout, type AboutFields } from '../../src/lib/aboutMe'
 
 /** Appearance cards: human captions owned by i18n, not by theme.ts. */
 const THEME_CAPTION_KEY: Record<ThemeId, string> = {
@@ -294,6 +298,11 @@ function SettingsInner() {
   const activeTheme = useStore(themeId)
   const [aboutBusy, setAboutBusy] = React.useState(false)
   const [langOpen, setLangOpen] = React.useState(false)
+  const [thinkerOpen, setThinkerOpen] = React.useState(false)
+  const [aboutOpen, setAboutOpen] = React.useState(false)
+  const [aboutForm, setAboutForm] = React.useState<AboutFields>({ name: '', work: '', extra: '' })
+  const [aboutError, setAboutError] = React.useState<string | null>(null)
+  const notifPerm = useStore(notificationPermission)
   const linux = useLinuxGuest()
   const runtime = useRuntimeInfo()
 
@@ -394,45 +403,62 @@ function SettingsInner() {
     })()
   }
 
-  const switchThinker = () => {
-    showAlert(t('settings.thinker.switch.title'), t('settings.thinker.switch.body'), [
-      { text: t('common.cancel'), style: 'cancel' },
-      {
-        text: 'OpenCode',
-        onPress: () => {
-          void (async () => {
-            await setOpencodeOneShot(false)
-            await setThinker('opencode')
-            showAlert(t('settings.thinker.selected.title'), t('settings.thinker.selected.body'), [
-              { text: t('chrome.alert.ok') },
-            ])
-          })()
-        },
-      },
-      {
-        text: 'Moch',
-        onPress: () => {
-          void (async () => {
-            await stopOpencodeServer()
-            await setOpencodeOneShot(false)
-            await setThinker('moch')
-          })()
-        },
-      },
-    ])
+  /**
+   * Thinker switch: picker sheet instead of the old two-button alert. The
+   * current thinker row is the sheet's selected (disabled) option; picking the
+   * other one runs the exact pre-existing switch sequence, then closes.
+   */
+  const chooseThinker = (id: 'moch' | 'opencode') => {
+    if (id === thinker) return
+    if (id === 'opencode') {
+      void (async () => {
+        await setOpencodeOneShot(false)
+        await setThinker('opencode')
+        setThinkerOpen(false)
+        showAlert(t('settings.thinker.selected.title'), t('settings.thinker.selected.body'), [
+          { text: t('chrome.alert.ok') },
+        ])
+      })()
+      return
+    }
+    void (async () => {
+      await stopOpencodeServer()
+      await setOpencodeOneShot(false)
+      await setThinker('moch')
+      setThinkerOpen(false)
+    })()
   }
 
-  const showAbout = () => {
+  /** Open the editable About-me sheet, prefilled from the stored profile. */
+  const openAbout = () => {
     void (async () => {
       if (aboutBusy) return
       setAboutBusy(true)
+      setAboutError(null)
       try {
         const entries = await readAbout()
-        showAlert(
-          t('settings.memory.about.title'),
-          entries.length ? entries.join('\n') : t('settings.memory.about.empty'),
-          [{ text: t('chrome.alert.ok') }],
-        )
+        setAboutForm(parseAbout(entries))
+        setAboutOpen(true)
+      } finally {
+        setAboutBusy(false)
+      }
+    })()
+  }
+
+  const saveAboutSheet = () => {
+    void (async () => {
+      if (aboutBusy) return
+      setAboutBusy(true)
+      setAboutError(null)
+      try {
+        const r = await saveAbout(aboutForm)
+        if (!r.ok) {
+          setAboutError(r.error ?? t('settings.about.saveFailedWhy', { why: 'RPC' }))
+          return
+        }
+        setAboutOpen(false)
+      } catch (e) {
+        setAboutError(e instanceof Error ? e.message : String(e))
       } finally {
         setAboutBusy(false)
       }
@@ -505,7 +531,6 @@ function SettingsInner() {
           <Group>
             <Row
               label={t('settings.language.label')}
-              sub={t('settings.language.hint')}
               value={currentNative}
               chevron
               onPress={() => setLangOpen(true)}
@@ -531,7 +556,6 @@ function SettingsInner() {
             />
             <Row
               label={linux.installed ? t('settings.linux.reinstall') : t('settings.linux.install')}
-              sub={t('settings.linux.install.sub')}
               onPress={() => { void linux.runInstall() }}
               disabled={linux.busy}
               right={linux.busy ? <Spinner size="small" color={C.accent} /> : undefined}
@@ -539,19 +563,16 @@ function SettingsInner() {
             {linux.installed ? (
               <Row
                 label={t('settings.linux.reset')}
-                sub={t('settings.linux.reset.sub')}
                 danger
                 onPress={confirmLinuxReset}
               />
             ) : null}
             <Row
               label={t('settings.runtime.restart')}
-              sub={t('settings.runtime.restart.sub')}
               onPress={() => { void restartEmbeddedRuntime().catch(() => {}) }}
             />
             <Row
               label={t('settings.runtime.battery')}
-              sub={t('settings.runtime.battery.sub')}
               value={runtime.battery === 'already' ? t('settings.runtime.battery.exempted') : undefined}
               valueColor={C.greenSoft}
               disabled={runtime.battery === 'already'}
@@ -559,19 +580,16 @@ function SettingsInner() {
             />
             <Row
               label={t('settings.runtime.stop')}
-              sub={t('settings.runtime.stop.sub')}
               danger
               onPress={() => { void stopEmbeddedRuntime().then(() => { /* process exits shortly */ }).catch(() => {}) }}
             />
             <Row
               label={t('settings.agent.skills')}
-              sub={t('settings.agent.skills.sub')}
               chevron
               onPress={() => router.push('/(tabs)/skills')}
             />
             <Row
               label={t('settings.agent.models')}
-              sub={t('settings.agent.models.sub')}
               chevron
               onPress={() => router.push('/(tabs)/agent')}
             />
@@ -597,22 +615,19 @@ function SettingsInner() {
             ) : null}
             <Row
               label={t('settings.thinker.switch')}
-              sub={t('settings.thinker.switch.sub')}
               chevron
-              onPress={switchThinker}
+              onPress={() => setThinkerOpen(true)}
             />
             <Row
               label={t('settings.thinker.providers')}
-              sub={t('settings.thinker.providers.sub')}
               chevron
               onPress={() => router.push('/onboarding/providers')}
             />
             <Row
               label={t('settings.memory.about')}
-              sub={t('settings.memory.about.sub')}
               value={t('common.edit')}
               chevron
-              onPress={showAbout}
+              onPress={openAbout}
             />
           </Group>
         </Section>
@@ -622,7 +637,6 @@ function SettingsInner() {
           <Group>
             <Row
               label={t('settings.notifications.title')}
-              sub={t('settings.notifications.sub')}
               right={
                 <Toggle
                   value={notifOn}
@@ -631,18 +645,22 @@ function SettingsInner() {
                 />
               }
             />
-            <Row
-              label={t('settings.notifications.enable')}
-              onPress={() => { void ensureNotificationPermission().catch(() => {}) }}
-            />
+            {/* #7: once permission is granted the row disappears — the atom
+                updates right after ensureNotificationPermission() resolves. */}
+            {notifPerm !== 'granted' ? (
+              <Row
+                label={t('settings.notifications.enable')}
+                onPress={() => { void ensureNotificationPermission().catch(() => {}) }}
+              />
+            ) : null}
           </Group>
         </Section>
 
         {/* This phone — local-only facts + reconnect/disconnect pair. */}
         <Section title={t('settings.section.phone')}>
           <Group>
-            <Row label={t('settings.phone.local')} sub={t('settings.phone.local.sub')} />
-            <Row label={t('settings.phone.approvals')} sub={t('settings.phone.approvals.sub')} />
+            <Row label={t('settings.phone.local')} />
+            <Row label={t('settings.phone.approvals')} />
           </Group>
           <View style={[s.btnPair, { flexDirection: dir.row }]}>
             <GhostBtn label={t('settings.phone.reconnect')} onPress={reconnect} style={s.btnPairItem} />
@@ -660,7 +678,6 @@ function SettingsInner() {
           <Group>
             <Row
               label={`Moch v${appVersion()} (${appBuild()})`}
-              sub={t('settings.about.version.sub')}
               disabled
             />
           </Group>
@@ -733,6 +750,137 @@ function SettingsInner() {
           </SheetCard>
         </View>
       </Modal>
+
+      {/* Thinker picker sheet — current thinker selected & locked, the other
+          one runs the existing switch logic. */}
+      <Modal
+        visible={thinkerOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setThinkerOpen(false)}
+      >
+        <View style={s.sheetRoot}>
+          <SheetBackdrop onPress={() => setThinkerOpen(false)} />
+          <SheetCard style={s.sheetCard}>
+            <SheetGrabber />
+            <View style={[s.sheetHead, { flexDirection: dir.row }]}>
+              <Txt size={13.5} weight="800">
+                {t('settings.thinker.switch.title')}
+              </Txt>
+              <HeaderButton
+                onPress={() => setThinkerOpen(false)}
+                accessibilityLabel={t('common.close')}
+              >
+                <Icon name="close" size={14} color={C.textDim} />
+              </HeaderButton>
+            </View>
+            {(
+              [
+                { id: 'moch' as const, label: t('settings.thinker.moch') },
+                { id: 'opencode' as const, label: t('settings.thinker.opencode') },
+              ]
+            ).map((opt) => {
+              const active = opt.id === thinker
+              return (
+                <Pressable
+                  key={opt.id}
+                  onPress={active ? undefined : () => chooseThinker(opt.id)}
+                  disabled={active}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: active, disabled: active }}
+                  accessibilityLabel={opt.label}
+                  style={({ pressed }) => [
+                    s.langRow,
+                    { flexDirection: dir.row },
+                    active && s.langRowOn,
+                    active && s.thinkerRowOn,
+                    pressed && s.pressed,
+                  ]}
+                >
+                  <Txt
+                    size={13.5}
+                    weight={active ? '700' : '500'}
+                    color={active ? C.accent : C.text}
+                  >
+                    {opt.label}
+                  </Txt>
+                  {active ? <Icon name="checkmark" size={16} color={C.accent} /> : null}
+                </Pressable>
+              )
+            })}
+          </SheetCard>
+        </View>
+      </Modal>
+
+      {/* About-me editor — AGENTS.md pattern #2: RNKC KeyboardAvoidingView as
+          the Modal's full-screen root; fields scroll above the IME. */}
+      <Modal
+        visible={aboutOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setAboutOpen(false)}
+      >
+        <KeyboardAvoidingView style={s.sheetRoot} behavior="padding">
+          <SheetBackdrop onPress={() => { if (!aboutBusy) setAboutOpen(false) }} />
+          <SheetCard style={s.sheetCard}>
+            <SheetGrabber />
+            <View style={[s.sheetHead, { flexDirection: dir.row }]}>
+              <Txt size={13.5} weight="800">
+                {t('settings.memory.about.title')}
+              </Txt>
+              <HeaderButton
+                onPress={() => { if (!aboutBusy) setAboutOpen(false) }}
+                accessibilityLabel={t('common.close')}
+              >
+                <Icon name="close" size={14} color={C.textDim} />
+              </HeaderButton>
+            </View>
+            <ScrollView keyboardShouldPersistTaps="handled" style={s.aboutForm}>
+              <Txt size={10.5} color={C.textDim} style={s.aboutLabel}>
+                {t('settings.about.field.name')}
+              </Txt>
+              <Field
+                value={aboutForm.name}
+                onChangeText={(v) => setAboutForm((f) => ({ ...f, name: v }))}
+                placeholder={t('settings.about.field.name')}
+                returnKeyType="next"
+                accessibilityLabel={t('settings.about.field.name')}
+              />
+              <Txt size={10.5} color={C.textDim} style={s.aboutLabel}>
+                {t('settings.about.field.work')}
+              </Txt>
+              <Field
+                value={aboutForm.work}
+                onChangeText={(v) => setAboutForm((f) => ({ ...f, work: v }))}
+                placeholder={t('settings.about.field.work')}
+                returnKeyType="next"
+                accessibilityLabel={t('settings.about.field.work')}
+              />
+              <Txt size={10.5} color={C.textDim} style={s.aboutLabel}>
+                {t('settings.about.field.extra')}
+              </Txt>
+              <Field
+                multiline
+                value={aboutForm.extra}
+                onChangeText={(v) => setAboutForm((f) => ({ ...f, extra: v }))}
+                placeholder={t('settings.about.field.extra')}
+                accessibilityLabel={t('settings.about.field.extra')}
+              />
+              {aboutError ? (
+                <Txt size={10.5} color={C.red} style={s.aboutError}>
+                  {t('settings.about.saveFailedWhy', { why: aboutError })}
+                </Txt>
+              ) : null}
+              <PrimaryBtn
+                label={aboutBusy ? t('settings.about.saving') : t('settings.about.save')}
+                onPress={saveAboutSheet}
+                disabled={aboutBusy}
+                style={s.aboutSave}
+              />
+            </ScrollView>
+          </SheetCard>
+        </KeyboardAvoidingView>
+      </Modal>
     </ScreenShell>
   )
 }
@@ -784,4 +932,10 @@ const makeS = () => StyleSheet.create({
     marginTop: 4,
   },
   langRowOn: { backgroundColor: C.accentSoft },
+  thinkerRowOn: { borderColor: C.accent, borderWidth: 1 },
+  // About-me sheet
+  aboutForm: { marginTop: 4 },
+  aboutLabel: { marginTop: 10, marginBottom: 4 },
+  aboutError: { marginTop: 8, lineHeight: 14 },
+  aboutSave: { marginTop: 14 },
 })

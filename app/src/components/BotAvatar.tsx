@@ -1,23 +1,28 @@
-import React from 'react'
-import { Image, StyleSheet, View } from 'react-native'
+import React, { useEffect, useMemo, useRef } from 'react'
+import { Animated, Easing, Image, StyleProp, StyleSheet, View, ViewStyle } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { C, useStyles } from '../lib/theme'
 import { useDir } from '../lib/strings'
 import { DEFAULT_PROFILE } from '../lib/botRosterMeta'
+import { useReduceMotion } from './useReduceMotion'
 
 /**
- * Shared bot avatar (issue #170).
+ * Shared bot avatar (issue #170, round-2 feedback #8).
  *
  * One design language for every surface that renders bot identity:
  * drawer roster (`BotsRoster`), Fleet cards (`app/(tabs)/fleet.tsx`),
  * and bot detail (`app/bot.tsx`).
  *
- * - Default agent → Mochi mascot on an accentSoft disc (it is Moch, not a hire).
- * - Named bots → deterministic mochi-profiles PNG (stable hash % 15), so a
- *   bot keeps its picture across launches with zero data-model change.
- * - `frozen` adds a small snow badge (Fleet used to swap the whole icon for
- *   snow-outline; the freeze button already carries play/pause, this keeps
- *   the at-a-glance signal without losing identity).
+ * - Default agent → the real Mochi logo (`app/assets/logo.png`); it is Moch,
+ *   not a hire, so it gets the brand mark, not a generated profile picture.
+ * - Named bots → deterministic transparent mochi-profiles PNG (stable hash
+ *   % 15), so a bot keeps its picture across launches with zero data-model
+ *   change. Rendered at its own size, no disc/container behind it.
+ * - `frozen` adds a small snow badge over the image (Fleet used to swap the
+ *   whole icon for snow-outline; the freeze button already carries
+ *   play/pause, this keeps the at-a-glance signal without losing identity).
+ * - Gentle idle "breathing" (bob + tiny scale), phased per avatar so lists
+ *   don't pulse in sync; disabled under OS reduce-motion (BUG-056 hook).
  */
 const AVATARS = [
   require('../../assets/mochi-profiles/01-moko.png'),
@@ -53,29 +58,68 @@ export function BotAvatar({
   isDefault,
   size = 32,
   frozen = false,
+  style,
 }: {
   profile: string
   isDefault?: boolean
   size?: number
   frozen?: boolean
+  style?: StyleProp<ViewStyle>
 }) {
   const s = useStyles(makeS)
   const dir = useDir()
+  const reduceMotion = useReduceMotion()
   const def = isDefault ?? profile === DEFAULT_PROFILE
-  const imgSize = Math.round(size * 0.78)
+
+  // Phase offset per avatar slot so rows in a list breathe out of sync.
+  const phase = ((botAvatarIndex(def ? DEFAULT_PROFILE : profile) / AVATARS.length) * Math.PI * 2)
+  const t = useRef(new Animated.Value(0)).current
+
+  useEffect(() => {
+    if (reduceMotion) return
+    const loop = Animated.sequence([
+      Animated.delay(Math.round(phase * 800)),
+      Animated.loop(Animated.sequence([
+        Animated.timing(t, {
+          toValue: 1,
+          duration: 2200,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(t, {
+          toValue: 0,
+          duration: 2200,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+      ),
+    ])
+    loop.start()
+    return () => loop.stop()
+  }, [t, reduceMotion, phase])
+
+  const animStyle = useMemo(() => {
+    if (reduceMotion) return undefined
+    const translateY = t.interpolate({ inputRange: [0, 1], outputRange: [0, -size * 0.05] })
+    const scale = t.interpolate({ inputRange: [0, 1], outputRange: [1, 1.03] })
+    const rotate = t.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '1.5deg'] })
+    return { transform: [{ translateY }, { scale }, { rotate }] }
+  }, [t, reduceMotion, size])
+
   // Manual RTL mirroring (root layout never forces I18nManager): the snow
-  // badge sits on the logical end of the disc, like every other badge in the
-  // redesign. Public props/behavior are unchanged for Sidebar/BotsRoster.
+  // badge sits on the logical end of the image, like every other badge in
+  // the redesign. Public props/behavior are unchanged for Sidebar/BotsRoster.
   const badgeSide = dir.rtl ? { left: -2 } : { right: -2 }
   return (
-    <View
-      style={[s.disc, { width: size, height: size, borderRadius: size / 2 }]}
+    <Animated.View
+      style={[{ width: size, height: size }, animStyle, style]}
       accessibilityRole="image"
       accessibilityLabel={def ? 'Moch' : profile}
     >
       <Image
-        source={def ? require('../../assets/mochi-run-1.png') : botAvatarSource(profile)}
-        style={{ width: imgSize, height: imgSize, resizeMode: 'contain' }}
+        source={def ? require('../../assets/logo.png') : botAvatarSource(profile)}
+        style={{ width: size, height: size, resizeMode: 'contain' }}
       />
       {frozen ? (
         <View
@@ -88,20 +132,12 @@ export function BotAvatar({
           <Ionicons name="snow-outline" size={Math.max(8, Math.round(size * 0.28))} color={C.accent} />
         </View>
       ) : null}
-    </View>
+    </Animated.View>
   )
 }
 
 const makeS = () =>
   StyleSheet.create({
-    disc: {
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: C.accentSoft,
-      borderWidth: 1,
-      borderColor: C.border,
-      overflow: 'visible',
-    },
     frozenBadge: {
       position: 'absolute',
       bottom: -2,

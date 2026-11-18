@@ -41,8 +41,12 @@ import { useStore } from '@nanostores/react'
 import { C, useStyles } from '../lib/theme'
 import { localeAtom, tr, useDir } from '../lib/strings'
 import { Txt } from './ui'
-import { makeDialogS } from './Sidebar'
+import { Icon } from './Icon'
+import { makeDialogS, StatusDot, ageLabel, type RecentChat } from './Sidebar'
 import { projectActions, type ProjectRow } from '../lib/workspace'
+
+/** Feedback round 2 [12]: at most five recent chats render under a project. */
+const MAX_PROJECT_CHATS = 5
 
 export interface ProjectListProps {
   projects: ProjectRow[]
@@ -55,6 +59,12 @@ export interface ProjectListProps {
   onProjectMenu?: (p: ProjectRow) => void
   /** False when the drawer is closed: drops any open sheet/dialog. */
   active?: boolean
+  /** [12] Per-project recent chats (up to five render inline). */
+  projectChats?: Record<string, RecentChat[]>
+  /** Open one of the mini-list chats (owner swaps the screen + closes). */
+  onOpenProjectChat?: (id: string) => void
+  /** [12] "More": owner activates the project and opens the Chats screen. */
+  onProjectMore?: (id: string) => void
 }
 
 /** Fade/scale the overlay in when it opens (the Modal itself is unmounted on close). */
@@ -82,6 +92,30 @@ function usePopIn(visible: boolean, inMs = 140) {
 
 type ProjectDialog = 'none' | 'new' | 'rename' | 'delete'
 
+/**
+ * [12] Lightweight expansion motion for the inline mini-list: fades in and
+ * rises a few px on mount. Collapsing unmounts immediately (a closing drawer
+ * must never leave rows animating into nothing).
+ */
+function ExpandIn({ children }: { children: React.ReactNode }) {
+  const a = useRef(new Animated.Value(0)).current
+  useEffect(() => {
+    const t = Animated.timing(a, {
+      toValue: 1,
+      duration: 150,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    })
+    t.start()
+    return () => t.stop()
+  }, [a])
+  return (
+    <Animated.View style={{ opacity: a, transform: [{ translateY: Animated.multiply(a, -3) }] }}>
+      {children}
+    </Animated.View>
+  )
+}
+
 export function ProjectList({
   projects,
   activeProjectId,
@@ -89,6 +123,9 @@ export function ProjectList({
   onNewProject,
   onProjectMenu,
   active = true,
+  projectChats,
+  onOpenProjectChat,
+  onProjectMore,
 }: ProjectListProps) {
   const s = useStyles(makeS)
   const d = useStyles(makeDialogS)
@@ -206,6 +243,24 @@ export function ProjectList({
   )
   const allSelected = activeProjectId == null
 
+  // ── [12] expandable project rows ───────────────────────────────────────────
+  // Sessions live inside their projects: tapping a project selects it AND
+  // expands its inline mini-list; tapping the active project again collapses
+  // it (the selection/filter stays — the Chats screen chip clears it).
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  useEffect(() => {
+    // A selection made anywhere (drawer tap, "More", Set as default) expands.
+    setExpandedId(activeProjectId)
+  }, [activeProjectId])
+  const handleProjectPress = (p: ProjectRow) => {
+    if (p.id === activeProjectId) {
+      setExpandedId((prev) => (prev === p.id ? null : p.id))
+      return
+    }
+    setExpandedId(p.id)
+    onSelect(p.id)
+  }
+
   // Once closed, the sheet keeps its last project for the exit animation.
   const sheetRef = useRef<ProjectRow | null>(null)
   if (sheetFor) sheetRef.current = sheetFor
@@ -261,39 +316,108 @@ export function ProjectList({
         >
           {rows.map((p) => {
             const on = p.id === activeProjectId
+            const expanded = on && expandedId === p.id
+            const mini = expanded ? (projectChats?.[p.id] ?? []).slice(0, MAX_PROJECT_CHATS) : []
             return (
-              <Pressable
-                key={p.id}
-                style={({ pressed }) => [
-                  s.row,
-                  { flexDirection: dir.row },
-                  on && s.rowOn,
-                  pressed && s.rowPressed,
-                ]}
-                onPress={() => onSelect(p.id)}
-                onLongPress={() => openSheet(p)}
-                delayLongPress={350}
-                accessibilityRole="button"
-                accessibilityState={{ selected: on }}
-                accessibilityLabel={p.name}
-                accessibilityHint={tr('sidebar.projectActionsHint')}
-              >
-                <View style={[s.rowMain, { flexDirection: dir.row }]}>
-                  <View style={[s.dot, { backgroundColor: p.color || C.accent }]} />
-                  <Txt
-                    size={12}
-                    weight="600"
-                    color={on ? C.text : C.textDim}
-                    numberOfLines={1}
-                    style={s.name}
-                  >
-                    {p.name}
+              <View key={p.id}>
+                <Pressable
+                  style={({ pressed }) => [
+                    s.row,
+                    { flexDirection: dir.row },
+                    on && s.rowOn,
+                    pressed && s.rowPressed,
+                  ]}
+                  onPress={() => handleProjectPress(p)}
+                  onLongPress={() => openSheet(p)}
+                  delayLongPress={350}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on, expanded }}
+                  accessibilityLabel={p.name}
+                  accessibilityHint={tr(
+                    expanded ? 'chrome.drawer.projectCollapse' : 'chrome.drawer.projectExpand',
+                    { name: p.name },
+                  )}
+                >
+                  <View style={[s.rowMain, { flexDirection: dir.row }]}>
+                    <View style={[s.dot, { backgroundColor: p.color || C.accent }]} />
+                    <Txt
+                      size={12}
+                      weight="600"
+                      color={on ? C.text : C.textDim}
+                      numberOfLines={1}
+                      style={s.name}
+                    >
+                      {p.name}
+                    </Txt>
+                  </View>
+                  <Txt size={10.5} color={C.textFaint} mono>
+                    {p.sessionCount}
                   </Txt>
-                </View>
-                <Txt size={10.5} color={C.textFaint} mono>
-                  {p.sessionCount}
-                </Txt>
-              </Pressable>
+                  <Animated.View style={{ transform: [{ rotate: expanded ? '90deg' : '0deg' }] }}>
+                    <MaterialCommunityIcons
+                      name="chevron-right"
+                      size={13}
+                      color={C.textFaint}
+                      style={dir.rtl ? s.chevronRtl : undefined}
+                    />
+                  </Animated.View>
+                </Pressable>
+                {expanded ? (
+                  <ExpandIn>
+                    {mini.map((c) => (
+                      <Pressable
+                        key={c.id}
+                        style={({ pressed }) => [
+                          s.miniRow,
+                          { flexDirection: dir.row },
+                          dir.rtl ? { paddingRight: 23 } : { paddingLeft: 23 },
+                          c.active && s.miniRowActive,
+                          pressed && s.rowPressed,
+                        ]}
+                        onPress={() => onOpenProjectChat?.(c.id)}
+                        accessibilityRole="button"
+                        accessibilityLabel={tr('sidebar.openChat', { title: c.title })}
+                      >
+                        <StatusDot status={c.status} />
+                        <Txt
+                          size={11.5}
+                          weight="600"
+                          color={c.active ? C.text : C.textDim}
+                          numberOfLines={1}
+                          style={s.name}
+                        >
+                          {c.title}
+                        </Txt>
+                        {c.ts ? (
+                          <Txt size={9.5} color={C.textFaint} numberOfLines={1}>
+                            {ageLabel(c.ts)}
+                          </Txt>
+                        ) : null}
+                        <Icon
+                          name={dir.icon.forward}
+                          size={12}
+                          color={c.active ? C.accent : C.textFaint}
+                        />
+                      </Pressable>
+                    ))}
+                    <Pressable
+                      style={({ pressed }) => [
+                        s.moreBtn,
+                        { flexDirection: dir.row },
+                        dir.rtl ? { paddingRight: 23 } : { paddingLeft: 23 },
+                        pressed && s.rowPressed,
+                      ]}
+                      onPress={() => onProjectMore?.(p.id)}
+                      accessibilityRole="button"
+                      accessibilityLabel={tr('chrome.drawer.moreChats')}
+                    >
+                      <Txt size={11} weight="700" color={C.accent}>
+                        {tr('chrome.drawer.moreChats')}
+                      </Txt>
+                    </Pressable>
+                  </ExpandIn>
+                ) : null}
+              </View>
             )
           })}
         </ScrollView>
@@ -497,6 +621,24 @@ const makeS = () => StyleSheet.create({
   rowsContent: { gap: 3 },
   dot: { width: 8, height: 8, borderRadius: 4, flexShrink: 0 },
   name: { flexShrink: 1 },
+  // [12] expansion affordance + inline mini-list under a project row. The
+  // asymmetric indent is applied inline (useStyles factories don't see the
+  // live direction — same pattern as the sessions screen's meta line).
+  chevronRtl: { transform: [{ scaleX: -1 }] },
+  miniRow: {
+    alignItems: 'center',
+    gap: 7,
+    paddingVertical: 5,
+    minHeight: 30,
+    borderRadius: 8,
+  },
+  miniRowActive: { backgroundColor: C.bgHover },
+  moreBtn: {
+    alignItems: 'center',
+    paddingVertical: 4,
+    minHeight: 26,
+    borderRadius: 8,
+  },
   newLink: { paddingVertical: 4, paddingHorizontal: 8, alignSelf: 'flex-start' },
   modalRoot: { flex: 1, justifyContent: 'center' },
   sheet: {
