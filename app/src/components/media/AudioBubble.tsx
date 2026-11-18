@@ -6,6 +6,7 @@ import { Icon } from '../Icon'
 import { useStore } from '@nanostores/react'
 import { C, useStyles } from '../../lib/theme'
 import type { ChatSegment } from '../../lib/chat'
+import { useDir, useT } from '../../lib/strings'
 import { cacheKeyFor, formatBytes, formatDuration } from '../../lib/media'
 import { downloadMediaFile } from '../../lib/mediaCache'
 import { mediaStateForKey } from '../../lib/mediaState'
@@ -18,6 +19,8 @@ import { mediaStateForKey } from '../../lib/mediaState'
  */
 export function AudioBubble({ seg }: { seg: ChatSegment }) {
   const s = useStyles(makeS)
+  const dir = useDir()
+  const t = useT()
   // mediaStateForKey always returns a live computed (idle for unknown keys),
   // so an optimistic row without a gateway path yet just subscribes to idle.
   const load = useStore(mediaStateForKey(seg.path ? cacheKeyFor(seg.path) : '_idle_'))
@@ -85,11 +88,17 @@ export function AudioBubble({ seg }: { seg: ChatSegment }) {
 
   return (
     <View style={s.wrap}>
-      <View style={s.row}>
+      <View style={[s.row, { flexDirection: dir.row }]}>
         <Pressable
           style={({ pressed }) => [s.btn, pressed && s.pressed]}
           onPress={() => void toggle()}
-          accessibilityLabel={busyDownloading ? 'Cancel download' : status.playing ? 'Pause audio' : 'Play audio'}
+          accessibilityLabel={
+            busyDownloading
+              ? t('chat.media.cancelDownloadA11y')
+              : status.playing
+                ? t('chat.media.pauseAudioA11y')
+                : t('chat.media.playAudioA11y')
+          }
         >
           <Icon
             name={busyDownloading ? 'close' : status.playing ? 'pause' : 'play'}
@@ -103,16 +112,16 @@ export function AudioBubble({ seg }: { seg: ChatSegment }) {
           </View>
           <Text style={s.meta}>
             {busyDownloading
-              ? `${seg.name ?? 'Audio'} · ${dlPct != null ? `${dlPct}%` : 'downloading…'}`
+              ? `${seg.name ?? t('chat.media.audioLabel')} · ${dlPct != null ? `${dlPct}%` : t('chat.media.downloading')}`
               : duration > 0
                 ? `${formatDuration(status.currentTime)} / ${formatDuration(duration)}`
-                : (seg.name ?? 'Audio')}
+                : (seg.name ?? t('chat.media.audioLabel'))}
             {seg.size && !localUri && !busyDownloading ? ` · ${formatBytes(seg.size)}` : ''}
           </Text>
         </View>
       </View>
       {errorMsg && !busyDownloading ? (
-        <Pressable style={({ pressed }) => [s.errorRow, pressed && s.pressed]} onPress={() => void toggle()} accessibilityLabel="Retry download">
+        <Pressable style={({ pressed }) => [s.errorRow, { flexDirection: dir.row }, pressed && s.pressed]} onPress={() => void toggle()} accessibilityLabel={t('chat.media.retryDownloadA11y')}>
           <Icon name="alert-circle" size={13} color={C.red} />
           <Text style={s.errorText} numberOfLines={1}>{errorMsg}</Text>
           <Icon name="refresh" size={13} color={C.accent} />
@@ -125,7 +134,7 @@ export function AudioBubble({ seg }: { seg: ChatSegment }) {
 const makeS = () => StyleSheet.create({
   wrap: {
     backgroundColor: C.bgElev,
-    borderRadius: 16,
+    borderRadius: 13,
     minWidth: 200,
     overflow: 'hidden',
   },

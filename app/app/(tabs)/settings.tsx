@@ -1,27 +1,72 @@
 import React, { useMemo } from 'react'
-import { View, Text, Pressable, ScrollView, StyleSheet, Switch } from 'react-native'
+import { View, Pressable, StyleSheet, Modal } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { computed } from 'nanostores'
 import { useStore } from '@nanostores/react'
-import { Ionicons } from '@expo/vector-icons'
-import { Icon } from '../../src/components/Icon'
-import * as Clipboard from 'expo-clipboard'
 import Constants from 'expo-constants'
+import * as Clipboard from 'expo-clipboard'
 import * as Haptics from 'expo-haptics'
 import { router } from 'expo-router'
-import { connConfig, connectionState, gatewayError, disconnect, retryNow, redactedUrl } from '../../src/lib/gateway'
+import { Icon } from '../../src/components/Icon'
+import { ScreenShell } from '../../src/components/ScreenShell'
+import { showAlert } from '../../src/components/AlertDialog'
+import {
+  Card,
+  Divider,
+  GhostBtn,
+  HeaderButton,
+  Kicker,
+  Pill,
+  ScreenScroll,
+  SheetBackdrop,
+  SheetCard,
+  SheetGrabber,
+  Spinner,
+  Toggle,
+  Txt,
+} from '../../src/components/ui'
+import { C, useStyles, setTheme, THEME_OPTIONS, themeId, type ThemeId } from '../../src/lib/theme'
+import { LOCALE_OPTIONS, localeAtom, setLocale, useDir, useT, tr } from '../../src/lib/strings'
+import {
+  connConfig,
+  connectionState,
+  gatewayError,
+  disconnect,
+  retryNow,
+  redactedUrl,
+} from '../../src/lib/gateway'
 import { activeSession, messages } from '../../src/lib/chat'
 import { diagLog, logText } from '../../src/lib/log'
 import {
-  notificationsEnabled, setNotificationsEnabled, ensureNotificationPermission,
+  notificationsEnabled,
+  setNotificationsEnabled,
+  ensureNotificationPermission,
 } from '../../src/lib/push'
-import { getEmbeddedGateway, mochiRuntimeStatus, restartEmbeddedRuntime, stopEmbeddedRuntime, requestBatteryExemption, linuxStatus, linuxReset, linuxBootstrap, type LinuxGuestStatus } from '../../src/lib/mochiRuntime'
-import { C, useStyles, setTheme, THEME_OPTIONS, themeId, type ThemeId } from '../../src/lib/theme'
-import { ScreenShell } from '../../src/components/ScreenShell'
-import { localeAtom, setLocale, tr } from '../../src/lib/strings'
-import { showAlert } from '../../src/components/AlertDialog'
-import { thinkerAtom, ocOneShotAtom, setThinker, setOpencodeOneShot, stopOpencodeServer, type Thinker } from '../../src/lib/thinker'
-import { readAbout, saveAbout } from '../../src/lib/aboutMe'
+import {
+  getEmbeddedGateway,
+  mochiRuntimeStatus,
+  restartEmbeddedRuntime,
+  stopEmbeddedRuntime,
+  requestBatteryExemption,
+  linuxStatus,
+  linuxReset,
+  linuxBootstrap,
+  type LinuxGuestStatus,
+} from '../../src/lib/mochiRuntime'
+import {
+  thinkerAtom,
+  ocOneShotAtom,
+  setThinker,
+  setOpencodeOneShot,
+  stopOpencodeServer,
+} from '../../src/lib/thinker'
+import { readAbout } from '../../src/lib/aboutMe'
+
+/** Appearance cards: human captions owned by i18n, not by theme.ts. */
+const THEME_CAPTION_KEY: Record<ThemeId, string> = {
+  mocheme: 'settings.theme.mocheme.caption',
+  relay: 'settings.theme.relay.caption',
+}
 
 export default function Settings() {
   const s = useStyles(makeS)
@@ -32,23 +77,23 @@ export default function Settings() {
   )
 }
 
-// ── Small building blocks ───────────────────────────────────────────────────
+// ── Data hooks (unchanged polling/behaviour, lifted out of JSX sections) ────
 
-function LinuxSectionRows() {
+/**
+ * Linux guest status + the two long fallible operations. Poll cadence stays
+ * 60s: linuxStatus() serves a Python-side cache (a real size walk stat()s
+ * every rootfs file — seconds of GIL inside the shared app process).
+ */
+function useLinuxGuest() {
   const [st, setSt] = React.useState<LinuxGuestStatus | null>(null)
   const [busy, setBusy] = React.useState(false)
   React.useEffect(() => {
     let alive = true
     const tick = () => { linuxStatus().then((x) => { if (alive) setSt(x) }).catch(() => {}) }
     tick()
-    // linuxStatus() serves a Python-side cache (a real size walk stat()s every
-    // rootfs file — seconds of GIL inside the shared app process, which used
-    // to fire here every 5s and starve sessions). 60s is plenty: install and
-    // reset both refresh the cache when they change the tree.
-    const t = setInterval(tick, 60_000)
-    return () => { alive = false; clearInterval(t) }
+    const timer = setInterval(tick, 60_000)
+    return () => { alive = false; clearInterval(timer) }
   }, [])
-  const installed = !!st?.bootstrapped
   // #112 / BUG-016 pattern (setup.tsx): the bootstrap/reset are long, fallible
   // operations — the old handlers fired-and-forgot, so a failed install left
   // the row silently unchanged with no retry hint.
@@ -58,11 +103,19 @@ function LinuxSectionRows() {
     try {
       const r = await linuxBootstrap('ubuntu-24.04')
       if (!r || r.ok === false) {
-        showAlert(tr('linux.install.failed', { why: r?.steps || 'no result from the runtime' }))
+        showAlert(
+          tr('linux.install.failed', { why: r?.steps || tr('settings.linux.noResult') }),
+          undefined,
+          [{ text: tr('chrome.alert.ok') }],
+        )
         return
       }
     } catch (e) {
-      showAlert(tr('linux.install.failed', { why: e instanceof Error ? e.message : String(e) }))
+      showAlert(
+        tr('linux.install.failed', { why: e instanceof Error ? e.message : String(e) }),
+        undefined,
+        [{ text: tr('chrome.alert.ok') }],
+      )
     } finally {
       setBusy(false)
     }
@@ -73,50 +126,30 @@ function LinuxSectionRows() {
     try {
       const r = await linuxReset()
       if (!r) {
-        showAlert(tr('linux.reset.failed', { why: 'the runtime refused or is unavailable' }))
+        showAlert(
+          tr('linux.reset.failed', { why: tr('settings.linux.refused') }),
+          undefined,
+          [{ text: tr('chrome.alert.ok') }],
+        )
         return
       }
     } catch (e) {
-      showAlert(tr('linux.reset.failed', { why: e instanceof Error ? e.message : String(e) }))
+      showAlert(
+        tr('linux.reset.failed', { why: e instanceof Error ? e.message : String(e) }),
+        undefined,
+        [{ text: tr('chrome.alert.ok') }],
+      )
     } finally {
       setBusy(false)
     }
   }
-  return (
-    <>
-      <Row
-        icon="logo-tux"
-        label={installed ? `Linux ready — ${st?.distro ?? 'guest'}` : st?.sizeMb ? 'Linux — setting up…' : 'No Linux environment'}
-        sub={installed ? `${st?.sizeMb ?? 0} MB on disk · agent shell runs inside it` : st?.sizeMb ? `${st?.sizeMb} MB so far…` : 'Ubuntu/Debian userspace for the agent (apt, any language, browser)'}
-      />
-      <Row
-        icon="download-outline"
-        label={installed ? 'Update / reinstall environment' : 'Install Linux environment'}
-        sub="Downloads the base system (needs network, few minutes)"
-        onPress={() => { void runInstall() }}
-      />
-      {installed ? (
-        <Row
-          icon="trash-outline"
-          label="Reset Linux environment"
-          sub="Deletes the guest and everything installed inside it"
-          danger
-          onPress={() => {
-            showAlert('Reset Linux environment?', 'Deletes the guest rootfs and all packages inside it.', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Reset', style: 'destructive', onPress: () => { void runReset() } },
-            ])
-          }}
-        />
-      ) : null}
-    </>
-  )
+  return { st, busy, installed: !!st?.bootstrapped, runInstall, runReset }
 }
 
-function RuntimeSectionRows() {
+/** Embedded gateway / Mochi runtime status + battery-exemption request. */
+function useRuntimeInfo() {
   const [gw, setGw] = React.useState<{ ready: boolean; port: number | null; hermesVersion?: string | null } | null>(null)
   const [battery, setBattery] = React.useState<'idle' | 'already' | 'requested'>('idle')
-
   React.useEffect(() => {
     let alive = true
     const tick = () => {
@@ -129,133 +162,98 @@ function RuntimeSectionRows() {
     const timer = setInterval(tick, 5000)
     return () => { alive = false; clearInterval(timer) }
   }, [])
-
-  const running = !!gw?.ready
-  return (
-    <>
-      <Row
-        icon="hardware-chip-outline"
-        label={running ? 'Embedded agent — running' : gw ? 'Embedded agent — starting…' : 'Embedded agent — unavailable'}
-        sub={gw?.port ? `Mochi ${gw.hermesVersion ?? '—'} · 127.0.0.1:${gw.port}` : 'Bundled Python + Mochi runtime on this phone'}
-      />
-      <Row
-        icon="refresh-outline"
-        label="Restart runtime"
-        sub="Fresh Python process (relaunches the app)"
-        onPress={() => { void restartEmbeddedRuntime().catch(() => {}) }}
-      />
-      <Row
-        icon="battery-charging-outline"
-        label={battery === 'already' ? 'Battery optimization — exempted' : 'Battery optimization — exempt this app'}
-        sub="Helps the runtime survive aggressive ROMs (MIUI etc.)"
-        disabled={battery === 'already'}
-        onPress={() => {
-          void requestBatteryExemption().then((r) => { if (r) setBattery(r) }).catch(() => {})
-        }}
-      />
-      <Row
-        icon="stop-circle-outline"
-        label="Stop runtime"
-        sub="Ends the background service and exits the app"
-        danger
-        onPress={() => { void stopEmbeddedRuntime().then(() => { /* process exits shortly */ }).catch(() => {}) }}
-      />
-    </>
-  )
+  const requestExemption = () => {
+    void requestBatteryExemption().then((r) => { if (r) setBattery(r) }).catch(() => {})
+  }
+  return { gw, battery, requestExemption }
 }
+
+// ── Small building blocks in the mockup's row-card language ─────────────────
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  const s = useStyles(makeS)
   return (
-    <View style={s.section}>
-      <Text style={s.sectionLabel}>{title}</Text>
-      <View style={s.card}>{children}</View>
+    <View>
+      <Kicker>{title}</Kicker>
+      {children}
     </View>
   )
 }
 
-function Row({
-  icon, label, sub, right, onPress, danger, disabled, chevron,
-}: {
-  icon: keyof typeof Ionicons.glyphMap
+/** m-card as a settings group: zero padding, 1px soft separators between rows. */
+function Group({ children }: { children: React.ReactNode }) {
+  const s = useStyles(makeS)
+  const items = React.Children.toArray(children).filter(Boolean)
+  return (
+    <Card style={s.group}>
+      {items.map((child, i) => (
+        <React.Fragment key={i}>
+          {i > 0 ? <Divider /> : null}
+          {child}
+        </React.Fragment>
+      ))}
+    </Card>
+  )
+}
+
+interface RowProps {
   label: string
   sub?: string
-  right?: React.ReactNode
+  /** Trailing value (mockup: accent links / textFaint muted values). */
+  value?: string
+  valueColor?: string
   onPress?: () => void
   danger?: boolean
-  disabled?: boolean
   chevron?: boolean
-}) {
+  right?: React.ReactNode
+  disabled?: boolean
+  a11y?: string
+}
+
+function Row({ label, sub, value, valueColor, onPress, danger, chevron, right, disabled, a11y }: RowProps) {
   const s = useStyles(makeS)
+  const dir = useDir()
   const body = (
-    <View style={[s.rowInner, !onPress && { minHeight: 52 }]}>
-      <View style={[s.rowIcon, danger && s.rowIconDanger]}>
-        <Icon name={icon} size={16} color={danger ? C.red : C.accent} />
-      </View>
+    <View style={[s.rowInner, { flexDirection: dir.row }]}>
       <View style={s.rowText}>
-        <Text style={[s.rowLabel, disabled && s.rowLabelDisabled, danger && { color: C.red }]} numberOfLines={1}>
+        <Txt
+          size={12.5}
+          weight="700"
+          color={danger ? C.red : disabled ? C.textDim : C.text}
+          numberOfLines={2}
+        >
           {label}
-        </Text>
-        {sub ? <Text style={s.rowSub} numberOfLines={2}>{sub}</Text> : null}
+        </Txt>
+        {sub ? (
+          <Txt size={10.5} color={C.textDim} style={s.rowSub}>
+            {sub}
+          </Txt>
+        ) : null}
       </View>
       {right}
-      {chevron && !right ? <Icon name="chevron-forward" size={15} color={C.textFaint} /> : null}
+      {value ? (
+        <Txt size={12.5} weight="600" color={valueColor ?? C.textFaint} numberOfLines={1} style={s.rowValue}>
+          {value}
+        </Txt>
+      ) : null}
+      {chevron ? <Icon name={dir.icon.forward} size={14} color={C.textFaint} /> : null}
     </View>
   )
-  if (!onPress) return <View style={{ opacity: disabled ? 0.5 : 1 }}>{body}</View>
+  if (!onPress) {
+    return <View style={disabled ? s.rowDisabled : undefined}>{body}</View>
+  }
   return (
     <Pressable
-      style={({ pressed }) => [s.row, pressed && s.rowPressed, disabled && s.rowDisabled]}
       onPress={onPress}
       disabled={disabled}
-      accessibilityLabel={label}
+      accessibilityRole="button"
+      accessibilityLabel={a11y ?? label}
+      accessibilityState={disabled ? { disabled: true } : undefined}
+      style={({ pressed }) => [pressed && s.pressed, disabled && s.rowDisabled]}
     >
       {body}
     </Pressable>
   )
 }
-
-function Divider() {
-  const s = useStyles(makeS)
-  return <View style={s.divider} />
-}
-
-
-// ── Appearance: theme option card (Mocheme / Relay) ─────────────────────────
-
-function ThemeCard({ id, name, desc, swatches, onPick }: {
-  id: ThemeId
-  name: string
-  desc: string
-  swatches: string[]
-  onPick: (id: ThemeId) => void
-}) {
-  const s = useStyles(makeS)
-  const active = useStore(themeId) === id
-  return (
-    <Pressable
-      style={({ pressed }) => [s.themeCard, active && s.themeCardOn, pressed && s.rowPressed]}
-      onPress={() => onPick(id)}
-      accessibilityRole="button"
-      accessibilityLabel={`${name} theme${active ? ', active' : ''}`}
-    >
-      {active ? (
-        <View style={s.themeCheck}>
-          <Icon name="checkmark" size={13} color={C.onAccent} />
-        </View>
-      ) : null}
-      <Text style={s.themeName}>{name}</Text>
-      <Text style={s.themeDesc} numberOfLines={2}>{desc}</Text>
-      <View style={s.themeSwatches}>
-        {swatches.map((c, i) => (
-          <View key={i} style={[s.themeSw, { backgroundColor: c }]} />
-        ))}
-      </View>
-    </Pressable>
-  )
-}
-
-// ── Screen ──────────────────────────────────────────────────────────────────
 
 /** Installed app version (#66 / BUG-119): native first, expo config fallback. */
 function appVersion(): string {
@@ -271,10 +269,15 @@ function appBuild(): string {
   return c.nativeBuildVersion ?? '—'
 }
 
+// ── Screen ──────────────────────────────────────────────────────────────────
+
 function SettingsInner() {
   const s = useStyles(makeS)
+  // useT/useDir subscribe: the whole screen re-renders and mirrors on a
+  // language switch, with no restart (never I18nManager.forceRTL).
+  const t = useT()
+  const dir = useDir()
   const cfg = useStore(connConfig)
-  // BUG-116: which catalog the fleet screens read (EN/AR).
   const locale = useStore(localeAtom)
   const state = useStore(connectionState)
   const err = useStore(gatewayError)
@@ -288,13 +291,54 @@ function SettingsInner() {
   const notifOn = useStore(notificationsEnabled)
   const thinker = useStore(thinkerAtom)
   const ocOneShot = useStore(ocOneShotAtom)
+  const activeTheme = useStore(themeId)
   const [aboutBusy, setAboutBusy] = React.useState(false)
+  const [langOpen, setLangOpen] = React.useState(false)
+  const linux = useLinuxGuest()
+  const runtime = useRuntimeInfo()
 
-  const stateColor = state === 'open' ? C.greenSoft : state === 'connecting' ? C.amber : C.red
+  // ── Connection hero ──────────────────────────────────────────────────────
+  const connected = state === 'open'
+  const connecting = state === 'connecting'
   const stateLabel =
-    state === 'open' ? 'Connected' : state === 'connecting' ? 'Connecting…'
-    : state === 'error' ? 'Connection error' : 'Offline'
+    connected ? t('settings.conn.connected')
+    : connecting ? t('settings.conn.connecting')
+    : state === 'error' ? t('settings.conn.error')
+    : t('settings.conn.offline')
+  const pillKind = connected ? 'green' as const : connecting ? 'amber' as const : 'red' as const
+  const heroTone = connected ? s.heroConnected : connecting ? s.heroConnecting : s.heroDown
+  const heroSub = cfg
+    ? cfg.tls ? t('settings.conn.secure') : t('settings.conn.plain')
+    : t('settings.conn.noneSub')
 
+  // ── Runtime / Linux rows ────────────────────────────────────────────────
+  const runtimeValue = runtime.gw?.ready
+    ? t('settings.runtime.running')
+    : runtime.gw ? t('settings.runtime.starting') : t('settings.runtime.unavailable')
+  const runtimeColor = runtime.gw?.ready ? C.greenSoft : runtime.gw ? C.amber : C.textFaint
+  const embeddedSub = runtime.gw?.port
+    ? `Mochi ${runtime.gw.hermesVersion ?? '—'} · 127.0.0.1:${runtime.gw.port}`
+    : t('settings.runtime.embedded.sub')
+  const linuxValue = linux.installed
+    ? `${linux.st?.distro ?? 'guest'} · ${linux.st?.sizeMb ?? 0} MB`
+    : linux.st?.sizeMb ? t('settings.linux.settingUp') : t('settings.linux.notInstalled')
+  const linuxColor = linux.installed ? C.greenSoft : C.textFaint
+  const linuxSub = linux.installed ? t('settings.linux.subInstalled') : t('settings.linux.subNone')
+
+  // ── Thinker rows ────────────────────────────────────────────────────────
+  const thinkerValue =
+    thinker === 'moch' ? t('settings.thinker.moch')
+    : ocOneShot ? t('settings.thinker.oneshot')
+    : t('settings.thinker.server')
+  const thinkerSub =
+    thinker === 'moch' ? t('settings.thinker.moch.sub')
+    : ocOneShot ? t('settings.thinker.oneshot.sub')
+    : t('settings.thinker.server.sub')
+
+  // ── Language picker ─────────────────────────────────────────────────────
+  const currentNative = LOCALE_OPTIONS.find((l) => l.id === locale)?.native ?? locale
+
+  // ── Actions (all pre-existing behaviour, copy localized) ────────────────
   const copyDiagnostics = async () => {
     const text = [
       // #66 / BUG-119: the real installed build (was a hardcoded "Moch v1.0").
@@ -307,305 +351,437 @@ function SettingsInner() {
       logText().slice(-4000),
     ].join('\n')
     await Clipboard.setStringAsync(text)
-    showAlert('Copied', 'Diagnostics copied to clipboard.')
+    showAlert(t('settings.about.copied.title'), t('settings.about.diagnosticsCopied'), [
+      { text: t('chrome.alert.ok') },
+    ])
   }
 
   const exportTranscript = async () => {
-    const text = messages.get().map((m) => `[${new Date(m.ts).toLocaleString()}] ${m.role}: ${m.text}`).join('\n\n')
-    if (!text) { showAlert('Empty', 'No messages to export.'); return }
+    const text = messages.get().map((m) => `[${new Date(m.ts).toLocaleString(locale)}] ${m.role}: ${m.text}`).join('\n\n')
+    if (!text) {
+      showAlert(t('settings.about.empty.title'), t('settings.about.noMessages'), [
+        { text: t('chrome.alert.ok') },
+      ])
+      return
+    }
     // BUG-077: say so when the clipboard cap clips the export.
     const clipped = text.length > 50000
     await Clipboard.setStringAsync(text.slice(0, 50000))
-    showAlert('Copied', clipped ? 'Copied — long transcripts are capped at 50,000 characters.' : 'Transcript copied to clipboard.')
+    showAlert(
+      t('settings.about.copied.title'),
+      clipped ? t('settings.about.transcriptClipped') : t('settings.about.transcriptCopied'),
+      [{ text: t('chrome.alert.ok') }],
+    )
+  }
+
+  const reconnect = () => {
+    void retryNow().catch((e) => showAlert(t('settings.phone.retryFailed'), String(e), [{ text: t('chrome.alert.ok') }]))
+  }
+
+  const confirmLinuxReset = () => {
+    showAlert(t('settings.linux.reset.title'), t('settings.linux.reset.body'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('settings.linux.reset.confirm'), style: 'destructive', onPress: () => { void linux.runReset() } },
+    ])
+  }
+
+  const retryServerMode = () => {
+    void (async () => {
+      await setOpencodeOneShot(false)
+      showAlert(t('settings.thinker.serverMode.title'), t('settings.thinker.serverMode.body'), [
+        { text: t('chrome.alert.ok') },
+      ])
+    })()
+  }
+
+  const switchThinker = () => {
+    showAlert(t('settings.thinker.switch.title'), t('settings.thinker.switch.body'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: 'OpenCode',
+        onPress: () => {
+          void (async () => {
+            await setOpencodeOneShot(false)
+            await setThinker('opencode')
+            showAlert(t('settings.thinker.selected.title'), t('settings.thinker.selected.body'), [
+              { text: t('chrome.alert.ok') },
+            ])
+          })()
+        },
+      },
+      {
+        text: 'Moch',
+        onPress: () => {
+          void (async () => {
+            await stopOpencodeServer()
+            await setOpencodeOneShot(false)
+            await setThinker('moch')
+          })()
+        },
+      },
+    ])
+  }
+
+  const showAbout = () => {
+    void (async () => {
+      if (aboutBusy) return
+      setAboutBusy(true)
+      try {
+        const entries = await readAbout()
+        showAlert(
+          t('settings.memory.about.title'),
+          entries.length ? entries.join('\n') : t('settings.memory.about.empty'),
+          [{ text: t('chrome.alert.ok') }],
+        )
+      } finally {
+        setAboutBusy(false)
+      }
+    })()
+  }
+
+  const pickLocale = (id: (typeof LOCALE_OPTIONS)[number]['id']) => {
+    void Haptics.selectionAsync()
+    void setLocale(id)
+    setLangOpen(false)
   }
 
   return (
-    <ScreenShell title="Settings" showBrand>
-      <ScrollView style={s.root} contentContainerStyle={{ padding: 16, gap: 18, paddingBottom: 44 }}>
-        {/* Connection status hero */}
-        <View style={s.hero}>
-          <View style={[s.heroDot, { backgroundColor: stateColor }]} />
-          <View style={{ flex: 1 }}>
-            <Text style={s.heroTitle} numberOfLines={1}>{cfg?.host ?? 'No computer'}</Text>
-            <Text style={[s.heroState, { color: stateColor }]} numberOfLines={1}>
-              {stateLabel}{cfg ? ` · ${cfg.tls ? 'secure (wss)' : 'plain (ws)'}` : ''}
-            </Text>
-            {err ? <Text style={s.heroErr} numberOfLines={2}>{err}</Text> : null}
+    <ScreenShell title={t('settings.title')} showBrand>
+      <ScreenScroll contentContainerStyle={s.content}>
+        {/* Connection hero (mockup screen 12): tinted Card, mono host:port,
+            real gateway state/error, no fake "secure" while disconnected. */}
+        <Card style={[s.hero, heroTone]}>
+          <View style={[s.heroTop, { flexDirection: dir.row }]}>
+            <Txt size={13} weight="700" mono ltr numberOfLines={1} style={s.heroHost}>
+              {cfg ? cfg.host : t('settings.conn.none')}
+            </Txt>
+            <Pill kind={pillKind}>{stateLabel}</Pill>
           </View>
-        </View>
-
-        <Section title="RUNTIME">
-          <RuntimeSectionRows />
-          <Divider />
-          <LinuxSectionRows />
-        </Section>
-        <Section title="APPEARANCE">
-          <View style={s.themeRow}>
-            {THEME_OPTIONS.map((t) => (
-              <ThemeCard key={t.id} id={t.id} name={t.name} desc={t.desc} swatches={t.swatches} onPick={(id) => { void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); void setTheme(id) }} />
-            ))}
-          </View>
-          <Divider />
-          {/* BUG-116: the EN/AR catalog shipped with M9.2 but nothing ever called
-              setLocale()/loadLocale(), so the Arabic strings and the RTL flag
-              were unreachable dead code. This is the switch. */}
-          <Row
-            icon="language-outline"
-            label="Language"
-            sub={locale === 'ar' ? 'العربية — fleet screens are right-to-left' : 'English (fleet screens)'}
-            chevron
-            onPress={() =>
-              showAlert('Language', 'Fleet screens follow this choice. The rest of the app is still English (retrofit is a later pass).', [
-                { text: 'English', style: locale === 'en' ? 'cancel' : 'default', onPress: () => { void setLocale('en') } },
-                { text: 'العربية', style: locale === 'ar' ? 'cancel' : 'default', onPress: () => { void setLocale('ar') } },
-              ])
-            }
-          />
-        </Section>
-
-        <Section title="AGENT">
-          <Row
-            icon="sparkles-outline"
-            label="Skills"
-            sub="Browse and manage the agent's skills"
-            chevron
-            onPress={() => router.push('/(tabs)/skills')}
-          />
-          <Divider />
-          <Row
-            icon="cube-outline"
-            label="Models"
-            sub="Provider, model and reasoning effort"
-            chevron
-            onPress={() => router.push('/(tabs)/agent')}
-          />
-        </Section>
-
-        <Section title="THIS PHONE">
-          <Row
-            icon="phone-portrait-outline"
-            label="Local agent only"
-            sub="This build runs the agent on your phone — no remote pairing"
-          />
-          <Divider />
-          <Row
-            icon="shield-checkmark-outline"
-            label="Agent approvals: off"
-            sub="Files and commands run without asking — this is your own phone. 'approvals.deny' rules still apply."
-          />
-          <Divider />
-          <Row
-            icon="refresh"
-            label="Reconnect now"
-            chevron
-            onPress={() => { void retryNow().catch((e) => showAlert('Retry failed', String(e))) }}
-          />
-          <Row
-            icon="close-circle-outline"
-            label="Disconnect"
-            danger
-            onPress={() => { disconnect() }}
-          />
-        </Section>
-
-        <Section title="THINKER">
-          <Row
-            icon="sparkles-outline"
-            label={thinker === 'moch' ? 'Moch (hermes) — active' : ocOneShot ? 'OpenCode · one-shot — active' : 'OpenCode · server — active'}
-            sub={thinker === 'moch'
-              ? 'The full agent on this phone. Everything is available.'
-              : ocOneShot
-                ? 'Same free models, no server: each message runs once and the answer lands whole. No streaming, no tool approvals.'
-                : 'Free-model brain in the Linux guest. Bots, crew, automations and the agent browser are hidden.'}
-          />
-          <Divider />
-          {thinker === 'opencode' && ocOneShot ? (
-            <>
-              <Row
-                icon="refresh-outline"
-                label="Retry server mode"
-                sub="Try the streaming server again (needs a working Linux guest)"
-                chevron
-                onPress={() => { void (async () => {
-                  await setOpencodeOneShot(false)
-                  showAlert('Server mode selected', 'Open a new chat — Moch will try starting the OpenCode server again.')
-                })() }}
-              />
-              <Divider />
-            </>
+          <Txt size={11.5} color={C.textDim} style={s.heroSub} numberOfLines={2}>
+            {heroSub}
+          </Txt>
+          {err ? (
+            <Txt size={10.5} color={C.red} numberOfLines={2} style={s.heroErr}>
+              {err}
+            </Txt>
           ) : null}
-          <Row
-            icon="swap-horizontal-outline"
-            label="Switch thinker"
-            sub="Changes which brain answers new chats"
-            chevron
-            onPress={() => showAlert('Switch thinker', 'New chats use the other brain. Existing chats keep their own history. OpenCode needs the Linux guest installed and its server running.', [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'OpenCode',
-                onPress: () => { void (async () => {
-                  await setOpencodeOneShot(false)
-                  await setThinker('opencode')
-                  showAlert('OpenCode selected', 'Open a new chat — Moch will start the OpenCode server in the Linux guest. If it fails, install the guest under RUNTIME.')
-                })() },
-              },
-              {
-                text: 'Moch',
-                onPress: () => { void (async () => {
-                  await stopOpencodeServer()
-                  await setOpencodeOneShot(false)
-                  await setThinker('moch')
-                })() },
-              },
-            ])}
-          />
-          <Divider />
-          <Row
-            icon="key-outline"
-            label="Providers"
-            sub="Add or change a provider key"
-            chevron
-            onPress={() => router.push('/onboarding/providers')}
-          />
+        </Card>
+
+        {/* Appearance — live theme switcher (Mocheme / Relay). */}
+        <Section title={t('settings.section.appearance')}>
+          <View style={[s.themeRow, { flexDirection: dir.row }]}>
+            {THEME_OPTIONS.map((opt) => {
+              const active = activeTheme === opt.id
+              return (
+                <Card
+                  key={opt.id}
+                  onPress={() => {
+                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                    void setTheme(opt.id)
+                  }}
+                  accessibilityLabel={t(
+                    active ? 'settings.theme.cardActiveA11y' : 'settings.theme.cardA11y',
+                    { name: opt.name },
+                  )}
+                  style={[s.themeCard, active && s.themeCardOn]}
+                >
+                  <View style={[s.themeHead, { flexDirection: dir.row }]}>
+                    <View style={[s.themeSwatch, { backgroundColor: opt.swatches[1] }]} />
+                    <Txt size={12.5} weight="700">
+                      {opt.name}
+                    </Txt>
+                  </View>
+                  <Txt size={10.5} color={C.textDim} numberOfLines={2} style={s.themeCaption}>
+                    {t(THEME_CAPTION_KEY[opt.id])}
+                  </Txt>
+                </Card>
+              )
+            })}
+          </View>
         </Section>
 
-        <Section title="MEMORY">
-          <Row
-            icon="person-circle-outline"
-            label="About me"
-            sub="What Moch remembers about you (USER.md)"
-            chevron
-            onPress={() => { void (async () => {
-              if (aboutBusy) return
-              setAboutBusy(true)
-              try {
-                const entries = await readAbout()
-                showAlert('About me', entries.length ? entries.join('\n') : 'Nothing saved yet — finish onboarding or send a message and Moch will remember.', [{ text: 'OK' }])
-              } finally {
-                setAboutBusy(false)
+        {/* Language — four locales, applied instantly via setLocale(). */}
+        <Section title={t('settings.section.language')}>
+          <Group>
+            <Row
+              label={t('settings.language.label')}
+              sub={t('settings.language.hint')}
+              value={currentNative}
+              chevron
+              onPress={() => setLangOpen(true)}
+              a11y={t('settings.language.rowA11y', { name: currentNative })}
+            />
+          </Group>
+        </Section>
+
+        {/* Runtime & agent — embedded runtime, Linux guest, maintenance, links. */}
+        <Section title={t('settings.section.runtime')}>
+          <Group>
+            <Row
+              label={t('settings.runtime.embedded')}
+              sub={embeddedSub}
+              value={runtimeValue}
+              valueColor={runtimeColor}
+            />
+            <Row
+              label={t('settings.linux.title')}
+              sub={linuxSub}
+              value={linuxValue}
+              valueColor={linuxColor}
+            />
+            <Row
+              label={linux.installed ? t('settings.linux.reinstall') : t('settings.linux.install')}
+              sub={t('settings.linux.install.sub')}
+              onPress={() => { void linux.runInstall() }}
+              disabled={linux.busy}
+              right={linux.busy ? <Spinner size="small" color={C.accent} /> : undefined}
+            />
+            {linux.installed ? (
+              <Row
+                label={t('settings.linux.reset')}
+                sub={t('settings.linux.reset.sub')}
+                danger
+                onPress={confirmLinuxReset}
+              />
+            ) : null}
+            <Row
+              label={t('settings.runtime.restart')}
+              sub={t('settings.runtime.restart.sub')}
+              onPress={() => { void restartEmbeddedRuntime().catch(() => {}) }}
+            />
+            <Row
+              label={t('settings.runtime.battery')}
+              sub={t('settings.runtime.battery.sub')}
+              value={runtime.battery === 'already' ? t('settings.runtime.battery.exempted') : undefined}
+              valueColor={C.greenSoft}
+              disabled={runtime.battery === 'already'}
+              onPress={runtime.requestExemption}
+            />
+            <Row
+              label={t('settings.runtime.stop')}
+              sub={t('settings.runtime.stop.sub')}
+              danger
+              onPress={() => { void stopEmbeddedRuntime().then(() => { /* process exits shortly */ }).catch(() => {}) }}
+            />
+            <Row
+              label={t('settings.agent.skills')}
+              sub={t('settings.agent.skills.sub')}
+              chevron
+              onPress={() => router.push('/(tabs)/skills')}
+            />
+            <Row
+              label={t('settings.agent.models')}
+              sub={t('settings.agent.models.sub')}
+              chevron
+              onPress={() => router.push('/(tabs)/agent')}
+            />
+          </Group>
+        </Section>
+
+        {/* Thinker & memory — active brain, switch, providers, about me. */}
+        <Section title={t('settings.section.thinker')}>
+          <Group>
+            <Row
+              label={t('settings.thinker.active')}
+              sub={thinkerSub}
+              value={thinkerValue}
+              valueColor={C.accent}
+            />
+            {thinker === 'opencode' && ocOneShot ? (
+              <Row
+                label={t('settings.thinker.retryServer')}
+                sub={t('settings.thinker.retryServer.sub')}
+                chevron
+                onPress={retryServerMode}
+              />
+            ) : null}
+            <Row
+              label={t('settings.thinker.switch')}
+              sub={t('settings.thinker.switch.sub')}
+              chevron
+              onPress={switchThinker}
+            />
+            <Row
+              label={t('settings.thinker.providers')}
+              sub={t('settings.thinker.providers.sub')}
+              chevron
+              onPress={() => router.push('/onboarding/providers')}
+            />
+            <Row
+              label={t('settings.memory.about')}
+              sub={t('settings.memory.about.sub')}
+              value={t('common.edit')}
+              chevron
+              onPress={showAbout}
+            />
+          </Group>
+        </Section>
+
+        {/* Notifications — background toggle + permission request. */}
+        <Section title={t('settings.section.notifications')}>
+          <Group>
+            <Row
+              label={t('settings.notifications.title')}
+              sub={t('settings.notifications.sub')}
+              right={
+                <Toggle
+                  value={notifOn}
+                  onChange={(v) => { void setNotificationsEnabled(v) }}
+                  accessibilityLabel={t('settings.notifications.toggleA11y')}
+                />
               }
-            })() }}
-          />
+            />
+            <Row
+              label={t('settings.notifications.enable')}
+              onPress={() => { void ensureNotificationPermission().catch(() => {}) }}
+            />
+          </Group>
         </Section>
 
-        <Section title="NOTIFICATIONS">
-          <View style={s.toggleRow}>
-            <View style={[s.rowIcon]}>
-              <Icon name="notifications-outline" size={16} color={C.accent} />
-            </View>
-            <View style={s.rowText}>
-              <Text style={s.rowLabel}>Notifications</Text>
-              <Text style={s.rowSub}>Buzz for approvals, questions & replies</Text>
-            </View>
-            <Switch
-              value={notifOn}
-              onValueChange={(v) => { void setNotificationsEnabled(v) }}
-              trackColor={{ true: C.accent, false: C.border }}
-              accessibilityLabel="Toggle notifications"
+        {/* This phone — local-only facts + reconnect/disconnect pair. */}
+        <Section title={t('settings.section.phone')}>
+          <Group>
+            <Row label={t('settings.phone.local')} sub={t('settings.phone.local.sub')} />
+            <Row label={t('settings.phone.approvals')} sub={t('settings.phone.approvals.sub')} />
+          </Group>
+          <View style={[s.btnPair, { flexDirection: dir.row }]}>
+            <GhostBtn label={t('settings.phone.reconnect')} onPress={reconnect} style={s.btnPairItem} />
+            <GhostBtn
+              label={t('settings.phone.disconnect')}
+              onPress={() => { disconnect() }}
+              textStyle={s.btnDangerText}
+              style={s.btnPairItem}
             />
           </View>
-          <Divider />
-          <Row
-            icon="checkmark-circle-outline"
-            label="Enable notifications"
-            onPress={() => { void ensureNotificationPermission().catch(() => {}) }}
-          />
         </Section>
 
-        <Section title="ABOUT">
-          <Row
-            icon="copy-outline"
-            label="Copy diagnostics"
-            sub={`${logs.length} log lines`}
-            onPress={copyDiagnostics}
-          />
-          <Divider />
-          <Row
-            icon="share-outline"
-            label="Export transcript"
-            sub={msgCount ? `${msgCount} messages — copies to clipboard` : 'No messages yet'}
-            onPress={exportTranscript}
-          />
-          <Divider />
-          <Row
-            icon="information-circle-outline"
-            label={`Moch v${appVersion()} (${appBuild()})`}
-            sub="Local agent on this phone — embedded runtime, your data, no pairing."
-            disabled
-          />
+        {/* About — build info, diagnostics/transcript export, counts. */}
+        <Section title={t('settings.section.about')}>
+          <Group>
+            <Row
+              label={`Moch v${appVersion()} (${appBuild()})`}
+              sub={t('settings.about.version.sub')}
+              disabled
+            />
+          </Group>
+          <View style={[s.btnPair, { flexDirection: dir.row }]}>
+            <GhostBtn
+              label={t('settings.about.copyDiagnostics')}
+              onPress={() => { void copyDiagnostics() }}
+              style={s.btnPairItem}
+            />
+            <GhostBtn
+              label={t('settings.about.export')}
+              onPress={() => { void exportTranscript() }}
+              style={s.btnPairItem}
+            />
+          </View>
+          <Txt size={10.5} color={C.textFaint} style={s.aboutCounts}>
+            {t('settings.about.counts', { logs: logs.length, msgs: msgCount })}
+          </Txt>
         </Section>
-      </ScrollView>
+      </ScreenScroll>
+
+      {/* Language sheet — native names + check, current highlighted. */}
+      <Modal
+        visible={langOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setLangOpen(false)}
+      >
+        <View style={s.sheetRoot}>
+          <SheetBackdrop onPress={() => setLangOpen(false)} />
+          <SheetCard style={s.sheetCard}>
+            <SheetGrabber />
+            <View style={[s.sheetHead, { flexDirection: dir.row }]}>
+              <Txt size={13.5} weight="800">
+                {t('settings.section.language')}
+              </Txt>
+              <HeaderButton
+                onPress={() => setLangOpen(false)}
+                accessibilityLabel={t('common.close')}
+              >
+                <Icon name="close" size={14} color={C.textDim} />
+              </HeaderButton>
+            </View>
+            <Txt size={10.5} color={C.textDim} style={s.sheetHint}>
+              {t('settings.language.sheetHint')}
+            </Txt>
+            {LOCALE_OPTIONS.map((opt) => {
+              const active = opt.id === locale
+              return (
+                <Pressable
+                  key={opt.id}
+                  onPress={() => pickLocale(opt.id)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={opt.native}
+                  style={({ pressed }) => [
+                    s.langRow,
+                    { flexDirection: dir.row },
+                    active && s.langRowOn,
+                    pressed && s.pressed,
+                  ]}
+                >
+                  <Txt size={13.5} weight={active ? '700' : '500'} color={active ? C.accent : C.text}>
+                    {opt.native}
+                  </Txt>
+                  {active ? <Icon name="checkmark" size={16} color={C.accent} /> : null}
+                </Pressable>
+              )
+            })}
+          </SheetCard>
+        </View>
+      </Modal>
     </ScreenShell>
   )
 }
 
 const makeS = () => StyleSheet.create({
   frame: { flex: 1, backgroundColor: C.bg },
-  root: { flex: 1, backgroundColor: C.bg },
-  hero: {
-    flexDirection: 'row',
+  content: { paddingBottom: 44 },
+  pressed: { opacity: 0.7 },
+  // Connection hero
+  hero: { padding: 12 },
+  heroConnected: { backgroundColor: C.greenTint, borderColor: 'rgba(74,222,128,0.3)' },
+  heroConnecting: { backgroundColor: C.amberSoft, borderColor: 'rgba(245,165,36,0.35)' },
+  heroDown: { backgroundColor: C.redSoft, borderColor: 'rgba(255,90,90,0.35)' },
+  heroTop: { alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 3 },
+  heroHost: { flexShrink: 1 },
+  heroSub: { lineHeight: 16 },
+  heroErr: { marginTop: 4, lineHeight: 14 },
+  // Appearance cards
+  themeRow: { gap: 8 },
+  themeCard: { flex: 1, marginBottom: 0, padding: 10 },
+  themeCardOn: { borderColor: C.accent },
+  themeHead: { alignItems: 'center', gap: 6, marginBottom: 4 },
+  themeSwatch: { width: 12, height: 12, borderRadius: 6 },
+  themeCaption: { lineHeight: 14 },
+  // Row groups
+  group: { padding: 0, overflow: 'hidden', marginBottom: 10 },
+  rowInner: { alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10, minHeight: 44 },
+  rowText: { flex: 1, minWidth: 0, gap: 1 },
+  rowSub: { lineHeight: 14 },
+  rowValue: { flexShrink: 1, maxWidth: '45%' },
+  rowDisabled: { opacity: 0.6 },
+  // Button pairs
+  btnPair: { gap: 6, marginBottom: 2 },
+  btnPairItem: { flex: 1 },
+  btnDangerText: { color: C.red },
+  aboutCounts: { marginTop: 6, marginHorizontal: 2 },
+  // Language sheet
+  sheetRoot: { flex: 1, justifyContent: 'flex-end' },
+  sheetCard: { paddingBottom: 26 },
+  sheetHead: { alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 },
+  sheetHint: { lineHeight: 14, marginBottom: 8 },
+  langRow: {
     alignItems: 'center',
-    gap: 12,
-    backgroundColor: C.bgCard,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  heroDot: { width: 10, height: 10, borderRadius: 5 },
-  heroTitle: { color: C.text, fontSize: 16.5, fontWeight: '700' },
-  heroState: { fontSize: 12.5, fontWeight: '600', marginTop: 2 },
-  heroErr: { color: C.red, fontSize: 11.5, marginTop: 4, lineHeight: 15 },
-  section: { gap: 8 },
-  sectionLabel: { color: C.textFaint, fontSize: 10.5, fontWeight: '800', letterSpacing: 1.5, marginLeft: 4 },
-  themeRow: { flexDirection: 'row', gap: 10, padding: 10 },
-  themeCard: {
-    flex: 1,
-    backgroundColor: C.bgElev,
-    borderWidth: 1.5,
-    borderColor: C.border,
-    borderRadius: 20,
-    padding: 12,
-  },
-  themeCardOn: { borderColor: C.accent, backgroundColor: C.accentSoft },
-  themeCheck: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    width: 20,
-    height: 20,
+    justifyContent: 'space-between',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
     borderRadius: 10,
-    backgroundColor: C.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
+    marginTop: 4,
   },
-  themeName: { color: C.text, fontSize: 14, fontWeight: '700', marginBottom: 2 },
-  themeDesc: { color: C.textFaint, fontSize: 11, lineHeight: 15, marginBottom: 10, minHeight: 30 },
-  themeSwatches: { flexDirection: 'row', gap: 5 },
-  themeSw: { width: 22, height: 22, borderRadius: 11, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
-  card: { backgroundColor: C.bgCard, borderRadius: 16, borderWidth: 1, borderColor: C.borderSoft, overflow: 'hidden' },
-  row: { minHeight: 56 },
-  rowPressed: { backgroundColor: C.bgHover },
-  rowDisabled: { opacity: 0.5 },
-  rowInner: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10 },
-  rowIcon: {
-    width: 30, height: 30, borderRadius: 9,
-    // BUG-017: theme token, not a hard-coded Mocheme literal (the literal
-    // kept the chips orange under the Relay theme).
-    backgroundColor: C.accentSoft,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  rowIconDanger: { backgroundColor: C.redSoft },
-  rowText: { flex: 1, gap: 1 },
-  rowLabel: { color: C.text, fontSize: 15, fontWeight: '600' },
-  rowLabelDisabled: { color: C.textDim },
-  rowSub: { color: C.textFaint, fontSize: 12, lineHeight: 16 },
-  divider: { height: 1, backgroundColor: C.borderSoft, marginLeft: 56 },
-  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10, minHeight: 56 },
-  serverRow: { flexDirection: 'row', alignItems: 'center' },
-  serverMain: { flex: 1, paddingHorizontal: 14, paddingVertical: 10, minHeight: 56, justifyContent: 'center' },
-  serverLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  miniDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.textFaint },
-  activeTag: { color: C.greenSoft, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
-  serverForget: { paddingHorizontal: 14, paddingVertical: 14, minHeight: 56, justifyContent: 'center' },
+  langRowOn: { backgroundColor: C.accentSoft },
 })

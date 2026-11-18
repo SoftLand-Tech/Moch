@@ -1,32 +1,47 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { View, Text, FlatList, StyleSheet, Pressable, TextInput, ActivityIndicator } from 'react-native'
-import { Ionicons } from '@expo/vector-icons'
+import { View, FlatList, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
 import Animated, { useAnimatedStyle } from 'react-native-reanimated'
 import { useRouter } from 'expo-router'
 import { useStore } from '@nanostores/react'
 import { ScreenShell } from '../../src/components/ScreenShell'
+import { Icon } from '../../src/components/Icon'
+import { Card, Field, Segmented, Spinner, Txt, Pill } from '../../src/components/ui'
 import { C, useStyles } from '../../src/lib/theme'
-import { loadCatalog, loadSkillDescriptions, commandCatalog, commandCategories, commandDescriptions, skillCommands, skillDescriptions } from '../../src/lib/slash'
+import { useDir, useT } from '../../src/lib/strings'
+import { loadCatalog, loadSkillDescriptions, commandCatalog, commandDescriptions, skillCommands, skillDescriptions } from '../../src/lib/slash'
 import { isConnected as isConnectedAtom } from '../../src/lib/gateway'
 
 /**
  * Skills + slash commands — the Hermes equivalent of ChatGPT's "Plugins".
  * Everything is fetched from the gateway's own registry (`commands.catalog`),
  * so nothing is hardcoded and new server-side commands appear automatically.
+ *
+ * Mockup screen 10: filter + Commands/Skills segmented switch + catalog cards.
+ * Tapping a row still just drops the command/skill into the chat composer.
  */
+
+/** Known gateway origin tokens → localized labels; anything else reads raw. */
+const ORIGIN_KEYS: Record<string, string> = {
+  bundled: 'skills.origin.bundled',
+  user: 'skills.origin.user',
+  local: 'skills.origin.local',
+}
+
 export default function Skills() {
   const s = useStyles(makeS)
   // BUG-133: chat-pad pattern on the LIST only — the filter field stays
   // top-anchored while the results viewport ends at the keyboard's top edge.
   const kb = useReanimatedKeyboardAnimation()
   const kbPad = useAnimatedStyle(() => ({ paddingBottom: -kb.height.value }))
+  // Locale subscription: the open screen re-translates on a language switch.
+  const t = useT()
+  const dir = useDir()
   const router = useRouter()
   const online = useStore(isConnectedAtom)
   const skills = useStore(skillCommands)
   const commands = useStore(commandCatalog)
-  const categories = useStore(commandCategories)
   const cmdDescs = useStore(commandDescriptions)
   const skillDescs = useStore(skillDescriptions)
   const [query, setQuery] = useState('')
@@ -80,86 +95,138 @@ export default function Skills() {
     router.navigate({ pathname: '/(tabs)/chat', params: { draft: `/${bare} ` } } as never)
   }
 
+  /** Origin token as the mockup's accent pill ("bundled" / "user" / …). */
+  const originLabel = (raw?: string): string => {
+    const token = (raw ?? 'local').trim().toLowerCase()
+    const key = ORIGIN_KEYS[token]
+    return key ? t(key) : token
+  }
+
+  // Command/skill ids are mono LTR data even in Arabic — writingDirection
+  // stays ltr, but the text itself must sit on the row's start edge (right
+  // when the UI is mirrored), so the alignment follows the UI direction.
+  const idAlign = { textAlign: dir.textAlign } as const
+
+  const emptyText = !online
+    ? t('common.offline')
+    : query.trim()
+      ? t('skills.empty.matches')
+      : tab === 'commands'
+        ? t('skills.empty.commands')
+        : t('skills.empty.skills')
+
+  const tabOptions = [
+    { key: 'commands' as const, label: t('skills.tab.commands', { n: Object.keys(commands).length }) },
+    { key: 'skills' as const, label: t('skills.tab.skills', { n: Object.keys(skills).length }) },
+  ]
+
   return (
     <SafeAreaView style={s.safe} edges={['bottom']}>
-      <ScreenShell title="Skills" showBrand>
-        <View style={s.searchWrap}>
-          <TextInput
-            style={s.search}
+      <ScreenShell title={t('skills.title')} showBrand>
+        {/* app-scroll's padded top block: filter + Commands/Skills switch.
+            Kept OUTSIDE the keyboard-padded list wraps so the field stays put
+            (BUG-133) while results rise above the keys. */}
+        <View style={s.top}>
+          <Field
             value={query}
             onChangeText={setQuery}
-            placeholder={tab === 'commands' ? 'Filter commands…' : 'Filter skills…'}
-            placeholderTextColor={C.textFaint}
+            placeholder={t('skills.filter.placeholder')}
             autoCorrect={false}
-            accessibilityLabel="Filter"
+            accessibilityLabel={t('skills.filter.a11y')}
+            wrapStyle={s.filter}
           />
+          <Segmented options={tabOptions} value={tab} onChange={setTab} style={s.segment} />
         </View>
 
-        <View style={s.tabs}>
-          {(['commands', 'skills'] as const).map((t) => (
-            <Pressable
-              key={t}
-              style={({ pressed }) => [s.tab, tab === t && s.tabOn, pressed && s.tabPressed]}
-              onPress={() => setTab(t)}
-              accessibilityRole="button"
-            >
-              <Text style={[s.tabText, tab === t && s.tabTextOn]}>{t === 'commands' ? `Commands (${Object.keys(commands).length})` : `Skills (${Object.keys(skills).length})`}</Text>
-            </Pressable>
-          ))}
-        </View>
-
-        {loading ? <ActivityIndicator color={C.textDim} style={{ marginTop: 28 }} /> : null}
+        {loading ? (
+          <View style={s.loadWrap}>
+            <Spinner />
+          </View>
+        ) : null}
 
         {!loading && tab === 'commands' ? (
           <Animated.View style={[s.kbListWrap, kbPad]}>
-          <FlatList
-            data={commandList}
-            keyExtractor={(x) => x.name}
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 32 }}
-            ListEmptyComponent={
-              <Text style={s.empty}>{online ? (query ? 'No matches' : 'No commands loaded') : 'Offline'}</Text>
-            }
-            renderItem={({ item }) => (
-              <Pressable
-                style={({ pressed }) => [s.row, pressed && s.rowPressed]}
-                onPress={() => run(item.name)}
-                accessibilityLabel={item.name}
-              >
-                <Text style={s.rowName}>{item.name}</Text>
-                {item.desc ? (
-                  <Text style={s.rowDesc} numberOfLines={2}>
-                    {item.desc}
-                  </Text>
-                ) : null}
-              </Pressable>
-            )}
-          />
+            <FlatList
+              data={commandList}
+              keyExtractor={(x) => x.name}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={s.listContent}
+              ListEmptyComponent={<Txt size={14} color={C.textFaint} center style={s.empty}>{emptyText}</Txt>}
+              renderItem={({ item }) => (
+                <Card
+                  onPress={() => run(item.name)}
+                  accessibilityLabel={t('skills.a11y.command', { name: item.name })}
+                >
+                  <View style={[s.rowInner, { flexDirection: dir.row }]}>
+                    <View style={s.rowBody}>
+                      <Txt
+                        size={13}
+                        weight="700"
+                        color={C.accent}
+                        mono
+                        ltr
+                        numberOfLines={1}
+                        style={idAlign}
+                      >
+                        {item.name}
+                      </Txt>
+                      {item.desc ? (
+                        <Txt size={11.5} color={C.textDim} numberOfLines={2} style={s.rowDesc}>
+                          {item.desc}
+                        </Txt>
+                      ) : null}
+                    </View>
+                    <Icon name={dir.icon.forward} size={16} color={C.textFaint} />
+                  </View>
+                </Card>
+              )}
+            />
           </Animated.View>
         ) : null}
 
         {!loading && tab === 'skills' ? (
           <Animated.View style={[s.kbListWrap, kbPad]}>
-          <FlatList
-            data={skillList}
-            keyExtractor={(x) => x.name}
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 32 }}
-            ListEmptyComponent={<Text style={s.empty}>{online ? (query ? 'No matches' : 'No skills installed') : 'Offline'}</Text>}
-            renderItem={({ item }) => (
-              <Pressable style={({ pressed }) => [s.row, pressed && s.rowPressed]} onPress={() => run(item.name)} accessibilityLabel={item.name}>
-                <View style={s.skillHead}>
-                  <Text style={s.rowName}>{item.name}</Text>
-                  <Text style={s.badge}>{item.origin ?? 'local'}</Text>
-                </View>
-                {item.desc ? (
-                  <Text style={s.rowDesc} numberOfLines={2}>{item.desc}</Text>
-                ) : item.usage != null ? (
-                  <Text style={s.rowDesc}>used {item.usage}×</Text>
-                ) : null}
-              </Pressable>
-            )}
-          />
+            <FlatList
+              data={skillList}
+              keyExtractor={(x) => x.name}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={s.listContent}
+              ListEmptyComponent={<Txt size={14} color={C.textFaint} center style={s.empty}>{emptyText}</Txt>}
+              renderItem={({ item }) => (
+                <Card
+                  onPress={() => run(item.name)}
+                  accessibilityLabel={t('skills.a11y.skill', { name: item.name })}
+                >
+                  <View style={[s.skillHead, { flexDirection: dir.row }]}>
+                    <View style={[s.skillId, { flexDirection: dir.row }]}>
+                      <Txt
+                        size={13}
+                        weight="700"
+                        mono
+                        ltr
+                        numberOfLines={1}
+                        style={[s.skillName, idAlign]}
+                      >
+                        {item.name}
+                      </Txt>
+                      <Pill kind="accent" style={s.originPill} textStyle={s.originPillText}>
+                        {originLabel(item.origin)}
+                      </Pill>
+                    </View>
+                    {item.usage != null ? (
+                      <Txt size={10.5} color={C.textFaint} mono style={s.used}>
+                        {t('skills.used', { n: item.usage })}
+                      </Txt>
+                    ) : null}
+                  </View>
+                  {item.desc ? (
+                    <Txt size={11.5} color={C.textDim} numberOfLines={2} style={s.rowDesc}>
+                      {item.desc}
+                    </Txt>
+                  ) : null}
+                </Card>
+              )}
+            />
           </Animated.View>
         ) : null}
       </ScreenShell>
@@ -170,19 +237,20 @@ export default function Skills() {
 const makeS = () => StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
   kbListWrap: { flex: 1 },
-  searchWrap: { paddingHorizontal: 16, paddingBottom: 8 },
-  search: { backgroundColor: C.bgCard, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 12, color: C.text, fontSize: 15, minHeight: 44 },
-  tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingBottom: 10 },
-  tab: { paddingHorizontal: 14, height: 34, borderRadius: 17, backgroundColor: C.bgCard, alignItems: 'center', justifyContent: 'center' },
-  tabOn: { backgroundColor: C.accent },
-  tabPressed: { opacity: 0.6 },
-  tabText: { color: C.textDim, fontSize: 13, fontWeight: '600' },
-  tabTextOn: { color: C.onAccent },
-  row: { paddingHorizontal: 10, paddingVertical: 11, borderRadius: 10, minHeight: 48, justifyContent: 'center' },
-  rowPressed: { backgroundColor: C.bgCard },
-  rowName: { color: C.text, fontSize: 15, fontWeight: '600' },
-  rowDesc: { color: C.textFaint, fontSize: 12.5, marginTop: 2, lineHeight: 17 },
-  skillHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  badge: { color: C.textFaint, fontSize: 10.5, fontWeight: '700', textTransform: 'uppercase' },
-  empty: { color: C.textFaint, textAlign: 'center', marginTop: 48, fontSize: 14 },
+  top: { paddingHorizontal: 14, paddingTop: 10 },
+  filter: { marginBottom: 8 },
+  segment: { marginBottom: 10 },
+  loadWrap: { marginTop: 28, alignItems: 'center' },
+  // app-scroll padding: 10 top / 14 horizontal / 18 bottom (mockup screen 10).
+  listContent: { paddingHorizontal: 14, paddingBottom: 18 },
+  rowInner: { alignItems: 'center', gap: 8 },
+  rowBody: { flex: 1, minWidth: 0 },
+  rowDesc: { marginTop: 2, lineHeight: 17 },
+  skillHead: { alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 3 },
+  skillId: { alignItems: 'center', gap: 6, flexShrink: 1, minWidth: 0 },
+  skillName: { flexShrink: 1 },
+  originPill: { alignSelf: 'center' },
+  originPillText: { fontSize: 9.5 },
+  used: { flexShrink: 0 },
+  empty: { marginTop: 48 },
 })

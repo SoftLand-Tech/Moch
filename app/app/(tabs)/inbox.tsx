@@ -1,12 +1,13 @@
-import React, { useCallback, useMemo, useState } from 'react'
-import { View, Text, SectionList, Pressable, StyleSheet, RefreshControl, Image } from 'react-native'
+import React, { useCallback, useState } from 'react'
+import { View, SectionList, StyleSheet, RefreshControl } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useStore } from '@nanostores/react'
 import { router } from 'expo-router'
 import { ScreenShell } from '../../src/components/ScreenShell'
-import { StatusDot } from '../../src/components/Sidebar'
+import { MochiMark } from '../../src/components/MochiMark'
+import { Card, Dot, Kicker, Pill, Txt, type DotKind, type PillKind } from '../../src/components/ui'
 import { C, useStyles } from '../../src/lib/theme'
-import { tr, localeAtom } from '../../src/lib/strings'
+import { useDir, useT } from '../../src/lib/strings'
 import { switchToSession } from '../../src/lib/chat'
 import { loadSessions } from '../../src/lib/sessionList'
 import {
@@ -30,10 +31,17 @@ import {
  */
 
 /** Kind → the shared status dot's vocabulary (amber / green / red). */
-const DOT: Record<InboxKind, 'input' | 'done' | 'error'> = {
-  ask: 'input',
-  done: 'done',
-  error: 'error',
+const DOT_KIND: Record<InboxKind, DotKind> = {
+  ask: 'amber',
+  done: 'green',
+  error: 'red',
+}
+
+/** Kind → the section-count pill's tone (mockup screen 3). */
+const PILL_KIND: Record<InboxKind, PillKind> = {
+  ask: 'amber',
+  done: 'green',
+  error: 'red',
 }
 
 const SECTION_KEY: Record<InboxKind, string> = {
@@ -42,9 +50,9 @@ const SECTION_KEY: Record<InboxKind, string> = {
   error: 'inbox.section.error',
 }
 
-/** The static Mochi portrait the empty state shows — a full MochiStage is a
- *  WebView, far too heavy for a placeholder (and it animates forever). */
-const MOCHI_AVATAR = require('../../assets/mochi-avatar.png')
+/** The mockup's centered Mochi empty state — the static MochiMark (a full
+ *  MochiStage is a WebView, far too heavy for a placeholder). */
+const EMPTY_MOCHI_SIZE = 84
 
 export default function Inbox() {
   const s = useStyles(makeS)
@@ -57,23 +65,20 @@ export default function Inbox() {
 
 function InboxInner() {
   const s = useStyles(makeS)
-  // Re-render on a language switch: tr() reads the atom lazily, so without a
-  // subscription the copy would stay in the previous locale.
-  const locale = useStore(localeAtom)
+  // useT subscribes to the locale atom: an open screen re-translates on a
+  // language switch, including the SectionList's memoized section headers.
+  const t = useT()
+  const dir = useDir()
   const items = useStore(inboxItems)
   const [refreshing, setRefreshing] = useState(false)
 
   // Sections keep the contract's order (Needs you → Finished → Failed) and
   // drop empties, so a quiet day is one short list instead of three headers.
-  // `locale` is a dependency only so the headers translate with the rest.
-  const sections = useMemo(() => {
-    const groups = groupInbox(items)
-    const order: InboxKind[] = ['ask', 'done', 'error']
-    return order
-      .filter((k) => groups[k].length > 0)
-      .map((k) => ({ kind: k, title: tr(SECTION_KEY[k]), data: groups[k] }))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, locale])
+  const groups = groupInbox(items)
+  const order: InboxKind[] = ['ask', 'done', 'error']
+  const sections = order
+    .filter((k) => groups[k].length > 0)
+    .map((k) => ({ kind: k, title: t(SECTION_KEY[k]), data: groups[k] }))
 
   const open = useCallback((item: InboxItem) => {
     // Navigate first: switchToSession swaps the chat content synchronously
@@ -96,54 +101,65 @@ function InboxInner() {
   }, [])
 
   return (
-    <ScreenShell title={tr('inbox.title')} showBrand>
+    <ScreenShell title={t('inbox.title')} showBrand>
       <SectionList
         sections={sections}
         keyExtractor={(item) => `${item.kind}:${item.storedId}`}
         stickySectionHeadersEnabled={false}
-        contentContainerStyle={s.content}
+        style={s.list}
+        contentContainerStyle={[s.content, sections.length === 0 && s.contentEmpty]}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.textDim} />
         }
         renderSectionHeader={({ section }) => (
-          <View style={s.sectionHead}>
-            <Text style={s.sectionTitle}>{section.title}</Text>
-            <Text style={s.sectionCount}>{section.data.length}</Text>
+          <View style={[s.sectionHead, { flexDirection: dir.row }]}>
+            <Kicker style={s.kicker}>{section.title}</Kicker>
+            <Pill
+              kind={PILL_KIND[section.kind]}
+              style={s.sectionPill}
+              textStyle={s.sectionCount}
+            >
+              {section.data.length}
+            </Pill>
           </View>
         )}
         renderItem={({ item }) => {
-          const age = inboxAgeLabel(item.at, Date.now(), tr)
-          const title = item.title || tr('inbox.untitled')
+          const age = inboxAgeLabel(item.at, Date.now(), t)
+          const title = item.title || t('inbox.untitled')
           return (
-            <Pressable
-              style={({ pressed }) => [s.row, pressed && s.rowPressed]}
-              onPress={() => open(item)}
-              accessibilityLabel={title}
-            >
-              <View style={s.dotWrap}>
-                <StatusDot status={DOT[item.kind]} />
-              </View>
-              <View style={s.rowBody}>
-                <View style={s.rowHead}>
-                  <Text style={s.title} numberOfLines={1}>
-                    {title}
-                  </Text>
-                  {age ? <Text style={s.age}>{age}</Text> : null}
+            <Card onPress={() => open(item)} accessibilityLabel={title}>
+              <View style={[s.rowInner, { flexDirection: dir.row }]}>
+                <Dot kind={DOT_KIND[item.kind]} style={s.dot} />
+                <View style={s.rowBody}>
+                  <View style={[s.rowHead, { flexDirection: dir.row }]}>
+                    <Txt size={13} weight="700" numberOfLines={1} style={s.title}>
+                      {title}
+                    </Txt>
+                    {age ? (
+                      <Txt size={10.5} color={C.textFaint} style={s.age}>
+                        {age}
+                      </Txt>
+                    ) : null}
+                  </View>
+                  {item.detail ? (
+                    <Txt size={11.5} color={C.textDim} numberOfLines={1} style={s.detail}>
+                      {item.detail}
+                    </Txt>
+                  ) : null}
                 </View>
-                {item.detail ? (
-                  <Text style={s.detail} numberOfLines={1}>
-                    {item.detail}
-                  </Text>
-                ) : null}
               </View>
-            </Pressable>
+            </Card>
           )
         }}
         ListEmptyComponent={
           <View style={s.emptyWrap}>
-            <Image source={MOCHI_AVATAR} style={s.emptyMascot} />
-            <Text style={s.emptyTitle}>{tr('inbox.empty.title')}</Text>
-            <Text style={s.emptyBody}>{tr('inbox.empty.body')}</Text>
+            <MochiMark size={EMPTY_MOCHI_SIZE} />
+            <Txt size={16} weight="800" center style={s.emptyTitle}>
+              {t('inbox.empty.headline')}
+            </Txt>
+            <Txt size={12.5} color={C.textDim} center style={s.emptyBody}>
+              {t('inbox.empty.caption')}
+            </Txt>
           </View>
         }
       />
@@ -153,40 +169,29 @@ function InboxInner() {
 
 const makeS = () => StyleSheet.create({
   frame: { flex: 1, backgroundColor: C.bg },
-  content: { paddingBottom: 28 },
+  list: { flex: 1 },
+  content: { paddingTop: 10, paddingHorizontal: 14, paddingBottom: 18 },
+  contentEmpty: { flexGrow: 1, justifyContent: 'center' },
   sectionHead: {
-    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 8,
-    paddingHorizontal: 16,
-    paddingTop: 18,
-    paddingBottom: 6,
+    marginTop: 8,
+    marginBottom: 6,
+    marginHorizontal: 2,
   },
-  sectionTitle: {
-    color: C.textDim,
-    fontSize: 11.5,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-  },
-  sectionCount: { color: C.textFaint, fontSize: 11.5, fontWeight: '700' },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    minHeight: 58,
-  },
-  rowPressed: { backgroundColor: C.bgHover },
-  dotWrap: { paddingTop: 6 },
-  rowBody: { flex: 1 },
-  rowHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  title: { color: C.text, fontSize: 15, fontWeight: '600', flexShrink: 1 },
-  age: { color: C.textFaint, fontSize: 11.5, marginLeft: 'auto' },
-  detail: { color: C.textDim, fontSize: 13, marginTop: 3 },
-  emptyWrap: { alignItems: 'center', paddingTop: 40, paddingHorizontal: 32 },
-  emptyMascot: { width: 96, height: 96, marginBottom: 14 },
-  emptyTitle: { color: C.text, fontSize: 17, fontWeight: '700', marginTop: 4 },
-  emptyBody: { color: C.textFaint, fontSize: 13, marginTop: 6, textAlign: 'center', lineHeight: 19 },
+  // Kicker ships with its own vertical margins; the section row owns them.
+  kicker: { margin: 0 },
+  sectionPill: { alignSelf: 'center' },
+  sectionCount: { fontSize: 10 },
+  rowInner: { alignItems: 'flex-start', gap: 9 },
+  dot: { marginTop: 5 },
+  rowBody: { flex: 1, minWidth: 0 },
+  rowHead: { alignItems: 'center', justifyContent: 'space-between', gap: 6 },
+  title: { flexShrink: 1 },
+  age: { flexShrink: 0 },
+  detail: { marginTop: 2 },
+  emptyWrap: { alignItems: 'center', paddingHorizontal: 24, paddingVertical: 24 },
+  emptyTitle: { marginTop: 10 },
+  emptyBody: { marginTop: 4, maxWidth: 240 },
 })

@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { Icon } from '../Icon'
 import { C, useStyles } from '../../lib/theme'
 import type { ChatSegment } from '../../lib/chat'
+import { useDir, useT } from '../../lib/strings'
 import { probeDownloadError, videoSource } from '../../lib/mediaCache'
 import { formatBytes } from '../../lib/media'
 
@@ -25,6 +26,8 @@ import { formatBytes } from '../../lib/media'
  */
 export function VideoBubble({ seg }: { seg: ChatSegment }) {
   const s = useStyles(makeS)
+  const dir = useDir()
+  const t = useT()
   const [playing, setPlaying] = useState(false)
   // Bumping the attempt remounts the player (its source is fixed at mount).
   const [attempt, setAttempt] = useState(0)
@@ -49,15 +52,15 @@ export function VideoBubble({ seg }: { seg: ChatSegment }) {
 
   return (
     <Pressable
-      style={({ pressed }) => [s.tile, pressed && s.pressed]}
+      style={({ pressed }) => [s.tile, { flexDirection: dir.row }, pressed && s.pressed]}
       onPress={() => { if (seg.path || localUri) setPlaying(true) }}
-      accessibilityLabel={`Play video${seg.name ? `: ${seg.name}` : ''}`}
+      accessibilityLabel={t('chat.media.playVideoA11y', { name: seg.name ?? t('chat.media.videoLabel') })}
     >
       <View style={s.playCircle}>
         <Icon name="play" size={16} color={C.onAccent} />
       </View>
       <View style={s.meta}>
-        <Text style={s.name} numberOfLines={1}>{seg.name ?? 'Video'}</Text>
+        <Text style={s.name} numberOfLines={1}>{seg.name ?? t('chat.media.videoLabel')}</Text>
         {seg.size ? <Text style={s.sub}>{formatBytes(seg.size)}</Text> : null}
       </View>
     </Pressable>
@@ -75,6 +78,7 @@ function VideoPlayerMount({
   onRetry: () => void
 }) {
   const s = useStyles(makeS)
+  const t = useT()
   const player = useVideoPlayer(
     // Local optimistic copies play straight from disk; gateway videos stream.
     seg.localUri ? { uri: seg.localUri } : videoSource(seg.path!),
@@ -99,17 +103,17 @@ function VideoPlayerMount({
     let alive = true
     const probe = seg.path ? probeDownloadError(seg.path) : Promise.resolve(null)
     void probe.then((mapped) => {
-      if (alive) setErrMsg(mapped ?? 'Video could not be played')
+      if (alive) setErrMsg(mapped ?? t('chat.media.videoError'))
     })
     return () => { alive = false }
-  }, [evt.status, seg.localUri, seg.path, onStaleLocal])
+  }, [evt.status, seg.localUri, seg.path, onStaleLocal, t])
 
   if (errMsg) {
     return (
       <Pressable
         style={({ pressed }) => [s.tile, pressed && s.pressed]}
         onPress={onRetry}
-        accessibilityLabel="Retry video"
+        accessibilityLabel={t('chat.media.retryVideoA11y')}
       >
         <Icon name="alert-circle" size={16} color={C.red} />
         <Text style={s.errorText} numberOfLines={1}>{errMsg}</Text>
@@ -143,15 +147,15 @@ const makeS = () => StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     backgroundColor: C.bgElev,
-    borderRadius: 16,
-    padding: 12,
+    borderRadius: 13,
+    padding: 10,
     minHeight: 60,
   },
   pressed: { opacity: 0.85 },
   playCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: C.accent,
     alignItems: 'center',
     justifyContent: 'center',
@@ -159,7 +163,7 @@ const makeS = () => StyleSheet.create({
   meta: { flex: 1 },
   name: { color: C.text, fontSize: 13.5, fontWeight: '600' },
   sub: { color: C.textFaint, fontSize: 11.5, marginTop: 1 },
-  playerWrap: { borderRadius: 16, overflow: 'hidden' },
+  playerWrap: { borderRadius: 13, overflow: 'hidden' },
   player: { width: 260, height: 170, backgroundColor: C.bgElev },
   loadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   errorText: { color: C.red, fontSize: 12.5, flexShrink: 1, flex: 1 },

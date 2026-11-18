@@ -1,13 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { View, Text, FlatList, StyleSheet, Pressable, ActivityIndicator, RefreshControl, TextInput } from 'react-native'
-import { Ionicons } from '@expo/vector-icons'
+import { FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
 import Animated, { useAnimatedStyle } from 'react-native-reanimated'
 import { useStore } from '@nanostores/react'
 import { ScreenShell } from '../../src/components/ScreenShell'
+import {
+  Card,
+  Divider,
+  Elev,
+  Field,
+  GhostBtn,
+  Kicker,
+  Pill,
+  PrimaryBtn,
+  Spinner,
+  Txt,
+} from '../../src/components/ui'
+import { Icon } from '../../src/components/Icon'
 import { C, useStyles } from '../../src/lib/theme'
-import { tr, isRTL } from '../../src/lib/strings'
+import { useDir, useT } from '../../src/lib/strings'
 import { rpc } from '../../src/lib/gateway'
 import { isConnected } from '../../src/lib/gateway'
 import { fleetProfiles, fleetStatusAtom } from '../../src/lib/fleet'
@@ -19,6 +31,11 @@ import { fleetProfiles, fleetStatusAtom } from '../../src/lib/fleet'
  * frozen bots refused); a tapped task expands to Complete / Reassign. The
  * server pokes dispatch after each write and a 60 s heal ticker reclaims
  * stale work, so a created task runs within ~a minute worst case.
+ *
+ * Redesign (mockup screen 8): four colored column kickers (Ready / Working /
+ * Blocked / Done) + mono counts, expandable task cards (accent border when
+ * open) with Complete + assignee pills, the run-timeline ledger footer, and a
+ * docked new-task card with the real create flow.
  */
 
 interface Task {
@@ -42,16 +59,27 @@ interface Run {
 }
 
 const COLUMNS = [
-  { key: 'ready', label: 'Ready', icon: 'inbox-outline' },
-  { key: 'running', label: 'Working', icon: 'cog-outline' },
-  { key: 'blocked', label: 'Blocked', icon: 'alert-circle-outline' },
-  { key: 'done', label: 'Done', icon: 'checkmark-circle-outline' },
-]
+  { key: 'ready', labelKey: 'crew.col.ready' },
+  { key: 'running', labelKey: 'crew.col.working' },
+  { key: 'blocked', labelKey: 'crew.col.blocked' },
+  { key: 'done', labelKey: 'crew.col.done' },
+] as const
 
-const SOURCE_ICON: Record<string, string> = {
-  kanban: 'grid-outline',
-  cron: 'timer-outline',
-  delegate: 'git-branch-outline',
+/** Column kicker ink (mockup: dim / accent / amber / green). */
+function columnColor(key: string): string {
+  return key === 'running'
+    ? C.accent
+    : key === 'blocked'
+      ? C.amber
+      : key === 'done'
+        ? C.greenSoft
+        : C.textDim
+}
+
+/** Run-ledger source glyph (the ledger rows are the only place the source is
+ *  shown; a11y label keeps the raw source name). */
+function runGlyph(source: string): string {
+  return source === 'cron' ? '⚡' : source === 'kanban' ? '📋' : source === 'delegate' ? '🔀' : '•'
 }
 
 /** Retry-safe create over a flaky phone WS (server dedupes on the key). */
@@ -61,6 +89,8 @@ function newIdempotencyKey(): string {
 
 export default function Crew() {
   const s = useStyles(makeS)
+  const t = useT()
+  const dir = useDir()
   const online = useStore(isConnected)
   const roster = useStore(fleetProfiles)
   const fleetStatus = useStore(fleetStatusAtom)
@@ -92,8 +122,8 @@ export default function Crew() {
     }
     setErr('')
     try {
-      const t = await rpc<{ tasks: Task[] }>('moch.kanban.tasks', { limit: 120 }, 15000)
-      setTasks(t.tasks ?? [])
+      const tasksRes = await rpc<{ tasks: Task[] }>('moch.kanban.tasks', { limit: 120 }, 15000)
+      setTasks(tasksRes.tasks ?? [])
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     }
@@ -116,10 +146,14 @@ export default function Crew() {
 
   /** Assignee chips: Moch (the launch profile) + every fleet bot. */
   const assignees = useMemo(
-    () => [{ name: 'default', label: tr('crew.moch') },
+    () => [{ name: 'default', label: t('crew.moch') },
       ...roster.map((p) => ({ name: p.name, label: p.name }))],
-    [roster],
+    [roster, t],
   )
+
+  const assigneeLabel = (name: string) => (name === 'default' ? t('crew.moch') : name)
+  const chipText = (name: string, label: string) =>
+    `@${name === 'default' ? label : name}`
 
   const create = async () => {
     if (!title.trim() || busy) return
@@ -138,56 +172,87 @@ export default function Crew() {
       void refresh()
       return res
     } catch (e) {
-      setActionErr(tr('crew.err', { why: e instanceof Error ? e.message : String(e) }))
+      setActionErr(t('crew.err', { why: e instanceof Error ? e.message : String(e) }))
     } finally {
       setBusy(false)
     }
   }
 
-  const complete = async (t: Task) => {
+  const complete = async (task: Task) => {
     if (busyTask) return
-    setBusyTask(t.id)
+    setBusyTask(task.id)
     setActionErr('')
     try {
       await rpc('moch.kanban.complete', {
-        task_id: t.id,
-        summary: tr('crew.complete.summary'),
+        task_id: task.id,
+        summary: t('crew.complete.summary'),
       }, 15000)
       setExpanded(null)
       void refresh()
     } catch (e) {
-      setActionErr(tr('crew.err', { why: e instanceof Error ? e.message : String(e) }))
+      setActionErr(t('crew.err', { why: e instanceof Error ? e.message : String(e) }))
     } finally {
       setBusyTask(null)
     }
   }
 
-  const reassign = async (t: Task, to: string) => {
-    if (busyTask || to === t.assignee) return
-    setBusyTask(t.id)
+  const reassign = async (task: Task, to: string) => {
+    if (busyTask || to === task.assignee) return
+    setBusyTask(task.id)
     setActionErr('')
     try {
-      await rpc('moch.kanban.assign', { task_id: t.id, assignee: to }, 15000)
+      await rpc('moch.kanban.assign', { task_id: task.id, assignee: to }, 15000)
       setExpanded(null)
       void refresh()
     } catch (e) {
-      setActionErr(tr('crew.err', { why: e instanceof Error ? e.message : String(e) }))
+      setActionErr(t('crew.err', { why: e instanceof Error ? e.message : String(e) }))
     } finally {
       setBusyTask(null)
     }
   }
 
+  /** Real number of completed tasks on the board (drives the Done empty line). */
+  const doneTotal = useMemo(
+    () => tasks.filter((task) => task.status === 'done' || task.status === 'complete').length,
+    [tasks],
+  )
+
   const byStatus = useMemo(() => {
     const m: Record<string, Task[]> = {}
-    for (const t of tasks) {
-      const key = t.status === 'running' ? 'running'
-        : t.status === 'blocked' ? 'blocked'
-          : t.status === 'done' || t.status === 'complete' ? 'done'
+    for (const task of tasks) {
+      const key = task.status === 'running' ? 'running'
+        : task.status === 'blocked' ? 'blocked'
+          : task.status === 'done' || task.status === 'complete' ? 'done'
             : 'ready'
-      ;(m[key] ??= []).push(t)
+      ;(m[key] ??= []).push(task)
     }
     return m
   }, [tasks])
+
+  const runStatusLabel = (status: string) => {
+    switch (status) {
+      case 'done':
+      case 'complete':
+        return t('crew.run.done')
+      case 'running':
+        return t('crew.run.running')
+      case 'failed':
+        return t('crew.run.failed')
+      case 'blocked':
+        return t('crew.run.blocked')
+      default:
+        return status
+    }
+  }
+
+  const runStatusColor = (status: string) =>
+    status === 'failed' || status === 'blocked'
+      ? C.red
+      : status === 'running'
+        ? C.amber
+        : status === 'done' || status === 'complete'
+          ? C.greenSoft
+          : C.textFaint
 
   // BUG-133: the create box is a bottom-docked input surface — port of the
   // fleet chat-pad pattern (kbPad lifts the list; createPad is the SINGLE
@@ -201,192 +266,247 @@ export default function Crew() {
 
   return (
     <SafeAreaView style={s.safe} edges={[]}>
-      <ScreenShell title="Crew" showBrand>
+      <ScreenShell title={t('crew.title')} showBrand>
         <Animated.View style={[s.body, kbPad]}>
-        {!online ? <Text style={s.offline}>{tr('crew.offline')}</Text> : null}
-        {err ? <Text style={s.err}>{err}</Text> : null}
-        {actionErr ? <Text style={s.err}>{actionErr}</Text> : null}
-        {loading && online ? (
-          <ActivityIndicator style={s.spin} />
-        ) : (
-          <FlatList
-            data={COLUMNS}
-            keyExtractor={(c) => c.key}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={() => { setRefreshing(true); void refresh() }}
-                tintColor={C.textDim}
-              />
-            }
-            ListHeaderComponent={
-              <Text style={s.hint}>{tr('crew.hint')}</Text>
-            }
-            renderItem={({ item: col }) => {
-              const list = byStatus[col.key] ?? []
-              return (
-                <View style={s.column}>
-                  <View style={s.colHead}>
-                    <Ionicons name={col.icon as never} size={15} color={C.textDim} />
-                    <Text style={s.colTitle}>{col.label}</Text>
-                    <Text style={s.colCount}>{list.length}</Text>
-                  </View>
-                  {list.length === 0 ? (
-                    <Text style={s.colEmpty}>—</Text>
-                  ) : (
-                    list.map((t) => {
-                      const open = expanded === t.id
-                      const done = t.status === 'done' || t.status === 'complete'
-                      return (
-                        <View key={t.id} style={[s.task, open && s.taskOpen]}>
-                          <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={t.title}
-                            onPress={() => setExpanded(open ? null : t.id)}
-                          >
-                            <Text style={s.taskTitle} numberOfLines={open ? 6 : 2}>{t.title}</Text>
-                            <View style={s.taskMeta}>
-                              <Ionicons name="person-outline" size={11} color={C.textFaint} />
-                              <Text style={s.taskMetaText}>
-                                {t.assignee === 'default' ? tr('crew.moch') : t.assignee || 'unassigned'}
-                              </Text>
-                              <Text style={s.taskMetaText}>· {t.id.slice(0, 8)}</Text>
-                            </View>
-                          </Pressable>
-                          {open && !done ? (
-                            <View style={s.taskActions}>
-                              <Pressable
-                                accessibilityRole="button"
-                                style={[s.actBtn, s.actPrimary]}
-                                onPress={() => complete(t)}
-                                disabled={busyTask === t.id}
-                              >
-                                {busyTask === t.id ? (
-                                  <ActivityIndicator size="small" />
-                                ) : (
-                                  <Text style={s.actPrimaryText}>{tr('crew.complete')}</Text>
-                                )}
-                              </Pressable>
-                            </View>
-                          ) : null}
-                          {open && !done ? (
-                            <View>
-                              <Text style={s.reassignLabel}>{tr('crew.assign')}</Text>
-                              <View style={[s.chips, isRTL() && { flexDirection: 'row-reverse' }]}>
-                                {assignees.map((a) => (
-                                  <Pressable
-                                    key={a.name}
-                                    accessibilityRole="button"
-                                    disabled={frozenSet.has(a.name) || a.name === t.assignee}
-                                    style={[
-                                      s.chip,
-                                      a.name === t.assignee && s.chipActive,
-                                      frozenSet.has(a.name) && s.chipFrozen,
-                                    ]}
-                                    onPress={() => reassign(t, a.name)}
-                                  >
-                                    <Text style={s.chipText} numberOfLines={1}>{a.label}</Text>
-                                  </Pressable>
-                                ))}
-                              </View>
-                            </View>
-                          ) : null}
-                        </View>
-                      )
-                    })
-                  )}
-                </View>
-              )
-            }}
-            ListFooterComponent={
-              <View style={s.timeline}>
-                <Text style={s.tlTitle}>{tr('crew.timeline')}</Text>
-                {runs.length === 0 ? (
-                  <Text style={s.colEmpty}>{tr('crew.timeline.empty')}</Text>
-                ) : (
-                  runs.map((r, i) => (
-                    <View key={`${r.source}-${r.id}-${i}`} style={s.tlRow}>
-                      <Ionicons
-                        name={(SOURCE_ICON[r.source] ?? 'ellipse-outline') as never}
-                        size={13}
-                        color={r.status === 'failed' || r.status === 'blocked'
-                          ? C.red : C.textDim}
-                      />
-                      <Text style={s.tlText} numberOfLines={1}>
-                        {r.title || r.id}
-                        {r.profile ? ` · @${r.profile}` : ''}
-                      </Text>
-                      <Text style={s.tlStatus}>{r.status}</Text>
-                    </View>
-                  ))
-                )}
-              </View>
-            }
-          />
-        )}
-
-        <Animated.View style={[s.createWrap, createPad]}>
-          {creating ? (
-            <View style={s.createBox}>
-              <TextInput
-                style={s.input}
-                placeholder={tr('crew.new.title')}
-                placeholderTextColor={C.textDim}
-                value={title}
-                onChangeText={setTitle}
-                autoFocus
-              />
-              <TextInput
-                style={s.inputBody}
-                placeholder={tr('crew.new.body')}
-                placeholderTextColor={C.textDim}
-                value={body}
-                onChangeText={setBody}
-                multiline
-              />
-              <Text style={s.assignLabel}>{tr('crew.new.assignee')}</Text>
-              <View style={[s.chips, isRTL() && { flexDirection: 'row-reverse' }]}>
-                {assignees.map((a) => (
-                  <Pressable
-                    key={a.name}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: assignee === a.name }}
-                    disabled={frozenSet.has(a.name)}
-                    style={[
-                      s.chip,
-                      assignee === a.name && s.chipActive,
-                      frozenSet.has(a.name) && s.chipFrozen,
-                    ]}
-                    onPress={() => setAssignee(a.name)}
-                  >
-                    <Text style={s.chipText} numberOfLines={1}>{a.label}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <View style={s.rowBtns}>
-                <Pressable style={s.btnGhost} onPress={() => setCreating(false)}>
-                  <Text style={s.btnGhostText}>{tr('fleet.cancel')}</Text>
-                </Pressable>
-                <Pressable
-                  style={[s.btn, !title.trim() && s.btnDisabled]}
-                  onPress={create}
-                  disabled={!title.trim() || busy}
-                >
-                  {busy ? (
-                    <ActivityIndicator size="small" />
-                  ) : (
-                    <Text style={s.btnText}>{tr('crew.new.cta')}</Text>
-                  )}
-                </Pressable>
-              </View>
+          {!online ? (
+            <Txt size={12} color={C.amber} style={s.banner}>{t('crew.offline')}</Txt>
+          ) : null}
+          {err ? (
+            <Txt size={12} color={C.red} style={s.banner}>
+              {t('crew.loadFailed', { why: err })}
+            </Txt>
+          ) : null}
+          {actionErr ? (
+            <Txt size={12} color={C.red} style={s.banner}>{actionErr}</Txt>
+          ) : null}
+          {loading && online ? (
+            <View style={s.spinWrap}>
+              <Spinner />
             </View>
           ) : (
-            <Pressable accessibilityRole="button" style={s.fab} onPress={() => { setActionErr(''); setCreating(true) }} disabled={!online}>
-              <Ionicons name="add" size={20} color={C.bg} />
-              <Text style={s.fabText}>{tr('crew.new')}</Text>
-            </Pressable>
+            <FlatList
+              data={COLUMNS}
+              keyExtractor={(c) => c.key}
+              contentContainerStyle={s.listContent}
+              keyboardShouldPersistTaps="handled"
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={() => { setRefreshing(true); void refresh() }}
+                  tintColor={C.textDim}
+                />
+              }
+              ListHeaderComponent={
+                <Txt size={10.5} color={C.textFaint} style={s.hint}>{t('crew.hint')}</Txt>
+              }
+              renderItem={({ item: col }) => {
+                const list = byStatus[col.key] ?? []
+                const color = columnColor(col.key)
+                return (
+                  <View style={s.column}>
+                    <View style={[s.colHead, { flexDirection: dir.row }]}>
+                      <Txt
+                        size={11}
+                        weight="800"
+                        color={color}
+                        style={[s.colTitle, !dir.rtl && s.colTitleUpper]}
+                      >
+                        {t(col.labelKey)}
+                      </Txt>
+                      <Txt size={11} color={C.textFaint} mono>{String(list.length)}</Txt>
+                    </View>
+                    {list.length === 0 ? (
+                      <Elev style={s.colEmpty}>
+                        <Txt size={11.5} color={C.textFaint} center>
+                          {col.key === 'done'
+                            ? t('crew.col.done.empty', { n: doneTotal })
+                            : t('crew.col.empty')}
+                        </Txt>
+                      </Elev>
+                    ) : (
+                      list.map((task) => {
+                        const open = expanded === task.id
+                        const done = task.status === 'done' || task.status === 'complete'
+                        return (
+                          <Card key={task.id} style={[s.taskCard, open && s.taskCardOpen]}>
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityLabel={task.title}
+                              accessibilityState={{ expanded: open }}
+                              onPress={() => setExpanded(open ? null : task.id)}
+                            >
+                              <View style={[s.taskTop, { flexDirection: dir.row }]}>
+                                <Txt
+                                  size={12.5}
+                                  weight="700"
+                                  numberOfLines={open ? 6 : 2}
+                                  style={[s.taskTitle, done && s.taskTitleDone]}
+                                >
+                                  {task.title}
+                                </Txt>
+                                <Txt size={10.5} color={C.accent} mono numberOfLines={1} style={s.taskAssignee}>
+                                  {chipText(task.assignee, assigneeLabel(task.assignee))}
+                                </Txt>
+                              </View>
+                            </Pressable>
+                            {open ? (
+                              <View style={s.taskOpen}>
+                                <Divider style={s.taskDivider} />
+                                <View style={[s.taskActions, { flexDirection: dir.row }]}>
+                                  <PrimaryBtn
+                                    small
+                                    label={done ? t('crew.completed') : t('crew.complete')}
+                                    onPress={() => complete(task)}
+                                    disabled={done || busyTask === task.id}
+                                    style={s.completeBtn}
+                                  >
+                                    {busyTask === task.id ? (
+                                      <Spinner size="small" color={C.onAccent} />
+                                    ) : (
+                                      <Txt size={11} weight="700" color={C.onAccent}>
+                                        {done ? t('crew.completed') : t('crew.complete')}
+                                      </Txt>
+                                    )}
+                                  </PrimaryBtn>
+                                  <View style={[s.assigneePills, { flexDirection: dir.row }]}>
+                                    {done ? (
+                                      <Pill kind="accent" textStyle={s.taskPillText}>
+                                        {chipText(task.assignee, assigneeLabel(task.assignee))}
+                                      </Pill>
+                                    ) : (
+                                      assignees.map((a) => {
+                                        const frozen = frozenSet.has(a.name)
+                                        const current = a.name === task.assignee
+                                        const label = chipText(a.name, a.label)
+                                        return (
+                                          <Pill
+                                            key={a.name}
+                                            kind={current ? 'accent' : 'neutral'}
+                                            onPress={frozen || current ? undefined : () => reassign(task, a.name)}
+                                            accessibilityLabel={`${t('crew.assign')}: ${label}`}
+                                            textStyle={s.taskPillText}
+                                            style={frozen ? s.pillFrozen : undefined}
+                                          >
+                                            {frozen ? t('crew.chip.frozen', { name: label }) : label}
+                                          </Pill>
+                                        )
+                                      })
+                                    )}
+                                  </View>
+                                </View>
+                                <Txt size={10} color={C.textFaint} mono ltr style={s.taskId}>
+                                  {`#${task.id.slice(0, 8)}`}
+                                </Txt>
+                              </View>
+                            ) : null}
+                          </Card>
+                        )
+                      })
+                    )}
+                  </View>
+                )
+              }}
+              ListFooterComponent={
+                <View style={s.timeline}>
+                  <Kicker>{t('crew.runTimeline')}</Kicker>
+                  {runs.length === 0 ? (
+                    <Elev>
+                      <Txt size={11.5} color={C.textFaint} center>{t('crew.timeline.empty')}</Txt>
+                    </Elev>
+                  ) : (
+                    <Elev style={s.ledger}>
+                      {runs.map((run, i) => (
+                        <View
+                          key={`${run.source}-${run.id}-${i}`}
+                          style={[s.tlRow, { flexDirection: dir.row }]}
+                        >
+                          <Txt size={12} color={C.text}>
+                            {runGlyph(run.source)}
+                          </Txt>
+                          <Txt size={11.5} color={C.text} numberOfLines={1} style={s.tlText}>
+                            {run.title || run.id}
+                            {run.profile ? (
+                              <Txt size={11.5} weight="700" color={C.accent}>
+                                {` · @${run.profile}`}
+                              </Txt>
+                            ) : null}
+                          </Txt>
+                          <Txt size={11.5} color={runStatusColor(run.status)}>
+                            {runStatusLabel(run.status)}
+                          </Txt>
+                        </View>
+                      ))}
+                    </Elev>
+                  )}
+                </View>
+              }
+            />
           )}
-        </Animated.View>
+
+          <Animated.View style={[s.createWrap, createPad]}>
+            {creating ? (
+              <Card style={s.createBox}>
+                <View style={[s.createHead, { flexDirection: dir.row }]}>
+                  <Txt size={13} weight="800" style={s.createTitle}>{t('crew.create.title')}</Txt>
+                  <GhostBtn small label={t('common.cancel')} onPress={() => setCreating(false)} />
+                </View>
+                <Field
+                  value={title}
+                  onChangeText={setTitle}
+                  placeholder={t('crew.create.titlePlaceholder')}
+                  autoFocus
+                  wrapStyle={s.fieldGap}
+                />
+                <Field
+                  value={body}
+                  onChangeText={setBody}
+                  placeholder={t('crew.create.bodyPlaceholder')}
+                  multiline
+                  wrapStyle={s.fieldGap}
+                  style={s.bodyInput}
+                />
+                <View style={[s.chips, { flexDirection: dir.row }]}>
+                  {assignees.map((a) => {
+                    const frozen = frozenSet.has(a.name)
+                    const label = chipText(a.name, a.label)
+                    return (
+                      <Pill
+                        key={a.name}
+                        kind={assignee === a.name ? 'accent' : 'neutral'}
+                        onPress={frozen ? undefined : () => setAssignee(a.name)}
+                        accessibilityLabel={`${t('crew.new.assignee')}: ${label}`}
+                        textStyle={s.chipText}
+                        style={frozen ? s.pillFrozen : undefined}
+                      >
+                        {frozen ? t('crew.chip.frozen', { name: label }) : label}
+                      </Pill>
+                    )
+                  })}
+                </View>
+                <PrimaryBtn
+                  label={t('crew.create.cta')}
+                  onPress={create}
+                  disabled={!title.trim() || busy}
+                  style={s.createBtn}
+                >
+                  {busy ? (
+                    <Spinner size="small" color={C.onAccent} />
+                  ) : (
+                    <Txt size={13} weight="700" color={C.onAccent}>{t('crew.create.cta')}</Txt>
+                  )}
+                </PrimaryBtn>
+              </Card>
+            ) : (
+              <PrimaryBtn
+                onPress={() => { setActionErr(''); setCreating(true) }}
+                disabled={!online}
+                style={[s.newBtn, { flexDirection: dir.row }]}
+              >
+                <Icon name="add" size={18} color={C.onAccent} />
+                <Txt size={13} weight="700" color={C.onAccent}>{t('crew.new')}</Txt>
+              </PrimaryBtn>
+            )}
+          </Animated.View>
         </Animated.View>
       </ScreenShell>
     </SafeAreaView>
@@ -397,61 +517,60 @@ const makeS = () =>
   StyleSheet.create({
     safe: { flex: 1, backgroundColor: C.bg },
     body: { flex: 1 },
-    err: { color: C.red, fontSize: 12, paddingHorizontal: 16, paddingVertical: 6 },
-    offline: { color: C.amber, fontSize: 12, paddingHorizontal: 16, paddingVertical: 6 },
-    spin: { marginTop: 24 },
-    hint: { color: C.textFaint, fontSize: 11, paddingHorizontal: 16, paddingBottom: 8 },
-    column: {
-      backgroundColor: C.bgCard,
-      borderRadius: 14,
-      marginHorizontal: 16,
-      marginBottom: 12,
-      padding: 12,
+    banner: { paddingHorizontal: 14, paddingTop: 8 },
+    spinWrap: { marginTop: 24, alignItems: 'center' },
+    listContent: { paddingTop: 10, paddingHorizontal: 14, paddingBottom: 18 },
+    hint: { lineHeight: 15, marginBottom: 8 },
+    column: { marginBottom: 10 },
+    colHead: {
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: 4,
+      marginHorizontal: 2,
+      marginBottom: 5,
     },
-    colHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
-    colTitle: { color: C.text, fontSize: 13, fontWeight: '600', flex: 1 },
-    colCount: { color: C.textFaint, fontSize: 12 },
-    colEmpty: { color: C.textFaint, fontSize: 12, paddingLeft: 4 },
-    task: { backgroundColor: C.bgElev, borderRadius: 10, padding: 10, marginBottom: 6 },
-    taskOpen: { borderWidth: 1, borderColor: C.border },
-    taskTitle: { color: C.text, fontSize: 13 },
-    taskMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
-    taskMetaText: { color: C.textFaint, fontSize: 11 },
-    taskActions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8 },
-    actBtn: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
-    actPrimary: { backgroundColor: C.accent },
-    actPrimaryText: { color: C.bg, fontWeight: '600', fontSize: 12 },
-    reassignLabel: { color: C.textFaint, fontSize: 11, marginTop: 8, marginBottom: 4 },
-    chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-    chip: { borderRadius: 999, borderWidth: 1, borderColor: C.border, paddingHorizontal: 10, paddingVertical: 5 },
-    chipActive: { backgroundColor: C.accentSoft, borderColor: C.accent },
-    chipFrozen: { opacity: 0.4 },
-    chipText: { color: C.textDim, fontSize: 11, maxWidth: 120 },
-    createWrap: { padding: 16 },
-    createBox: { backgroundColor: C.bgCard, borderRadius: 14, padding: 12 },
-    input: {
-      color: C.text, fontSize: 14, padding: 8, borderRadius: 8,
-      backgroundColor: C.bg,
+    colTitle: { flexShrink: 1 },
+    // Mockup uses uppercase + 0.06em tracking, but letterSpacing breaks Arabic
+    // letter joining — apply both only when the layout is LTR.
+    colTitleUpper: { textTransform: 'uppercase', letterSpacing: 0.66 },
+    colEmpty: { marginBottom: 6 },
+    taskCard: { marginBottom: 6 },
+    taskCardOpen: { borderColor: C.accent },
+    taskTop: { alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+    taskTitle: { flex: 1, lineHeight: 17 },
+    taskTitleDone: { textDecorationLine: 'line-through' },
+    taskAssignee: { flexShrink: 0 },
+    taskOpen: {},
+    taskDivider: { marginTop: 8 },
+    taskActions: {
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 6,
+      flexWrap: 'wrap',
+      marginTop: 8,
     },
-    inputBody: {
-      color: C.text, fontSize: 13, minHeight: 44, padding: 8, borderRadius: 8,
-      backgroundColor: C.bg, marginTop: 8, textAlignVertical: 'top',
+    assigneePills: { alignItems: 'center', flexWrap: 'wrap', gap: 4 },
+    pillFrozen: { opacity: 0.45 },
+    completeBtn: { paddingVertical: 4, paddingHorizontal: 10, minHeight: 26 },
+    taskPillText: { fontSize: 10, maxWidth: 140 },
+    taskId: { marginTop: 6 },
+    timeline: { paddingBottom: 32 },
+    ledger: { gap: 6 },
+    tlRow: { alignItems: 'center', gap: 6 },
+    tlText: { flex: 1 },
+    createWrap: { paddingHorizontal: 14, paddingTop: 8 },
+    createBox: { borderColor: C.accent, marginBottom: 0 },
+    createHead: {
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 6,
+      marginBottom: 6,
     },
-    assignLabel: { color: C.textFaint, fontSize: 11, marginTop: 10, marginBottom: 4 },
-    rowBtns: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 10 },
-    btn: { backgroundColor: C.accent, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 9 },
-    btnDisabled: { opacity: 0.5 },
-    btnText: { color: C.bg, fontWeight: '600', fontSize: 13 },
-    btnGhost: { paddingHorizontal: 12, paddingVertical: 9 },
-    btnGhostText: { color: C.textDim, fontSize: 13 },
-    fab: {
-      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-      backgroundColor: C.accent, borderRadius: 12, paddingVertical: 12,
-    },
-    fabText: { color: C.bg, fontWeight: '700' },
-    timeline: { paddingHorizontal: 16, paddingBottom: 32 },
-    tlTitle: { color: C.text, fontSize: 13, fontWeight: '600', marginBottom: 8 },
-    tlRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 },
-    tlText: { color: C.textDim, fontSize: 12, flex: 1 },
-    tlStatus: { color: C.textFaint, fontSize: 11 },
+    createTitle: { flexShrink: 1 },
+    fieldGap: { marginBottom: 6 },
+    bodyInput: { fontSize: 12, minHeight: 40 },
+    chips: { flexWrap: 'wrap', gap: 5, marginTop: 2, marginBottom: 8 },
+    chipText: { maxWidth: 140 },
+    createBtn: { width: '100%' },
+    newBtn: { width: '100%' },
   })

@@ -14,6 +14,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet } from 'react-native'
 import { C, useStyles } from '../lib/theme'
+import { useT } from '../lib/strings'
 import { MochiStage } from './Mascot'
 
 /** Same width as the native splash `imageWidth`, so frame one matches it. */
@@ -30,6 +31,7 @@ const EXIT_AT = 3250
 
 export function AnimatedSplash({ onDone }: { onDone: () => void }) {
   const s = useStyles(makeS)
+  const t = useT()
   const [reduced, setReduced] = useState(false)
   // Overlay starts as a pixel-for-pixel match of the native splash.
   const settle = useRef(new Animated.Value(1.045)).current
@@ -121,12 +123,12 @@ export function AnimatedSplash({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <Animated.View style={[s.overlay, { opacity: fade }]} accessibilityLabel="Loading Moch">
+    <Animated.View style={[s.overlay, { opacity: fade }]} accessibilityLabel={t('setup.splash.loading')}>
       {/* Tap anywhere to skip — plain Views/Images above don't intercept. */}
       <Pressable
         style={StyleSheet.absoluteFill}
         onPress={skip}
-        accessibilityLabel="Skip intro"
+        accessibilityLabel={t('setup.splash.skip')}
         accessibilityRole="button"
       />
       <Animated.View style={[s.ripple, rippleStyle(ripple1)]} />

@@ -3,6 +3,11 @@
  * `Alert.alert`, which renders the OS's stock dialog on Android and is a
  * silent NO-OP on react-native-web (errors just vanished there).
  *
+ * Presentation follows the redesign's bottom-sheet card language: an elevated
+ * `bgElev` card with a hairline border and 20 radius, a 15/800 title, a 12.5
+ * `textDim` message, then the app's `GhostBtn` (cancel) / `PrimaryBtn`
+ * (default) / red primary (destructive) buttons. RTL mirrors the button row.
+ *
  * Styling rides the theme tokens (C + useStyles), so the same component
  * matches Mocheme and Relay without knowing either exists. Usage is
  * imperative from anywhere — no prop drilling:
@@ -17,10 +22,12 @@
  * dropping the first promise (a caller awaiting it would hang forever).
  */
 import React from 'react'
-import { Modal, View, Text, Pressable, StyleSheet } from 'react-native'
+import { Modal, View, Pressable, StyleSheet } from 'react-native'
 import { atom } from 'nanostores'
 import { useStore } from '@nanostores/react'
 import { C, useStyles } from '../lib/theme'
+import { localeAtom, tr, useDir } from '../lib/strings'
+import { GhostBtn, PrimaryBtn, Txt } from './ui'
 import * as Haptics from 'expo-haptics'
 
 export interface AlertButton {
@@ -56,7 +63,7 @@ export function showAlert(
     queue.set([...queue.get(), {
       title: opts.title ?? '',
       message: opts.message,
-      buttons: opts.buttons?.length ? opts.buttons : [{ text: 'OK' }],
+      buttons: opts.buttons?.length ? opts.buttons : [{ text: tr('chrome.alert.ok') }],
       resolve,
     }])
   })
@@ -75,6 +82,9 @@ function answer(req: DialogRequest, index: number) {
 
 export function AlertDialogHost() {
   const s = useStyles(makeS)
+  const dir = useDir()
+  // Themed copy (a11y fallbacks) follows the app language.
+  useStore(localeAtom)
   const req = useStore(queue)[0] ?? null
   if (!req) return null
 
@@ -83,39 +93,56 @@ export function AlertDialogHost() {
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={() => answer(req, cancelIndex)}>
-      <View style={s.scrimWrap}>
+      <View style={[s.scrimWrap, { flexDirection: dir.row }]}>
         <Pressable
           style={[StyleSheet.absoluteFill, { backgroundColor: C.scrim }]}
-          accessibilityLabel="Dismiss dialog"
+          accessibilityLabel={tr('chrome.alert.dismiss')}
           onPress={() => answer(req, cancelIndex)}
         />
         <View style={s.card}>
-          <Text style={s.title}>{req.title}</Text>
-          {req.message ? <Text style={s.message}>{req.message}</Text> : null}
-          <View style={stacked ? s.stack : s.row}>
-            {req.buttons.map((b, i) => (
-              <Pressable
-                key={`${b.text}-${i}`}
-                style={({ pressed }) => [
-                  stacked ? s.stackBtn : s.rowBtn,
-                  b.style === 'destructive' && s.destructiveBtn,
-                  pressed && s.pressed,
-                ]}
-                onPress={() => answer(req, i)}
-                accessibilityLabel={b.text}
-              >
-                <Text
-                  style={[
-                    b.style === 'destructive' ? s.destructiveText
-                      : b.style === 'cancel' ? s.cancelText
-                        : s.defaultText,
-                  ]}
-                  numberOfLines={2}
-                >
-                  {b.text}
-                </Text>
-              </Pressable>
-            ))}
+          <Txt size={15} weight="800" color={C.text}>{req.title}</Txt>
+          {req.message ? (
+            <Txt size={12.5} color={C.textDim} style={s.message}>{req.message}</Txt>
+          ) : null}
+          <View
+            style={[
+              stacked ? s.stack : s.row,
+              { flexDirection: stacked ? 'column' : dir.row },
+            ]}
+          >
+            {req.buttons.map((b, i) => {
+              const btnStyle = stacked ? s.stackBtn : undefined
+              if (b.style === 'destructive') {
+                return (
+                  <PrimaryBtn
+                    key={`${b.text}-${i}`}
+                    onPress={() => answer(req, i)}
+                    accessibilityLabel={b.text}
+                    style={[btnStyle, s.dangerBtn]}
+                  >
+                    <Txt size={13} weight="700" color="#FFFFFF" numberOfLines={2}>{b.text}</Txt>
+                  </PrimaryBtn>
+                )
+              }
+              if (b.style === 'cancel') {
+                return (
+                  <GhostBtn
+                    key={`${b.text}-${i}`}
+                    label={b.text}
+                    onPress={() => answer(req, i)}
+                    style={btnStyle}
+                  />
+                )
+              }
+              return (
+                <PrimaryBtn
+                  key={`${b.text}-${i}`}
+                  label={b.text}
+                  onPress={() => answer(req, i)}
+                  style={btnStyle}
+                />
+              )
+            })}
           </View>
         </View>
       </View>
@@ -129,26 +156,15 @@ const makeS = () => StyleSheet.create({
     backgroundColor: C.bgElev,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: C.borderSoft,
-    padding: 20,
+    borderColor: C.border,
+    padding: 18,
     width: '100%',
     maxWidth: 340,
+    gap: 8,
   },
-  title: { color: C.text, fontSize: 17, fontWeight: '800', textAlign: 'left' },
-  message: { color: C.textDim, fontSize: 13.5, lineHeight: 19, marginTop: 8 },
-  row: { flexDirection: 'row', justifyContent: 'flex-end', gap: 6, marginTop: 20 },
-  rowBtn: {
-    borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, minHeight: 42,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: C.bgCard,
-  },
-  stack: { flexDirection: 'column', marginTop: 18, gap: 6 },
-  stackBtn: {
-    borderRadius: 14, minHeight: 46, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: C.bgCard,
-  },
-  destructiveBtn: { backgroundColor: C.redSoft },
-  destructiveText: { color: C.red, fontWeight: '800', fontSize: 14.5 },
-  cancelText: { color: C.textDim, fontWeight: '700', fontSize: 14.5 },
-  defaultText: { color: C.accent, fontWeight: '800', fontSize: 14.5 },
-  pressed: { opacity: 0.55 },
+  message: { lineHeight: 18 },
+  row: { justifyContent: 'flex-end', gap: 8, marginTop: 12 },
+  stack: { marginTop: 12, gap: 6 },
+  stackBtn: { alignSelf: 'stretch' },
+  dangerBtn: { backgroundColor: C.red },
 })

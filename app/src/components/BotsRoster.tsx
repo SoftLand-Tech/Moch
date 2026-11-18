@@ -7,23 +7,24 @@
  * the shell's `onOpenBot` (slice B's `openBotChat` does the lookup/create).
  * There is deliberately no per-bot chat list here.
  *
- * Rows reuse the drawer's own row language — avatar disc, one-line preview,
- * relative age, `StatusDot` from `./Sidebar` — so Sessions and Bots read as
- * two views of the same list, not two designs. The long-press menu is rendered
- * INSIDE the roster (not an RN Modal): the drawer already owns an animated
- * panel, and a Modal on top of it would fight the close animation, the
- * swipe-to-close pan and the web tab-order rules.
+ * Presentation follows the redesign mockup's Bots mode (`renderSidebarDrawer`,
+ * bots branch): a "Bots Roster" kicker, one elevated card per bot (avatar,
+ * 12.5/700 name + relative age, 11 textDim one-line description, status dot)
+ * and a dashed "+ New bot" card. The long-press action sheet stays in-panel
+ * (same card language as the project sheet) so it never fights the drawer's
+ * close animation, swipe-to-close pan or the web tab-order rules.
  *
  * `+ New bot` opens the existing Fleet screen (the create flow lives there);
  * creating from the drawer would be a second implementation of that flow.
  */
 import React, { useEffect, useMemo, useState } from 'react'
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { MaterialCommunityIcons } from '@expo/vector-icons'
 import { useRouter } from 'expo-router'
 import { useStore } from '@nanostores/react'
 import { C, useStyles } from '../lib/theme'
-import { localeAtom, tr } from '../lib/strings'
+import { localeAtom, tr, useDir } from '../lib/strings'
+import { Kicker, Txt } from './ui'
 import { attentionById } from '../lib/attention'
 import { busyStoredKey, pendingStoredIds } from '../lib/chat'
 import { sessionRows } from '../lib/sessionList'
@@ -37,7 +38,6 @@ import { rpc } from '../lib/gateway'
 import {
   DEFAULT_PROFILE,
   botStatusOf,
-  relativeAge,
   rosterRows,
   withSessionPreviews,
   type RosterProfileLike,
@@ -70,8 +70,29 @@ interface SheetState {
   row: RosterRow
 }
 
+/**
+ * Compact relative age ("2m", "3h", …) with the unit localized. The roster's
+ * pure helper (`relativeAge`) returns English unit suffixes, so the label is
+ * rebuilt here at the render site with chrome.age.* keys (SPEC §3).
+ */
+function ageLabel(ms?: number): string {
+  if (!ms || !Number.isFinite(ms) || ms <= 0) return ''
+  const delta = Date.now() - ms
+  if (delta < 60_000) return tr('chrome.age.lessMinute')
+  const mins = Math.floor(delta / 60_000)
+  if (mins < 60) return tr('chrome.age.minutes', { n: mins })
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return tr('chrome.age.hours', { n: hours })
+  const days = Math.floor(hours / 24)
+  if (days < 7) return tr('chrome.age.days', { n: days })
+  const weeks = Math.floor(days / 7)
+  if (weeks < 5) return tr('chrome.age.weeks', { n: weeks })
+  return tr('chrome.age.months', { n: Math.floor(days / 30) })
+}
+
 export function BotsRoster({ profiles, onOpenBot, onNewBot, onCloseDrawer, active = true }: BotsRosterProps) {
   const s = useStyles(makeS)
+  const dir = useDir()
   // Locale switches must re-render the roster's own copy.
   useStore(localeAtom)
   const router = useRouter()
@@ -168,17 +189,7 @@ export function BotsRoster({ profiles, onOpenBot, onNewBot, onCloseDrawer, activ
 
   return (
     <View style={s.root}>
-      <View style={s.headerRow}>
-        <Text style={s.header} numberOfLines={1}>{tr('bots.title')}</Text>
-        <Pressable
-          style={({ pressed }) => [s.headerAdd, pressed && s.pressed]}
-          onPress={onNewBot}
-          hitSlop={8}
-          accessibilityLabel={tr('bots.new')}
-        >
-          <MaterialCommunityIcons name="plus" size={16} color={C.textDim} />
-        </Pressable>
-      </View>
+      <Kicker style={s.kicker}>{tr('chrome.bots.kicker')}</Kicker>
 
       <ScrollView
         style={s.scroll}
@@ -194,7 +205,7 @@ export function BotsRoster({ profiles, onOpenBot, onNewBot, onCloseDrawer, activ
             ...(idsByProfile.get(row.profile) ?? []),
           ]
           const status = botStatusOf(row, ids, busy, attention, pending)
-          const age = relativeAge(row.lastActiveTs)
+          const age = ageLabel(row.lastActiveTs)
           // Highlight the bot whose identity new chats currently take. The
           // default agent is never highlighted: `activeBot == null` is its
           // resting state, so a permanent highlight on row 1 read as a
@@ -207,7 +218,12 @@ export function BotsRoster({ profiles, onOpenBot, onNewBot, onCloseDrawer, activ
           return (
             <Pressable
               key={row.profile}
-              style={({ pressed }) => [s.row, on && s.rowOn, pressed && s.rowPressed]}
+              style={({ pressed }) => [
+                s.card,
+                { flexDirection: dir.row },
+                on && s.cardOn,
+                pressed && s.rowPressed,
+              ]}
               onPress={() => openChat(row)}
               onLongPress={() => openSheet(row)}
               delayLongPress={350}
@@ -218,13 +234,18 @@ export function BotsRoster({ profiles, onOpenBot, onNewBot, onCloseDrawer, activ
             >
               <BotAvatar profile={row.profile} isDefault={row.isDefault} size={32} />
               <View style={s.rowText}>
-                <Text style={[s.name, on && s.nameOn]} numberOfLines={1}>{name}</Text>
+                <View style={[s.titleRow, { flexDirection: dir.row }]}>
+                  <Txt size={12.5} weight="700" color={C.text} numberOfLines={1} style={s.name}>
+                    {name}
+                  </Txt>
+                  {age ? <Txt size={10} color={C.textFaint}>{age}</Txt> : null}
+                </View>
                 {subtitle ? (
-                  <Text style={s.preview} numberOfLines={1}>{subtitle}</Text>
+                  <Txt size={11} color={C.textDim} numberOfLines={1}>
+                    {subtitle}
+                  </Txt>
                 ) : null}
               </View>
-              {age ? <Text style={s.age}>{age}</Text> : null}
-              <StatusDot status={status} />
               <Pressable
                 style={s.rowMenu}
                 hitSlop={6}
@@ -233,24 +254,24 @@ export function BotsRoster({ profiles, onOpenBot, onNewBot, onCloseDrawer, activ
               >
                 <MaterialCommunityIcons name="dots-horizontal" size={15} color={C.textFaint} />
               </Pressable>
+              <StatusDot status={status} />
             </Pressable>
           )
         })}
 
         {named.length === 0 ? (
-          <Text style={s.empty}>{tr('bots.empty')}</Text>
+          <Txt size={13} color={C.textFaint} style={s.empty}>{tr('bots.empty')}</Txt>
         ) : null}
 
         <Pressable
-          style={({ pressed }) => [s.row, pressed && s.rowPressed]}
+          style={({ pressed }) => [s.newCard, pressed && s.rowPressed]}
           onPress={onNewBot}
           accessibilityRole="button"
           accessibilityLabel={tr('bots.new')}
         >
-          <View style={s.newDisc}>
-            <MaterialCommunityIcons name="plus" size={16} color={C.accent} />
-          </View>
-          <Text style={s.newLabel} numberOfLines={1}>{tr('bots.new')}</Text>
+          <Txt size={12} weight="700" color={C.accent} numberOfLines={1}>
+            {tr('chrome.bots.newCard')}
+          </Txt>
         </Pressable>
       </ScrollView>
 
@@ -263,7 +284,9 @@ export function BotsRoster({ profiles, onOpenBot, onNewBot, onCloseDrawer, activ
             accessibilityLabel={tr('sidebar.cancel')}
           />
           <View style={s.sheet}>
-            <Text style={s.sheetTitle} numberOfLines={1}>{sheet.row.name}</Text>
+            <Txt size={10.5} weight="700" color={C.textFaint} style={s.sheetTitle} numberOfLines={1}>
+              {sheet.row.name}
+            </Txt>
             {/* The default agent has no `Bot Chat` of its own, so its row says
                 "Chat" (the plain surface) instead of promising a Bot Chat. */}
             <SheetRow
@@ -287,7 +310,7 @@ export function BotsRoster({ profiles, onOpenBot, onNewBot, onCloseDrawer, activ
                 onPress={() => void deleteBot(sheet.row)}
               />
             )}
-            {error ? <Text style={s.sheetError}>{error}</Text> : null}
+            {error ? <Txt size={12.5} color={C.red} style={s.sheetError}>{error}</Txt> : null}
           </View>
         </View>
       ) : null}
@@ -309,76 +332,56 @@ function SheetRow({
   onPress: () => void
 }) {
   const s = useStyles(makeS)
+  const dir = useDir()
   return (
     <Pressable
-      style={({ pressed }) => [s.sheetRow, pressed && s.rowPressed, busy && s.sheetRowBusy]}
+      style={({ pressed }) => [s.sheetRow, { flexDirection: dir.row }, pressed && s.rowPressed, busy && s.sheetRowBusy]}
       onPress={onPress}
       disabled={busy}
       accessibilityLabel={label}
       accessibilityRole="button"
     >
       <MaterialCommunityIcons name={icon} size={18} color={danger ? C.red : C.text} />
-      <Text style={[s.sheetRowLabel, danger && { color: C.red }]} numberOfLines={1}>{label}</Text>
+      <Txt size={15} color={danger ? C.red : C.text} style={s.sheetRowLabel} numberOfLines={1}>
+        {label}
+      </Txt>
     </Pressable>
   )
 }
 
 const makeS = () => StyleSheet.create({
-  root: { flex: 1, marginTop: 4 },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingLeft: 16,
-    paddingRight: 10,
-    marginTop: 6,
-    marginBottom: 2,
-  },
-  header: {
-    flex: 1,
-    color: C.textFaint,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-  },
-  headerAdd: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 14 },
-  pressed: { opacity: 0.5 },
+  root: { flex: 1 },
+  kicker: { marginTop: 2, marginBottom: 8 },
   scroll: { flex: 1 },
-  scrollBody: { paddingBottom: 8 },
-  row: {
-    flexDirection: 'row',
+  scrollBody: { paddingBottom: 8, gap: 6 },
+  card: {
     alignItems: 'center',
-    gap: 10,
-    minHeight: 56,
-    paddingHorizontal: 14,
-    marginHorizontal: 6,
-    borderRadius: 12,
+    gap: 9,
+    padding: 8,
+    borderRadius: 11,
+    backgroundColor: C.bgElev,
+    borderWidth: 1,
+    borderColor: C.border,
+    minHeight: 50,
   },
-  rowOn: { backgroundColor: C.accentSoft },
+  cardOn: { backgroundColor: C.accentSoft, borderColor: C.accent },
   rowPressed: { backgroundColor: C.bgHover },
-  // Avatar disc: 32dp, the 20dp mascot floats inside it.
-  disc: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  discDefault: { backgroundColor: C.accentSoft },
-  discMochi: { width: 24, height: 24, resizeMode: 'contain' },
-  discText: { color: C.onAccent, fontSize: 12.5, fontWeight: '800', letterSpacing: 0.2 },
-  rowText: { flex: 1, minWidth: 0 },
-  name: { color: C.textDim, fontSize: 14.5, fontWeight: '500' },
-  nameOn: { color: C.text, fontWeight: '600' },
-  preview: { color: C.textFaint, fontSize: 12, marginTop: 1 },
-  age: { color: C.textFaint, fontSize: 11.5 },
-  rowMenu: { width: 26, height: 26, alignItems: 'center', justifyContent: 'center' },
-  empty: { color: C.textFaint, fontSize: 13, paddingHorizontal: 16, paddingVertical: 10 },
-  newDisc: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  rowText: { flex: 1, minWidth: 0, gap: 2 },
+  titleRow: { alignItems: 'center', justifyContent: 'space-between', gap: 6 },
+  name: { flexShrink: 1 },
+  rowMenu: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
+  empty: { paddingHorizontal: 8, paddingVertical: 8 },
+  newCard: {
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: C.borderSoft,
     borderStyle: 'dashed',
+    borderColor: C.border,
+    minHeight: 38,
   },
-  newLabel: { color: C.accent, fontSize: 14.5, fontWeight: '600' },
 
   // In-panel sheet (not a Modal): scrim covers the roster body, card docks at
   // its bottom edge. Same radius/rows as the project sheet.
@@ -397,7 +400,7 @@ const makeS = () => StyleSheet.create({
     borderRadius: 14,
     backgroundColor: C.bgElev,
     borderWidth: 1,
-    borderColor: C.borderSoft,
+    borderColor: C.border,
     paddingVertical: 6,
     shadowColor: '#000000',
     shadowOpacity: 0.4,
@@ -406,15 +409,13 @@ const makeS = () => StyleSheet.create({
     elevation: 12,
   },
   sheetTitle: {
-    color: C.text,
-    fontSize: 13,
-    fontWeight: '700',
+    letterSpacing: 0.75,
+    textTransform: 'uppercase',
     paddingHorizontal: 14,
     paddingTop: 8,
     paddingBottom: 4,
   },
   sheetRow: {
-    flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
     minHeight: 46,
@@ -422,6 +423,6 @@ const makeS = () => StyleSheet.create({
     borderRadius: 8,
   },
   sheetRowBusy: { opacity: 0.5 },
-  sheetRowLabel: { color: C.text, fontSize: 15, flex: 1 },
-  sheetError: { color: C.red, fontSize: 12.5, paddingHorizontal: 14, paddingVertical: 8 },
+  sheetRowLabel: { flex: 1 },
+  sheetError: { paddingHorizontal: 14, paddingVertical: 8 },
 })

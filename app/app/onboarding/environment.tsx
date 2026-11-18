@@ -1,10 +1,19 @@
 import React, { useEffect, useState } from 'react'
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, ScrollView } from 'react-native'
+import { View, StyleSheet, Pressable, ScrollView } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { Icon } from '../../src/components/Icon'
+import {
+  Card,
+  Elev,
+  GhostBtn,
+  Kicker,
+  PrimaryBtn,
+  ScreenScroll,
+  Txt,
+} from '../../src/components/ui'
 import { C, useStyles } from '../../src/lib/theme'
-import { tr } from '../../src/lib/strings'
+import { useDir, useT } from '../../src/lib/strings'
 import {
   ALL_PACKAGES,
   PACKAGE_CATEGORIES,
@@ -18,7 +27,7 @@ import {
 import { linuxBootstrap, linuxStatus, type LinuxGuestStatus } from '../../src/lib/mochiRuntime'
 
 /**
- * Onboarding step 1 — the environment.
+ * Onboarding step 1 — the environment (mockup 16).
  *
  * The Linux guest is optional but it is the only place OpenCode (and real
  * package work) can run. When the user installs it, this screen offers a
@@ -27,30 +36,79 @@ import { linuxBootstrap, linuxStatus, type LinuxGuestStatus } from '../../src/li
  * can continue.
  */
 
-/** Human step text for a runner stage token, using the item catalogue. */
-function installStageText(stage: string, wanted: string[], done: Record<string, PackageResult>): string {
-  if (stage === 'update') return 'apt-get update…'
+/** Structured runner stage token — translated at render, never at callback. */
+type InstallStage =
+  | { kind: 'download' }
+  | { kind: 'update' }
+  | { kind: 'apt'; itemId: string | null }
+  | { kind: 'npm'; itemId: string | null }
+  | { kind: 'generic' }
+  | { kind: 'cancelling' }
+
+/** Catalogue ids → catalog keys: the package catalogue lives in lib and its
+ *  labels are translated here at the render site. */
+const CATEGORY_KEY: Record<string, string> = {
+  languages: 'setup.pkgcat.languages',
+  build: 'setup.pkgcat.build',
+  databases: 'setup.pkgcat.databases',
+  cli: 'setup.pkgcat.cli',
+  media: 'setup.pkgcat.media',
+  'node-tools': 'setup.pkgcat.nodeTools',
+}
+const PACKAGE_KEY: Record<string, string> = {
+  node: 'setup.pkg.node',
+  python: 'setup.pkg.python',
+  php: 'setup.pkg.php',
+  go: 'setup.pkg.go',
+  rust: 'setup.pkg.rust',
+  java: 'setup.pkg.java',
+  'build-essential': 'setup.pkg.buildEssential',
+  git: 'setup.pkg.git',
+  cmake: 'setup.pkg.cmake',
+  pkgconfig: 'setup.pkg.pkgconfig',
+  sqlite: 'setup.pkg.sqlite',
+  postgres: 'setup.pkg.postgres',
+  redis: 'setup.pkg.redis',
+  curl: 'setup.pkg.curl',
+  jq: 'setup.pkg.jq',
+  ripgrep: 'setup.pkg.ripgrep',
+  tmux: 'setup.pkg.tmux',
+  htop: 'setup.pkg.htop',
+  unzip: 'setup.pkg.unzip',
+  ffmpeg: 'setup.pkg.ffmpeg',
+  imagemagick: 'setup.pkg.imagemagick',
+  typescript: 'setup.pkg.typescript',
+  pnpm: 'setup.pkg.pnpm',
+  yarn: 'setup.pkg.yarn',
+}
+
+/** Map a runner stage token to its renderable shape (item names resolved). */
+function parseStage(stage: string, wanted: string[], done: Record<string, PackageResult>): InstallStage {
+  if (stage === 'update') return { kind: 'update' }
   const want = new Set(wanted)
   if (stage === 'apt') {
     // One apt command installs all apt items at once; naming the first one
     // that has not reported yet keeps the step text concrete and moving.
     const item = ALL_PACKAGES.find((i) => i.kind === 'apt' && want.has(i.id) && !done[i.id])
-    return item ? `installing ${item.name}…` : 'installing apt packages…'
+    return { kind: 'apt', itemId: item ? item.id : null }
   }
   if (stage.startsWith('npm:')) {
-    const item = ALL_PACKAGES.find((i) => i.id === stage.slice(4))
-    return item ? `installing ${item.name}…` : 'installing npm packages…'
+    const id = stage.slice(4)
+    const item = ALL_PACKAGES.find((i) => i.id === id)
+    return { kind: 'npm', itemId: item ? item.id : null }
   }
-  return 'Installing the packages you picked…'
+  return { kind: 'generic' }
 }
 
 export default function Environment() {
   const s = useStyles(makeS)
+  const t = useT()
+  const dir = useDir()
   const [distro, setDistro] = useState<'ubuntu-24.04' | 'debian-12' | 'none'>('ubuntu-24.04')
   const [installed, setInstalled] = useState<LinuxGuestStatus | null>(null)
   const [installing, setInstalling] = useState(false)
   const [installingPackages, setInstallingPackages] = useState(false)
-  const [step, setStep] = useState('')
+  const [stage, setStage] = useState<InstallStage | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<string[]>(defaultsPackageIds())
   const [results, setResults] = useState<Record<string, PackageResult>>({})
@@ -76,6 +134,7 @@ export default function Environment() {
   }, [])
 
   const guestReady = !!installed?.bootstrapped
+  const busy = installing || installingPackages
   const toggle = (id: string) => {
     setSelected((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]))
   }
@@ -91,7 +150,7 @@ export default function Environment() {
     const seen: Record<string, PackageResult> = {}
     setInstallingPackages(true)
     setResults({})
-    setStep('Installing the packages you picked…')
+    setStage({ kind: 'generic' })
     try {
       await installPackages(
         list,
@@ -99,7 +158,7 @@ export default function Environment() {
           seen[res.id] = res
           setResults((cur) => ({ ...cur, [res.id]: res }))
         },
-        (stage) => setStep(installStageText(stage, list, seen)),
+        (token) => setStage(parseStage(token, list, seen)),
       )
     } catch {
       // The runner reports failures as per-item results; a throw here is a
@@ -107,7 +166,7 @@ export default function Environment() {
     } finally {
       if (aliveRef.current) {
         setInstallingPackages(false)
-        setStep('')
+        setStage(null)
       }
     }
   }
@@ -117,23 +176,23 @@ export default function Environment() {
     setInstalling(true)
     setError(null)
     setResults({})
-    setStep('Downloading the base system…')
+    setStage({ kind: 'download' })
     try {
       const r = await linuxBootstrap(distro === 'none' ? 'skip' : distro)
       if (!r || r.ok === false) {
-        setError("The Linux install didn't finish — check the connection and try again.")
+        setError(t('setup.env.installFailed'))
         return
       }
       const st = await linuxStatus().catch(() => null)
       setInstalled(st)
       if (distro !== 'none' && selected.length) await installSelected()
-      setStep('')
+      setStage(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setInstalling(false)
       setInstallingPackages(false)
-      setStep('')
+      setStage(null)
     }
   }
 
@@ -150,219 +209,332 @@ export default function Environment() {
     router.push('/onboarding/thinker')
   }
 
+  const skip = () => { if (!busy) router.push('/onboarding/thinker') }
+
   const failures = Object.values(results).filter((r) => r.id !== 'apt' && !r.ok)
+
+  /** Localized label for a catalogue package (fallback: the lib's own name). */
+  const pkgName = (id: string): string => {
+    const key = PACKAGE_KEY[id]
+    if (key) return t(key)
+    return ALL_PACKAGES.find((i) => i.id === id)?.name ?? id
+  }
+
+  /** Localized distro name for a guest status id (fallback: raw id). */
+  const distroName = (id?: string | null): string => {
+    if (id === 'debian-12') return t('setup.env.debian.short')
+    if (id === 'ubuntu-24.04') return t('setup.env.ubuntu.short')
+    return id || t('setup.env.linuxFallback')
+  }
+
+  /** Localized runner line, stage token → readable text. */
+  const stageText = (st: InstallStage): string => {
+    switch (st.kind) {
+      case 'download': return t('setup.env.stage.download')
+      case 'update': return t('setup.env.stage.update')
+      case 'apt':
+        return st.itemId ? t('setup.env.stage.aptItem', { name: pkgName(st.itemId) }) : t('setup.env.stage.apt')
+      case 'npm':
+        return st.itemId ? t('setup.env.stage.npmItem', { name: pkgName(st.itemId) }) : t('setup.env.stage.npm')
+      case 'cancelling': return t('setup.env.cancelling')
+      default: return t('setup.env.stage.generic')
+    }
+  }
+
+  const distros = [
+    { id: 'ubuntu-24.04' as const, label: t('setup.env.ubuntu.short') },
+    { id: 'debian-12' as const, label: t('setup.env.debian.short') },
+    { id: 'none' as const, label: t('setup.env.none.short') },
+  ]
+
+  const primaryLabel = busy
+    ? t('setup.env.btn.installing')
+    : distro === 'none'
+      ? t('setup.env.btn.skipLinux')
+      : guestReady
+        ? selected.length
+          ? t('setup.env.btn.installSelected')
+          : t('common.continue')
+        : t('setup.env.btn.installContinue')
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
-      <ScrollView style={s.root} contentContainerStyle={s.content}>
-        <Text style={s.kicker}>STEP 1 OF 4</Text>
-        <Text style={s.title}>Give Moch a computer</Text>
-        <Text style={s.sub}>
-          A real Ubuntu userspace on your phone. Optional — but it gives the agent apt,
-          any language and servers, and it is where the OpenCode option runs.
-        </Text>
+      <View style={s.header}>
+        <Txt
+          size={10.5}
+          weight="800"
+          color={C.accent}
+          style={[s.kicker, { letterSpacing: dir.rtl ? 0 : 0.84 }]}
+        >
+          {t('setup.env.kicker')}
+        </Txt>
+        <Txt size={19} weight="800">{t('setup.env.title')}</Txt>
+      </View>
 
+      <ScreenScroll contentContainerStyle={s.scrollContent}>
         {guestReady ? (
-          <View style={s.okCard}>
+          <View style={[s.okCard, { flexDirection: dir.row }]}>
             <Icon name="checkmark-circle" size={20} color={C.greenSoft} />
-            <View style={{ flex: 1 }}>
-              <Text style={s.okTitle}>Linux is ready</Text>
-              <Text style={s.okSub}>{installed?.distro || 'guest'} · {installed?.sizeMb ?? 0} MB — you can add packages below.</Text>
+            <View style={s.flex}>
+              <Txt size={13} weight="700">{t('setup.env.ready.title')}</Txt>
+              <Txt size={11} color={C.textDim} mono style={s.readySub}>
+                {t('setup.env.ready.sub', {
+                  distro: distroName(installed?.distro),
+                  size: installed?.sizeMb ?? 0,
+                })}
+              </Txt>
             </View>
           </View>
         ) : null}
 
-        <Text style={s.sectionTitle}>BASE SYSTEM</Text>
-        {([
-          { id: 'ubuntu-24.04', name: 'Ubuntu 24.04 LTS', note: 'Newest packages · the default' },
-          { id: 'debian-12', name: 'Debian 12', note: 'Smaller base, rock solid' },
-          { id: 'none', name: 'None for now', note: 'Android-only tools; install later in Settings' },
-        ] as const).map((d) => (
-          <Pressable
-            key={d.id}
-            style={[s.card, distro === d.id && s.cardOn]}
-            onPress={() => setDistro(d.id)}
-            accessibilityRole="radio"
-            accessibilityState={{ selected: distro === d.id }}
-          >
-            <View style={s.cardHead}>
-              <Icon name={d.id === 'none' ? 'phone-portrait-outline' : 'logo-tux'} size={20} color={C.accent} />
-              <Text style={s.cardTitle}>{d.name}</Text>
-              {distro === d.id ? <Icon name="checkmark-circle" size={18} color={C.accent} /> : null}
-            </View>
-            <Text style={s.cardDesc}>{d.note}</Text>
-          </Pressable>
-        ))}
+        <Kicker style={s.kickerFirst}>{t('setup.env.distro.kicker')}</Kicker>
+        <View style={[s.tiles, { flexDirection: dir.row }]}>
+          {distros.map((d) => {
+            const on = distro === d.id
+            return (
+              <Pressable
+                key={d.id}
+                onPress={() => setDistro(d.id)}
+                style={[s.tile, on && s.tileOn]}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: on }}
+                accessibilityLabel={`${d.label}${on ? `. ${t('setup.a11y.selected')}` : ''}`}
+              >
+                <Txt size={11.5} weight="700" center color={on ? C.accent : C.textDim} numberOfLines={1}>
+                  {d.label}
+                </Txt>
+              </Pressable>
+            )
+          })}
+        </View>
 
         {distro !== 'none' ? (
           <>
-            <Text style={s.sectionTitle}>PACKAGES</Text>
-            <Text style={s.sectionHint}>Tick what you want installed inside it. Everything is skippable.</Text>
-            {PACKAGE_CATEGORIES.map((cat) => {
-              const open = !!expanded[cat.id]
-              return (
-                <View key={cat.id} style={s.cat}>
-                  <Pressable
-                    style={s.catHead}
-                    onPress={() => setExpanded((cur) => ({ ...cur, [cat.id]: !open }))}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${open ? 'Collapse' : 'Expand'} ${cat.name}`}
-                  >
-                    <Text style={s.catName}>{cat.name}</Text>
-                    <Text style={s.catCount}>{cat.items.filter((i) => selected.includes(i.id)).length}/{cat.items.length}</Text>
-                    <Icon name={open ? 'chevron-up' : 'chevron-down'} size={14} color={C.textFaint} />
-                  </Pressable>
-                  {open ? cat.items.map((item) => {
-                    const on = selected.includes(item.id)
-                    const res = results[item.id]
-                    return (
-                      <Pressable
-                        key={item.id}
-                        style={({ pressed }) => [s.pkgRow, pressed && s.pressed]}
-                        onPress={() => toggle(item.id)}
-                        accessibilityRole="checkbox"
-                        accessibilityState={{ checked: on }}
-                      >
-                        <View style={[s.box, on && s.boxOn]}>
-                          {on ? <Icon name="checkmark" size={13} color={C.onAccent} /> : null}
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={s.pkgName}>{item.name}</Text>
-                          <Text style={s.pkgNote}>{item.note}</Text>
-                          {res ? (
-                            <Text style={[s.pkgResult, { color: res.ok ? C.greenSoft : C.red }]} numberOfLines={2}>
-                              {res.ok ? 'installed' : res.detail || 'failed'}
-                            </Text>
-                          ) : null}
-                        </View>
-                        {item.requires && !selected.includes(item.requires) ? (
-                          <Text style={s.warnTag}>needs {item.requires}</Text>
-                        ) : null}
-                      </Pressable>
-                    )
-                  }) : null}
-                </View>
-              )
-            })}
+            <Kicker>{t('setup.env.packages.kicker')}</Kicker>
+            <Card style={s.pkgsCard}>
+              {PACKAGE_CATEGORIES.map((cat, idx) => {
+                const open = !!expanded[cat.id]
+                const catName = CATEGORY_KEY[cat.id] ? t(CATEGORY_KEY[cat.id]) : cat.name
+                const catSelected = cat.items.filter((i) => selected.includes(i.id)).length
+                const catFailures = cat.items.filter((i) => {
+                  const r = results[i.id]
+                  return r && !r.ok
+                })
+                return (
+                  <View key={cat.id} style={[s.cat, idx > 0 && s.catDivided]}>
+                    <Pressable
+                      style={[s.catHead, { flexDirection: dir.row }]}
+                      onPress={() => setExpanded((cur) => ({ ...cur, [cat.id]: !open }))}
+                      accessibilityRole="button"
+                      accessibilityLabel={t(open ? 'setup.env.collapse' : 'setup.env.expand', { name: catName })}
+                    >
+                      <Txt size={11.5} weight="700" color={C.textDim} style={s.flex}>{catName}</Txt>
+                      <Txt size={10.5} weight="700" color={C.textFaint} mono>
+                        {catSelected}/{cat.items.length}
+                      </Txt>
+                      <Icon name={open ? 'chevron-up' : 'chevron-down'} size={14} color={C.textFaint} />
+                    </Pressable>
+                    {open ? (
+                      <View style={[s.chips, { flexDirection: dir.row }]}>
+                        {cat.items.map((item) => {
+                          const itemName = PACKAGE_KEY[item.id] ? t(PACKAGE_KEY[item.id]) : item.name
+                          const on = selected.includes(item.id)
+                          const res = results[item.id]
+                          const failed = !!res && !res.ok
+                          const missing = !!item.requires && !selected.includes(item.requires)
+                          const mark = failed ? '✕ ' : res?.ok || on ? '✓ ' : '+ '
+                          const ink = failed
+                            ? C.red
+                            : res?.ok
+                              ? C.greenSoft
+                              : on
+                                ? C.accent
+                                : missing
+                                  ? C.amber
+                                  : C.textDim
+                          const border = failed
+                            ? C.red
+                            : on
+                              ? C.accent
+                              : missing
+                                ? C.amber
+                                : C.border
+                          const bg = failed ? C.redSoft : on ? C.accentSoft : C.bgElev
+                          const label = [
+                            itemName,
+                            missing ? t('setup.env.needs', { pkg: pkgName(item.requires as string) }) : '',
+                            res ? (res.ok ? t('setup.env.installed') : t('setup.env.failed')) : '',
+                          ].filter(Boolean).join('. ')
+                          return (
+                            <Pressable
+                              key={item.id}
+                              onPress={() => toggle(item.id)}
+                              style={({ pressed }) => [s.chip, { backgroundColor: bg, borderColor: border }, pressed && s.pressed]}
+                              accessibilityRole="checkbox"
+                              accessibilityState={{ checked: on }}
+                              accessibilityLabel={label}
+                            >
+                              <Txt size={11.5} weight="700" mono color={ink}>
+                                {mark + itemName}
+                              </Txt>
+                            </Pressable>
+                          )
+                        })}
+                      </View>
+                    ) : null}
+                    {open && catFailures.length
+                      ? catFailures.map((item) => (
+                          <Txt key={item.id} size={10.5} color={C.red} style={s.failDetail} numberOfLines={2}>
+                            {pkgName(item.id)}: {results[item.id]?.detail || t('setup.env.failed')}
+                          </Txt>
+                        ))
+                      : null}
+                  </View>
+                )
+              })}
+            </Card>
           </>
         ) : null}
 
-        {step ? (
-          <View style={s.progress}>
-            <ActivityIndicator size="small" color={C.accent} />
-            <Text style={s.progressText}>{step}</Text>
-            {installingPackages ? (
-              <Pressable
-                style={({ pressed }) => [s.cancelBtn, pressed && s.pressed]}
-                onPress={() => { cancelPackageInstall(); setStep('Cancelling…') }}
-                accessibilityRole="button"
-                accessibilityLabel="Cancel the package install"
-              >
-                <Text style={s.cancelText}>Cancel</Text>
-              </Pressable>
-            ) : null}
-          </View>
+        {stage ? (
+          <Elev style={s.progress}>
+            <View style={[s.progressRow, { flexDirection: dir.row }]}>
+              <Txt size={11} color={C.greenSoft} mono style={s.flex}>
+                {t('setup.env.stage.running', { stage: stageText(stage) })}
+              </Txt>
+              {installingPackages && stage.kind !== 'cancelling' ? (
+                <Pressable
+                  style={({ pressed }) => [s.cancelBtn, pressed && s.pressed]}
+                  onPress={() => { cancelPackageInstall(); setStage({ kind: 'cancelling' }) }}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('setup.env.cancelA11y')}
+                >
+                  <Txt size={11.5} weight="800" color={C.red}>{t('common.cancel')}</Txt>
+                </Pressable>
+              ) : null}
+            </View>
+          </Elev>
         ) : null}
-        {error ? <Text style={s.error}>{error}</Text> : null}
+
+        {error ? <Txt size={12.5} color={C.red} style={s.error}>{error}</Txt> : null}
+
         {failures.length ? (
           <View style={s.failBox}>
-            <Text style={s.error} numberOfLines={3}>
-              {failures.length} package{failures.length > 1 ? 's' : ''} failed — you can retry from Settings.
-            </Text>
+            <Txt size={12} color={C.red} numberOfLines={3}>
+              {failures.length === 1
+                ? t('setup.env.failures.one', { n: failures.length })
+                : t('setup.env.failures.many', { n: failures.length })}
+            </Txt>
             <Pressable
               style={({ pressed }) => [s.logBtn, pressed && s.pressed]}
               onPress={() => {
                 if (showLog || loadingLog) { setShowLog(false); return }
                 setLoadingLog(true)
-                void readInstallLog().then((t) => { setLogText(t || 'No log yet.'); setShowLog(true) }).finally(() => setLoadingLog(false))
+                void readInstallLog()
+                  .then((text) => {
+                    setLogText(text || t('setup.env.log.empty'))
+                    setShowLog(true)
+                  })
+                  .finally(() => setLoadingLog(false))
               }}
               accessibilityRole="button"
-              accessibilityLabel={showLog ? 'Hide the install log' : 'Show the install log'}
+              accessibilityLabel={showLog ? t('setup.env.log.hideA11y') : t('setup.env.log.showA11y')}
             >
-              <Text style={s.logBtnText}>{loadingLog ? 'Reading…' : showLog ? 'Hide install log' : 'Show install log'}</Text>
+              <Txt size={12.5} weight="800" color={C.accent}>
+                {loadingLog
+                  ? t('setup.env.log.reading')
+                  : showLog
+                    ? t('setup.env.log.hide')
+                    : t('setup.env.log.show')}
+              </Txt>
             </Pressable>
             {showLog ? (
               <ScrollView style={s.logBox} nestedScrollEnabled>
-                <Text style={s.logText} selectable>{logText}</Text>
+                <Txt size={11} color={C.textDim} mono ltr selectable style={s.logText}>{logText}</Txt>
               </ScrollView>
             ) : null}
           </View>
         ) : null}
 
-        <Pressable
-          style={[s.btn, (installing || installingPackages) && s.btnBusy]}
-          disabled={installing || installingPackages}
-          onPress={() => void next()}
-          accessibilityRole="button"
-        >
-          <Text style={s.btnText}>
-            {installing || installingPackages
-              ? 'Installing…'
-              : distro === 'none'
-                ? 'Skip Linux'
-                : guestReady
-                  ? selected.length ? 'Install selected packages' : 'Continue'
-                  : 'Install environment'}
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[s.skip, (installing || installingPackages) && s.pressed]}
-          onPress={() => { if (!installing && !installingPackages) router.push('/onboarding/thinker') }}
-          disabled={installing || installingPackages}
-          accessibilityRole="button"
-          accessibilityLabel="Skip this step"
-        >
-          <Text style={[s.skipText, (installing || installingPackages) && { color: C.textFaint }]}>
-            {installing || installingPackages ? 'Installing — cancel or wait' : 'Skip this step'}
-          </Text>
-        </Pressable>
-      </ScrollView>
+        <View style={[s.actions, { flexDirection: dir.row }]}>
+          <GhostBtn
+            onPress={skip}
+            disabled={busy}
+            style={s.skipBtn}
+            accessibilityLabel={t('setup.env.skipA11y')}
+          >
+            <Txt size={12.5} weight="600" color={busy ? C.textFaint : C.text} center numberOfLines={2}>
+              {busy ? t('setup.env.skip.busy') : t('common.skip')}
+            </Txt>
+          </GhostBtn>
+          <PrimaryBtn
+            onPress={() => void next()}
+            disabled={busy}
+            style={s.installBtn}
+            accessibilityLabel={primaryLabel}
+          >
+            <Txt size={13} weight="700" color={C.onAccent} center numberOfLines={1}>
+              {primaryLabel}
+            </Txt>
+          </PrimaryBtn>
+        </View>
+      </ScreenScroll>
     </SafeAreaView>
   )
 }
 
 const makeS = () => StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
-  root: { flex: 1 },
-  content: { padding: 20, paddingBottom: 48 },
-  kicker: { color: C.accent, fontSize: 10.5, fontWeight: '800', letterSpacing: 1.8, marginBottom: 8 },
-  title: { color: C.text, fontSize: 27, fontWeight: '800', lineHeight: 32, marginBottom: 8 },
-  sub: { color: C.textDim, fontSize: 14, lineHeight: 20, marginBottom: 18 },
-  sectionTitle: { color: C.textFaint, fontSize: 10.5, fontWeight: '800', letterSpacing: 1.6, marginTop: 8, marginBottom: 6 },
-  sectionHint: { color: C.textFaint, fontSize: 12, marginBottom: 10, lineHeight: 16 },
-  card: { backgroundColor: C.bgCard, borderRadius: 14, borderWidth: 1, borderColor: C.border, padding: 13, marginBottom: 8 },
-  cardOn: { borderColor: C.accent },
-  cardHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  cardTitle: { color: C.text, fontSize: 15, fontWeight: '700', flex: 1 },
-  cardDesc: { color: C.textFaint, fontSize: 12.5, marginTop: 5, lineHeight: 17 },
-  okCard: { flexDirection: 'row', gap: 10, alignItems: 'center', backgroundColor: C.greenTint, borderRadius: 14, padding: 12, marginBottom: 12 },
-  okTitle: { color: C.text, fontSize: 14, fontWeight: '700' },
-  okSub: { color: C.textDim, fontSize: 12, marginTop: 2 },
-  cat: { backgroundColor: C.bgCard, borderRadius: 14, borderWidth: 1, borderColor: C.borderSoft, marginBottom: 8, overflow: 'hidden' },
-  catHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 13, minHeight: 46 },
-  catName: { color: C.text, fontSize: 14, fontWeight: '700', flex: 1 },
-  catCount: { color: C.textFaint, fontSize: 11.5, fontWeight: '700' },
-  pkgRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingHorizontal: 13, paddingVertical: 10, borderTopWidth: 1, borderTopColor: C.borderSoft },
+  header: { paddingTop: 14, paddingHorizontal: 16, paddingBottom: 6 },
+  kicker: { textTransform: 'uppercase' },
+  scrollContent: { paddingBottom: 28 },
+  flex: { flex: 1 },
   pressed: { opacity: 0.75 },
-  box: { width: 20, height: 20, borderRadius: 6, borderWidth: 1.5, borderColor: C.border, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-  boxOn: { backgroundColor: C.accent, borderColor: C.accent },
-  pkgName: { color: C.text, fontSize: 13.5, fontWeight: '600' },
-  pkgNote: { color: C.textFaint, fontSize: 11.5, marginTop: 2, lineHeight: 15 },
-  pkgResult: { fontSize: 11, marginTop: 3 },
-  warnTag: { color: C.amber, fontSize: 10.5, fontWeight: '700', marginTop: 2 },
-  progress: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
-  progressText: { color: C.textDim, fontSize: 12.5, flex: 1 },
-  cancelBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, backgroundColor: C.bgHover },
-  cancelText: { color: C.red, fontSize: 12.5, fontWeight: '800' },
-  error: { color: C.red, fontSize: 12.5, lineHeight: 18, marginTop: 10 },
-  failBox: { marginTop: 10 },
+  okCard: {
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: C.greenTint,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+  },
+  readySub: { marginTop: 2 },
+  kickerFirst: { marginTop: 2 },
+  tiles: { gap: 6, marginBottom: 10 },
+  tile: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.bgCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 34,
+  },
+  tileOn: { backgroundColor: C.accentSoft, borderColor: C.accent },
+  pkgsCard: { paddingVertical: 4 },
+  cat: { paddingVertical: 6 },
+  catDivided: { borderTopWidth: 1, borderTopColor: C.borderSoft },
+  catHead: { alignItems: 'center', gap: 8, paddingVertical: 4 },
+  chips: { flexWrap: 'wrap', gap: 6, paddingBottom: 4 },
+  chip: {
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  failDetail: { marginTop: 4 },
+  progress: { marginBottom: 10 },
+  progressRow: { alignItems: 'center', gap: 8 },
+  cancelBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: C.bgHover },
+  error: { lineHeight: 18, marginTop: 6, marginBottom: 6 },
+  failBox: { marginTop: 2, marginBottom: 6 },
   logBtn: { alignSelf: 'flex-start', marginTop: 8, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, backgroundColor: C.bgHover },
-  logBtnText: { color: C.accent, fontSize: 12.5, fontWeight: '800' },
   logBox: { maxHeight: 220, marginTop: 8, backgroundColor: C.bgCard, borderRadius: 12, borderWidth: 1, borderColor: C.borderSoft, padding: 10 },
-  logText: { color: C.textDim, fontSize: 11, lineHeight: 15, fontFamily: 'monospace' },
-  btn: { backgroundColor: C.accent, borderRadius: 16, paddingVertical: 16, alignItems: 'center', marginTop: 18 },
-  btnBusy: { opacity: 0.6 },
-  btnText: { color: C.onAccent, fontSize: 15.5, fontWeight: '800' },
-  skip: { alignItems: 'center', paddingVertical: 16 },
-  skipText: { color: C.textDim, fontSize: 13.5, fontWeight: '600' },
+  logText: { lineHeight: 15 },
+  actions: { alignItems: 'stretch', gap: 8, marginTop: 8 },
+  skipBtn: { flex: 1 },
+  installBtn: { flex: 2 },
 })

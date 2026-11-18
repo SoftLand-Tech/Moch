@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react'
 import { AppState, Pressable, StyleSheet, View } from 'react-native'
 import { useStore } from '@nanostores/react'
 import { MochiSurface } from './mochi/MochiSurface'
+import { tr } from '../lib/strings'
 import { mochiCommitted, type UseMochiState } from './mochi/useMochiState'
 import type { MochiStateName } from './mochi/mochiStates.gen'
 
@@ -46,7 +47,7 @@ export function Mascot({ mochi }: { mochi: UseMochiState }) {
       <Pressable
         style={s.box}
         accessibilityRole="button"
-        accessibilityLabel="Mochi the mascot"
+        accessibilityLabel={tr('mochi.mascot')}
         onPressIn={() => {
           // One press = one pat session: if the OS ever re-delivers pressIn
           // without a pressOut (Android touch churn), don't restart the

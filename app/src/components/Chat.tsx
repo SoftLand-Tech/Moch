@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, Animated, Image } from 'react-native'
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, Animated, Platform } from 'react-native'
 // The maintained fork. The original `react-native-markdown-display` pins
 // markdown-it 10, which does `require('punycode')` — a Node builtin that
 // Metro's Hermes runtime does not provide, so it breaks the Android bundle.
@@ -9,19 +9,21 @@ import Markdown from '@ronradtke/react-native-markdown-display'
 import * as Clipboard from 'expo-clipboard'
 import * as Speech from 'expo-speech'
 import { Icon } from './Icon'
+import { MochiMark } from './MochiMark'
 import { speakText, stopTts } from '../lib/voice'
-import { C, S, useStyles, useShape } from '../lib/theme'
+import { C, useStyles } from '../lib/theme'
 import { formatThinkMeta, type ChatMessage, type ChatSegment, type ToolItem } from '../lib/chat'
 import { MediaSegmentView } from './media/MediaSegmentView'
 import { useReduceMotion } from './useReduceMotion'
 import { CommandCard } from './CommandOutput'
 import { openInAppBrowserTab } from '../lib/openInBrowser'
+import { useDir, useT, type Dir } from '../lib/strings'
 
 // BUG-135 interop: the package's dist DOES re-export the raw MarkdownIt
 // constructor (dist/index.js `exports.MarkdownIt = markdown_it_1.default`),
 // but its CJS-with-JSX shape loses NAMED import bindings under tsx/node ESM
-// interop — the test:imports gate dies with "(MarkdownIt) is not a
-// function". require() keeps the REAL exports object in both runtimes
+// interop — the test:imports gate dies with "(MarkdownIt) is not a function".
+// require() keeps the REAL exports object in both runtimes
 // (Metro require + tsx), so the constructor is reachable either way.
 type MarkdownItCtor = (typeof import('@ronradtke/react-native-markdown-display'))['MarkdownIt']
 const { MarkdownIt } = require('@ronradtke/react-native-markdown-display') as {
@@ -64,35 +66,64 @@ function fmtTime(ts: number): string {
   }
 }
 
+/**
+ * Markdown type scale for assistant prose — the redesign's compact chat scale
+ * (12.5 px body, 19 px leading) instead of the old 16/24 dashboard scale.
+ */
 const makeMdBase = () => ({
-  body: { color: C.text, fontSize: 16, lineHeight: 24 },
-  paragraph: { marginTop: 0, marginBottom: 12 },
-  code_inline: { color: C.accent, backgroundColor: C.accentSoft, borderRadius: 4, paddingHorizontal: 5, fontSize: 14.5 },
-  fence: { color: C.text, backgroundColor: C.bgCard, borderRadius: 10, padding: 12, fontSize: 13, fontFamily: 'monospace' },
-  code_block: { color: C.text, backgroundColor: C.bgCard, borderRadius: 10, padding: 12, fontSize: 13, fontFamily: 'monospace' },
-  blockquote: { backgroundColor: 'transparent', borderLeftColor: C.border, marginLeft: 0, paddingLeft: 12 },
+  body: { color: C.text, fontSize: 12.5, lineHeight: 19 },
+  paragraph: { marginTop: 0, marginBottom: 8 },
+  code_inline: { color: C.accent, backgroundColor: C.accentSoft, borderRadius: 4, paddingHorizontal: 4, fontSize: 11.5 },
+  fence: { color: C.text, backgroundColor: C.bgCard, borderRadius: 9, padding: 10, fontSize: 11, fontFamily: 'monospace' },
+  code_block: { color: C.text, backgroundColor: C.bgCard, borderRadius: 9, padding: 10, fontSize: 11, fontFamily: 'monospace' },
+  blockquote: { backgroundColor: 'transparent', borderLeftColor: C.border, marginLeft: 0, paddingLeft: 10 },
   link: { color: C.accent },
   bullet_list: { color: C.text },
   ordered_list: { color: C.text },
-  heading1: { color: C.text, fontSize: 21, fontWeight: '700' },
-  heading2: { color: C.text, fontSize: 18, fontWeight: '700' },
-  heading3: { color: C.text, fontSize: 16.5, fontWeight: '700' },
+  heading1: { color: C.text, fontSize: 16.5, fontWeight: '700' },
+  heading2: { color: C.text, fontSize: 15, fontWeight: '700' },
+  heading3: { color: C.text, fontSize: 13.5, fontWeight: '700' },
   hr: { backgroundColor: C.border, height: 1 },
   table: { borderColor: C.border },
   th: { color: C.text, borderColor: C.border },
   td: { color: C.textDim, borderColor: C.border },
 })
 
+/**
+ * Apply the active text direction over the theme-reactive markdown styles.
+ * The catalog bundle itself stays direction-agnostic; prose inside the card
+ * must read right-aligned in Arabic (SPEC §4).
+ */
+const withDir = (md: Record<string, object>, dir: Dir): never => {
+  const body = (md.body ?? {}) as Record<string, unknown>
+  const paragraph = (md.paragraph ?? {}) as Record<string, unknown>
+  const heading = (md.heading1 ?? {}) as Record<string, unknown>
+  const h2 = (md.heading2 ?? {}) as Record<string, unknown>
+  const h3 = (md.heading3 ?? {}) as Record<string, unknown>
+  return {
+    ...md,
+    body: { ...body, textAlign: dir.textAlign, writingDirection: dir.writingDirection },
+    paragraph: { ...paragraph, textAlign: dir.textAlign, writingDirection: dir.writingDirection },
+    heading1: { ...heading, textAlign: dir.textAlign, writingDirection: dir.writingDirection },
+    heading2: { ...h2, textAlign: dir.textAlign, writingDirection: dir.writingDirection },
+    heading3: { ...h3, textAlign: dir.textAlign, writingDirection: dir.writingDirection },
+  } as never
+}
+
 /** Theme-reactive markdown styles — fetch through useStyles in components. */
 export const makeMdStyles = () => makeMdBase() as never
+export { withDir }
 
-/** Denser markdown for command-output cards: 14.5/21 body, tighter paragraphs. */
+/** Denser markdown for command-output cards: 12.5/18 body, tighter paragraphs. */
 export const makeCardMdStyles = () => {
   const mdBase = makeMdBase()
   return {
     ...mdBase,
-    body: { ...mdBase.body, fontSize: 14.5, lineHeight: 21 },
-    paragraph: { ...mdBase.paragraph, marginBottom: 8 },
+    body: { ...mdBase.body, fontSize: 12.5, lineHeight: 18 },
+    paragraph: { ...mdBase.paragraph, marginBottom: 6 },
+    heading1: { ...mdBase.heading1, fontSize: 15 },
+    heading2: { ...mdBase.heading2, fontSize: 14 },
+    heading3: { ...mdBase.heading3, fontSize: 13 },
   } as never
 }
 
@@ -104,6 +135,7 @@ export const makeCardMdStyles = () => {
  */
 export const ThinkingDots = React.memo(function ThinkingDots() {
   const s = useStyles(makeS)
+  const t = useT()
   // BUG-056: shared live hook — the old one-shot read went stale until a
   // remount (no listener on the OS setting).
   const reduce = useReduceMotion()
@@ -126,7 +158,7 @@ export const ThinkingDots = React.memo(function ThinkingDots() {
     return () => loops.forEach((l: { start: () => void; stop: () => void }) => l.stop())
   }, [reduce, dots])
   return (
-    <View style={s.dotsRow} accessibilityLabel="Agent is working">
+    <View style={s.dotsRow} accessibilityLabel={t('chat.msg.agentWorking')}>
       {dots.map((v: Animated.Value, i: number) => (
         <Animated.View
           key={i}
@@ -165,7 +197,8 @@ export const MessageBubble = React.memo(function MessageBubble({
 }) {
   const s = useStyles(makeS)
   const md = useStyles(makeMdStyles)
-  const S = useShape()
+  const dir = useDir()
+  const t = useT()
   const isUser = m.role === 'user'
   const [copied, setCopied] = useState(false)
   const [speakState, setSpeakState] = useState<'idle' | 'loading' | 'playing'>('idle')
@@ -205,10 +238,10 @@ export const MessageBubble = React.memo(function MessageBubble({
     }
   }
 
-  // ChatGPT renders the assistant unboxed and full width; only the user gets a bubble.
+  // Assistant replies are the mockup's Mochi-mark card; user messages are the
+  // cream bubble on the right. Command outputs render as the card family, not
+  // as prose — a terminal write-once row (no segments, no streaming tail).
   if (!isUser) {
-    // Command outputs render as the card family, not as prose — a terminal
-    // write-once row (no segments, no streaming tail, no Listen).
     if (m.cmd) {
       return <CommandCard m={m} onInsert={onCommandInsert} onOpenCatalog={onOpenCatalog} />
     }
@@ -223,13 +256,11 @@ export const MessageBubble = React.memo(function MessageBubble({
       (seg) => seg.kind === 'text' && seg.text.trim(),
     )
     return (
-      <View style={s.botWrap}>
-        {S.assistantAvatar ? (
-          <View style={s.avatarWrap}>
-            <Image source={MOCHI_AVATAR} style={s.avatarImg} />
-          </View>
-        ) : null}
-        <View style={[s.botBody, S.assistantCard && s.botCard]}>
+      <View style={[s.botWrap, { flexDirection: dir.row }]}>
+        <View style={s.avatarWrap}>
+          <MochiMark size={26} />
+        </View>
+        <View style={[s.botCard, dir.rtl && s.botCardRtl]}>
         {segs.map((seg, i) =>
           seg.kind === 'media' ? (
             <MediaSegmentView key={i} seg={seg} />
@@ -252,31 +283,33 @@ export const MessageBubble = React.memo(function MessageBubble({
             // BUG-040: the cursor rides INLINE at the text tail — as its own
             // block-level Text node it rendered on its own line below the
             // growing paragraph.
-            <Text key={i} style={s.streamText}>{seg.text}▍</Text>
+            <Text key={i} style={[s.streamText, { textAlign: dir.textAlign, writingDirection: dir.writingDirection }]}>{seg.text}▍</Text>
           ) : (
             // BUG-135: completed text renders through the linkified
             // markdown-it + in-app link handler (see mdLinkified above).
-            <Markdown key={i} style={md} markdownit={mdLinkified} onLinkPress={onMdLinkPress}>
+            <Markdown key={i} style={withDir(md, dir)} markdownit={mdLinkified} onLinkPress={onMdLinkPress}>
               {seg.text}
             </Markdown>
           ),
         )}
         {m.streaming && !hasVisibleText ? <ThinkingDots /> : null}
         {m.status === 'failed' ? (
-          <View style={s.failedRow}>
-            <Icon name="alert-circle" size={15} color={C.red} />
-            <Text style={s.failedText}>{m.error ?? 'Something went wrong'}</Text>
+          <View style={[s.failedRow, { flexDirection: dir.row }]}>
+            <Icon name="alert-circle" size={14} color={C.red} />
+            <Text style={[s.failedText, { textAlign: dir.textAlign, writingDirection: dir.writingDirection }]}>
+              {m.error ?? t('chat.msg.failed')}
+            </Text>
           </View>
         ) : null}
         {m.text && !m.streaming ? (
-          <View style={s.botActions}>
-            <Text style={s.time}>{fmtTime(m.ts)}</Text>
+          <View style={[s.botActions, { flexDirection: dir.row }]}>
+            <Text style={[s.time, dir.rtl ? { marginRight: 0, marginLeft: 6 } : null]}>{fmtTime(m.ts)}</Text>
             <Pressable
               onPress={copy}
               hitSlop={10}
               style={({ pressed }) => [s.iconBtn, pressed && s.iconPressed]}
               accessibilityRole="button"
-              accessibilityLabel="Copy message"
+              accessibilityLabel={t('chat.msg.copyA11y')}
             >
               <Icon name={copied ? 'checkmark' : 'copy-outline'} size={15} color={copied ? C.greenSoft : C.textFaint} />
             </Pressable>
@@ -285,7 +318,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               hitSlop={10}
               style={({ pressed }) => [s.iconBtn, pressed && s.iconPressed]}
               accessibilityRole="button"
-              accessibilityLabel={speakState === 'playing' ? 'Stop playback' : 'Listen'}
+              accessibilityLabel={speakState === 'playing' ? t('chat.msg.stopPlaybackA11y') : t('chat.msg.listenA11y')}
             >
               {speakState === 'loading' ? (
                 <ActivityIndicator color={C.textFaint} size="small" />
@@ -306,14 +339,17 @@ export const MessageBubble = React.memo(function MessageBubble({
   // no-op that would silently drop the media. The failed row keeps its media
   // segments — that IS the user's cue to re-attach and resend.
   const hasMediaSegs = userSegs.some((seg) => seg.kind === 'media')
+  // Manual RTL mirroring (no I18nManager.forceRTL): outgoing bubbles move to
+  // the reading-start side and the 4px tail corner follows them.
+  const selfEnd = dir.rtl ? ('flex-start' as const) : ('flex-end' as const)
   return (
-    <View style={s.userWrap}>
-      <View style={[s.userBubble, hasMediaSegs && s.userBubbleMedia]}>
+    <View style={[s.userWrap, { alignItems: selfEnd }]}>
+      <View style={[s.userBubble, { alignSelf: selfEnd }, dir.rtl && s.userBubbleRtl, hasMediaSegs && s.userBubbleMedia]}>
         {userSegs.map((seg, i) =>
           seg.kind === 'media' ? (
             <MediaSegmentView key={i} seg={seg} />
           ) : seg.text ? (
-            <Text key={i} style={s.userText} selectable>
+            <Text key={i} style={[s.userText, { textAlign: dir.textAlign, writingDirection: dir.writingDirection }]} selectable>
               {seg.text}
             </Text>
           ) : null,
@@ -321,30 +357,31 @@ export const MessageBubble = React.memo(function MessageBubble({
       </View>
       {/* BUG-045: user messages get a timestamp too — only assistant rows
           showed one. */}
-      <Text style={s.userTime}>{fmtTime(m.ts)}</Text>
+      <Text style={[s.userTime, { alignSelf: selfEnd }]}>{fmtTime(m.ts)}</Text>
       {/* BUG-036: 'unconfirmed' renders through the same failed-row
           machinery (marker + Retry) but reads as a warning, not an error —
           a submit-phase timeout may still be running remotely. */}
       {m.status === 'failed' || m.status === 'unconfirmed' ? (
-        <View style={s.failedRow}>
+        <View style={[s.failedRow, s.failedRowUser, { flexDirection: dir.row, alignSelf: selfEnd }]}>
           <Icon
             name={m.status === 'unconfirmed' ? 'help-circle' : 'alert-circle'}
-            size={15}
+            size={14}
             color={m.status === 'unconfirmed' ? C.amber : C.red}
           />
-          <Text style={s.failedText}>
+          <Text style={[s.failedText, { textAlign: dir.textAlign, writingDirection: dir.writingDirection }]}>
             {m.status === 'unconfirmed'
-              ? (m.error ?? 'Sent — no confirmation from the computer; it may have gone through')
-              : (m.error ?? 'Not sent')}
+              ? (m.error ?? t('chat.msg.unconfirmed'))
+              : (m.error ?? t('chat.msg.notSent'))}
           </Text>
           {onRetry && !hasMediaSegs ? (
             <Pressable
               onPress={() => onRetry(m.id)}
               style={({ pressed }) => [s.retryBtn, pressed && s.iconPressed]}
-              accessibilityLabel={m.status === 'unconfirmed' ? 'Retry unconfirmed send' : 'Retry send'}
+              accessibilityRole="button"
+              accessibilityLabel={m.status === 'unconfirmed' ? t('chat.msg.retryUnconfirmedA11y') : t('chat.msg.retrySendA11y')}
             >
-              <Icon name="refresh" size={13} color={C.text} />
-              <Text style={s.retryText}>Retry</Text>
+              <Icon name="refresh" size={12} color={C.text} />
+              <Text style={s.retryText}>{t('common.retry')}</Text>
             </Pressable>
           ) : null}
         </View>
@@ -354,10 +391,10 @@ export const MessageBubble = React.memo(function MessageBubble({
 })
 
 /**
- * One reasoning segment of an assistant message — the ChatGPT-style collapsed
- * block. Hidden by default: collapsed renders only the header line, so even
- * long transcripts with reasoning stay cheap; the text mounts only while
- * expanded.
+ * One reasoning segment of an assistant message — the redesign's dashed
+ * thinking pill. Collapsed it shows only the pill (blush dot + elapsed meta),
+ * so even long transcripts with reasoning stay cheap; the text mounts only
+ * while expanded, below the pill.
  *
  * While `live` (this block is the message's actively growing tail) the header
  * runs its own 1 Hz heartbeat so the elapsed counter keeps counting through
@@ -376,7 +413,8 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
   onEffortPress?: () => void
 }) {
   const s = useStyles(makeS)
-  const S = useShape()
+  const dir = useDir()
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [now, setNow] = useState(() => Date.now())
   const hasText = !!seg.text.trim()
@@ -387,158 +425,229 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
   }, [live, hasText])
   if (!hasText) return null
   const meta = live ? formatThinkMeta(seg.startedAt ?? 0, seg.chars ?? seg.text.length, now) : seg.meta
-  const header = (
-    <View style={s.thinkHead}>
-      <Icon name={open ? 'chevron-down' : 'chevron-forward'} size={12} color={C.textFaint} />
-      {live ? <ThinkingDots /> : null}
-      <Text style={s.thinkLabel}>
-        {live ? 'Thinking' : 'Thought'}
-        {meta ? ` · ${meta}` : ''}
-      </Text>
-      {live && effort && onEffortPress ? (
-        <Pressable
-          hitSlop={6}
-          style={({ pressed }) => [s.effortChip, pressed && s.iconPressed]}
-          onPress={onEffortPress}
-          accessibilityLabel={`Reasoning effort ${effort}. Tap to change`}
-        >
-          <Text style={s.effortChipText}>effort: {effort}</Text>
-        </Pressable>
+  return (
+    <View style={s.thinkWrap}>
+      <Pressable
+        onPress={() => setOpen(!open)}
+        accessibilityRole="button"
+        accessibilityLabel={open ? t('chat.think.collapseA11y') : t('chat.think.expandA11y')}
+        style={({ pressed }) => [
+          s.thinkPill,
+          { alignSelf: dir.rtl ? 'flex-end' : 'flex-start' },
+          pressed && s.iconPressed,
+        ]}
+      >
+        <View style={s.thinkDot} />
+        {live ? <ThinkingDots /> : null}
+        <Text style={s.thinkLabel}>
+          {live ? t('chat.think.live') : t('chat.think.done')}
+          {meta ? ` · ${meta}` : ''}
+        </Text>
+        {live && effort && onEffortPress ? (
+          <Pressable
+            hitSlop={6}
+            style={({ pressed }) => [
+              s.effortChip,
+              dir.rtl ? { marginRight: 4 } : { marginLeft: 4 },
+              pressed && s.iconPressed,
+            ]}
+            onPress={onEffortPress}
+            accessibilityLabel={t('chat.think.effortA11y', { effort })}
+          >
+            <Text style={s.effortChipText}>{t('chat.think.effort', { effort })}</Text>
+          </Pressable>
+        ) : null}
+      </Pressable>
+      {open ? (
+        <Text style={[s.thinkText, { textAlign: dir.textAlign, writingDirection: dir.writingDirection }]}>
+          {seg.text.length > 4000 ? `${t('chat.think.truncated')}\n${seg.text.slice(-4000)}` : seg.text}
+        </Text>
       ) : null}
     </View>
   )
-  if (S.dashedThinking) {
-    // Mocheme: the dashed pill wraps ONLY the header — a multi-line paragraph
-    // inside a stadium-shaped capsule read as one giant dashed blob. The
-    // expanded reasoning sits below it, outside the shape.
-    return (
-      <View style={s.thinkMochi}>
-        <Pressable
-          onPress={() => setOpen(!open)}
-          accessibilityLabel={open ? 'Collapse thinking' : 'Expand thinking'}
-          style={({ pressed }) => [s.think, s.thinkPill, pressed && s.iconPressed]}
-        >
-          {header}
-        </Pressable>
-        {open ? (
-          <Text style={s.thinkText}>{seg.text.length > 4000 ? `…truncated — last 4000 chars:\n${seg.text.slice(-4000)}` : seg.text}</Text>
-        ) : null}
-      </View>
-    )
+})
+
+/**
+ * A collapsible tool-call card (mockup case 1): green check + mono tool name +
+ * mono duration; tapping expands the tool's detail (the preview the gateway
+ * pushed) under a hairline. Running rows keep their spinner, failed rows a red
+ * cross — the data and states are unchanged from the old flat row.
+ */
+export const ToolRow = React.memo(function ToolRow({ t: tool }: { t: ToolItem }) {
+  const s = useStyles(makeS)
+  const dir = useDir()
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  const color = tool.status === 'running' ? C.accent : tool.status === 'failed' ? C.red : C.greenSoft
+  const statusLabel =
+    tool.status === 'running'
+      ? t('chat.tool.status.running')
+      : tool.status === 'failed'
+        ? t('chat.tool.status.failed')
+        : t('chat.tool.status.done')
+  const expandable = !!tool.preview
+  const head = (
+    <View style={[s.toolHead, { flexDirection: dir.row }]}>
+      {tool.status === 'running' ? (
+        <ActivityIndicator size="small" color={color} style={s.toolSpinner} />
+      ) : (
+        <Icon name={tool.status === 'failed' ? 'close' : 'checkmark'} size={12} color={color} />
+      )}
+      <Text style={[s.toolName, s.mono]} numberOfLines={1}>{tool.name}</Text>
+      {tool.durationS != null ? (
+        <Text style={[s.toolDur, s.mono]}>{(tool.durationS).toFixed(1)}s</Text>
+      ) : null}
+      {expandable ? (
+        <Icon
+          name={open ? 'chevron-up' : 'chevron-down'}
+          size={11}
+          color={C.textFaint}
+          style={s.toolChevron}
+        />
+      ) : null}
+    </View>
+  )
+  const detail = open && tool.preview ? (
+    <View style={s.toolDetail}>
+      <Text style={[s.toolDetailText, s.mono]} numberOfLines={12}>{tool.preview}</Text>
+    </View>
+  ) : null
+  if (!expandable) {
+    return <View style={s.toolCard} accessibilityLabel={t('chat.tool.a11y', { name: tool.name, status: statusLabel })}>{head}</View>
   }
   return (
     <Pressable
       onPress={() => setOpen(!open)}
-      accessibilityLabel={open ? 'Collapse thinking' : 'Expand thinking'}
-      style={({ pressed }) => [s.think, pressed && s.iconPressed]}
+      accessibilityRole="button"
+      accessibilityLabel={
+        open
+          ? t('chat.tool.collapseA11y', { name: tool.name })
+          : t('chat.tool.expandA11y', { name: tool.name })
+      }
+      style={({ pressed }) => [s.toolCard, pressed && s.iconPressed]}
     >
-      {header}
-      {open ? (
-        <Text style={s.thinkText}>{seg.text.length > 4000 ? `…truncated — last 4000 chars:\n${seg.text.slice(-4000)}` : seg.text}</Text>
-      ) : null}
+      {head}
+      {detail}
     </Pressable>
   )
 })
 
-export const ToolRow = React.memo(function ToolRow({ t }: { t: ToolItem }) {
-  const s = useStyles(makeS)
-  const color = t.status === 'running' ? C.accent : t.status === 'failed' ? C.red : C.greenSoft
-  return (
-    <View style={s.toolRow} accessibilityLabel={`${t.name} ${t.status}`}>
-      {t.status === 'running' ? (
-        <ActivityIndicator size="small" color={color} style={{ width: 14 }} />
-      ) : (
-        <Icon name={t.status === 'failed' ? 'close' : 'checkmark'} size={13} color={color} />
-      )}
-      <Text style={s.toolName}>{t.name}</Text>
-      {t.preview ? (
-        <Text style={s.toolPreview} numberOfLines={1}>
-          {t.preview}
-        </Text>
-      ) : null}
-      {t.durationS != null ? <Text style={s.toolDur}>{(t.durationS).toFixed(1)}s</Text> : null}
-    </View>
-  )
-})
-
-/** Mochi's face, pre-rendered from mochi-svgs/mochi.svg (scripts render pipeline). */
-const MOCHI_AVATAR = require('../../assets/mochi-avatar.png')
-
 const makeS = () => StyleSheet.create({
+  mono: { fontFamily: Platform.select({ android: 'monospace', ios: 'Menlo', default: 'monospace' }) },
+  // ── Assistant row: MochiMark 26 + the bgCard message card ────────────────
   botWrap: {
-    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: 8,
-    paddingHorizontal: S.assistantAvatar ? 12 : 16,
-    paddingVertical: 10,
+    paddingVertical: 5,
   },
-  // Mocheme: assistant replies sit in a soft blob card; Relay runs unboxed.
-  botBody: { flex: 1, minWidth: 0 },
+  avatarWrap: { width: 26, height: 26, marginTop: 2, flexShrink: 0 },
+
   botCard: {
+    flex: 1,
+    minWidth: 0,
+    backgroundColor: C.bgCard,
+    borderWidth: 1,
+    borderColor: C.borderSoft,
+    borderTopLeftRadius: 4,
+    borderTopRightRadius: 16,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  // RTL mirror: the 4px tail corner moves to the reading-end corner.
+  botCardRtl: {
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 4,
+  },
+  streamText: { color: C.text, fontSize: 12.5, lineHeight: 19 },
+  dotsRow: { flexDirection: 'row', alignItems: 'center', gap: 3, height: 12, marginTop: 2 },
+  dot: { width: 5, height: 5, borderRadius: 3, backgroundColor: C.blush },
+  botActions: { alignItems: 'center', gap: 2, marginTop: 6 },
+  iconBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 14 },
+  iconPressed: { opacity: 0.5 },
+  time: { color: C.textFaint, fontSize: 10.5, marginRight: 6 },
+  failedRow: { alignItems: 'center', gap: 6, marginTop: 8 },
+  failedRowUser: { alignSelf: 'flex-end', marginTop: 6 },
+  failedText: { color: C.red, fontSize: 12, flexShrink: 1, lineHeight: 17 },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     backgroundColor: C.bgCard,
     borderWidth: 1,
     borderColor: C.border,
-    borderRadius: S.radiusCard + 6,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 5,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    height: 28,
   },
-  avatarWrap: { width: 30, height: 30, borderRadius: 15, overflow: 'hidden', marginTop: 2 },
-  avatarImg: { width: 30, height: 30 },
-  userWrap: { paddingHorizontal: 16, paddingVertical: 6, alignItems: 'flex-end' },
-  // BUG-045: per-message timestamp under the user's bubble.
-  userTime: { color: C.textFaint, fontSize: 10.5, alignSelf: 'flex-end', marginTop: 3, marginRight: 4 },
+  retryText: { color: C.text, fontSize: 11.5, fontWeight: '700' },
+
+  // ── User bubble: cream, right-aligned, 16/16/4/16 ────────────────────────
+  userWrap: { alignItems: 'flex-end', paddingVertical: 5 },
+  userTime: { color: C.textFaint, fontSize: 10.5, alignSelf: 'flex-end', marginTop: 3 },
   userBubble: {
+    alignSelf: 'flex-end',
+    maxWidth: '82%',
     backgroundColor: C.userBubble,
-    borderRadius: S.radiusBubble,
-    borderBottomRightRadius: S.radiusBubbleTail,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    maxWidth: '88%',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    borderBottomRightRadius: 4,
+    borderBottomLeftRadius: 16,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
     shadowColor: '#000',
-    shadowOpacity: S.radiusBubbleTail < S.radiusBubble ? 0.35 : 0,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: S.radiusBubbleTail < S.radiusBubble ? 4 : 0,
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  // RTL mirror of the bubble tail.
+  userBubbleRtl: {
+    borderBottomRightRadius: 16,
+    borderBottomLeftRadius: 4,
   },
   // Media rows: the photo/doc sits flush inside the bubble like ChatGPT's —
   // tighter padding, no double-inset around the media tiles.
   userBubbleMedia: { paddingHorizontal: 6, paddingVertical: 6, gap: 6 },
-  userText: { color: C.userText, fontSize: 16, lineHeight: 23 },
-  streamText: { color: C.text, fontSize: 16, lineHeight: 24 },
-  dotsRow: { flexDirection: 'row', alignItems: 'center', gap: 3, height: 12, marginTop: 2 },
-  dot: { width: 5, height: 5, borderRadius: 3, backgroundColor: C.blush },
-  botActions: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, marginLeft: -6 },
-  iconBtn: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center', borderRadius: 15 },
-  iconPressed: { opacity: 0.5 },
-  time: { color: C.textFaint, fontSize: 11, marginRight: 6 },
-  failedRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
-  failedText: { color: C.red, fontSize: 12.5, flexShrink: 1 },
-  retryBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: C.bgCard, borderRadius: 14, paddingHorizontal: 10, height: 30 },
-  retryText: { color: C.text, fontSize: 12, fontWeight: '700' },
-  think: {
-    backgroundColor: C.bgCard,
-    borderRadius: S.dashedThinking ? 999 : S.radiusCard,
-    borderWidth: S.dashedThinking ? 1.5 : 0,
+  userText: { color: C.userText, fontSize: 12.5, fontWeight: '500', lineHeight: 18 },
+
+  // ── Dashed thinking pill ─────────────────────────────────────────────────
+  thinkWrap: { marginBottom: 6 },
+  thinkPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
     borderStyle: 'dashed',
     borderColor: C.thinkBorder,
-    paddingHorizontal: S.dashedThinking ? 14 : 10,
-    paddingVertical: S.dashedThinking ? 8 : 10,
-    alignSelf: S.dashedThinking ? 'flex-start' : 'stretch',
+    backgroundColor: C.bgCard,
   },
-  // Mocheme wrapper: pill + (when expanded) the reasoning text below it.
-  thinkMochi: { marginBottom: 8 },
-  thinkPill: { marginBottom: 0 },
-  thinkHead: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  thinkLabel: { color: C.textFaint, fontSize: 11.5, fontWeight: '600' },
+  thinkDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.blush, flexShrink: 0 },
+  thinkLabel: { color: C.textDim, fontSize: 11, fontWeight: '400' },
   thinkText: { color: C.textDim, fontSize: 12.5, lineHeight: 18, marginTop: 6 },
-  effortChip: { marginLeft: 'auto', backgroundColor: C.bgHover, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 },
+  effortChip: { backgroundColor: C.bgHover, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 },
   effortChipText: { color: C.textFaint, fontSize: 10, fontWeight: '700' },
-  toolRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 4 },
-  toolName: { color: C.textDim, fontSize: 12.5, fontWeight: '600' },
-  toolPreview: { color: C.textFaint, fontSize: 12, flexShrink: 1 },
-  toolDur: { color: C.textFaint, fontSize: 11 },
+
+  // ── Tool rows: tappable cards ────────────────────────────────────────────
+  toolCard: {
+    backgroundColor: C.bgCard,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 11,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginVertical: 3,
+  },
+  toolHead: { alignItems: 'center', gap: 6 },
+  toolSpinner: { width: 12, height: 12 },
+  toolName: { color: C.textDim, fontSize: 11, fontWeight: '600', flexShrink: 1 },
+  toolDur: { color: C.textFaint, fontSize: 10, marginLeft: 'auto' },
+  toolChevron: { marginLeft: 2 },
+  toolDetail: { marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: C.borderSoft },
+  toolDetailText: { color: C.textDim, fontSize: 10.5, lineHeight: 15 },
 })

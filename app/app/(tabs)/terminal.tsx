@@ -1,13 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { View, Text, Pressable, StyleSheet, TextInput, ActivityIndicator, type GestureResponderEvent } from 'react-native'
+import { View, Pressable, StyleSheet, TextInput, type GestureResponderEvent } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { useRouter } from 'expo-router'
 import { useKeyboardState, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
 import Animated, { useAnimatedStyle } from 'react-native-reanimated'
 import { WebView } from 'react-native-webview'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
 import { Icon } from '../../src/components/Icon'
+import { Card, GhostBtn, HeaderButton, PrimaryBtn, Spinner, Txt } from '../../src/components/ui'
 import { C, useStyles } from '../../src/lib/theme'
+import { tr, useT } from '../../src/lib/strings'
 import {
   linuxStatus,
   linuxTermProbe,
@@ -40,8 +43,13 @@ type Gate = 'checking' | 'noprobe' | 'noguest' | 'nopty' | 'ready' | 'failed'
  */
 const REFOCUS_DELAY_MS = 140
 
+/** xterm font bounds — 13 is the renderer's default, 9/20 keep it legible. */
+const FONT_MIN = 9
+const FONT_MAX = 20
+
 export default function Terminal() {
   const s = useStyles(makeS)
+  const t = useT()
   // BUG-093: the bottom edge stays STATIC. The keyboard lift is the chat
   // pattern's animated negative paddingBottom (TerminalInner); swapping the
   // edge per keyboard state re-lays-out the whole frame mid-animation for
@@ -49,7 +57,7 @@ export default function Terminal() {
   return (
     <SafeAreaView style={s.frame} edges={['bottom']}>
       <ScreenShell
-        title="Terminal"
+        title={t('sidebar.terminal')}
         right={<TerminalMenu onKill={() => killRef.current?.()} onClear={() => clearRef.current?.()} />}
       >
         <TerminalInner />
@@ -64,30 +72,32 @@ const clearRef = { current: null as null | (() => void) }
 
 function TerminalMenu({ onKill, onClear }: { onKill: () => void; onClear: () => void }) {
   const s = useStyles(makeS)
+  const t = useT()
+  // Mockup: compact 28dp header icons — clear in ink, kill in red.
   return (
     <View style={s.menuRow}>
-      <Pressable
-        style={({ pressed }) => [s.menuBtn, pressed && s.pressed]}
+      <HeaderButton
         onPress={onClear}
-        hitSlop={8}
-        accessibilityLabel="Clear screen"
+        accessibilityLabel={t('terminal.clear')}
+        style={s.menuBtn}
       >
-        <Icon name="ban-outline" size={17} color={C.text} />
-      </Pressable>
-      <Pressable
-        style={({ pressed }) => [s.menuBtn, pressed && s.pressed]}
+        <Icon name="backspace-outline" size={16} color={C.text} />
+      </HeaderButton>
+      <HeaderButton
         onPress={onKill}
-        hitSlop={8}
-        accessibilityLabel="Kill terminal session"
+        accessibilityLabel={t('terminal.kill')}
+        style={s.menuBtn}
       >
-        <Icon name="skull-outline" size={17} color={C.text} />
-      </Pressable>
+        <Icon name="close" size={16} color={C.red} />
+      </HeaderButton>
     </View>
   )
 }
 
 function TerminalInner() {
   const s = useStyles(makeS)
+  const t = useT()
+  const router = useRouter()
   // IME visibility truth (RN focus lies on Android — see focusInput).
   // BUG-133: selector form — the object form re-rendered on every per-frame
   // keyboard animation field; only isVisible is consumed here.
@@ -97,6 +107,8 @@ function TerminalInner() {
   const [snap, setSnap] = useState<{ state: TermState; alive: boolean }>({ state: 'idle', alive: false })
   const [hidden, setHidden] = useState('')
   const [fontSize, setFontSize] = useState(13)
+  /** Fitted xterm grid — display-only mirror of the `fit` message. */
+  const [termGrid, setTermGrid] = useState({ cols: 80, rows: 24 })
   // BUG-093 lift: same driver as the chat screen (chat.tsx BUG-037 fix) —
   // the reanimated keyboard height as a negative bottom pad. The
   // KeyboardAvoidingView computed its pad from parent-relative coords and
@@ -191,7 +203,11 @@ function TerminalInner() {
         out.current.bytes = 0
         inject('window.__fit();void 0;')
       } else if (msg.type === 'fit' && msg.cols && msg.rows) {
-        void ctl.resize(msg.cols, msg.rows)
+        const cols = msg.cols
+        const rows = msg.rows
+        // Display-only mirror for the status bar; resize itself unchanged.
+        setTermGrid((prev) => (prev.cols === cols && prev.rows === rows ? prev : { cols, rows }))
+        void ctl.resize(cols, rows)
       } else if (msg.type === 'key' && typeof msg.data === 'string' && msg.data) {
         // BUG-100 safety net: if the WebView ever holds focus, the Android
         // IME types into xterm's internal textarea — forward those bytes
@@ -234,12 +250,12 @@ function TerminalInner() {
         if (!alive) return
         if (!p) {
           setGate('noprobe')
-          setGateMsg('Native terminal bridge missing — rebuild the APK with this branch.')
+          setGateMsg(tr('terminal.bridgeMissing'))
           return
         }
         if (!p.pty || !p.shell) {
           setGate('nopty')
-          setGateMsg(p.error ?? 'This device refused the terminal pty.')
+          setGateMsg(p.error ?? tr('terminal.ptyRefused'))
           return
         }
         setGate('ready')
@@ -249,7 +265,7 @@ function TerminalInner() {
       } catch (e) {
         if (alive) {
           setGate('failed')
-          setGateMsg(e instanceof Error ? e.message : 'Terminal failed to start')
+          setGateMsg(e instanceof Error ? e.message : tr('terminal.startFailed'))
         }
       }
     })()
@@ -368,10 +384,10 @@ function TerminalInner() {
   }, [send])
 
   killRef.current = useCallback(() => {
-    showAlert('Kill terminal session?', 'The shell and its jobs die. Next open boots a fresh one.', [
-      { text: 'Cancel', style: 'cancel' },
+    showAlert(tr('terminal.killTitle'), tr('terminal.killBody'), [
+      { text: tr('common.cancel'), style: 'cancel' },
       {
-        text: 'Kill',
+        text: tr('terminal.killCta'),
         style: 'destructive',
         onPress: () => {
           void ctl.kill()
@@ -393,20 +409,33 @@ function TerminalInner() {
     inject(`window.__tsize(${fontSize});void 0;`)
   }, [fontSize, inject])
 
+  const bumpFont = useCallback((delta: number) => {
+    setFontSize((f) => Math.max(FONT_MIN, Math.min(FONT_MAX, f + delta)))
+  }, [])
+
   if (gate === 'checking') {
     return (
       <View style={s.center}>
-        <ActivityIndicator color={C.textDim} />
-        <Text style={s.dim}>Starting terminal…</Text>
+        <Spinner />
+        <Txt size={13} color={C.textDim} center>{t('terminal.starting')}</Txt>
       </View>
     )
   }
 
   if (gate === 'noguest') {
     return (
-      <View style={s.center}>
-        <Text style={s.dim}>Moch Linux isn't installed yet.</Text>
-        <Text style={s.dim}>Install it from Settings → Linux environment, then come back.</Text>
+      <View style={s.emptyWrap}>
+        <Card style={s.emptyCard}>
+          <Txt size={15} weight="800" center>{t('terminal.noguest.title')}</Txt>
+          <Txt size={12} color={C.textDim} center style={s.emptyBody}>
+            {t('terminal.noguest.body')}
+          </Txt>
+          <PrimaryBtn
+            label={t('terminal.noguest.cta')}
+            onPress={() => router.push('/onboarding/environment')}
+            style={s.emptyCta}
+          />
+        </Card>
       </View>
     )
   }
@@ -414,17 +443,16 @@ function TerminalInner() {
   if (gate === 'noprobe' || gate === 'nopty' || gate === 'failed') {
     return (
       <View style={s.center}>
-        <Text style={s.dim}>{gateMsg || 'Terminal failed to start.'}</Text>
+        <Txt size={13} color={C.textDim} center>{gateMsg || t('terminal.failed')}</Txt>
         {snap.state === 'dead' ? (
-          <Pressable
-            style={({ pressed }) => [s.retry, pressed && s.pressed]}
+          <GhostBtn
+            label={t('common.retry')}
             onPress={() => {
               setGate('checking')
               void ctl.start(80, 24).then((ok) => setGate(ok ? 'ready' : 'failed'))
             }}
-          >
-            <Text style={s.retryText}>Retry</Text>
-          </Pressable>
+            style={s.gateRetry}
+          />
         ) : null}
       </View>
     )
@@ -432,41 +460,75 @@ function TerminalInner() {
 
   return (
     <Animated.View style={[s.root, kbPad]}>
-      {/* Tapping the output re-raises the IME when it's down (blur + refocus
-          — see focusInput). BUG-100: Android enforces pointerEvents only on
-          ReactViewGroup containers — on the WebView itself it's a no-op, so
-          the WebView ate every tap and the IME typed into xterm's internal
-          textarea, never reaching the PTY. The box-only wrapper intercepts
-          touches BEFORE the WebView and is itself the tap target; the dead
-          overlay stays a sibling so Retry remains tappable. */}
-      <View style={s.outputWrap} onLayout={scheduleFit}>
-        <View ref={hitRef} style={s.outputHit} pointerEvents="box-only" onTouchEnd={onTapOutput}>
-          <WebView
-            ref={wvRef}
-            source={{ uri: 'file:///android_asset/term/index.html' }}
-            javaScriptEnabled
-            allowFileAccess
-            onMessage={handleWebMsg}
-            style={s.output}
-            onRenderProcessGone={() => {
-              // Android WebView renderer died — a reload replays from rawBank.
-              out.current.ready = false
-              inject('window.location.reload();void 0;')
-            }}
-          />
+      {/* xterm.js frame (mockup screen 5): flex 1, 2/10/6 margins, near-black
+          surface, 14 radius, 10 padding; the font-size bar sits inside on a
+          hairline, the sticky key pad just below the frame. */}
+      <View style={s.termFrame}>
+        {/* Tapping the output re-raises the IME when it's down (blur + refocus
+            — see focusInput). BUG-100: Android enforces pointerEvents only on
+            ReactViewGroup containers — on the WebView itself it's a no-op, so
+            the WebView ate every tap and the IME typed into xterm's internal
+            textarea, never reaching the PTY. The box-only wrapper intercepts
+            touches BEFORE the WebView and is itself the tap target; the dead
+            overlay stays a sibling so Retry remains tappable. */}
+        <View style={s.outputWrap} onLayout={scheduleFit}>
+          <View ref={hitRef} style={s.outputHit} pointerEvents="box-only" onTouchEnd={onTapOutput}>
+            <WebView
+              ref={wvRef}
+              source={{ uri: 'file:///android_asset/term/index.html' }}
+              javaScriptEnabled
+              allowFileAccess
+              onMessage={handleWebMsg}
+              style={s.output}
+              onRenderProcessGone={() => {
+                // Android WebView renderer died — a reload replays from rawBank.
+                out.current.ready = false
+                inject('window.location.reload();void 0;')
+              }}
+            />
+          </View>
+          {dead ? (
+            <View style={s.deadWrap} pointerEvents="box-none">
+              <Txt mono ltr size={11} color={C.amber} style={s.deadLine}>
+                {t('terminal.sessionEnded')}
+              </Txt>
+              <GhostBtn
+                small
+                label={t('common.retry')}
+                accessibilityLabel={t('terminal.restart')}
+                onPress={() => void ctl.start(80, 24)}
+                style={s.deadRetry}
+              />
+            </View>
+          ) : null}
         </View>
-        {dead ? (
-          <View style={s.deadWrap} pointerEvents="box-none">
-            <Text style={[s.mono, s.deadLine]}>[session ended]</Text>
+
+        {/* Font-size bar — mono xterm.js grid label + A− / A+ (real state). */}
+        <View style={s.fontBar}>
+          <Txt mono ltr size={10.5} color={C.textFaint}>
+            {t('terminal.xtermSize', { cols: termGrid.cols, rows: termGrid.rows })}
+          </Txt>
+          <View style={s.fontBtns}>
             <Pressable
-              style={({ pressed }) => [s.retry, pressed && s.pressed]}
-              onPress={() => void ctl.start(80, 24)}
-              accessibilityLabel="Restart shell"
+              onPress={() => bumpFont(-1)}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={t('terminal.fontSmaller')}
+              style={({ pressed }) => [s.fontBtn, pressed && s.pressed]}
             >
-              <Text style={s.retryText}>Retry</Text>
+              <Txt size={11} weight="700" color={C.text}>{t('terminal.font.decrease')}</Txt>
+            </Pressable>
+            <Pressable
+              onPress={() => bumpFont(1)}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={t('terminal.fontBigger')}
+              style={({ pressed }) => [s.fontBtn, pressed && s.pressed]}
+            >
+              <Txt size={11} weight="700" color={C.text}>{t('terminal.font.increase')}</Txt>
             </Pressable>
           </View>
-        ) : null}
+        </View>
       </View>
 
       {/* Invisible direct-typing field: zero-size, never rendered as text
@@ -495,45 +557,43 @@ function TerminalInner() {
         multiline={false}
         blurOnSubmit={false}
         editable={!dead}
-        accessibilityLabel="Terminal input"
+        accessibilityLabel={t('terminal.inputA11y')}
       />
 
       <KeyRow onKey={onPadKey} armed={armed} onArm={(m) => { armedRef.current = m; setArmed(m) }} />
 
-      <View style={s.composer}>
-        <Text style={s.prompt}>{dead ? 'session ended' : '$ touch output to type'}</Text>
-        <Pressable
-          style={({ pressed }) => [s.send, pressed && s.pressed]}
-          onPress={() => setFontSize((f) => Math.min(20, f + 1))}
-          hitSlop={8}
-          accessibilityLabel="Bigger font"
-        >
-          <Text style={s.aa}>A+</Text>
-        </Pressable>
-      </View>
+      {dead ? null : (
+        <Txt size={11.5} color={C.textDim} center style={s.hint}>
+          {t('terminal.tapHint')}
+        </Txt>
+      )}
     </Animated.View>
   )
 }
 
-/** Pad keys: seq sent as-is; ctrlSeq = Ctrl+key form; hint = a11y label. */
-const PAD_ROWS: { label: string; seq?: string; ctrlSeq?: string; modifier?: 'ctrl' | 'alt'; hint: string }[][] = [
+/**
+ * Pad keys: seq sent as-is; ctrlSeq = Ctrl+key form; hintKey = a11y label.
+ * Row 1 is the mockup's sticky row (Ctrl, Alt, Tab, Esc + arrows); row 2
+ * keeps every legacy key (^C, ^D, Home, End, PgUp, PgDn) reachable.
+ */
+const PAD_ROWS: { label: string; seq?: string; ctrlSeq?: string; modifier?: 'ctrl' | 'alt'; hintKey: string }[][] = [
   [
-    { label: 'Esc', seq: TERM_KEYS.ESC, hint: 'Escape' },
-    { label: 'Tab', seq: TERM_KEYS.TAB, hint: 'Autocomplete' },
-    { label: 'Ctrl', modifier: 'ctrl', hint: 'Ctrl modifier for the next key' },
-    { label: '↑', seq: TERM_KEYS.UP, ctrlSeq: TERM_CTRL_KEYS.UP, hint: 'History back' },
-    { label: '↓', seq: TERM_KEYS.DOWN, ctrlSeq: TERM_CTRL_KEYS.DOWN, hint: 'History forward' },
-    { label: '^C', seq: TERM_KEYS.CTRL_C, hint: 'Interrupt' },
-    { label: '^D', seq: TERM_KEYS.CTRL_D, hint: 'Logout / EOF' },
+    { label: 'Ctrl', modifier: 'ctrl', hintKey: 'terminal.key.ctrl' },
+    { label: 'Alt', modifier: 'alt', hintKey: 'terminal.key.alt' },
+    { label: 'Tab', seq: TERM_KEYS.TAB, hintKey: 'terminal.key.tab' },
+    { label: 'Esc', seq: TERM_KEYS.ESC, hintKey: 'terminal.key.escape' },
+    { label: '↑', seq: TERM_KEYS.UP, ctrlSeq: TERM_CTRL_KEYS.UP, hintKey: 'terminal.key.up' },
+    { label: '↓', seq: TERM_KEYS.DOWN, ctrlSeq: TERM_CTRL_KEYS.DOWN, hintKey: 'terminal.key.down' },
+    { label: '←', seq: TERM_KEYS.LEFT, ctrlSeq: TERM_CTRL_KEYS.LEFT, hintKey: 'terminal.key.left' },
+    { label: '→', seq: TERM_KEYS.RIGHT, ctrlSeq: TERM_CTRL_KEYS.RIGHT, hintKey: 'terminal.key.right' },
   ],
   [
-    { label: 'Alt', modifier: 'alt', hint: 'Alt modifier for the next key' },
-    { label: '←', seq: TERM_KEYS.LEFT, ctrlSeq: TERM_CTRL_KEYS.LEFT, hint: 'Cursor left' },
-    { label: '→', seq: TERM_KEYS.RIGHT, ctrlSeq: TERM_CTRL_KEYS.RIGHT, hint: 'Cursor right' },
-    { label: 'Home', seq: TERM_KEYS.HOME, ctrlSeq: TERM_CTRL_KEYS.HOME, hint: 'Line start' },
-    { label: 'End', seq: TERM_KEYS.END, ctrlSeq: TERM_CTRL_KEYS.END, hint: 'Line end' },
-    { label: 'PgUp', seq: TERM_KEYS.PGUP, hint: 'Page up' },
-    { label: 'PgDn', seq: TERM_KEYS.PGDN, hint: 'Page down' },
+    { label: '^C', seq: TERM_KEYS.CTRL_C, hintKey: 'terminal.key.interrupt' },
+    { label: '^D', seq: TERM_KEYS.CTRL_D, hintKey: 'terminal.key.eof' },
+    { label: 'Home', seq: TERM_KEYS.HOME, ctrlSeq: TERM_CTRL_KEYS.HOME, hintKey: 'terminal.key.home' },
+    { label: 'End', seq: TERM_KEYS.END, ctrlSeq: TERM_CTRL_KEYS.END, hintKey: 'terminal.key.end' },
+    { label: 'PgUp', seq: TERM_KEYS.PGUP, hintKey: 'terminal.key.pageUp' },
+    { label: 'PgDn', seq: TERM_KEYS.PGDN, hintKey: 'terminal.key.pageDown' },
   ],
 ]
 
@@ -547,6 +607,7 @@ function KeyRow({
   onArm: (m: 'ctrl' | 'alt' | null) => void
 }) {
   const s = useStyles(makeS)
+  const t = useT()
   return (
     <View style={s.padWrap}>
       {PAD_ROWS.map((row, i) => (
@@ -569,10 +630,12 @@ function KeyRow({
                   if (armed) onArm(null)
                 }}
                 hitSlop={2}
-                accessibilityLabel={k.hint}
+                accessibilityLabel={t(k.hintKey)}
                 accessibilityState={isModifier ? { selected: isArmed } : undefined}
               >
-                <Text style={[s.keyText, isArmed && s.keyTextArmed]}>{k.label}</Text>
+                <Txt mono ltr size={11} weight="700" color={isArmed ? C.onAccent : C.text}>
+                  {k.label}
+                </Txt>
               </Pressable>
             )
           })}
@@ -582,58 +645,79 @@ function KeyRow({
   )
 }
 
-const makeS = () =>
-  ({
-    frame: { flex: 1, backgroundColor: C.bg },
-    root: { flex: 1 },
-    center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, padding: 24 },
-    dim: { color: C.textDim, fontSize: 14, textAlign: 'center' },
-    output: { flex: 1, backgroundColor: '#000', borderRadius: 12, borderWidth: 1, borderColor: C.border },
-    outputWrap: { flex: 1 },
-    outputHit: { flex: 1, marginHorizontal: 10 },
-    mono: { color: '#E8E8E8', fontFamily: 'monospace' },
-    deadWrap: { position: 'absolute', top: 14, left: 0, right: 0, alignItems: 'center' },
-    deadLine: { color: C.amber ?? '#E5A50A', marginTop: 8 },
-    hiddenInput: { position: 'absolute', width: 1, height: 1, opacity: 0 },
-    keyRow: { flexDirection: 'row', gap: 5, paddingHorizontal: 10, paddingTop: 6 },
-    padWrap: { paddingBottom: 2 },
-    key: {
-      flex: 1,
-      alignItems: 'center',
-      paddingVertical: 7,
-      backgroundColor: C.bgCard,
-      borderRadius: 8,
-      borderWidth: 1,
-      borderColor: C.borderSoft,
-    },
-    keyArmed: { backgroundColor: C.bgElev, borderColor: C.accent ?? C.text },
-    keyText: { color: C.text, fontSize: 12, fontWeight: '600' },
-    keyTextArmed: { color: C.accent ?? C.text },
-    composer: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 10 },
-    prompt: { color: C.textDim, fontSize: 16, fontWeight: '700' },
-    send: {
-      width: 40,
-      height: 40,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: C.bgCard,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: C.borderSoft,
-    },
-    aa: { color: C.text, fontSize: 14, fontWeight: '700' },
-    pressed: { opacity: 0.55 },
-    retry: { marginTop: 12, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: C.bgCard, borderRadius: 10, borderWidth: 1, borderColor: C.borderSoft },
-    retryText: { color: C.text, fontWeight: '600' },
-    menuRow: { flexDirection: 'row', gap: 6 },
-    menuBtn: {
-      width: 38,
-      height: 38,
-      borderRadius: 14,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: C.bgElev,
-      borderWidth: 1,
-      borderColor: C.borderSoft,
-    },
-  }) as const
+const makeS = () => StyleSheet.create({
+  frame: { flex: 1, backgroundColor: C.bg },
+  root: { flex: 1 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24 },
+
+  // ── No-guest empty state (mockup screen 5) ────────────────────────────────
+  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  emptyCard: { padding: 20, width: '100%' },
+  emptyBody: { marginTop: 6, marginBottom: 14, lineHeight: 17 },
+  emptyCta: { alignSelf: 'center' },
+  gateRetry: { marginTop: 12 },
+
+  // ── xterm frame + font bar ────────────────────────────────────────────────
+  termFrame: {
+    flex: 1,
+    marginTop: 2,
+    marginHorizontal: 10,
+    marginBottom: 6,
+    backgroundColor: '#050508',
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 14,
+    padding: 10,
+  },
+  outputWrap: { flex: 1 },
+  outputHit: { flex: 1 },
+  output: { flex: 1, backgroundColor: '#050508' },
+  deadWrap: { position: 'absolute', top: 14, left: 0, right: 0, alignItems: 'center' },
+  deadLine: { marginTop: 8 },
+  deadRetry: { marginTop: 8 },
+  fontBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  fontBtns: { flexDirection: 'row', gap: 5 },
+  fontBtn: {
+    backgroundColor: C.bgElev,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 1,
+    minWidth: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // ── Sticky key pad ────────────────────────────────────────────────────────
+  padWrap: { paddingTop: 2 },
+  keyRow: { flexDirection: 'row', gap: 4, paddingHorizontal: 10, paddingTop: 4 },
+  key: {
+    flex: 1,
+    minWidth: 36,
+    minHeight: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    backgroundColor: C.bgCard,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  keyArmed: { backgroundColor: C.accent, borderColor: C.accent },
+  hint: { paddingTop: 4, paddingBottom: 8, paddingHorizontal: 10 },
+
+  hiddenInput: { position: 'absolute', width: 1, height: 1, opacity: 0 },
+  pressed: { opacity: 0.55 },
+
+  menuRow: { flexDirection: 'row', gap: 6 },
+  menuBtn: { width: 28, height: 28, borderRadius: 10 },
+})

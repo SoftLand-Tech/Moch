@@ -17,6 +17,8 @@ import Animated, { useAnimatedStyle } from 'react-native-reanimated'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useStore } from '@nanostores/react'
 import { Icon } from '../../src/components/Icon'
+import { Dot, GhostBtn, HeaderButton, Pill, PrimaryBtn, Spinner, Txt } from '../../src/components/ui'
+import { MochiMark } from '../../src/components/MochiMark'
 import * as Haptics from 'expo-haptics'
 import * as ImagePicker from 'expo-image-picker'
 import * as DocumentPicker from 'expo-document-picker'
@@ -84,17 +86,18 @@ import { Mascot } from '../../src/components/Mascot'
 import { useMochiState } from '../../src/components/mochi/useMochiState'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
-import { tr } from '../../src/lib/strings'
+import { localeAtom, useDir, useT } from '../../src/lib/strings'
 import { countUnanswered } from '../../src/lib/clarifyGate'
-import { C, S, useStyles, useShape } from '../../src/lib/theme'
+import { C, useStyles } from '../../src/lib/theme'
 
-/** Empty-state prompts, styled as plain icon rows the way ChatGPT does. */
+/** Empty-state prompts — the mockup's four starter rows (label from the chat
+ *  catalog; `slash` focuses the composer so the palette opens, BUG-043). */
 const STARTERS = [
-  { icon: 'sparkles-outline' as const, label: 'What can you do?' },
-  { icon: 'document-text-outline' as const, label: 'Summarize my day' },
-  { icon: 'terminal-outline' as const, label: 'Explain this repo' },
-  { icon: 'help-circle-outline' as const, label: 'Browse slash commands' },
-]
+  { key: 'chat.starter.what', slash: false },
+  { key: 'chat.starter.day', slash: false },
+  { key: 'chat.starter.repo', slash: false },
+  { key: 'chat.starter.slash', slash: true },
+] as const
 
 const MAX_SLASH_ITEMS = 120
 
@@ -103,8 +106,17 @@ const MAX_SLASH_ITEMS = 120
 const REC_OPTIONS: RecordingOptions = { ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true }
 
 export default function Chat() {
-  const S = useShape()
   const s = useStyles(makeS)
+  const t = useT()
+  const dir = useDir()
+  // The RETRY badge is mono/LTR ONLY for the English literal; translated
+  // scripts (ar/zh/fr) must keep their natural direction and proportional font.
+  const englishRetry = useStore(localeAtom) === 'en'
+  /** Single-button alert with the catalog's localized OK. */
+  const alertOk = (title: string, message?: string) =>
+    void showAlert(title, message, [{ text: t('chat.alert.ok') }])
+  /** Direction overrides for the raw <Text> nodes that carry user content. */
+  const rtlText = { textAlign: dir.textAlign, writingDirection: dir.writingDirection } as const
   const msgs = useStore(messages)
   const tls = useStore(tools)
   const busy = useStore(agentBusy)
@@ -282,8 +294,10 @@ export default function Chat() {
     if (!botProfile) return
     void (async () => {
       await setActiveBot(botProfile)
-      void newChat().catch((e) => showAlert('New chat failed', e instanceof Error ? e.message : String(e)))
+      await newChat().catch((e) => alertOk(t('chat.newChatFailed'), e instanceof Error ? e.message : String(e)))
     })()
+    // One-shot hand-off: the alert text is read on the firing pass only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [botProfile])
   const lastDraft = useRef<string | undefined>(undefined)
 
@@ -464,7 +478,7 @@ export default function Chat() {
       if (canonical === 'new') {
         updateInput('')
         setSlashItems(null)
-        void newChat().catch((e) => showAlert('New chat failed', e instanceof Error ? e.message : String(e)))
+        void newChat().catch((e) => alertOk(t('chat.newChatFailed'), e instanceof Error ? e.message : String(e)))
         return
       }
       const target = interactiveTarget(canonical, parsed.args)
@@ -530,7 +544,7 @@ export default function Chat() {
       // BUG-041: the composer was cleared before the dispatch — a failed
       // command must give the text back (the plain-send failure path does).
       updateInput(trimmed)
-      showAlert('Command failed', e instanceof Error ? e.message : String(e))
+      alertOk(t('chat.alert.commandFailed'), e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -544,15 +558,19 @@ export default function Chat() {
   const canAttach = online && !recording && !(steerMode && busy) && !ocMode // steer is text-only; OpenCode prompts are text-only too
   const addAttachment = (att: PendingAttachment) => {
     if (att.kind !== 'image' && att.size != null && att.size > ATTACH_MAX_BYTES) {
-      showAlert(
-        'Attachment too large',
-        `${att.name} is ${formatBytes(att.size)} — the limit is ${formatBytes(ATTACH_MAX_BYTES)}.`,
+      alertOk(
+        t('chat.alert.attachTooLargeTitle'),
+        t('chat.alert.attachTooLargeBody', {
+          name: att.name,
+          size: formatBytes(att.size),
+          limit: formatBytes(ATTACH_MAX_BYTES),
+        }),
       )
       return
     }
     setPendingAttachments((cur) => {
       if (cur.length >= MAX_ATTACHMENTS) {
-        showAlert('Attachment limit', `Up to ${MAX_ATTACHMENTS} files per message.`)
+        alertOk(t('chat.alert.attachLimitTitle'), t('chat.alert.attachLimitBody', { n: MAX_ATTACHMENTS }))
         return cur
       }
       return [...cur, att]
@@ -579,13 +597,13 @@ export default function Chat() {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync()
       if (!perm.granted) {
-        showAlert('Photos denied', 'Allow photo access to attach images.')
+        alertOk(t('chat.alert.photosDeniedTitle'), t('chat.alert.photosDeniedBody'))
         return
       }
       const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'] })
       if (!r.canceled && r.assets?.length) pickAsset(r.assets[0])
     } catch (e) {
-      showAlert('Picker failed', e instanceof Error ? e.message : String(e))
+      alertOk(t('chat.alert.pickerFailed'), e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -593,13 +611,13 @@ export default function Chat() {
     try {
       const perm = await ImagePicker.requestCameraPermissionsAsync()
       if (!perm.granted) {
-        showAlert('Camera denied', 'Allow camera access to take photos.')
+        alertOk(t('chat.alert.cameraDeniedTitle'), t('chat.alert.cameraDeniedBody'))
         return
       }
       const r = await ImagePicker.launchCameraAsync()
       if (!r.canceled && r.assets?.length) pickAsset(r.assets[0])
     } catch (e) {
-      showAlert('Camera failed', e instanceof Error ? e.message : String(e))
+      alertOk(t('chat.alert.cameraFailed'), e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -621,7 +639,7 @@ export default function Chat() {
         state: 'pick',
       })
     } catch (e) {
-      showAlert('Picker failed', e instanceof Error ? e.message : String(e))
+      alertOk(t('chat.alert.pickerFailed'), e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -668,9 +686,11 @@ export default function Chat() {
       })
     })
     if (sharedIn.skipped > 0) {
-      showAlert(
-        'Share skipped',
-        `${sharedIn.skipped} shared file${sharedIn.skipped === 1 ? '' : 's'} exceeded the ${formatBytes(ATTACH_MAX_BYTES)} limit.`,
+      alertOk(
+        t('chat.alert.shareSkippedTitle'),
+        sharedIn.skipped === 1
+          ? t('chat.alert.shareSkippedBodyOne', { limit: formatBytes(ATTACH_MAX_BYTES) })
+          : t('chat.alert.shareSkippedBodyMany', { n: sharedIn.skipped, limit: formatBytes(ATTACH_MAX_BYTES) }),
       )
     }
     // One-shot per share: ack above clears the trigger, so the closed-over
@@ -714,21 +734,21 @@ export default function Chat() {
         await steerRun(text)
       } catch (e) {
         updateInput(text)
-        showAlert('Steer failed', e instanceof Error ? e.message : 'unknown')
+        alertOk(t('chat.alert.steerFailed'), e instanceof Error ? e.message : t('chat.alert.unknown'))
       }
       return
     }
     if (busy) {
       if (!storedId) {
         // BUG-075: a silent no-op — say why the send didn't happen.
-        showAlert('One moment', 'The chat is still opening — try again in a second.')
+        alertOk(t('chat.alert.openingTitle'), t('chat.alert.openingBody'))
         return // keep the text
       }
       // Attachment-only sends queue with empty text (allowEmpty); the chips
       // ride the in-memory attach map keyed by the queued id.
       const item = enqueueSend(storedId, text, { allowEmpty: pendingAttachments.length > 0 })
       if (!item) {
-        showAlert('Queue full', 'Remove a queued message or wait for the current reply to finish.')
+        alertOk(t('chat.alert.queueFullTitle'), t('chat.alert.queueFullBody'))
         return
       }
       setQueuedAttachments(item.id, pendingAttachments)
@@ -753,7 +773,7 @@ export default function Chat() {
       // attempt had attached was detached server-side, so a re-send cannot
       // duplicate attachments.
       setPendingAttachments((cur) => cur.map((a) => ({ ...a, state: 'pick' as const, error: undefined, path: undefined })))
-      showAlert('Send failed', e instanceof Error ? e.message : 'unknown')
+      alertOk(t('chat.alert.sendFailed'), e instanceof Error ? e.message : t('chat.alert.unknown'))
     }
   }
 
@@ -773,11 +793,11 @@ export default function Chat() {
       await recorder.stop()
       uri = recorder.uri ?? null
     } catch (e) {
-      showAlert('Recording failed', e instanceof Error ? e.message : 'unknown')
+      alertOk(t('chat.alert.recordingFailed'), e instanceof Error ? e.message : t('chat.alert.unknown'))
       return
     }
     if (!uri) {
-      showAlert('Recording failed', 'No audio captured.')
+      alertOk(t('chat.alert.recordingFailed'), t('chat.alert.noAudio'))
       return
     }
     try {
@@ -787,7 +807,7 @@ export default function Chat() {
       // dialog here was a tap-to-dismiss speed bump on every voice note.
       updateInput(transcript)
     } catch (e) {
-      showAlert('Transcription failed', e instanceof Error ? e.message : 'unknown')
+      alertOk(t('chat.alert.transcriptionFailed'), e instanceof Error ? e.message : t('chat.alert.unknown'))
     }
   }
 
@@ -808,7 +828,7 @@ export default function Chat() {
       }
       const st = await AudioModule.requestRecordingPermissionsAsync()
       if (!st.granted) {
-        showAlert('Mic denied', 'Allow microphone access to record voice.')
+        alertOk(t('chat.alert.micDeniedTitle'), t('chat.alert.micDeniedBody'))
         return
       }
       await recorder.prepareToRecordAsync()
@@ -827,7 +847,7 @@ export default function Chat() {
     } catch (e) {
       stopRecTimer()
       setRecording(false)
-      showAlert('Recording failed', e instanceof Error ? e.message : 'unknown')
+      alertOk(t('chat.alert.recordingFailed'), e instanceof Error ? e.message : t('chat.alert.unknown'))
     }
   }
 
@@ -871,55 +891,71 @@ export default function Chat() {
     // no timed_out flag) and retire() makes the question unrecoverable, so
     // Send stays off until EVERY question has a real answer.
     const batchMissing = isBatchClarifyOf(r) ? countUnanswered(r.questions ?? [], batchAnswers) : 0
+    const approvalLabel = (c: string) =>
+      c === 'once'
+        ? t('chat.approval.allow')
+        : c === 'session'
+          ? t('chat.approval.allowSession')
+          : c === 'always'
+            ? t('chat.approval.allowAlways')
+            : t('chat.approval.deny')
     return (
     <>
       {r.method === 'approval' ? (
         <View style={s.sheet}>
-          <View style={s.sheetHead}>
+          <View style={[s.sheetHead, { flexDirection: dir.row }]}>
             <Icon name="shield-checkmark-outline" size={15} color={C.amber} />
-            <Text style={s.sheetTitle}>
-              Approval needed{r.replayed ? ' (restored)' : ''}
-            </Text>
+            <Txt size={13} weight="800" style={s.sheetTitle}>
+              {r.replayed ? t('chat.approval.restored') : t('chat.approval.title')}
+            </Txt>
           </View>
           {/* BUG-082: the body scrolls inside a height-capped card; the
               choices row below stays pinned and always reachable, no
               matter how long the command/description is. */}
           <ScrollView style={s.sheetScroll} nestedScrollEnabled>
-            {r.toolName ? <Text style={s.sheetKicker}>{r.toolName}</Text> : null}
-            <Text style={s.sheetBody} selectable>
-              {r.command ?? r.description ?? 'The agent wants to run a command.'}
+            {r.toolName ? (
+              <Txt size={10.5} weight="700" color={C.textFaint} mono ltr style={s.sheetKicker}>{r.toolName}</Txt>
+            ) : null}
+            <Text style={[s.sheetBody, rtlText]} selectable>
+              {r.command ?? r.description ?? t('chat.approval.defaultCommand')}
             </Text>
             {r.description && r.description !== r.command ? (
-              <Text style={s.sheetDesc}>{r.description}</Text>
+              <Text style={[s.sheetDesc, rtlText]}>{r.description}</Text>
             ) : null}
           </ScrollView>
-          <View style={s.sheetRow}>
+          <View style={[s.sheetRow, { flexDirection: dir.row }]}>
             {approvalChoicesFor(r).map((c) => {
               const deny = c === 'deny'
+              const onPress = () => {
+                // BUG-050: refusing the agent is a warning, not a
+                // success — the haptic language must match the red
+                // Deny styling (AlertDialog uses Warning for
+                // destructive choices too).
+                void Haptics.notificationAsync(
+                  deny ? Haptics.NotificationFeedbackType.Warning : Haptics.NotificationFeedbackType.Success,
+                )
+                void respondApproval(c as 'once' | 'session' | 'always' | 'deny', false, r)
+              }
+              if (deny) {
+                return (
+                  <GhostBtn
+                    key={c}
+                    onPress={onPress}
+                    accessibilityLabel={approvalLabel(c)}
+                    label={approvalLabel(c)}
+                    style={[s.sheetBtn, s.denyBtn]}
+                    textStyle={s.denyText}
+                  />
+                )
+              }
               return (
-                <Pressable
+                <PrimaryBtn
                   key={c}
-                  style={({ pressed }) => [
-                    s.sheetBtn,
-                    deny ? s.denyBtn : { backgroundColor: c === 'always' ? C.accentDark : C.accent },
-                    pressed && s.btnPressed,
-                  ]}
-                  onPress={() => {
-                    // BUG-050: refusing the agent is a warning, not a
-                    // success — the haptic language must match the red
-                    // Deny styling (AlertDialog uses Warning for
-                    // destructive choices too).
-                    void Haptics.notificationAsync(
-                      deny ? Haptics.NotificationFeedbackType.Warning : Haptics.NotificationFeedbackType.Success,
-                    )
-                    void respondApproval(c as 'once' | 'session' | 'always' | 'deny', false, r)
-                  }}
-                  accessibilityLabel={c}
-                >
-                  <Text style={[s.sheetBtnText, !deny && { color: C.onAccent }]} numberOfLines={1}>
-                    {c === 'once' ? 'Allow' : c === 'session' ? 'Always this chat' : c === 'always' ? 'Always' : 'Deny'}
-                  </Text>
-                </Pressable>
+                  onPress={onPress}
+                  accessibilityLabel={approvalLabel(c)}
+                  label={approvalLabel(c)}
+                  style={[s.sheetBtn, c === 'always' && { backgroundColor: C.accentDark }]}
+                />
               )
             })}
           </View>
@@ -928,9 +964,9 @@ export default function Chat() {
 
       {r.method === 'clarify' ? (
         <View style={s.sheet}>
-          <View style={s.sheetHead}>
+          <View style={[s.sheetHead, { flexDirection: dir.row }]}>
             <Icon name="help-circle-outline" size={15} color={C.accent} />
-            <Text style={s.sheetTitle}>Mochi needs you</Text>
+            <Txt size={13} weight="800" style={s.sheetTitle}>{t('chat.clarify.title')}</Txt>
           </View>
           {isBatchClarifyOf(r) ? (
             <>
@@ -939,82 +975,86 @@ export default function Chat() {
               <ScrollView style={s.sheetScroll} nestedScrollEnabled>
               {r.questions!.map((q) => (
                 <View key={q.qid} style={{ marginBottom: 10 }}>
-                  <Text style={s.qText}>{q.question ?? q.qid}</Text>
+                  <Text style={[s.qText, rtlText]}>{q.question ?? q.qid}</Text>
                   {q.choices?.map((o) => (
                     <Pressable
                       key={o}
                       style={({ pressed }) => [s.clarifyBtn, batchAnswers[q.qid] === o && s.clarifyOn, pressed && s.btnPressed]}
                       onPress={() => setBatchAnswers((a) => ({ ...a, [q.qid]: o }))}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: batchAnswers[q.qid] === o }}
                     >
                       <Text style={[s.clarifyText, batchAnswers[q.qid] === o && { color: C.onAccent }]}>{o}</Text>
                     </Pressable>
                   ))}
                   {!q.choices?.length ? (
                     <TextInput
-                      style={s.qInput}
+                      style={[s.qInput, { textAlign: dir.textAlign, writingDirection: dir.writingDirection }]}
                       value={batchAnswers[q.qid] ?? ''}
-                      onChangeText={(t) => setBatchAnswers((a) => ({ ...a, [q.qid]: t }))}
-                      placeholder="Your answer…"
+                      onChangeText={(val) => setBatchAnswers((a) => ({ ...a, [q.qid]: val }))}
+                      placeholder={t('chat.clarify.placeholder')}
                       placeholderTextColor={C.textFaint}
                       // BUG-049: the question text, not an internal id.
-                      accessibilityLabel={`Answer: ${q.question ?? 'the question'}`}
+                      accessibilityLabel={t('chat.clarify.answerA11y', { question: q.question ?? q.qid })}
                     />
                   ) : null}
                 </View>
               ))}
               </ScrollView>
               {batchMissing > 0 ? (
-                <Text style={s.qHint}>
+                <Txt size={11} color={C.amber} center style={s.qHint}>
                   {batchMissing === 1
-                    ? tr('chat.clarify.pending.one')
-                    : tr('chat.clarify.pending.many', { n: batchMissing })}
-                </Text>
+                    ? t('chat.clarify.pending.one')
+                    : t('chat.clarify.pending.many', { n: batchMissing })}
+                </Txt>
               ) : null}
-              <Pressable
+              <PrimaryBtn
                 disabled={batchMissing > 0}
-                accessibilityState={{ disabled: batchMissing > 0 }}
-                style={({ pressed }) => [s.sheetBtn, batchMissing > 0 ? s.sheetBtnOff : { backgroundColor: C.accent }, pressed && s.btnPressed]}
+                accessibilityLabel={t('chat.clarify.send')}
+                label={t('chat.clarify.send')}
                 onPress={() => { if (batchMissing > 0) return; void respondClarifyBatch(batchAnswers, r) }}
-              >
-                <Text style={[s.sheetBtnText, batchMissing > 0 ? { color: C.textDim } : { color: C.onAccent }]}>Send</Text>
-              </Pressable>
+                style={s.sheetBtnFull}
+              />
             </>
           ) : (
             <>
               {/* BUG-082: long question/many options scroll; the answer
                   input stays pinned. */}
               <ScrollView style={s.sheetScroll} nestedScrollEnabled>
-              <Text style={s.sheetBody}>{r.question ?? 'Clarification needed'}</Text>
+              <Text style={[s.sheetBody, rtlText]}>{r.question ?? t('chat.clarify.needed')}</Text>
               {r.options?.map((o) => (
                 <Pressable
                   key={o}
                   style={({ pressed }) => [s.clarifyBtn, pressed && s.btnPressed]}
                   onPress={() => { void respondClarify(o, r) }}
+                  accessibilityRole="button"
+                  accessibilityLabel={o}
                 >
-                  <Text style={s.clarifyText}>{o}</Text>
+                  <Text style={[s.clarifyText, rtlText]}>{o}</Text>
                 </Pressable>
               ))}
               </ScrollView>
-              <View style={s.clarifyRow}>
+              <View style={[s.clarifyRow, { flexDirection: dir.row }]}>
                 <TextInput
-                  style={[s.qInput, { flex: 1 }]}
+                  style={[s.qInput, { flex: 1, textAlign: dir.textAlign, writingDirection: dir.writingDirection }]}
                   value={answerText}
                   onChangeText={setAnswerText}
-                  placeholder="Or type your answer…"
+                  placeholder={t('chat.clarify.orTypePlaceholder')}
                   placeholderTextColor={C.textFaint}
-                  accessibilityLabel="Clarification answer"
+                  accessibilityLabel={t('chat.clarify.answerLabel')}
                 />
                 <Pressable
                   style={({ pressed }) => [s.miniSend, pressed && s.btnPressed]}
                   onPress={() => {
                     // BUG-075: an empty tap used to wipe the field and do
                     // nothing — keep the text, and only send a real answer.
-                    const t = answerText.trim()
-                    if (!t) return
+                    const val = answerText.trim()
+                    if (!val) return
                     setAnswerText('')
-                    void respondClarify(t, r)
+                    void respondClarify(val, r)
                   }}
-                  accessibilityLabel="Send clarification"
+                  accessibilityRole="button"
+                  accessibilityLabel={t('chat.clarify.sendA11y')}
                 >
                   <Icon name="arrow-up" size={17} color={C.onAccent} />
                 </Pressable>
@@ -1026,41 +1066,44 @@ export default function Chat() {
 
       {(r.method === 'sudo' || r.method === 'secret') ? (
         <View style={s.sheet}>
-          <View style={s.sheetHead}>
+          <View style={[s.sheetHead, { flexDirection: dir.row }]}>
             <Icon name="lock-closed-outline" size={15} color={C.red} />
-            <Text style={[s.sheetTitle, { color: C.red }]}>
-              {r.method === 'sudo' ? 'Sudo requested' : 'Secret requested'}
-            </Text>
+            <Txt size={13} weight="800" color={C.red} style={s.sheetTitle}>
+              {r.method === 'sudo' ? t('chat.sudo.title') : t('chat.secret.title')}
+            </Txt>
           </View>
           {/* BUG-082: long prompt scrolls; the password field and the
               Send/Deny row stay pinned. */}
           <ScrollView style={s.sheetScroll} nestedScrollEnabled>
-            <Text style={s.sheetBody} selectable>
+            <Text style={[s.sheetBody, rtlText]} selectable>
               {r.prompt}
             </Text>
           </ScrollView>
           <TextInput
-            style={s.qInput}
+            style={[s.qInput, { textAlign: dir.textAlign, writingDirection: dir.writingDirection }]}
             value={secretValue}
             onChangeText={setSecretValue}
-            placeholder={r.method === 'sudo' ? 'sudo password…' : `Value for ${r.envVar ?? 'secret'}…`}
+            placeholder={
+              r.method === 'sudo'
+                ? t('chat.secret.sudoPlaceholder')
+                : t('chat.secret.valuePlaceholder', { name: r.envVar ?? 'secret' })
+            }
             placeholderTextColor={C.textFaint}
             secureTextEntry
-            accessibilityLabel="Secret value"
+            accessibilityLabel={t('chat.secret.a11y')}
           />
-          <View style={[s.sheetRow, { marginTop: 10 }]}>
-            <Pressable
-              style={({ pressed }) => [s.sheetBtn, { backgroundColor: C.accent }, pressed && s.btnPressed]}
+          <View style={[s.sheetRow, { flexDirection: dir.row, marginTop: 10 }]}>
+            <PrimaryBtn
+              label={t('chat.clarify.send')}
               onPress={() => { const v = secretValue; setSecretValue(''); void respondPrivileged(true, v || undefined, r) }}
-            >
-              <Text style={[s.sheetBtnText, { color: C.onAccent }]}>Send</Text>
-            </Pressable>
-            <Pressable
-              style={({ pressed }) => [s.sheetBtn, s.denyBtn, pressed && s.btnPressed]}
+              style={s.sheetBtn}
+            />
+            <GhostBtn
+              label={t('chat.approval.deny')}
               onPress={() => { setSecretValue(''); void respondPrivileged(false, undefined, r) }}
-            >
-              <Text style={[s.sheetBtnText, { color: C.red }]}>Deny</Text>
-            </Pressable>
+              style={[s.sheetBtn, s.denyBtn]}
+              textStyle={s.denyText}
+            />
           </View>
         </View>
       ) : null}
@@ -1132,95 +1175,118 @@ export default function Chat() {
     // pads the top; composerPad above owns the bottom inset exclusively.
     <SafeAreaView style={s.safe} edges={[]}>
       <ScreenShell
-        title={title || 'Moch'}
+        // Mockup: a brand-new chat is titled "New chat"; real sessions keep
+        // their title or fall back to the app name.
+        title={title || (msgs.length === 0 && !booting ? t('chat.newChat') : 'Moch')}
         onSearch={() => router.navigate('/(tabs)/sessions')}
         right={
           <>
-            {/* New chat, on the header like the drawer pill — same flow
-                (ScreenShell startNew → newChat). Always available, even when
-                the model chip is hidden (tray header / no model yet). */}
-            <Pressable
-              style={({ pressed }) => [s.headerIconBtn, pressed && s.btnPressed]}
+            {/* New chat — the header's "+" (same flow as the drawer's startNew
+                → newChat). Always available, even when the model chip is
+                hidden (tray header / no model yet). */}
+            <HeaderButton
               onPress={() => {
                 router.navigate('/(tabs)/chat')
-                void newChat().catch((e) => showAlert('New chat failed', e instanceof Error ? e.message : String(e)))
+                void newChat().catch((e) => alertOk(t('chat.newChatFailed'), e instanceof Error ? e.message : String(e)))
               }}
-              hitSlop={6}
-              accessibilityLabel="New chat"
+              accessibilityLabel={t('chat.newChat')}
             >
               <Icon name="add" size={18} color={C.text} />
-            </Pressable>
+            </HeaderButton>
             {/* OpenCode thinker chip — replaces the hermes model chip in
                 OpenCode mode (never hermes provider state on an OC chat).
-                Tapping opens the model sheet, which talks to the OC server.
-                Tray-header themes skip this: the floating tray chip below
-                (S.trayHeader && ocMode) is the owner there — rendering both
-                would duplicate the label. */}
-            {ocMode && !S.trayHeader ? (
+                Tapping opens the model sheet, which talks to the OC server. */}
+            {ocMode ? (
               <Pressable
                 style={({ pressed }) => [s.modelChip, pressed && s.btnPressed]}
                 onPress={() => setModelPickerOpen(true)}
                 hitSlop={6}
                 accessibilityRole="button"
-                accessibilityLabel={ocOneShot ? `OpenCode one-shot${ocModelForChip ? `, model ${ocModelForChip}` : ''}. Tap to change` : `OpenCode thinker, model ${ocModelForChip || 'default'}. Tap to change`}
-              >
-                <Icon name="cube-outline" size={12} color={C.accent} />
-                <Text style={s.modelChipText} numberOfLines={1}>{ocOneShot ? `One-shot${ocModelForChip ? ` · ${ocModelForChip}` : ''}` : `OpenCode${ocModelForChip ? ` · ${ocModelForChip}` : ''}`}</Text>
-              </Pressable>
-            ) : null}
-            {!ocMode && !S.trayHeader && curModel ? (
-              <Pressable
-                style={({ pressed }) => [s.modelChip, pressed && s.btnPressed]}
-                onPress={() => setModelPickerOpen(true)}
-                hitSlop={6}
-                accessibilityLabel={`Current model ${curModel}. Tap to change`}
-              >
-                <Icon name="cube-outline" size={12} color={C.accent} />
-                <Text style={s.modelChipText} numberOfLines={1}>{curModel}</Text>
-              </Pressable>
-            ) : null}
-            {/* BUG-111: an active bot silently scoped every NEW chat to its
-                profile — same UI, different memory/skills/credentials/routing.
-                Make the scoping visible and give it one obvious way back.
-                (Hermes-only: bots don't exist in OpenCode mode.) */}
-            {!ocMode && activeBot ? (
-              <Pressable
-                style={({ pressed }) => [s.botChip, pressed && s.btnPressed]}
-                onPress={() =>
-                  showAlert(
-                    `New chats go to ${activeBot}`,
-                    'This bot runs on its own profile: its own memory, skills and credentials. Chats you start now belong to it until you switch back.',
-                    [
-                      { text: 'Stay', style: 'cancel' },
-                      { text: 'Switch back', onPress: () => { void setActiveBot(null) } },
-                    ],
-                  )
+                accessibilityLabel={
+                  ocModelForChip
+                    ? (ocOneShot
+                        ? t('chat.oc.a11yOneShot', { model: ocModelForChip })
+                        : t('chat.oc.a11yThinker', { model: ocModelForChip }))
+                    : (ocOneShot ? t('chat.oc.a11yOneShotDefault') : t('chat.oc.a11yThinkerDefault'))
                 }
+              >
+                <Text style={s.modelChipText} numberOfLines={1}>
+                  {ocOneShot
+                    ? (ocModelForChip ? t('chat.oc.oneShotModel', { model: ocModelForChip }) : t('chat.oc.oneShot'))
+                    : (ocModelForChip ? t('chat.oc.thinkerModel', { model: ocModelForChip }) : t('chat.oc.thinker'))}
+                </Text>
+              </Pressable>
+            ) : null}
+            {!ocMode && curModel ? (
+              <Pressable
+                style={({ pressed }) => [s.modelChip, pressed && s.btnPressed]}
+                onPress={() => setModelPickerOpen(true)}
                 hitSlop={6}
                 accessibilityRole="button"
-                accessibilityLabel={`Bot ${activeBot} is active — new chats use this bot. Tap to switch back to the default agent.`}
+                accessibilityLabel={t('chat.model.a11y', { model: curModel })}
               >
-                <Icon name="people-outline" size={12} color={C.accent} />
-                <Text style={s.botChipText} numberOfLines={1}>{activeBot}</Text>
+                <Text style={s.modelChipText} numberOfLines={1}>{curModel}</Text>
               </Pressable>
             ) : null}
           </>
         }
       >
         <Animated.View style={[s.root, kbPad]}>
+          {/* Active-bot profile chip (BUG-111): the chat's bot scoping is the
+              mockup's pill row under the header — green dot, "Bot:", @name, and
+              the one obvious way back. Hermes-only: bots don't exist in OC. */}
+          {!ocMode && activeBot ? (
+            <View style={[s.botRow, { flexDirection: dir.row }]}>
+              <Pressable
+                style={({ pressed }) => [s.botPill, { flexDirection: dir.row }, pressed && s.btnPressed]}
+                onPress={() =>
+                  void showAlert(
+                    t('chat.bot.alertTitle', { name: activeBot }),
+                    t('chat.bot.alertBody'),
+                    [
+                      { text: t('chat.bot.stay'), style: 'cancel' },
+                      { text: t('chat.bot.switchBackAction'), onPress: () => { void setActiveBot(null) } },
+                    ],
+                  )
+                }
+                accessibilityRole="button"
+                accessibilityLabel={t('chat.bot.a11y', { name: activeBot })}
+              >
+                <Dot kind="green" size={8} />
+                <Txt size={11} color={C.textDim}>{t('chat.bot.label')}</Txt>
+                <Txt size={11} weight="700" numberOfLines={1} style={s.botName}>@{activeBot}</Txt>
+              </Pressable>
+              <Pressable
+                onPress={() => { void setActiveBot(null) }}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={t('chat.bot.switchBackAction')}
+              >
+                <Txt size={11} weight="600" color={C.accent}>{t('chat.bot.switchBack')}</Txt>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {/* Offline / connecting banner (mockup: amberSoft strip + mono RETRY)
+              — the real connectState / retryNow / queued-count machine stays. */}
           {showOfflineBanner ? (
             <Pressable
-              style={({ pressed }) => [s.banner, pressed && s.btnPressed]}
+              style={({ pressed }) => [s.banner, { flexDirection: dir.row }, pressed && s.btnPressed]}
               onPress={() => { void retryNow().catch(() => {}) }}
               accessibilityRole="button"
-              accessibilityLabel="Reconnect"
+              accessibilityLabel={t('chat.offline.reconnectA11y')}
             >
-              <Text style={s.bannerText}>
-                {conn === 'connecting' ? 'Connecting…'
-                  : !everOpen ? 'Starting your agent…'
-                  : `Offline${gerr ? ' — tap to retry' : ''}`}
-                {qb.length ? ` · ${qb.length} queued` : ''}
+              <Text style={[s.bannerText, rtlText]} numberOfLines={2}>
+                {conn === 'connecting'
+                  ? t('chat.offline.connecting')
+                  : !everOpen
+                    ? t('chat.offline.starting')
+                    : gerr
+                      ? t('chat.offline.retry')
+                      : t('chat.offline.plain')}
+                {qb.length ? ` · ${t('chat.offline.queued', { n: qb.length })}` : ''}
               </Text>
+              <Txt size={10} mono={englishRetry} ltr={englishRetry} color={C.amber}>{t('chat.offline.retryShort')}</Txt>
             </Pressable>
           ) : null}
 
@@ -1229,11 +1295,15 @@ export default function Chat() {
               keeps the cached transcript readable offline in the meantime. */}
           {banner ? (
             <Pressable
-              style={({ pressed }) => [s.banner, pressed && s.btnPressed]}
+              style={({ pressed }) => [s.banner, { flexDirection: dir.row }, pressed && s.btnPressed]}
               onPress={() => banner.retry?.()}
-              accessibilityLabel={banner.retry ? 'Retry' : undefined}
+              accessibilityRole="button"
+              accessibilityLabel={banner.retry ? t('chat.offline.retryA11y') : undefined}
             >
-              <Text style={s.bannerText}>{banner.text}</Text>
+              <Text style={[s.bannerText, rtlText]} numberOfLines={2}>{banner.text}</Text>
+              {banner.retry ? (
+                <Txt size={10} mono={englishRetry} ltr={englishRetry} color={C.amber}>{t('chat.offline.retryShort')}</Txt>
+              ) : null}
             </Pressable>
           ) : null}
 
@@ -1242,38 +1312,6 @@ export default function Chat() {
               flows underneath him while scrolling, and the paddingTop reserve
               below keeps the oldest messages clear of him at the top rest. */}
           <View style={s.listWrap}>
-          {S.trayHeader && ocMode ? (
-            // Tray keeps a single symmetric row (menu | centered title |
-            // status), so the thinker chip floats here in OpenCode mode —
-            // mirrored from Moch, who owns the right corner. Messages scroll
-            // under it like they do under him; the list's top reserve keeps
-            // both clear at rest.
-            <Pressable
-              style={({ pressed }) => [s.modelChip, s.modelFloatChip, pressed && s.btnPressed]}
-              onPress={() => setModelPickerOpen(true)}
-              hitSlop={6}
-              accessibilityRole="button"
-              accessibilityLabel={ocOneShot ? `OpenCode one-shot${ocModelForChip ? `, model ${ocModelForChip}` : ''}. Tap to change` : `OpenCode thinker, model ${ocModelForChip || 'default'}. Tap to change`}
-            >
-              <Icon name="cube-outline" size={12} color={C.accent} />
-              <Text style={s.modelChipText} numberOfLines={1}>{ocOneShot ? `One-shot${ocModelForChip ? ` · ${ocModelForChip}` : ''}` : `OpenCode${ocModelForChip ? ` · ${ocModelForChip}` : ''}`}</Text>
-            </Pressable>
-          ) : S.trayHeader && !ocMode && curModel ? (
-            // Tray keeps a single symmetric row (menu | centered title |
-            // status), so the model chip floats here — mirrored from Moch,
-            // who owns the right corner. Messages scroll under it like they
-            // do under him; the list's top reserve keeps both clear at rest.
-            <Pressable
-              style={({ pressed }) => [s.modelChip, s.modelFloatChip, pressed && s.btnPressed]}
-              onPress={() => setModelPickerOpen(true)}
-              hitSlop={6}
-              accessibilityRole="button"
-              accessibilityLabel={`Current model ${curModel}. Tap to change`}
-            >
-              <Icon name="cube-outline" size={12} color={C.accent} />
-              <Text style={s.modelChipText} numberOfLines={1}>{curModel}</Text>
-            </Pressable>
-          ) : null}
           <FlatList
             ref={listRef}
             // Keyed by STORED id: a real chat swap mounts a clean list (no
@@ -1332,56 +1370,67 @@ export default function Chat() {
                 // resume over a slow link) must never look like a brand-new
                 // chat — the starters are ONLY for genuinely empty ones.
                 <View style={s.booting}>
-                  <ActivityIndicator color={C.accent} />
-                  <Text style={s.bootingText}>Loading chat…</Text>
+                  <Spinner />
+                  <Txt size={12} color={C.textFaint}>{t('chat.loading')}</Txt>
                 </View>
               ) : (
+                // Empty state (mockup case 1): centered MochiMark 68, title,
+                // subtitle, then the four starter cards. The data/logic is the
+                // original STARTERS array — only the visual language changed.
                 <View style={s.empty}>
-                  {STARTERS.map((st) => (
-                    <Pressable
-                      key={st.label}
-                      style={({ pressed }) => [s.starter, pressed && s.starterPressed]}
-                      onPress={() => {
-                        // BUG-043: the slash palette only renders while the
-                        // composer is focused — the starter must focus it or
-                        // the user stares at a lone "/" with no catalog.
-                        if (st.label === 'Browse slash commands') {
-                          updateInput('/')
-                          inputRef.current?.focus()
-                        } else updateInput(st.label)
-                      }}
-                      accessibilityLabel={st.label}
-                    >
-                      <Icon name={st.icon} size={19} color={C.textDim} />
-                      <Text style={s.starterText}>{st.label}</Text>
-                    </Pressable>
-                  ))}
+                  <MochiMark size={68} />
+                  <Txt size={16} weight="800" center style={s.emptyTitle}>{t('chat.empty.title')}</Txt>
+                  <Txt size={12} color={C.textDim} center style={s.emptySubtitle}>{t('chat.empty.subtitle')}</Txt>
+                  <View style={s.starterList}>
+                    {STARTERS.map((st) => (
+                      <Pressable
+                        key={st.key}
+                        style={({ pressed }) => [s.starter, { flexDirection: dir.row }, pressed && s.starterPressed]}
+                        onPress={() => {
+                          // BUG-043: the slash palette only renders while the
+                          // composer is focused — the starter must focus it or
+                          // the user stares at a lone "/" with no catalog.
+                          if (st.slash) {
+                            updateInput('/')
+                            inputRef.current?.focus()
+                          } else updateInput(t(st.key))
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel={t(st.key)}
+                      >
+                        <Text style={[s.starterText, rtlText]} numberOfLines={2}>{t(st.key)}</Text>
+                        <Icon name={dir.icon.forward} size={14} color={C.accent} />
+                      </Pressable>
+                    ))}
+                  </View>
                 </View>
               )
             }
           />
 
-          {/* Run status — quiet, above the composer. Reasoning lives on the
-              message itself now (collapsed "Thinking" block), not here. While
-              the turn runs the tool rows show live; once it ends the log
-              collapses to one tappable line so a finished turn stops eating
-              screen space. */}
+          {/* Tool log + todos — quiet, above the composer. Reasoning lives on
+              the message itself (dashed thinking pill), not here. While the
+              turn runs the tool rows show live; once it ends the log collapses
+              to one tappable line so a finished turn stops eating screen
+              space. */}
           {(tls.length > 0 || td.length > 0) ? (
             <View style={s.runFooter}>
               {busy ? (
                 <>
-                  {tls.slice(-3).map((t: ToolItem) => <ToolRow key={t.id} t={t} />)}
-                  {tls.length > 3 ? <Text style={s.moreTools}>+{tls.length - 3} more</Text> : null}
+                  {tls.slice(-3).map((tool: ToolItem) => <ToolRow key={tool.id} t={tool} />)}
+                  {tls.length > 3 ? (
+                    <Txt size={11} color={C.textFaint} style={s.moreTools}>{t('chat.tools.more', { n: tls.length - 3 })}</Txt>
+                  ) : null}
                 </>
               ) : tls.length > 0 && !toolsOpen ? (
                 <Pressable
-                  style={({ pressed }) => [s.toolsToggle, pressed && s.btnPressed]}
+                  style={({ pressed }) => [s.toolsToggle, { flexDirection: dir.row }, pressed && s.btnPressed]}
                   onPress={() => setToolsOpen(true)}
                   accessibilityRole="button"
-                  accessibilityLabel={`Show ${tls.length} tool calls: ${toolSummary}`}
+                  accessibilityLabel={t('chat.tools.showA11y', { n: tls.length, summary: toolSummary })}
                 >
-                  <Icon name="terminal-outline" size={11} color={C.accent} />
-                  <Text style={s.toolsToggleText} numberOfLines={1}>
+                  <Icon name="terminal-outline" size={12} color={C.accent} />
+                  <Text style={[s.toolsToggleText, rtlText]} numberOfLines={1}>
                     {toolSummary}
                   </Text>
                   <Icon name="chevron-up" size={12} color={C.textFaint} />
@@ -1389,31 +1438,33 @@ export default function Chat() {
               ) : tls.length > 0 ? (
                 <>
                   <Pressable
-                    style={({ pressed }) => [s.toolsToggle, pressed && s.btnPressed]}
+                    style={({ pressed }) => [s.toolsToggle, { flexDirection: dir.row }, pressed && s.btnPressed]}
                     onPress={() => setToolsOpen(false)}
                     accessibilityRole="button"
-                    accessibilityLabel="Hide tool calls"
+                    accessibilityLabel={t('chat.tools.hideA11y')}
                   >
-                    <Icon name="terminal-outline" size={11} color={C.accent} />
-                    <Text style={s.toolsToggleText} numberOfLines={1}>
+                    <Icon name="terminal-outline" size={12} color={C.accent} />
+                    <Text style={[s.toolsToggleText, rtlText]} numberOfLines={1}>
                       {toolSummary}
                     </Text>
                     <Icon name="chevron-down" size={12} color={C.textFaint} />
                   </Pressable>
                   <ScrollView style={s.toolsOpenList} keyboardShouldPersistTaps="handled">
-                    {tls.map((t: ToolItem) => <ToolRow key={t.id} t={t} />)}
+                    {tls.map((tool: ToolItem) => <ToolRow key={tool.id} t={tool} />)}
                   </ScrollView>
                 </>
               ) : null}
               {td.length > 0 ? (
                 <View style={s.todos}>
                   {/* BUG-077: show what was cut instead of silently dropping. */}
-                  {td.slice(0, 4).map((t, i) => (
-                    <Text key={i} style={s.todo}>
-                      {t.done ? '✓' : '○'} {t.text}
+                  {td.slice(0, 4).map((todo, i) => (
+                    <Text key={i} style={[s.todo, rtlText]}>
+                      {todo.done ? '✓' : '○'} {todo.text}
                     </Text>
                   ))}
-                  {td.length > 4 ? <Text style={s.todoMore}>+{td.length - 4} more</Text> : null}
+                  {td.length > 4 ? (
+                    <Text style={s.todoMore}>{t('chat.todo.more', { n: td.length - 4 })}</Text>
+                  ) : null}
                 </View>
               ) : null}
             </View>
@@ -1425,30 +1476,33 @@ export default function Chat() {
                 onPress={jumpToLatest}
                 hitSlop={4}
                 accessibilityRole="button"
-                accessibilityLabel="Jump to latest"
+                accessibilityLabel={t('chat.jumpLatestA11y')}
               >
               <Icon name="arrow-down" size={19} color={C.text} />
             </Pressable>
           ) : null}
 
-          {/* Slash palette — only while the composer is focused. The rows'
-              ScrollView is keyboardShouldPersistTaps="handled", so tapping a
-              row never blurs the input and can never race this gate. */}
+          {/* Slash palette — the mockup's elevated card. Only while the
+              composer is focused: the rows' ScrollView is
+              keyboardShouldPersistTaps="handled", so tapping a row never blurs
+              the input and can never race this gate. */}
           {composerFocused && slashItems && slashItems.length > 0 ? (
             <View style={s.slashPanel}>
-              <View style={s.slashHead}>
-                <Icon name="terminal-outline" size={13} color={C.accent} />
-                <Text style={s.slashHeadText}>
-                  {cmdCount} command{cmdCount === 1 ? '' : 's'} · {skillCount} skill{skillCount === 1 ? '' : 's'}
+              <View style={[s.slashHead, { flexDirection: dir.row }]}>
+                <Txt size={10} weight="700" color={C.textFaint} style={s.slashKicker}>{t('chat.slash.kicker')}</Txt>
+                <Text style={[s.slashHint, rtlText]}>
+                  {t('chat.slash.counts', {
+                    commands: cmdCount === 1 ? t('chat.cmd.commandOne') : t('chat.cmd.commandMany', { n: cmdCount }),
+                    skills: skillCount === 1 ? t('chat.cmd.skillOne') : t('chat.cmd.skillMany', { n: skillCount }),
+                  })}
                 </Text>
-                <Text style={s.slashHint}>tap to fill</Text>
               </View>
               {/* BUG-054: virtualized — the registry can hold 120+ rows and an
                   unvirtualized ScrollView mounted every one of them on each
                   keystroke's filtered list. */}
               <FlatList
                 keyboardShouldPersistTaps="handled"
-                style={{ maxHeight: 320 }}
+                style={s.slashList}
                 data={slashItems}
                 keyExtractor={(it, i) => `${it.kind ?? 'c'}-${it.text.startsWith('/') ? it.text : `/${it.text}`}-${i}`}
                 renderItem={({ item: it }) => {
@@ -1459,27 +1513,24 @@ export default function Chat() {
                   const insertable = it.text.startsWith('/') ? it.text : `/${it.text}`
                   return (
                     <Pressable
-                      style={({ pressed }) => [s.slashRow, pressed && s.slashRowPressed]}
+                      style={({ pressed }) => [s.slashRow, { flexDirection: dir.row }, pressed && s.slashRowPressed]}
                       onPress={() => {
                         updateInput(insertable)
                         setSlashItems(null)
                       }}
-                      accessibilityLabel={`${label}, ${isSkill ? 'skill' : 'command'}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('chat.slash.a11y', {
+                        label,
+                        kind: isSkill ? t('chat.slash.skill') : t('chat.slash.command'),
+                      })}
                     >
-                      <Icon
-                        name={isSkill ? 'sparkles-outline' : 'terminal-outline'}
-                        size={14}
-                        color={isSkill ? C.accent : C.textFaint}
-                      />
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.slashName}>{label}</Text>
-                        {it.meta ? (
-                          <Text style={s.slashMeta} numberOfLines={2}>
-                            {it.meta}
-                          </Text>
-                        ) : null}
-                      </View>
-                      <Text style={s.slashKind}>{isSkill ? 'skill' : 'cmd'}</Text>
+                      <Txt size={12} weight="700" color={C.accent} mono ltr numberOfLines={1} style={s.slashName}>{label}</Txt>
+                      <Text
+                        style={[s.slashMeta, { textAlign: dir.rtl ? 'left' : 'right' }]}
+                        numberOfLines={1}
+                      >
+                        {it.meta ?? (isSkill ? t('chat.slash.skill') : '')}
+                      </Text>
                     </Pressable>
                   )
                 }}
@@ -1499,18 +1550,22 @@ export default function Chat() {
             <View>
               <View style={s.sheet}>
                 <Pressable
-                  style={({ pressed }) => [s.foreignHead, pressed && s.btnPressed]}
+                  style={({ pressed }) => [s.foreignHead, { flexDirection: dir.row }, pressed && s.btnPressed]}
                   onPress={() => setForeignOpen(!foreignOpen)}
                   accessibilityRole="button"
-                  accessibilityLabel={`${tr('chat.foreign.title')} — ${foreign.length} question${foreign.length > 1 ? 's' : ''}. ${foreignOpen ? 'Hide' : 'Show'}`}
+                  accessibilityLabel={t('chat.foreign.a11y', {
+                    title: t('chat.foreign.title'),
+                    count: t('chat.foreign.count', { n: foreign.length }),
+                    action: foreignOpen ? t('chat.foreign.hide') : t('chat.foreign.show'),
+                  })}
                 >
                   <Icon name="git-network-outline" size={15} color={C.amber} />
                   <Text style={[s.sheetTitle, s.foreignTitle]} numberOfLines={2}>
-                    {tr('chat.foreign.title')} ({foreign.length})
+                    {t('chat.foreign.title')} ({foreign.length})
                   </Text>
                   <Icon name={foreignOpen ? 'chevron-down' : 'chevron-up'} size={14} color={C.textFaint} />
                 </Pressable>
-                {!foreignOpen ? <Text style={s.sheetDesc}>{tr('chat.foreign.hint')}</Text> : null}
+                {!foreignOpen ? <Text style={[s.sheetDesc, rtlText]}>{t('chat.foreign.hint')}</Text> : null}
               </View>
               {foreignOpen ? foreign.map((f) => <View key={f.id}>{questionCard(f)}</View>) : null}
             </View>
@@ -1521,66 +1576,64 @@ export default function Chat() {
               chat it blocks, so a quick switch away hides it. */}
           {ocMode && ocPerm && ocPerm.sid === sid ? (
             <View style={s.sheet}>
-              <View style={s.sheetHead}>
+              <View style={[s.sheetHead, { flexDirection: dir.row }]}>
                 <Icon name="shield-checkmark-outline" size={15} color={C.amber} />
-                <Text style={s.sheetTitle}>OpenCode wants to run</Text>
+                <Txt size={13} weight="800" style={s.sheetTitle}>{t('chat.ocPerm.title')}</Txt>
               </View>
               <ScrollView style={s.sheetScroll} nestedScrollEnabled>
-                {ocPerm.req.message ? <Text style={s.sheetKicker}>{ocPerm.req.message}</Text> : null}
-                <Text style={s.sheetBody} selectable>{ocPerm.req.action || 'a tool'}</Text>
+                {ocPerm.req.message ? (
+                  <Txt size={10.5} weight="700" color={C.textFaint} mono ltr style={s.sheetKicker}>{ocPerm.req.message}</Txt>
+                ) : null}
+                <Text style={[s.sheetBody, rtlText]} selectable>{ocPerm.req.action || t('chat.ocPerm.toolFallback')}</Text>
                 {ocPerm.req.resources.length ? (
-                  <Text style={s.sheetDesc}>{ocPerm.req.resources.join(', ')}</Text>
+                  <Text style={[s.sheetDesc, rtlText]}>{ocPerm.req.resources.join(', ')}</Text>
                 ) : null}
               </ScrollView>
-              <View style={s.sheetRow}>
-                <Pressable
-                  style={({ pressed }) => [s.sheetBtn, { backgroundColor: C.accent }, pressed && s.btnPressed]}
+              <View style={[s.sheetRow, { flexDirection: dir.row }]}>
+                <PrimaryBtn
+                  label={t('chat.ocPerm.allowOnce')}
+                  accessibilityLabel={t('chat.ocPerm.allowOnce')}
                   onPress={() => {
                     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
                     void ocReplyPermission(ocPerm.sid, 'once')
                   }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Allow once"
-                >
-                  <Text style={[s.sheetBtnText, { color: C.onAccent }]}>Allow once</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [s.sheetBtn, { backgroundColor: C.accentDark }, pressed && s.btnPressed]}
+                  style={s.sheetBtn}
+                />
+                <PrimaryBtn
+                  label={t('chat.ocPerm.allowAlways')}
+                  accessibilityLabel={t('chat.ocPerm.allowAlways')}
                   onPress={() => {
                     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
                     void ocReplyPermission(ocPerm.sid, 'always')
                   }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Always allow"
-                >
-                  <Text style={[s.sheetBtnText, { color: C.onAccent }]}>Always allow</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [s.sheetBtn, s.denyBtn, pressed && s.btnPressed]}
+                  style={[s.sheetBtn, { backgroundColor: C.accentDark }]}
+                />
+                <GhostBtn
+                  label={t('chat.approval.deny')}
+                  accessibilityLabel={t('chat.approval.deny')}
                   onPress={() => {
                     // Refusing the agent is a warning, not a success — same
                     // haptic language as the hermes Deny (BUG-050).
                     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
                     void ocReplyPermission(ocPerm.sid, 'reject')
                   }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Deny"
-                >
-                  <Text style={[s.sheetBtnText, { color: C.red }]}>Deny</Text>
-                </Pressable>
+                  style={[s.sheetBtn, s.denyBtn]}
+                  textStyle={s.denyText}
+                />
               </View>
             </View>
           ) : null}
 
-          {/* ── Composer: rounded pill, like ChatGPT ── */}
+          {/* ── Composer: the mockup's rounded pill, safe-area bottom owner ── */}
           <Animated.View style={[s.composerWrap, composerPad]}>
             {queued.length > 0 ? (
               <View style={s.queueStrip}>
-                <View style={s.queueHead}>
-                  <Icon name="time-outline" size={12} color={C.accent} />
-                  <Text style={s.queueHeadText}>
-                    {queued.length === 1 ? '1 message' : `${queued.length} messages`} queued ·{' '}
-                    {busy ? 'sends when this reply finishes' : online ? 'sending…' : 'waiting for connection'}
+                <View style={[s.queueHead, { flexDirection: dir.row }]}>
+                  <Txt size={10} weight="700" color={C.amber} style={s.queueKicker}>
+                    {t('chat.queue.kicker', { n: queued.length })}
+                  </Txt>
+                  <Text style={[s.queueStatus, rtlText]} numberOfLines={1}>
+                    {busy ? t('chat.queue.whenBusy') : online ? t('chat.queue.sending') : t('chat.queue.waiting')}
                   </Text>
                 </View>
                 {queued.slice(0, 3).map((q) => {
@@ -1602,7 +1655,10 @@ export default function Chat() {
                         // (the queued item itself is already gone either way).
                         const room = Math.max(0, MAX_ATTACHMENTS - cur.length)
                         if (atts.length > room) {
-                          showAlert('Attachment limit', `Only ${room} of ${atts.length} attachments fit this message.`)
+                          alertOk(
+                            t('chat.alert.attachLimitTitle'),
+                            t('chat.alert.attachLimitPartial', { n: room, total: atts.length }),
+                          )
                         }
                         return [...cur, ...atts.slice(0, room)]
                       })
@@ -1613,17 +1669,20 @@ export default function Chat() {
                     removeQueued(storedId, q.id)
                   }
                   return (
-                  <View key={q.id} style={s.queueRow}>
+                  <View key={q.id} style={[s.queueRow, { flexDirection: dir.row }]}>
                     <Pressable
                       style={({ pressed }) => [s.queueMsg, pressed && s.btnPressed]}
                       onPress={editQueued}
-                      accessibilityLabel={`Edit queued message: ${q.text.slice(0, 60)}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('chat.queue.editA11y', { text: q.text.slice(0, 60) })}
                     >
-                      <Text style={s.queueMsgText} numberOfLines={1}>{q.text || '(attachment)'}</Text>
+                      <Text style={[s.queueMsgText, rtlText]} numberOfLines={1}>
+                        {q.text || t('chat.queue.attachment')}
+                      </Text>
                     </Pressable>
                     {busy && q.text.trim() ? (
-                      <Pressable
-                        style={({ pressed }) => [s.queueAct, pressed && s.btnPressed]}
+                      <Pill
+                        kind="accent"
                         onPress={() => {
                           const atts = takeQueuedAttachments(q.id)
                           removeQueued(storedId, q.id)
@@ -1639,25 +1698,27 @@ export default function Chat() {
                             }
                           })
                         }}
-                        hitSlop={8}
-                        accessibilityLabel="Send this now as a steer"
+                        accessibilityLabel={t('chat.queue.steerA11y')}
+                        style={s.queueSteerPill}
                       >
-                        <Icon name="flash-outline" size={14} color={C.accent} />
-                      </Pressable>
+                        {t('chat.queue.sendNow')}
+                      </Pill>
                     ) : null}
                     <Pressable
                       style={({ pressed }) => [s.queueAct, pressed && s.btnPressed]}
                       onPress={dropQueued}
                       hitSlop={8}
                       accessibilityRole="button"
-                      accessibilityLabel="Remove queued message"
+                      accessibilityLabel={t('chat.queue.removeA11y')}
                     >
                       <Icon name="close" size={14} color={C.textDim} />
                     </Pressable>
                   </View>
                   )
                 })}
-                {queued.length > 3 ? <Text style={s.queueMore}>+{queued.length - 3} more</Text> : null}
+                {queued.length > 3 ? (
+                  <Text style={s.queueMore}>{t('chat.queue.more', { n: queued.length - 3 })}</Text>
+                ) : null}
               </View>
             ) : null}
 
@@ -1682,53 +1743,75 @@ export default function Chat() {
               </ScrollView>
             ) : null}
 
-            {/* Steer toggle lives ABOVE the pill: below it, its appearance
-                pushed the composer up (input "floating high" off the bottom)
-                while the safe-area pad stayed under the chip. Hermes-only —
-                session.redirect/steer are gateway RPCs an OpenCode chat never
-                speaks. */}
-            {busy && !ocMode ? (
-              <Pressable
-                style={({ pressed }) => [s.steerChip, steerMode && s.steerChipOn, pressed && s.btnPressed]}
-                onPress={() => setSteerMode(!steerMode)}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel={steerMode ? 'Steer mode on' : 'Steer mode'}
-              >
-                <Icon name="git-branch-outline" size={12} color={steerMode ? C.onAccent : C.textDim} />
-                <Text style={[s.steerText, steerMode && { color: C.onAccent }]}>Steer</Text>
-              </Pressable>
+            {/* Run status line (mockup): what the agent is doing + the steer
+                lever. Hermes-only — session.redirect/steer are gateway RPCs an
+                OpenCode chat never speaks. */}
+            {busy && !ocMode && !recording ? (
+              <View style={[s.runStatus, { flexDirection: dir.row }]}>
+                <Text style={[s.runStatusText, rtlText]} numberOfLines={1}>
+                  {tls.length
+                    ? t('chat.run.running', { name: tls[tls.length - 1].name })
+                    : t('chat.run.working')}
+                </Text>
+                <Pressable
+                  onPress={() => setSteerMode(!steerMode)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={steerMode ? t('chat.steer.modeOnA11y') : t('chat.steer.modeA11y')}
+                  style={({ pressed }) => [pressed && s.btnPressed]}
+                >
+                  <Text style={[s.runStatusSteer, steerMode && { color: C.accent }]}>
+                    {steerMode ? t('chat.steer.active') : t('chat.steer.label')}
+                  </Text>
+                </Pressable>
+              </View>
             ) : null}
 
-            <View style={s.composer}>
-              <Pressable
-                style={({ pressed }) => [s.attach, !canAttach && s.attachOff, pressed && s.btnPressed]}
-                onPress={openAttachSheet}
-                disabled={!canAttach}
-                hitSlop={8}
-                accessibilityLabel={canAttach ? 'Add attachment' : steerMode && busy ? 'Attachments unavailable in steer mode' : 'Attachments unavailable offline'}
-              >
-                <Icon name={canAttach ? 'add' : 'add-circle-outline'} size={22} color={canAttach ? C.textDim : C.border} />
-              </Pressable>
+            {recording ? (
+              // The mockup's recording pill replaces the composer while a take
+              // is live: pulsing dot, live waveform, mono timer, Transcribe
+              // (stop+transcribe, the same finishRecording path) and discard.
+              <VoiceRecStrip
+                recorder={recorder}
+                secs={recSecs}
+                onFinish={() => { void finishRecording() }}
+                onCancel={() => { void cancelRecording() }}
+              />
+            ) : (
+              <View style={[s.composer, { flexDirection: dir.row }]}>
+                {/* + attach — a 32px btnTint circle, dimmed while busy/offline. */}
+                <Pressable
+                  style={({ pressed }) => [s.attach, !canAttach && s.attachOff, pressed && s.btnPressed]}
+                  onPress={openAttachSheet}
+                  disabled={!canAttach}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    canAttach
+                      ? t('chat.composer.attachA11y')
+                      : steerMode && busy
+                        ? t('chat.composer.attachSteerLocked')
+                        : t('chat.composer.attachOffline')
+                  }
+                >
+                  <Icon name="add" size={20} color={canAttach ? C.text : C.textFaint} />
+                </Pressable>
 
-              {recording ? (
-                <VoiceRecStrip recorder={recorder} secs={recSecs} onCancel={() => { void cancelRecording() }} />
-              ) : (
                 <TextInput
                   ref={inputRef}
-                  style={s.input}
+                  style={[s.input, { textAlign: dir.textAlign, writingDirection: dir.writingDirection }]}
                   value={input}
                   onChangeText={updateInput}
                   placeholder={
                     isSlashMode
-                      ? 'Filter commands…'
+                      ? t('chat.slash.filterPlaceholder')
                       : voiceState === 'transcribing'
-                        ? 'Transcribing…'
+                        ? t('chat.composer.placeholderTranscribing')
                         : steerMode && busy
-                          ? 'Steer the running task…'
+                          ? t('chat.composer.placeholderSteer')
                           : busy
-                            ? 'Reply — queued until it finishes'
-                            : S.askPlaceholder
+                            ? t('chat.composer.placeholderBusy')
+                            : t('chat.composer.placeholder')
                   }
                   placeholderTextColor={C.textFaint}
                   multiline={Platform.OS !== 'web'}
@@ -1736,50 +1819,53 @@ export default function Chat() {
                   onSubmitEditing={() => { if (Platform.OS === 'web') void send() }}
                   onFocus={() => setComposerFocused(true)}
                   onBlur={() => setComposerFocused(false)}
-                  accessibilityLabel="Message input"
+                  accessibilityLabel={t('chat.composer.a11y')}
                 />
-              )}
 
-              {busy ? (
-                <Pressable
-                  style={({ pressed }) => [s.sendBtn, pressed && s.btnPressed]}
-                  onPress={() => { void stopRun() }}
-                  hitSlop={8}
-                  accessibilityLabel="Stop"
-                >
-                  <Icon name="stop" size={17} color={C.onAccent} />
-                </Pressable>
-              ) : (
-                <Pressable
-                  style={({ pressed }) => [s.iconCircle, recording && s.recOn, pressed && s.btnPressed]}
-                  onPress={toggleRecord}
-                  disabled={!!voiceState}
-                  hitSlop={8}
-                  accessibilityLabel={recording ? `Stop recording (${recSecs}s)` : 'Record voice'}
-                >
-                  {voiceState === 'transcribing' ? (
-                    <ActivityIndicator color={C.textDim} size="small" />
-                  ) : (
-                    // BUG-080: token ink on the accent fill (was a literal).
-                    <Icon name={recording ? 'square' : 'mic-outline'} size={19} color={recording ? C.onAccent : C.textDim} />
-                  )}
-                </Pressable>
-              )}
-
-              <Pressable
-                style={({ pressed }) => [s.sendBtn, !canSend && s.sendOff, pressed && s.btnPressed]}
-                onPress={() => { void send() }}
-                disabled={!canSend}
-                hitSlop={8}
-                accessibilityLabel={steerMode && busy ? 'Send steer' : 'Send message'}
-              >
-                <Icon
-                  name={isSlashMode ? 'return-down-back' : steerMode && busy ? 'bulb' : 'arrow-up'}
-                  size={18}
-                  color={canSend ? C.onAccent : C.textFaint}
-                />
-              </Pressable>
-            </View>
+                {busy ? (
+                  <Pressable
+                    style={({ pressed }) => [s.sendBtn, s.stopBtn, pressed && s.btnPressed]}
+                    onPress={() => { void stopRun() }}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('chat.composer.stopA11y')}
+                  >
+                    <Icon name="stop" size={15} color="#FFFFFF" />
+                  </Pressable>
+                ) : (
+                  <>
+                    <Pressable
+                      style={({ pressed }) => [s.micBtn, pressed && s.btnPressed]}
+                      onPress={toggleRecord}
+                      disabled={!!voiceState}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('chat.composer.recordA11y')}
+                    >
+                      {voiceState === 'transcribing' ? (
+                        <ActivityIndicator color={C.textDim} size="small" />
+                      ) : (
+                        <Icon name="mic-outline" size={17} color={C.textDim} />
+                      )}
+                    </Pressable>
+                    <Pressable
+                      style={({ pressed }) => [s.sendBtn, !canSend && s.sendOff, pressed && s.btnPressed]}
+                      onPress={() => { void send() }}
+                      disabled={!canSend}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel={steerMode && busy ? t('chat.composer.sendSteerA11y') : t('chat.composer.sendA11y')}
+                    >
+                      <Icon
+                        name={isSlashMode ? 'return-down-back' : steerMode && busy ? 'bulb' : 'arrow-up'}
+                        size={17}
+                        color={canSend ? C.onAccent : C.textFaint}
+                      />
+                    </Pressable>
+                  </>
+                )}
+              </View>
+            )}
           </Animated.View>
 
           {/* Interactive pickers — attach sources, /model, options/mixed commands, and the command browser */}
@@ -1848,40 +1934,101 @@ const makeS = () => StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
   // Shared press feedback so every tappable answers on the frame it's hit.
   btnPressed: { opacity: 0.6 },
-  // BUG-017: amberSoft token — the literal was hue-locked to Mocheme and
-  // clashed with Relay's teal band after a theme switch.
-  banner: { backgroundColor: C.amberSoft, paddingVertical: 9, paddingHorizontal: 14 },
-  bannerText: { color: C.amber, fontSize: 12.5, fontWeight: '600', textAlign: 'center' },
-  empty: { paddingHorizontal: 16, paddingTop: 24, gap: 2 },
-  booting: { flex: 1, flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 80 },
-  bootingText: { color: C.textFaint, fontSize: 13.5 },
-  starter: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 44, justifyContent: 'flex-start' },
+
+  // ── Offline / failure banner (mockup: amberSoft strip + mono RETRY) ──────
+  banner: {
+    marginHorizontal: 12,
+    marginBottom: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 11,
+    borderRadius: 11,
+    backgroundColor: C.amberSoft,
+    borderWidth: 1,
+    borderColor: 'rgba(245,165,36,0.35)',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  bannerText: { color: C.amber, fontSize: 11.5, fontWeight: '700', flex: 1, lineHeight: 16 },
+
+  // ── Active-bot chip row under the header (BUG-111) ──────────────────────
+  botRow: {
+    paddingHorizontal: 12,
+    paddingBottom: 6,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+  },
+  botPill: {
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: C.bgCard,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 999,
+    paddingVertical: 3,
+    paddingHorizontal: 9,
+    flexShrink: 1,
+  },
+  botName: { flexShrink: 1 },
+
+  // ── Empty state (mockup: centered MochiMark + starter cards) ────────────
+  booting: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 80 },
+  empty: {
+    flexGrow: 1,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+    paddingVertical: 12,
+  },
+  emptyTitle: { marginTop: 6 },
+  emptySubtitle: { marginTop: 2, marginBottom: 14 },
+  starterList: { width: '100%', gap: 7 },
+  starter: {
+    backgroundColor: C.bgCard,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 13,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    minHeight: 40,
+  },
   starterPressed: { opacity: 0.6 },
-  starterText: { color: C.textDim, fontSize: 15.5, fontWeight: '500' },
-  runFooter: { borderTopWidth: 1, borderTopColor: C.borderSoft, backgroundColor: C.bg, paddingVertical: 4, maxHeight: 190 },
-  moreTools: { color: C.textFaint, fontSize: 11.5, paddingHorizontal: 16, marginTop: 2 },
-  // Collapsed tool-log affordance: a bordered chip (same idiom as the steer
-  // chip) so it reads as a tappable control, not missing UI.
+  starterText: { color: C.text, fontSize: 12.5, fontWeight: '600', flex: 1 },
+
+  // ── Tool log / todos above the composer ─────────────────────────────────
+  runFooter: { paddingHorizontal: 14, paddingVertical: 4, maxHeight: 190 },
+  moreTools: { paddingHorizontal: 2, marginTop: 2 },
   toolsToggle: {
-    flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     alignSelf: 'flex-start',
-    marginHorizontal: 16,
-    marginVertical: 5,
-    maxWidth: '92%',
-    paddingHorizontal: S.radiusChip > 100 ? 14 : 10,
-    height: S.radiusChip > 100 ? 30 : 26,
-    borderRadius: S.radiusChip,
+    maxWidth: '100%',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 11,
     backgroundColor: C.bgCard,
     borderWidth: 1,
     borderColor: C.border,
   },
   toolsToggleText: { color: C.textDim, fontSize: 11.5, fontWeight: '700', flexShrink: 1 },
   toolsOpenList: { maxHeight: 170 },
-  todos: { paddingHorizontal: 16, paddingVertical: 2 },
-  todo: { color: C.textDim, fontSize: 12.5, lineHeight: 18 },
-  todoMore: { color: C.textFaint, fontSize: 12, marginTop: 2 },
+  todos: {
+    backgroundColor: C.bgElev,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 11,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    marginTop: 4,
+    gap: 2,
+  },
+  todo: { color: C.textDim, fontSize: 12, lineHeight: 17 },
+  todoMore: { color: C.textFaint, fontSize: 11, marginTop: 2 },
   fab: {
     position: 'absolute',
     right: 16,
@@ -1895,90 +2042,126 @@ const makeS = () => StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
   },
-  slashPanel: { borderTopWidth: 1, borderTopColor: C.borderSoft, backgroundColor: C.bgElev },
+
+  // ── Slash palette card (mockup: elevated card, uppercase kicker) ────────
+  slashPanel: {
+    marginHorizontal: 12,
+    marginBottom: 6,
+    backgroundColor: C.bgElev,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 13,
+    padding: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  slashHead: {
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+    paddingHorizontal: 6,
+    paddingTop: 2,
+    paddingBottom: 4,
+  },
+  slashKicker: { letterSpacing: 0.75, textTransform: 'uppercase' },
+  slashHint: { color: C.textFaint, fontSize: 10, flexShrink: 1 },
+  slashList: { maxHeight: 320 },
+  slashRow: {
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+    minHeight: 34,
+  },
+  slashRowPressed: { backgroundColor: C.bgHover },
+  slashName: { flexShrink: 0, maxWidth: '54%' },
+  slashMeta: { color: C.textDim, fontSize: 11, flex: 1 },
+
+  // ── Header model chip (mockup: accentSoft stadium, maxWidth 96) ─────────
   modelChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    maxWidth: 148,
-    height: 30,
-    paddingHorizontal: 10,
-    borderRadius: 15,
-    backgroundColor: S.modelChipTint ? C.accentSoft : C.bgCard,
-    borderWidth: 1,
-    borderColor: S.modelChipTint ? C.accentSoft : C.border,
-  },
-  modelChipText: { color: C.textDim, fontSize: 11.5, fontWeight: '700', flexShrink: 1 },
-  // BUG-111 bot chip: same chip vocabulary as the model chip, accent-filled so the
-  // active-bot scoping is unmissable next to it.
-  botChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    maxWidth: 148,
-    height: 30,
-    paddingHorizontal: 10,
-    borderRadius: 15,
+    gap: 4,
+    maxWidth: 96,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 999,
     backgroundColor: C.accentSoft,
-    borderWidth: 1,
-    borderColor: C.accentSoft,
-  },
-  botChipText: { color: C.accent, fontSize: 11.5, fontWeight: '700', flexShrink: 1 },
-  // Header new-chat button: same circle vocabulary as the drawer's other
-  // header controls, so it reads next to the model chip without competing.
-  headerIconBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: C.bgCard,
     borderWidth: 1,
     borderColor: C.border,
   },
-  modelFloatChip: { position: 'absolute', top: 8, left: 12, zIndex: 2 },
-  slashHead: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: C.borderSoft },
-  slashHeadText: { color: C.accent, fontSize: 11, fontWeight: '800', letterSpacing: 0.5, flex: 1 },
-  slashHint: { color: C.textFaint, fontSize: 10.5 },
-  slashRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 8, minHeight: 44 },
-  slashRowPressed: { backgroundColor: C.bgHover },
-  slashName: { color: C.text, fontSize: 14, fontWeight: '600' },
-  slashMeta: { color: C.textFaint, fontSize: 11.5, marginTop: 1, lineHeight: 15 },
-  slashKind: { color: C.textFaint, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
-  // BUG-082: cap the card so a long prompt can never push its own action
-  // row (or the composer) below the fold; the body scrolls instead.
-  sheet: { marginHorizontal: 12, marginBottom: 8, backgroundColor: C.bgElev, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: C.border, maxHeight: '55%', overflow: 'hidden' },
+  modelChipText: {
+    color: C.accent,
+    fontSize: 10.5,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
+
+  // ── Question cards (approval / clarify / sudo / secret) ─────────────────
+  sheet: {
+    marginHorizontal: 12,
+    marginBottom: 8,
+    backgroundColor: C.bgElev,
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    maxHeight: '55%',
+    overflow: 'hidden',
+  },
   // The body shrinks (flexShrink) inside the capped card and scrolls; the
   // action rows after it keep their intrinsic height and stay pinned.
   sheetScroll: { flexShrink: 1 },
-  sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
-  sheetTitle: { color: C.text, fontSize: 13.5, fontWeight: '700' },
-  sheetKicker: { color: C.textFaint, fontSize: 11.5, marginBottom: 4 },
-  sheetBody: { color: C.text, fontSize: 14.5, lineHeight: 21, marginBottom: 12 },
-  sheetDesc: { color: C.textDim, fontSize: 12.5, marginBottom: 10, lineHeight: 18 },
-  // BUG-087: centered text + side padding + single-line labels — with the
-  // default 4-choice set each pill gets ~71dp on a 360dp screen and
-  // 'Always this chat' used to wrap into ragged left-aligned multi-line
-  // pills that read as broken.
-  sheetRow: { flexDirection: 'row', gap: 8 },
+  sheetHead: { alignItems: 'center', gap: 6, marginBottom: 8 },
+  sheetTitle: { color: C.text },
+  sheetKicker: { marginBottom: 4 },
+  sheetBody: { color: C.text, fontSize: 13, lineHeight: 19, marginBottom: 10 },
+  sheetDesc: { color: C.textDim, fontSize: 12, lineHeight: 17, marginBottom: 8 },
+  sheetRow: { gap: 8 },
   // BUG-086 aggregate foreign-question header: same card vocabulary, but the
   // whole header row is the expander tap target.
-  foreignHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  foreignHead: { alignItems: 'center', gap: 6, marginBottom: 4 },
   foreignTitle: { flex: 1 },
-  sheetBtn: { flex: 1, borderRadius: 22, paddingVertical: 11, paddingHorizontal: 8, alignItems: 'center', minHeight: 44, justifyContent: 'center' },
+  sheetBtn: { flex: 1, paddingHorizontal: 8, minHeight: 40 },
+  sheetBtnFull: { width: '100%', marginTop: 8 },
   denyBtn: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: C.red },
-  // BH-000025: the batch Send's waiting state — answered in full restores
-  // the accent CTA above.
-  sheetBtnOff: { backgroundColor: C.inputBg, borderWidth: 1, borderColor: C.border },
-  qHint: { color: C.textFaint, fontSize: 11.5, marginTop: 8, marginBottom: 2, textAlign: 'center' },
-  sheetBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700', textAlign: 'center' },
-  qText: { color: C.text, fontSize: 14.5, marginBottom: 6, lineHeight: 20 },
-  qInput: { backgroundColor: C.bgCard, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 11, color: C.text, fontSize: 15, marginTop: 8, minHeight: 44 },
-  clarifyBtn: { backgroundColor: C.bgCard, borderRadius: 20, paddingVertical: 11, alignItems: 'center', marginTop: 6, minHeight: 44, justifyContent: 'center' },
-  clarifyOn: { backgroundColor: C.accent },
-  clarifyText: { color: C.text, fontSize: 14.5, fontWeight: '600' },
-  clarifyRow: { flexDirection: 'row', gap: 8, marginTop: 10, alignItems: 'center' },
-  miniSend: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center' },
+  denyText: { color: C.red },
+  qHint: { marginTop: 8, marginBottom: 2 },
+  qText: { color: C.text, fontSize: 13, marginBottom: 6, lineHeight: 19 },
+  qInput: {
+    backgroundColor: C.bgCard,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 11,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+    color: C.text,
+    fontSize: 13,
+    marginTop: 8,
+    minHeight: 40,
+  },
+  clarifyBtn: {
+    backgroundColor: C.bgCard,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 11,
+    paddingVertical: 10,
+    alignItems: 'center',
+    marginTop: 6,
+    minHeight: 40,
+    justifyContent: 'center',
+  },
+  clarifyOn: { backgroundColor: C.accent, borderColor: C.accent },
+  clarifyText: { color: C.text, fontSize: 12.5, fontWeight: '600' },
+  clarifyRow: { gap: 8, marginTop: 10, alignItems: 'center' },
+  miniSend: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center' },
+
+  // ── Composer ────────────────────────────────────────────────────────────
   composerWrap: { paddingHorizontal: 12, paddingTop: 6, backgroundColor: C.bg },
   // Positioned box around the transcript that hosts the floating mascot.
   listWrap: { flex: 1 },
@@ -1986,91 +2169,106 @@ const makeS = () => StyleSheet.create({
   // Inverted coordinates: paddingTop (16) is the visual bottom gap above the
   // composer; paddingBottom (156) is the visual top reserve that keeps the
   // oldest message (and short/empty chats via flex-end) clear of floating Moch.
-  listContent: { paddingTop: 16, paddingBottom: 156, flexGrow: 1, justifyContent: 'flex-end' },
+  listContent: { paddingTop: 16, paddingBottom: 156, paddingHorizontal: 14, flexGrow: 1, justifyContent: 'flex-end' },
   // Top-right float for Moch: the absolutely positioned view shrinks to the
   // 144px box (no opposite anchors), so the box is the only touch target and
   // the scroll-to-bottom FAB keeps the bottom-right corner.
   mochFloat: { position: 'absolute', top: 0, right: 12 },
   chipStrip: { maxHeight: 72, marginBottom: 6 },
   composer: {
-    flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 6,
-    backgroundColor: C.bgElev,
-    borderRadius: S.radiusComposer,
-    borderWidth: S.composerBorder,
+    backgroundColor: C.bgCard,
+    borderRadius: 24,
+    borderWidth: 1,
     borderColor: C.border,
-    paddingHorizontal: 8,
-    paddingVertical: S.composerBorder > 1 ? 7 : 6,
+    paddingHorizontal: 6,
+    paddingVertical: 5,
     shadowColor: '#000',
-    shadowOpacity: S.radiusComposer > 26 ? 0.4 : 0,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: S.radiusComposer > 26 ? 8 : 0,
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
   },
   attach: {
-    width: S.sendSize,
-    height: S.sendSize,
-    borderRadius: S.sendSize / 2,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: C.btnTint,
+    flexShrink: 0,
   },
-  attachOff: { opacity: 0.4 },
-  input: { flex: 1, color: C.text, fontSize: 16, maxHeight: 110, minHeight: 34, paddingTop: 7, paddingBottom: 7, paddingHorizontal: 4 },
-  iconCircle: {
-    width: S.sendSize,
-    height: S.sendSize,
-    borderRadius: S.sendSize / 2,
+  attachOff: { opacity: 0.45 },
+  input: {
+    flex: 1,
+    color: C.text,
+    fontSize: 13,
+    lineHeight: 18,
+    maxHeight: 110,
+    minHeight: 32,
+    paddingTop: 7,
+    paddingBottom: 7,
+    paddingHorizontal: 4,
+  },
+  micBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: C.btnTint,
+    flexShrink: 0,
   },
-  recOn: { backgroundColor: C.red },
   sendBtn: {
-    width: S.sendSize,
-    height: S.sendSize,
-    borderRadius: S.sendSize / 2,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: C.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: S.radiusComposer > 26 ? 0.35 : 0,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: S.radiusComposer > 26 ? 5 : 0,
+    flexShrink: 0,
   },
-  sendOff: { backgroundColor: C.bgCard },
-  steerChip: {
-    flexDirection: 'row',
+  stopBtn: { backgroundColor: C.red },
+  sendOff: { backgroundColor: C.bgHover },
+
+  // Run status line (mockup: accent "● Running tool:" + mono steer lever).
+  runStatus: {
+    paddingVertical: 3,
+    paddingHorizontal: 16,
+    // composerWrap already pads 12px to the screen edge — escape that gutter so
+    // the net inset stays the mockup's 16px rather than stacking to 28px.
+    marginHorizontal: -12,
     alignItems: 'center',
-    gap: 4,
-    alignSelf: 'center',
-    // Above the pill: spacing hangs below the chip (gap to the pill), so the
-    // pill itself stays pinned to the safe-area bottom.
-    marginBottom: 6,
-    paddingHorizontal: S.radiusChip > 100 ? 14 : 10,
-    height: S.radiusChip > 100 ? 28 : 26,
-    borderRadius: S.radiusChip,
-    backgroundColor: C.bgCard,
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 4,
   },
-  steerChipOn: { backgroundColor: C.accent },
-  steerText: { color: C.textDim, fontSize: 11.5, fontWeight: '700' },
+  runStatusText: { color: C.accent, fontSize: 11, fontWeight: '600', flexShrink: 1 },
+  runStatusSteer: {
+    color: C.textDim,
+    fontSize: 10,
+    fontWeight: '700',
+    fontFamily: Platform.select({ android: 'monospace', ios: 'Menlo', default: 'monospace' }),
+  },
+
+  // ── Queued-sends strip (mockup: bgElev card, amber kicker, Send now) ────
   queueStrip: {
     backgroundColor: C.bgElev,
-    borderRadius: 16,
+    borderRadius: 11,
     borderWidth: 1,
     borderColor: C.border,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 8,
     marginBottom: 6,
     gap: 4,
   },
-  queueHead: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  queueHeadText: { color: C.textDim, fontSize: 11, fontWeight: '700' },
-  queueRow: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 30 },
+  queueHead: { alignItems: 'center', justifyContent: 'space-between', gap: 6 },
+  queueKicker: { letterSpacing: 0.75, textTransform: 'uppercase' },
+  queueStatus: { color: C.textFaint, fontSize: 10, flexShrink: 1 },
+  queueRow: { alignItems: 'center', gap: 6, minHeight: 30 },
   queueMsg: { flex: 1, justifyContent: 'center' },
-  queueMsgText: { color: C.text, fontSize: 13.5, lineHeight: 18 },
-  queueAct: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  queueMore: { color: C.textFaint, fontSize: 11, paddingLeft: 2 },
+  queueMsgText: { color: C.text, fontSize: 11.5, fontWeight: '500', lineHeight: 16 },
+  queueAct: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  queueSteerPill: { paddingVertical: 2, paddingHorizontal: 8 },
+  queueMore: { color: C.textFaint, fontSize: 10.5, paddingHorizontal: 2 },
 })

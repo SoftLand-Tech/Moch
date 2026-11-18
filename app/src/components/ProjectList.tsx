@@ -6,6 +6,12 @@
  * `projects.*` RPCs. "All projects" is the default bucket — `active_id == null`
  * on the wire, never a made-up id.
  *
+ * Presentation follows the redesign mockup's Projects block
+ * (`renderSidebarDrawer`): a colored 8dp dot, a 12/600 name, a mono count, and
+ * the active row washed in `accentSoft` with a hairline border; "+ New
+ * project" is an accent text link. The section kicker is rendered by the
+ * Sidebar (this list is its body), matching the mockup's one-kicker layout.
+ *
  * The long-press sheet (Rename / Set as default / Archive / Delete) and the
  * new/rename/delete dialogs reuse the drawer's dialog language from Sidebar
  * (`makeDialogS`) rather than inventing a second one: same card, same buttons,
@@ -22,7 +28,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from 'react-native'
@@ -32,10 +37,10 @@ import {
 // proven bottom-sheet variant.
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { MaterialCommunityIcons } from '@expo/vector-icons'
-import { Icon } from './Icon'
 import { useStore } from '@nanostores/react'
 import { C, useStyles } from '../lib/theme'
-import { localeAtom, tr } from '../lib/strings'
+import { localeAtom, tr, useDir } from '../lib/strings'
+import { Txt } from './ui'
 import { makeDialogS } from './Sidebar'
 import { projectActions, type ProjectRow } from '../lib/workspace'
 
@@ -87,6 +92,7 @@ export function ProjectList({
 }: ProjectListProps) {
   const s = useStyles(makeS)
   const d = useStyles(makeDialogS)
+  const dir = useDir()
   // Locale switches must re-render the list's copy.
   useStore(localeAtom)
 
@@ -191,6 +197,13 @@ export function ProjectList({
 
   // The default (Home) bucket is the "All projects" row, never a row of its own.
   const rows = useMemo(() => projects.filter((p) => !p.isNoProject), [projects])
+  // The mockup puts a count on every row — "All projects" totals the tree's
+  // per-project session counts (the Home bucket is included: its node counts
+  // the sessions no project owns).
+  const allCount = useMemo(
+    () => projects.reduce((n, p) => n + (Number.isFinite(p.sessionCount) ? p.sessionCount : 0), 0),
+    [projects],
+  )
   const allSelected = activeProjectId == null
 
   // Once closed, the sheet keeps its last project for the exit animation.
@@ -207,32 +220,33 @@ export function ProjectList({
 
   return (
     <View style={s.root}>
-      <View style={s.headerRow}>
-        <Text style={s.header} numberOfLines={1}>{tr('sidebar.projects')}</Text>
-        <Pressable
-          style={({ pressed }) => [s.headerAdd, pressed && s.pressed]}
-          onPress={openNew}
-          hitSlop={8}
-          accessibilityLabel={tr('sidebar.newProject')}
-        >
-          <Icon name="add" size={16} color={C.textDim} />
-        </Pressable>
-      </View>
-
       <Pressable
-        style={({ pressed }) => [s.row, allSelected && s.rowOn, pressed && s.rowPressed]}
+        style={({ pressed }) => [
+          s.row,
+          { flexDirection: dir.row },
+          allSelected && s.rowOn,
+          pressed && s.rowPressed,
+        ]}
         onPress={() => onSelect(null)}
         accessibilityRole="button"
         accessibilityState={{ selected: allSelected }}
         accessibilityLabel={tr('sidebar.allProjects')}
       >
-        <View style={[s.dot, { backgroundColor: allSelected ? C.accent : C.textFaint }]} />
-        <Text style={[s.name, allSelected && s.nameOn]} numberOfLines={1}>
-          {tr('sidebar.allProjects')}
-        </Text>
-        {allSelected ? (
-          <Text style={s.caption} numberOfLines={1}>{tr('sidebar.personal')}</Text>
-        ) : null}
+        <View style={[s.rowMain, { flexDirection: dir.row }]}>
+          <View style={[s.dot, { backgroundColor: allSelected ? C.accent : C.textFaint }]} />
+          <Txt
+            size={12}
+            weight="600"
+            color={allSelected ? C.text : C.textDim}
+            numberOfLines={1}
+            style={s.name}
+          >
+            {tr('sidebar.allProjects')}
+          </Txt>
+        </View>
+        <Txt size={10.5} color={C.textFaint} mono numberOfLines={1}>
+          {allCount}
+        </Txt>
       </Pressable>
 
       {rows.length ? (
@@ -250,7 +264,12 @@ export function ProjectList({
             return (
               <Pressable
                 key={p.id}
-                style={({ pressed }) => [s.row, on && s.rowOn, pressed && s.rowPressed]}
+                style={({ pressed }) => [
+                  s.row,
+                  { flexDirection: dir.row },
+                  on && s.rowOn,
+                  pressed && s.rowPressed,
+                ]}
                 onPress={() => onSelect(p.id)}
                 onLongPress={() => openSheet(p)}
                 delayLongPress={350}
@@ -259,9 +278,21 @@ export function ProjectList({
                 accessibilityLabel={p.name}
                 accessibilityHint={tr('sidebar.projectActionsHint')}
               >
-                <View style={[s.dot, { backgroundColor: p.color || C.accent }]} />
-                <Text style={[s.name, on && s.nameOn]} numberOfLines={1}>{p.name}</Text>
-                {p.sessionCount > 0 ? <Text style={s.count}>{p.sessionCount}</Text> : null}
+                <View style={[s.rowMain, { flexDirection: dir.row }]}>
+                  <View style={[s.dot, { backgroundColor: p.color || C.accent }]} />
+                  <Txt
+                    size={12}
+                    weight="600"
+                    color={on ? C.text : C.textDim}
+                    numberOfLines={1}
+                    style={s.name}
+                  >
+                    {p.name}
+                  </Txt>
+                </View>
+                <Txt size={10.5} color={C.textFaint} mono>
+                  {p.sessionCount}
+                </Txt>
               </Pressable>
             )
           })}
@@ -269,13 +300,14 @@ export function ProjectList({
       ) : null}
 
       <Pressable
-        style={({ pressed }) => [s.row, pressed && s.rowPressed]}
+        style={({ pressed }) => [s.newLink, pressed && s.rowPressed]}
         onPress={openNew}
         accessibilityRole="button"
         accessibilityLabel={tr('sidebar.newProject')}
       >
-        <Icon name="add" size={16} color={C.accent} />
-        <Text style={s.newLabel} numberOfLines={1}>{tr('sidebar.newProject')}</Text>
+        <Txt size={11.5} weight="600" color={C.accent} numberOfLines={1}>
+          {tr('chrome.projects.newLink')}
+        </Txt>
       </Pressable>
 
       {/* ── Sheet + dialogs: one Modal, one scrim, one pop ──────────────── */}
@@ -296,7 +328,9 @@ export function ProjectList({
               <Animated.View
                 style={[s.sheet, { opacity: anim, transform: [{ scale }] }]}
               >
-                <Text style={s.sheetTitle} numberOfLines={1}>{shownSheet.name}</Text>
+                <Txt size={10.5} weight="700" color={C.textFaint} style={s.sheetTitle} numberOfLines={1}>
+                  {shownSheet.name}
+                </Txt>
                 <SheetRow
                   icon="pencil-outline"
                   label={tr('sidebar.renameProject')}
@@ -322,27 +356,30 @@ export function ProjectList({
                   danger
                   onPress={() => openDelete(shownSheet)}
                 />
-                {error ? <Text style={[d.dialogError, s.sheetError]}>{error}</Text> : null}
+                {error ? <Txt size={12} color={C.red} style={s.sheetError}>{error}</Txt> : null}
               </Animated.View>
             ) : null
           ) : (
             <Animated.View style={[d.dialogCard, { opacity: anim, transform: [{ scale }] }]}>
-              <Text style={d.dialogTitle}>
+              <Txt style={d.dialogTitle}>
                 {dialog === 'new'
                   ? tr('sidebar.newProject')
                   : dialog === 'rename'
                     ? tr('sidebar.renameProject')
                     : tr('project.delete.title')}
-              </Text>
+              </Txt>
 
               {dialog === 'delete' ? (
-                <Text style={d.dialogBody}>
+                <Txt style={d.dialogBody}>
                   {tr('project.delete.body', { name: target?.name ?? '' })}
-                </Text>
+                </Txt>
               ) : (
                 <>
                   <TextInput
-                    style={d.dialogInput}
+                    style={[
+                      d.dialogInput,
+                      { textAlign: dir.textAlign, writingDirection: dir.writingDirection },
+                    ]}
                     value={nameText}
                     onChangeText={setNameText}
                     autoFocus
@@ -356,7 +393,10 @@ export function ProjectList({
                   {dialog === 'new' ? (
                     <>
                       <TextInput
-                        style={d.dialogInput}
+                        style={[
+                          d.dialogInput,
+                          { textAlign: dir.textAlign, writingDirection: dir.writingDirection },
+                        ]}
                         value={pathText}
                         onChangeText={setPathText}
                         autoCapitalize="none"
@@ -365,21 +405,21 @@ export function ProjectList({
                         placeholderTextColor={C.textFaint}
                         accessibilityLabel={tr('project.folder.label')}
                       />
-                      <Text style={d.dialogBody}>{tr('project.folder.hint')}</Text>
+                      <Txt style={d.dialogBody}>{tr('project.folder.hint')}</Txt>
                     </>
                   ) : null}
                 </>
               )}
 
-              {error ? <Text style={d.dialogError}>{error}</Text> : null}
+              {error ? <Txt style={d.dialogError}>{error}</Txt> : null}
 
-              <View style={d.dialogButtons}>
+              <View style={[d.dialogButtons, { flexDirection: dir.row }]}>
                 <Pressable
                   style={[d.dialogBtn, busy && d.dialogBtnBusy]}
                   onPress={closeAll}
                   disabled={busy}
                 >
-                  <Text style={d.dialogBtnText}>{tr('sidebar.cancel')}</Text>
+                  <Txt style={d.dialogBtnText}>{tr('sidebar.cancel')}</Txt>
                 </Pressable>
                 {dialog === 'delete' ? (
                   <Pressable
@@ -387,7 +427,7 @@ export function ProjectList({
                     onPress={() => void runDelete()}
                     disabled={busy}
                   >
-                    <Text style={d.dialogBtnDangerText}>{tr('sidebar.delete')}</Text>
+                    <Txt style={d.dialogBtnDangerText}>{tr('sidebar.delete')}</Txt>
                   </Pressable>
                 ) : (
                   <Pressable
@@ -395,9 +435,9 @@ export function ProjectList({
                     onPress={() => void (dialog === 'new' ? runCreate() : runRename())}
                     disabled={busy || !nameText.trim()}
                   >
-                    <Text style={d.dialogBtnPrimaryText}>
+                    <Txt style={d.dialogBtnPrimaryText}>
                       {dialog === 'new' ? tr('project.create') : tr('sidebar.save')}
-                    </Text>
+                    </Txt>
                   </Pressable>
                 )}
               </View>
@@ -422,66 +462,51 @@ function SheetRow({
   onPress: () => void
 }) {
   const s = useStyles(makeS)
+  const dir = useDir()
   return (
     <Pressable
-      style={({ pressed }) => [s.sheetRow, pressed && s.rowPressed]}
+      style={({ pressed }) => [s.sheetRow, { flexDirection: dir.row }, pressed && s.rowPressed]}
       onPress={onPress}
       accessibilityLabel={label}
     >
       <MaterialCommunityIcons name={icon} size={18} color={danger ? C.red : C.text} />
-      <Text style={[s.sheetRowLabel, danger && { color: C.red }]} numberOfLines={1}>{label}</Text>
+      <Txt size={15} color={danger ? C.red : C.text} style={s.sheetRowLabel} numberOfLines={1}>
+        {label}
+      </Txt>
     </Pressable>
   )
 }
 
 const makeS = () => StyleSheet.create({
-  root: { marginBottom: 2 },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingLeft: 16,
-    paddingRight: 10,
-    marginTop: 6,
-    marginBottom: 2,
-  },
-  header: {
-    flex: 1,
-    color: C.textFaint,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-  },
-  headerAdd: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 14 },
-  pressed: { opacity: 0.5 },
+  root: { marginBottom: 8 },
   row: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    minHeight: 44,
-    paddingHorizontal: 16,
-    marginHorizontal: 6,
-    borderRadius: 12,
+    justifyContent: 'space-between',
+    gap: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    minHeight: 36,
   },
-  rowOn: { backgroundColor: C.accentSoft },
+  rowMain: { flex: 1, minWidth: 0, alignItems: 'center', gap: 7 },
+  rowOn: { backgroundColor: C.accentSoft, borderColor: C.border },
   rowPressed: { backgroundColor: C.bgHover },
-  rowsScroll: { maxHeight: 3 * 44 },
-  rowsContent: { paddingBottom: 2 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  name: { flex: 1, color: C.textDim, fontSize: 14.5, fontWeight: '500' },
-  nameOn: { color: C.text, fontWeight: '700' },
-  caption: { color: C.textFaint, fontSize: 11.5, fontWeight: '600' },
-  count: { color: C.textFaint, fontSize: 12, fontWeight: '600' },
-  newLabel: { flex: 1, color: C.accent, fontSize: 14.5, fontWeight: '600' },
+  rowsScroll: { maxHeight: 3 * 36 },
+  rowsContent: { gap: 3 },
+  dot: { width: 8, height: 8, borderRadius: 4, flexShrink: 0 },
+  name: { flexShrink: 1 },
+  newLink: { paddingVertical: 4, paddingHorizontal: 8, alignSelf: 'flex-start' },
   modalRoot: { flex: 1, justifyContent: 'center' },
   sheet: {
-    width: '86%',
+    width: '88%',
     maxWidth: 400,
     alignSelf: 'center',
     backgroundColor: C.bgElev,
-    borderRadius: 16,
     borderWidth: 1,
-    borderColor: C.borderSoft,
+    borderColor: C.border,
+    borderRadius: 18,
     paddingVertical: 8,
     paddingHorizontal: 6,
     gap: 2,
@@ -492,22 +517,18 @@ const makeS = () => StyleSheet.create({
     elevation: 16,
   },
   sheetTitle: {
-    color: C.textFaint,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.8,
+    letterSpacing: 0.75,
     textTransform: 'uppercase',
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   sheetRow: {
-    flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
     minHeight: 46,
     paddingHorizontal: 12,
     borderRadius: 10,
   },
-  sheetRowLabel: { color: C.text, fontSize: 15.5, flex: 1 },
+  sheetRowLabel: { flex: 1 },
   sheetError: { paddingHorizontal: 12, paddingVertical: 6 },
 })

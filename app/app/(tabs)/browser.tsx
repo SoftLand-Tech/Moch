@@ -1,12 +1,10 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
-  Text,
   Pressable,
   TextInput,
   ScrollView,
   StyleSheet,
-  ActivityIndicator,
   AppState,
   BackHandler,
   Platform,
@@ -23,9 +21,11 @@ import Animated, {
 } from 'react-native-reanimated'
 import * as Haptics from 'expo-haptics'
 import { useStore } from '@nanostores/react'
-import { Ionicons } from '@expo/vector-icons'
 import { ScreenShell } from '../../src/components/ScreenShell'
+import { Icon } from '../../src/components/Icon'
 import { C, useStyles } from '../../src/lib/theme'
+import { Card, Elev, Field, HeaderButton, PrimaryBtn, Txt } from '../../src/components/ui'
+import { useDir, useT } from '../../src/lib/strings'
 import {
   ensureBrowserRelay,
   browserTabs,
@@ -39,7 +39,6 @@ import {
   refreshTabTargetIds,
 } from '../../src/lib/browserRelay'
 import { shareInInbox, normalizeSharedPayload } from '../../src/lib/shareIn'
-import { tr } from '../../src/lib/strings'
 
 /**
  * Moch Browser (BUILD-PLAN.md B1) — the visible, multi-tab WebView pool the
@@ -58,12 +57,17 @@ import { tr } from '../../src/lib/strings'
  *    shareIn inbox the OS share target uses — text lands in the draft,
  *    nothing auto-sends.
  *
- * Speed/native pass (fleet audit, 13 agents — see BROWSER-SPEED-REPORT.md):
- * instant chrome on open (relay hydrate + parallel boot), ref-based reload
- * (no WebView remount — keeps the DevTools target alive), ←/→ + hardware
- * Back page history, a Chrome-style load-progress bar, haptics, URL-bar
- * focus ergonomics, and memoized TabChip/TabPage so store ticks and
- * keystrokes stop re-rendering every WebView. Contracts C1-C5 preserved.
+ * Redesign pass: the chrome is the mockup's screen 6 — tab-chip strip with a
+ * round "+", 26px history/reload controls over a mono URL field, an
+ * "Ask Moch" toggle that reveals the accent-rimmed Ask row, the accent
+ * load-progress line, and the WebView pool framed in an m-card. Relay
+ * boot/error states render as cards INSIDE that viewport so the mockup's
+ * booting screen keeps the chrome visible. All prior behavior is unchanged:
+ * speed-pass hydration, ref-based reload, history + hardware Back, haptics,
+ * URL-bar focus ergonomics, and the memoized TabChip/TabPage memo boundary
+ * that keeps store ticks and keystrokes out of the WebView pool. The URL bar
+ * and Ask row are top-anchored; BUG-133's kbPad on the pool container is the
+ * pool's single keyboard owner.
  */
 
 const HOME_URL = 'https://www.google.com'
@@ -75,6 +79,8 @@ type WVRef = React.ComponentRef<typeof WebView> | null
 
 export default function Browser() {
   const s = useStyles(makeS)
+  const t = useT()
+  const dir = useDir()
   // BUG-133: tapping a web-page input (a search box in the page itself) opens
   // the IME over the pool with no inset handling anywhere — react-native-
   // webview has none built-in under edge-to-edge. The chat-pad pattern on
@@ -148,9 +154,11 @@ export default function Browser() {
   // ── Load progress (Chrome-style 2dp bar under the URL row) ───────────────
   const loadProgress = useSharedValue(0)
   const barVisible = useSharedValue(0)
+  // Mockup: the track is always there and the accent fill sits at 100% when
+  // idle. Real load events drive the width while a page is in flight; the
+  // pass-through/fade values below are unchanged from the speed pass.
   const barStyle = useAnimatedStyle(() => ({
-    width: `${Math.round(loadProgress.value * 100)}%`,
-    opacity: barVisible.value,
+    width: `${Math.round((barVisible.value > 0 ? Math.max(loadProgress.value, 0.08) : 1) * 100)}%`,
   }))
   const resetProgress = useCallback(() => {
     loadProgress.value = 0
@@ -347,103 +355,122 @@ export default function Browser() {
   const relayBad = status && !status.running
 
   return (
-    <ScreenShell title="Browser">
+    <ScreenShell title={t('browser.title')}>
       {/* Speed pass: the shell's top bar already applies the top inset
           (ScreenShell) — this wrapper adds none, so there is no double
           status-bar band and no stacked bottom inset fighting the pool's
           kbPad (BUG-133's verified avoidance stays the single owner). */}
       <SafeAreaView style={s.safe} edges={[]}>
-        {booting ? (
-          <View style={s.center}>
-            <ActivityIndicator size="large" color={C.accent} />
-            <Text style={s.bootText}>Starting the browser relay…</Text>
-          </View>
-        ) : relayBad ? (
-          <View style={s.center}>
-            <Ionicons name="warning-outline" size={34} color={C.red} />
-            <Text style={s.bootText}>Browser relay unavailable</Text>
-            <Text style={s.errText}>{status?.lastError ?? 'unknown error'}</Text>
-            {/* BUG-118: tap-to-retry, the ScreenShell reconnect-control pattern. */}
-            <Pressable
-              style={({ pressed }) => [s.retryBtn, pressed && s.retryBtnPressed]}
-              onPress={retryBoot}
-              accessibilityRole="button"
-              accessibilityLabel={tr('browser.retry')}
+        <View style={s.root}>
+          {/* TabChips strip — real tabs + the mockup's round "+" button. */}
+          <View style={[s.tabStrip, { flexDirection: dir.row }]}>
+            <ScrollView
+              horizontal
+              keyboardShouldPersistTaps="handled"
+              showsHorizontalScrollIndicator={false}
+              style={s.tabScroll}
+              contentContainerStyle={[s.tabRow, { flexDirection: dir.row }]}
             >
-              <Ionicons name="refresh" size={17} color={C.onAccent} />
-              <Text style={s.retryText}>{tr('browser.retry')}</Text>
-            </Pressable>
-          </View>
-        ) : (
-          <View style={s.root}>
-            {/* Tab strip */}
-            <View style={s.tabBar}>
-              <ScrollView horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false} style={s.tabScroll}>
-                <View style={s.tabRow}>
-                  {tabs.map((t) => (
-                    <TabChip
-                      key={t.id}
-                      id={t.id}
-                      title={t.title}
-                      url={t.url}
-                      loading={t.ready === false}
-                      on={t.id === activeId}
-                      onOpen={openTab}
-                      onClose={removeTab}
-                    />
-                  ))}
-                </View>
-              </ScrollView>
-              <Pressable
-                style={s.newTab}
-                onPress={newTab}
-                accessibilityRole="button"
-                accessibilityLabel="New tab"
-              >
-                <Ionicons name="add" size={20} color={C.text} />
-              </Pressable>
-            </View>
-
-            {/* URL row (owns its draft — keystrokes stay off the pool) */}
-            <UrlRow
-              url={active ? liveUrls.current[active.id] ?? active.url : ''}
-              canBack={canBack}
-              canFwd={canFwd}
-              onBack={pageBack}
-              onFwd={pageFwd}
-              onReload={reload}
-              onSubmit={submitUrl}
-              onAsk={() => setAskOpen((v) => !v)}
-            />
-
-            {/* Chrome-style load progress (active tab only) */}
-            <View style={s.progressTrack} pointerEvents="none">
-              <Animated.View style={[s.progressFill, barStyle]} />
-            </View>
-
-            {askOpen && <AskRow onAsk={askMoch} />}
-
-            {/* WebView pool — every tab stays mounted; inactive tabs render
-                1px, opaque and untouchable so their renderer keeps producing
-                frames for CDP (screenshots/screencast need a live surface). */}
-            <Animated.View style={[s.pool, kbPad]}>
-              {tabs.map((t) => (
-                <TabPage
-                  key={`${t.id}:${renderKeys[t.id] ?? 0}`}
-                  url={t.url}
-                  on={t.id === activeId}
-                  h={getHandlers(t.id)}
+              {tabs.map((tab) => (
+                <TabChip
+                  key={tab.id}
+                  id={tab.id}
+                  title={tab.title}
+                  url={tab.url}
+                  loading={tab.ready === false}
+                  on={tab.id === activeId}
+                  onOpen={openTab}
+                  onClose={removeTab}
                 />
               ))}
-            </Animated.View>
+            </ScrollView>
+            <Pressable
+              style={s.newTab}
+              onPress={newTab}
+              accessibilityRole="button"
+              accessibilityLabel={t('browser.newTab')}
+            >
+              <Icon name="add" size={13} color={C.text} />
+            </Pressable>
           </View>
-        )}
+
+          {/* URL row (owns its draft — keystrokes stay off the pool) */}
+          <UrlRow
+            url={active ? liveUrls.current[active.id] ?? active.url : ''}
+            canBack={canBack}
+            canFwd={canFwd}
+            askOpen={askOpen}
+            onBack={pageBack}
+            onFwd={pageFwd}
+            onReload={reload}
+            onSubmit={submitUrl}
+            onAsk={() => setAskOpen((v) => !v)}
+          />
+
+          {/* Chrome-style load progress (active tab only); booting shows the
+              mockup's 38% resting fill. */}
+          <View style={s.progressTrack} pointerEvents="none">
+            {booting ? (
+              <View style={[s.progressFill, s.progressBoot]} />
+            ) : (
+              <Animated.View style={[s.progressFill, barStyle]} />
+            )}
+          </View>
+
+          {askOpen && <AskRow onAsk={askMoch} />}
+
+          {/* Viewport — boot/error card states OR the real WebView pool.
+              Every tab stays mounted; inactive tabs render 1px, opaque and
+              untouchable so their renderer keeps producing frames for CDP
+              (screenshots/screencast need a live surface). */}
+          <Animated.View style={[s.viewport, kbPad]}>
+            {booting ? (
+              <Card style={s.stateCard}>
+                <Txt size={13} weight="700" color={C.accent} center>
+                  {t('browser.booting.title')}
+                </Txt>
+                <Txt size={11.5} color={C.textDim} center style={s.stateSub}>
+                  {t('browser.booting.sub')}
+                </Txt>
+              </Card>
+            ) : relayBad ? (
+              <Card style={s.stateCard}>
+                <Icon name="warning-outline" size={30} color={C.red} />
+                <Txt size={13} weight="700" color={C.red} center style={s.stateSub}>
+                  {t('browser.error.title')}
+                </Txt>
+                <Txt size={11.5} color={C.textDim} center style={s.stateSub} numberOfLines={3}>
+                  {status?.lastError ?? t('browser.error.unknown')}
+                </Txt>
+                {/* BUG-118: tap-to-retry, the ScreenShell reconnect-control pattern. */}
+                <PrimaryBtn
+                  label={t('common.retry')}
+                  onPress={retryBoot}
+                  accessibilityLabel={t('common.retry')}
+                  small
+                  style={s.retryBtn}
+                />
+              </Card>
+            ) : (
+              <View style={s.frame}>
+                {tabs.map((tab) => (
+                  <TabPage
+                    key={`${tab.id}:${renderKeys[tab.id] ?? 0}`}
+                    url={tab.url}
+                    on={tab.id === activeId}
+                    h={getHandlers(tab.id)}
+                  />
+                ))}
+              </View>
+            )}
+          </Animated.View>
+        </View>
       </SafeAreaView>
     </ScreenShell>
   )
 }
 
-// ── TabChip — memoized tab-strip row (SPEED_REPORT A2-18 pattern) ───────────
+// ── TabChip — memoized tab-strip chip (SPEED_REPORT A2-18 pattern) ──────────
 
 const TabChip = memo(function TabChip({
   id,
@@ -463,23 +490,26 @@ const TabChip = memo(function TabChip({
   onClose: (id: string) => void
 }) {
   const s = useStyles(makeTabS)
+  const t = useT()
+  const dir = useDir()
   return (
     <Pressable
       onPress={() => onOpen(id)}
-      style={[s.tab, on && s.tabOn]}
+      style={[s.tab, { flexDirection: dir.row }, on && s.tabOn]}
       accessibilityRole="tab"
-      accessibilityLabel={`Tab ${title}`}
+      accessibilityState={{ selected: on }}
+      accessibilityLabel={t('browser.tabLabel', { title: title || url })}
     >
-      <Text numberOfLines={1} style={[s.tabText, on && s.tabTextOn]}>
+      <Txt size={11} weight="700" color={on ? C.accent : C.textDim} numberOfLines={1} style={s.tabText}>
         {loading ? '… ' : ''}{title || url}
-      </Text>
+      </Txt>
       <Pressable
         hitSlop={8}
         onPress={() => onClose(id)}
         accessibilityRole="button"
-        accessibilityLabel="Close tab"
+        accessibilityLabel={t('browser.closeTab')}
       >
-        <Ionicons name="close" size={14} color={on ? C.onAccent : C.textFaint} />
+        <Icon name="close" size={10} color={on ? C.accent : C.textFaint} />
       </Pressable>
     </Pressable>
   )
@@ -491,6 +521,7 @@ const UrlRow = memo(function UrlRow({
   url,
   canBack,
   canFwd,
+  askOpen,
   onBack,
   onFwd,
   onReload,
@@ -500,6 +531,7 @@ const UrlRow = memo(function UrlRow({
   url: string
   canBack: boolean
   canFwd: boolean
+  askOpen: boolean
   onBack: () => void
   onFwd: () => void
   onReload: () => void
@@ -507,6 +539,8 @@ const UrlRow = memo(function UrlRow({
   onAsk: () => void
 }) {
   const s = useStyles(makeUrlRowS)
+  const t = useT()
+  const dir = useDir()
   const inputRef = useRef<TextInput>(null)
   const [draft, setDraft] = useState(url)
   const [focused, setFocused] = useState(false)
@@ -526,47 +560,47 @@ const UrlRow = memo(function UrlRow({
     inputRef.current?.blur()
   }, [draft, onSubmit])
   return (
-    <View style={s.urlRow}>
-      <Pressable
-        style={s.urlBtn}
+    <View style={[s.urlRow, { flexDirection: dir.row }]}>
+      <HeaderButton
+        style={s.navBtn}
         onPress={onBack}
         disabled={!canBack}
-        accessibilityRole="button"
-        accessibilityLabel="Go back"
-        accessibilityState={{ disabled: !canBack }}
+        accessibilityLabel={t('browser.goBack')}
       >
-        <Ionicons name="chevron-back" size={20} color={canBack ? C.text : C.textFaint} />
-      </Pressable>
-      <Pressable
-        style={s.urlBtn}
-        onPress={onFwd}
-        disabled={!canFwd}
-        accessibilityRole="button"
-        accessibilityLabel="Go forward"
-        accessibilityState={{ disabled: !canFwd }}
-      >
-        <Ionicons name="chevron-forward" size={20} color={canFwd ? C.text : C.textFaint} />
-      </Pressable>
-      <Pressable style={s.urlBtn} onPress={onReload} accessibilityRole="button" accessibilityLabel="Reload page">
-        <Ionicons name="refresh" size={18} color={C.text} />
-      </Pressable>
-      <View style={s.urlWrap}>
+        <Icon name={dir.icon.back} size={14} color={canBack ? C.text : C.textFaint} />
+      </HeaderButton>
+      {/* The mockup row is back + reload; forward appears only when the live
+          tab actually has forward history (feature preserved, chrome quiet). */}
+      {canFwd ? (
+        <HeaderButton
+          style={s.navBtn}
+          onPress={onFwd}
+          accessibilityLabel={t('browser.goForward')}
+        >
+          <Icon name={dir.icon.forward} size={14} color={C.text} />
+        </HeaderButton>
+      ) : null}
+      <HeaderButton style={s.navBtn} onPress={onReload} accessibilityLabel={t('browser.reload')}>
+        <Icon name="refresh" size={13} color={C.text} />
+      </HeaderButton>
+      <View style={[s.urlWrap, { flexDirection: dir.row }, focused && s.urlWrapFocused]}>
         <TextInput
           ref={inputRef}
           style={s.urlInput}
           value={draft}
-          onChangeText={(t) => setDraft(t)}
+          onChangeText={(txt) => setDraft(txt)}
           onSubmitEditing={submit}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          placeholder="Search or enter address"
+          placeholder={t('browser.urlPlaceholder')}
           placeholderTextColor={C.textFaint}
+          selectionColor={C.accent}
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="url"
           returnKeyType="go"
           selectTextOnFocus
-          accessibilityLabel="Address bar"
+          accessibilityLabel={t('browser.addressBar')}
         />
         {focused && draft.length > 0 && (
           <Pressable
@@ -576,19 +610,22 @@ const UrlRow = memo(function UrlRow({
               inputRef.current?.focus()
             }}
             accessibilityRole="button"
-            accessibilityLabel="Clear address"
+            accessibilityLabel={t('browser.clearAddress')}
           >
-            <Ionicons name="close" size={15} color={C.textFaint} />
+            <Icon name="close" size={12} color={C.textFaint} />
           </Pressable>
         )}
       </View>
       <Pressable
-        style={[s.urlBtn, s.askBtn]}
+        style={[s.askToggle, askOpen && s.askToggleOn]}
         onPress={onAsk}
         accessibilityRole="button"
-        accessibilityLabel="Ask Moch about this page"
+        accessibilityState={{ expanded: askOpen }}
+        accessibilityLabel={t('browser.askToggleA11y')}
       >
-        <Ionicons name="sparkles" size={18} color={C.onAccent} />
+        <Txt size={10.5} weight="700" color={askOpen ? C.onAccent : C.accent}>
+          {t('browser.askToggle')}
+        </Txt>
       </Pressable>
     </View>
   )
@@ -598,6 +635,8 @@ const UrlRow = memo(function UrlRow({
 
 const AskRow = memo(function AskRow({ onAsk }: { onAsk: (task: string) => void }) {
   const s = useStyles(makeAskS)
+  const t = useT()
+  const dir = useDir()
   const [draft, setDraft] = useState('')
   const send = useCallback(() => {
     const task = draft.trim()
@@ -606,21 +645,26 @@ const AskRow = memo(function AskRow({ onAsk }: { onAsk: (task: string) => void }
     setDraft('')
   }, [draft, onAsk])
   return (
-    <View style={s.askRow}>
-      <TextInput
-        style={s.askInput}
+    <Elev style={[s.askRow, { flexDirection: dir.row }]}>
+      <Field
         value={draft}
         onChangeText={setDraft}
         onSubmitEditing={send}
-        placeholder="What should Moch do on this page?"
-        placeholderTextColor={C.textFaint}
+        placeholder={t('browser.askPlaceholder')}
         multiline
-        accessibilityLabel="Ask Moch task"
+        style={s.askInput}
+        wrapStyle={s.askInputWrap}
+        accessibilityLabel={t('browser.askInputA11y')}
       />
-      <Pressable style={s.askGo} onPress={send} accessibilityRole="button" accessibilityLabel="Send task to Moch">
-        <Ionicons name="arrow-up" size={20} color={C.onAccent} />
-      </Pressable>
-    </View>
+      <PrimaryBtn
+        label={t('browser.send')}
+        onPress={send}
+        small
+        style={s.askSend}
+        textStyle={s.askSendText}
+        accessibilityLabel={t('browser.sendA11y')}
+      />
+    </Elev>
   )
 })
 
@@ -672,35 +716,60 @@ const TabPage = memo(function TabPage({
 const makeS = () =>
   StyleSheet.create({
     safe: { flex: 1, backgroundColor: C.bg },
-    center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 32 },
-    bootText: { color: C.textDim, fontSize: 15, textAlign: 'center' },
-    errText: { color: C.red, fontSize: 13, textAlign: 'center' },
-    retryBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 7,
-      marginTop: 8,
-      paddingHorizontal: 18,
-      height: 38,
-      borderRadius: 19,
-      backgroundColor: C.accent,
-    },
-    retryBtnPressed: { opacity: 0.75 },
-    retryText: { color: C.onAccent, fontSize: 14, fontWeight: '600' },
     root: { flex: 1 },
-    tabBar: {
-      flexDirection: 'row',
+    // TabChips strip (mockup: 0 12 6, gap 5, centered; round 24px + at the end)
+    tabStrip: {
       alignItems: 'center',
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: C.borderSoft,
-      paddingRight: 4,
+      gap: 5,
+      paddingHorizontal: 12,
+      paddingBottom: 6,
     },
-    tabScroll: { flex: 1 },
-    tabRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, gap: 6 },
-    newTab: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
-    progressTrack: { height: 2, overflow: 'hidden' },
+    tabScroll: { flexGrow: 0, flexShrink: 1, minWidth: 0 },
+    tabRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    newTab: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: C.border,
+      backgroundColor: C.bgCard,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    // Load progress (mockup: 2px track, borderSoft, radius 99, margin 0 12 6)
+    progressTrack: {
+      height: 2,
+      marginHorizontal: 12,
+      marginBottom: 6,
+      borderRadius: 99,
+      backgroundColor: C.borderSoft,
+      overflow: 'hidden',
+    },
     progressFill: { height: 2, backgroundColor: C.accent },
-    pool: { flex: 1, overflow: 'hidden' },
+    progressBoot: { width: '38%' },
+    // WebView viewport — mockup app-scroll padding-top 2 + m-card framing.
+    viewport: { flex: 1, paddingTop: 2 },
+    frame: {
+      flex: 1,
+      marginHorizontal: 14,
+      marginBottom: 10,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: C.border,
+      backgroundColor: C.bgCard,
+      overflow: 'hidden',
+    },
+    stateCard: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 36,
+      paddingHorizontal: 16,
+      marginHorizontal: 14,
+      marginTop: 8,
+    },
+    stateSub: { marginTop: 4 },
+    retryBtn: { marginTop: 14, paddingHorizontal: 16 },
   })
 
 const makeTabS = () =>
@@ -708,75 +777,90 @@ const makeTabS = () =>
     tab: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 6,
+      gap: 4,
       maxWidth: 170,
+      paddingVertical: 4,
       paddingHorizontal: 10,
-      height: 34,
-      borderRadius: 10,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: C.border,
       backgroundColor: C.bgCard,
     },
-    tabOn: { backgroundColor: C.accent },
-    tabText: { color: C.textDim, fontSize: 13, maxWidth: 120 },
-    tabTextOn: { color: C.onAccent, fontWeight: '600' },
+    tabOn: { backgroundColor: C.accentSoft, borderColor: C.accent },
+    tabText: { maxWidth: 120 },
   })
 
 const makeUrlRowS = () =>
   StyleSheet.create({
+    // Mockup: 0 12 6, gap 5, centered row.
     urlRow: {
-      flexDirection: 'row',
       alignItems: 'center',
-      gap: 4,
-      paddingHorizontal: 6,
-      paddingVertical: 6,
+      gap: 5,
+      paddingHorizontal: 12,
+      paddingBottom: 6,
     },
-    urlBtn: { width: 30, height: 32, alignItems: 'center', justifyContent: 'center' },
-    askBtn: { backgroundColor: C.accent, borderRadius: 16 },
+    // shell-icon-btn at 26px (mockup overrides width/height only).
+    navBtn: { width: 26, height: 26, borderRadius: 10 },
+    // Mono URL field: inputBg, border, radius 9, 10.5 textDim, single line.
     urlWrap: {
       flex: 1,
+      minWidth: 0,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 4,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: C.bgCard,
+      backgroundColor: C.inputBg,
       borderWidth: 1,
-      borderColor: C.borderSoft,
-      paddingLeft: 14,
-      paddingRight: 8,
+      borderColor: C.border,
+      borderRadius: 9,
+      paddingVertical: 5,
+      paddingHorizontal: 8,
     },
-    urlInput: { flex: 1, height: 36, color: C.text, fontSize: 14 },
+    urlWrapFocused: { borderColor: C.accent },
+    urlInput: {
+      flex: 1,
+      minWidth: 0,
+      padding: 0,
+      color: C.textDim,
+      fontSize: 10.5,
+      fontFamily: Platform.select({ android: 'monospace', ios: 'Menlo', default: 'monospace' }),
+      writingDirection: 'ltr',
+      textAlign: 'left',
+    },
+    // "Ask Moch" toggle: accent border; accent bg when open.
+    askToggle: {
+      borderWidth: 1,
+      borderColor: C.accent,
+      backgroundColor: C.accentSoft,
+      borderRadius: 9,
+      paddingVertical: 5,
+      paddingHorizontal: 8,
+      flexShrink: 0,
+    },
+    askToggleOn: { backgroundColor: C.accent },
   })
 
 const makeAskS = () =>
   StyleSheet.create({
+    // Mockup: margin 0 12 8, padding 7, bgElev, accent border, radius 11.
     askRow: {
-      flexDirection: 'row',
-      alignItems: 'flex-end',
-      gap: 8,
-      paddingHorizontal: 10,
-      paddingBottom: 6,
-    },
-    askInput: {
-      flex: 1,
-      minHeight: 38,
-      maxHeight: 110,
-      borderRadius: 12,
-      backgroundColor: C.bgCard,
-      borderWidth: 1,
-      borderColor: C.accentSoft,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      color: C.text,
-      fontSize: 14,
-    },
-    askGo: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
-      backgroundColor: C.accent,
+      marginHorizontal: 12,
+      marginBottom: 8,
+      padding: 7,
+      borderColor: C.accent,
+      borderRadius: 11,
       alignItems: 'center',
-      justifyContent: 'center',
+      gap: 6,
     },
+    askInputWrap: { flex: 1, borderRadius: 11 },
+    askInput: {
+      minHeight: 28,
+      maxHeight: 110,
+      fontSize: 11.5,
+      paddingVertical: 5,
+      paddingHorizontal: 8,
+    },
+    askSend: { minHeight: 28, paddingVertical: 5, paddingHorizontal: 10, borderRadius: 11 },
+    askSendText: { fontSize: 11 },
   })
 
 const makePoolS = () =>

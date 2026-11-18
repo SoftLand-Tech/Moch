@@ -9,8 +9,8 @@ import {
   useWindowDimensions,
 } from 'react-native'
 import type { GestureResponderEvent, PanResponderGestureState } from 'react-native'
-import { Ionicons } from '@expo/vector-icons'
 import { Icon } from './Icon'
+import { HeaderButton } from './ui'
 import { useRouter } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useStore } from '@nanostores/react'
@@ -45,7 +45,7 @@ import {
   setIdentity,
 } from '../lib/workspace'
 import type { Identity } from '../lib/workspace'
-import { tr, localeAtom } from '../lib/strings'
+import { tr, localeAtom, useDir } from '../lib/strings'
 import {
   activeStoredId,
   busyStoredKey,
@@ -90,6 +90,7 @@ export function ScreenShell({
 }) {
   const S = useShape()
   const s = useStyles(makeS)
+  const dir = useDir()
   const [open, setOpen] = useState(false)
   const router = useRouter()
   const insets = useSafeAreaInsets()
@@ -103,7 +104,6 @@ export function ScreenShell({
   // inset (see trayTitleAbs below). Ref-latched: the cluster's layout is
   // stable once laid out, so setState only fires on a real width change,
   // never per render.
-  const [rightClusterW, setRightClusterW] = useState(0)
 
   // Shell subscriptions are flush-stable by construction (see the summary-key
   // computeds in lib/chat): during a streaming turn this component must NOT
@@ -162,7 +162,7 @@ export function ScreenShell({
       // Fixed-duration legs on both outcomes: the release glide is the SAME
       // animation as the hamburger open (and its close counterpart), just
       // starting from wherever the drag stopped — one consistent motion.
-      if (g.vx > FLICK || dragProgress.current > 0.5) setOpen(true)
+      if ((dir.rtl ? g.vx < -FLICK : g.vx > FLICK) || dragProgress.current > 0.5) setOpen(true)
       else settleTo(drawerAnim, 0, CANCEL_MS)
     }
     return PanResponder.create({
@@ -175,11 +175,16 @@ export function ScreenShell({
         return false
       },
       onStartShouldSetPanResponder: () => false,
+      // The drawer docks LEFT in LTR and RIGHT in Arabic, so the open drag is
+      // rightward only in LTR and leftward only in RTL (the Sidebar's own edge
+      // strip and panel drags mirror with it, off this same progress value).
       onMoveShouldSetPanResponder: (_e, g) =>
-        !openRef.current && g.dx > EDGE_CLAIM && g.dx > Math.abs(g.dy) * DOMINANCE,
+        !openRef.current &&
+        (dir.rtl ? g.dx < -EDGE_CLAIM : g.dx > EDGE_CLAIM) &&
+        Math.abs(g.dx) > Math.abs(g.dy) * DOMINANCE,
       onPanResponderGrant: () => captureProgress(drawerAnim, dragProgress, moveSeen),
       onPanResponderMove: (_e, g) => {
-        const p = clamp01(g.dx / panelWidthRef.current)
+        const p = clamp01((dir.rtl ? -g.dx : g.dx) / panelWidthRef.current)
         dragProgress.current = p
         moveSeen.current = true
         drawerAnim.setValue(p)
@@ -187,7 +192,7 @@ export function ScreenShell({
       onPanResponderRelease: settle,
       onPanResponderTerminate: settle,
     })
-  }, [drawerAnim])
+  }, [drawerAnim, dir.rtl])
 
   // The drawer's chat list comes from the gateway, so it has to be fetched.
   React.useEffect(() => {
@@ -474,7 +479,7 @@ export function ScreenShell({
       patchSession(live, { title })
       return null
     } catch (e) {
-      return e instanceof Error ? e.message : 'Rename failed'
+      return e instanceof Error ? e.message : tr('common.renameFailed')
     }
   }, [liveIdOf])
 
@@ -511,134 +516,48 @@ export function ScreenShell({
       forgetChatMarks(storedId)
       return null
     } catch (e) {
-      return e instanceof Error ? e.message : 'Delete failed'
+      return e instanceof Error ? e.message : tr('common.deleteFailed')
     }
   }, [liveIdOf])
+  const connColor = online ? C.greenSoft : connecting ? C.amber : C.amber
+  const connLabel = online ? tr('shell.connected') : connecting ? tr('shell.connecting') : tr('shell.offline')
 
   return (
     <View style={s.root} {...openPan.panHandlers}>
-      {S.trayHeader ? (
-        // Mocheme tray — one row: the title floats dead-center (absolutely
-        // positioned, inset by the measured controls width so it can never
-        // run under the model chip).
-        // REVIEW FIX (BUG-018 regression): the redesign removed the drawer's
-        // Chats entry, and this tray branch used to omit the onSearch
-        // affordance — together that made /(tabs)/sessions (and its
-        // pending-questions banner) unreachable in the DEFAULT theme, the
-        // exact bug the drawer entry was added to fix. The search circle now
-        // renders in the tray too, same as the Relay header.
-        // The card starts BELOW the status bar (marginTop carries the inset);
-        // padding the inset inside the card used to paint a tall empty head
-        // above the buttons — the "top padding too much" bug.
-        <View style={[s.topBarTray, { marginTop: insets.top + 6, paddingTop: 6 }]}>
-          <View
-            pointerEvents="none"
-            // Measured, not static: the right cluster (search + new chat +
-            // status ≈ 136dp) is wider than the menu circle, so a hard-coded
-            // inset let long titles ellipsize UNDER the buttons. The row's
-            // own onLayout feeds the real width; 56 floor covers the menu
-            // side (38 circle + 10 card padding + 8 air) for short clusters.
-            style={[s.trayTitleAbs, { top: 6, bottom: 6, paddingHorizontal: Math.max(rightClusterW + 18, 56) }]}
-          >
-            <View style={s.trayTitleWrap}>
-              {showBrand ? <Text style={s.trayBrand}>Moch</Text> : null}
-              <Text style={s.trayTitle} numberOfLines={1}>
+      <View style={[s.headerWrap, { paddingTop: insets.top + 4 }]}>
+        <View style={[s.header, { flexDirection: dir.row }, S.trayHeader ? s.headerTray : s.headerBar]}>
+          <HeaderButton onPress={() => setOpen(true)} accessibilityLabel={tr('shell.menu')}>
+            <Icon name="menu" size={20} color={C.text} />
+          </HeaderButton>
+
+          <View style={s.titleBlock}>
+            <View style={[s.titleRow, { flexDirection: dir.row }]}>
+              <Pressable
+                onPress={online ? undefined : () => { void retryNow().catch(() => {}) }}
+                hitSlop={8}
+                accessibilityRole={online ? undefined : 'button'}
+                accessibilityLabel={connLabel}
+                style={s.connDotHit}
+              >
+                <View style={[s.connDot, { backgroundColor: connColor, shadowColor: connColor }]} />
+              </Pressable>
+              <Text style={s.title} numberOfLines={1}>
                 {title}
               </Text>
             </View>
-          </View>
-          <View style={s.trayControls}>
-            <Pressable
-              style={({ pressed }) => [s.trayCircle, pressed && s.circlePressed]}
-              onPress={() => setOpen(true)}
-              hitSlop={8}
-              accessibilityLabel="Open menu"
-            >
-              <Icon name="menu" size={20} color={C.text} />
-            </Pressable>
-            <View style={s.traySpacer} />
-            <View
-              style={s.trayRight}
-              onLayout={(e) => {
-                const w = e.nativeEvent.layout.width
-                setRightClusterW((cur) => (Math.abs(cur - w) < 0.5 ? cur : w))
-              }}
-            >
-              {onSearch ? (
-                <Pressable
-                  style={({ pressed }) => [s.trayCircle, pressed && s.circlePressed]}
-                  onPress={onSearch}
-                  hitSlop={8}
-                  accessibilityLabel="All chats"
-                >
-                  <Icon name="search" size={18} color={C.text} />
-                </Pressable>
-              ) : null}
-              {right}
-              {/* BUG-046: the status chip is now a real reconnect control —
-                  it used to be an inert Pressable with no press feedback
-                  while the banner next to it said "tap to retry". */}
-              <Pressable
-                style={({ pressed }) => [s.trayCircle, !online && pressed && s.circlePressed]}
-                hitSlop={8}
-                onPress={online ? undefined : () => { void retryNow().catch(() => {}) }}
-                accessibilityRole={online ? undefined : 'button'}
-                accessibilityLabel={online ? 'Connected' : connecting ? 'Connecting' : 'Not connected — tap to retry'}
-              >
-                <Icon
-                  name={online ? 'radio-button-on' : connecting ? 'ellipse-outline' : 'cloud-offline-outline'}
-                  size={18}
-                  color={online ? C.greenSoft : C.textFaint}
-                />
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      ) : (
-        <View style={[s.topBar, { paddingTop: insets.top + 6 }]}>
-          <Pressable
-            style={({ pressed }) => [s.circle, pressed && s.circlePressed]}
-            onPress={() => setOpen(true)}
-            hitSlop={8}
-            accessibilityLabel="Open menu"
-          >
-            <Icon name="menu" size={20} color={C.text} />
-          </Pressable>
-
-          <View style={s.titleWrap}>
-            {showBrand ? <Text style={s.brand}>Moch</Text> : null}
-            <Text style={[s.title, showBrand && s.titleDim]} numberOfLines={1}>
-              {title}
-            </Text>
+            {showBrand ? <Text style={s.brand}>MOCH</Text> : null}
           </View>
 
-          {onSearch ? (
-            <Pressable
-              style={({ pressed }) => [s.circle, pressed && s.circlePressed]}
-              onPress={onSearch}
-              hitSlop={8}
-              accessibilityLabel="All chats"
-            >
-              <Icon name="search" size={18} color={C.text} />
-            </Pressable>
-          ) : null}
-          {right}
-          {/* BUG-046: functional reconnect control (was inert). */}
-          <Pressable
-            style={({ pressed }) => [s.circle, !online && pressed && s.circlePressed]}
-            hitSlop={8}
-            onPress={online ? undefined : () => { void retryNow().catch(() => {}) }}
-            accessibilityRole={online ? undefined : 'button'}
-            accessibilityLabel={online ? 'Connected' : connecting ? 'Connecting' : 'Not connected — tap to retry'}
-          >
-            <Icon
-              name={online ? 'radio-button-on' : connecting ? 'ellipse-outline' : 'cloud-offline-outline'}
-              size={18}
-              color={online ? C.greenSoft : C.textFaint}
-            />
-          </Pressable>
+          <View style={[s.rightCluster, { flexDirection: dir.row }]}>
+            {onSearch ? (
+              <HeaderButton onPress={onSearch} accessibilityLabel={tr('shell.allChats')}>
+                <Icon name="search" size={18} color={C.text} />
+              </HeaderButton>
+            ) : null}
+            {right}
+          </View>
         </View>
-      )}
+      </View>
 
       <View style={s.body}>{children}</View>
 
@@ -685,7 +604,7 @@ export function ScreenShell({
         onDelete={handleDelete}
         footer={
           pendingN > 0 ? (
-            <View style={s.footerNote}>
+            <View style={[s.footerNote, { flexDirection: dir.row }]}>
               <Icon name="alert-circle" size={14} color={C.amber} />
               <Text style={s.footerText}>
                 {pendingN > 1
@@ -702,64 +621,60 @@ export function ScreenShell({
 
 const makeS = () => StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
-  // Relay keeps today's bare bar; Mocheme's tray is its own block (topBarTray).
-  topBar: {
+  headerWrap: { paddingHorizontal: 12, paddingBottom: 6, zIndex: 20 },
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingBottom: 8,
+    justifyContent: 'space-between',
+    gap: 8,
+    minHeight: 44,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
   },
-  // Mocheme tray card — taller than the old bar: the title owns a centered
-  // line and the controls row sits beneath it.
-  topBarTray: {
-    marginHorizontal: 10,
-    marginTop: 8,
-    paddingHorizontal: 10,
-    paddingBottom: 8,
+  // Mocheme: floating rounded tray (mockup §7 .shell-header under mocheme).
+  headerTray: {
     backgroundColor: C.bgCard,
     borderWidth: 1,
     borderColor: C.border,
-    borderRadius: 24,
+    borderRadius: 16,
     shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
+    shadowOpacity: 0.28,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
   },
-  trayTitleAbs: { position: 'absolute', left: 0, right: 0, alignItems: 'center', justifyContent: 'center' },
-  // stretch to the inset width so a long title ellipsizes its tail (start
-  // visible + '…') instead of overflowing both ends and getting mid-clipped.
-  trayTitleWrap: { alignSelf: 'stretch', alignItems: 'center' },
-  trayBrand: { color: C.textFaint, fontSize: 11.5, fontWeight: '700', letterSpacing: 0.5, marginBottom: 1 },
-  trayTitle: { color: C.text, fontSize: 16.5, fontWeight: '700' },
-  trayControls: { flexDirection: 'row', alignItems: 'center' },
-  trayRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  traySpacer: { flex: 1 },
-  trayCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: C.bgElev,
-    borderWidth: 1,
-    borderColor: C.borderSoft,
+  // Relay: plain bar with a hairline under it.
+  headerBar: {
+    backgroundColor: 'transparent',
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+    borderRadius: 0,
+    paddingHorizontal: 4,
+    paddingBottom: 8,
   },
-  circle: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: C.bgCard,
+  titleBlock: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center' },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '100%' },
+  connDotHit: { padding: 3 },
+  connDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    shadowColor: C.greenSoft,
+    shadowOpacity: 0.9,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 0 },
   },
-  circlePressed: { opacity: 0.55 },
-  titleWrap: { flex: 1, paddingHorizontal: 4 },
-  brand: { color: C.text, fontSize: 17, fontWeight: '700' },
-  title: { color: C.text, fontSize: 16, fontWeight: '600' },
-  titleDim: { fontSize: 13, color: C.textFaint, fontWeight: '500' },
+  title: { color: C.text, fontSize: 14.5, fontWeight: '700', flexShrink: 1 },
+  brand: {
+    color: C.textFaint,
+    fontSize: 9.5,
+    fontWeight: '700',
+    letterSpacing: 0.76,
+    textTransform: 'uppercase',
+    marginTop: 1,
+  },
+  rightCluster: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   body: { flex: 1 },
-  footerNote: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 18, paddingVertical: 6 },
-  footerText: { color: C.textDim, fontSize: 12.5, flex: 1 },
+  footerNote: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
+  footerText: { color: C.amber, fontSize: 11.5, fontWeight: '700', flex: 1 },
 })

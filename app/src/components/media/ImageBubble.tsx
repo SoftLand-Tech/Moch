@@ -8,6 +8,7 @@ import type { ChatSegment } from '../../lib/chat'
 import { imageFallbackDataUrl, imageSource, isMediaRootPath, probeDownloadError } from '../../lib/mediaCache'
 import { fitWithin, formatBytes, isDataUrlPath, shouldAutoDownload } from '../../lib/media'
 import { MediaViewerModal } from './MediaViewerModal'
+import { useDir, useT } from '../../lib/strings'
 
 /**
  * ChatGPT-style rounded image bubble: aspect-fit inside a ≤220 px box, radius
@@ -28,6 +29,8 @@ import { MediaViewerModal } from './MediaViewerModal'
  */
 export function ImageBubble({ seg, maxWidth = 220 }: { seg: ChatSegment; maxWidth?: number }) {
   const s = useStyles(makeS)
+  const dir = useDir()
+  const t = useT()
   const [viewerOpen, setViewerOpen] = useState(false)
   const [fallbackUri, setFallbackUri] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -58,7 +61,7 @@ export function ImageBubble({ seg, maxWidth = 220 }: { seg: ChatSegment; maxWidt
       return
     }
     if (!seg.path || fallbackUri || inline) {
-      setError('Image could not be loaded')
+      setError(t('chat.media.imageError'))
       return
     }
     // /api/media only serves images under the Hermes home's media roots;
@@ -72,7 +75,7 @@ export function ImageBubble({ seg, maxWidth = 220 }: { seg: ChatSegment; maxWidt
           /* fall through to the primary probe */
         }
       }
-      setError((await probeDownloadError(seg.path!)) ?? 'Image could not be loaded')
+      setError((await probeDownloadError(seg.path!)) ?? t('chat.media.imageError'))
     }
     void load()
   }
@@ -91,10 +94,18 @@ export function ImageBubble({ seg, maxWidth = 220 }: { seg: ChatSegment; maxWidt
       <Pressable
         onPress={() => setFetched(true)}
         style={({ pressed }) => [s.errorTile, pressed && s.pressed, { width: maxWidth }]}
-        accessibilityLabel={`Load image${seg.name ? ` ${seg.name}` : ''}${seg.size ? ` (${formatBytes(seg.size)})` : ''}`}
+        accessibilityLabel={
+          seg.name
+            ? seg.size
+              ? t('chat.media.loadImageSizedA11y', { name: seg.name, size: formatBytes(seg.size) })
+              : t('chat.media.loadImageA11y', { name: seg.name })
+            : t('chat.media.tapToLoad')
+        }
       >
         <Icon name="image-outline" size={20} color={C.textFaint} />
-        <Text style={s.errorText}>{seg.size ? `${formatBytes(seg.size)} — tap to load` : 'Tap to load'}</Text>
+        <Text style={s.errorText}>
+          {seg.size ? t('chat.media.sizeTapToLoad', { size: formatBytes(seg.size) }) : t('chat.media.tapToLoad')}
+        </Text>
       </Pressable>
     )
   }
@@ -108,7 +119,7 @@ export function ImageBubble({ seg, maxWidth = 220 }: { seg: ChatSegment; maxWidt
       <Pressable
         onPress={() => setViewerOpen(true)}
         style={({ pressed }) => [s.wrap, pressed && s.pressed, box]}
-        accessibilityLabel={`Image${seg.name ? `: ${seg.name}` : ''}`}
+        accessibilityLabel={t('chat.media.imageA11y', { name: seg.name ?? t('chat.media.imageLabel') })}
       >
         <Image
           source={primary}
@@ -123,7 +134,9 @@ export function ImageBubble({ seg, maxWidth = 220 }: { seg: ChatSegment; maxWidt
           }}
           transition={150}
         />
-        {seg.size && seg.size > 0 ? <Text style={s.sizeTag}>{formatBytes(seg.size)}</Text> : null}
+        {seg.size && seg.size > 0 ? (
+          <Text style={[s.sizeTag, dir.rtl ? { right: undefined, left: 8 } : null]}>{formatBytes(seg.size)}</Text>
+        ) : null}
       </Pressable>
       <MediaViewerModal seg={seg} visible={viewerOpen} onClose={() => setViewerOpen(false)} />
     </>
@@ -132,7 +145,7 @@ export function ImageBubble({ seg, maxWidth = 220 }: { seg: ChatSegment; maxWidt
 
 const makeS = () => StyleSheet.create({
   wrap: {
-    borderRadius: 16,
+    borderRadius: 14,
     overflow: 'hidden',
     backgroundColor: C.bgElev,
   },
@@ -153,7 +166,7 @@ const makeS = () => StyleSheet.create({
   },
   errorTile: {
     minHeight: 76,
-    borderRadius: 16,
+    borderRadius: 13,
     backgroundColor: C.bgElev,
     alignItems: 'center',
     justifyContent: 'center',
