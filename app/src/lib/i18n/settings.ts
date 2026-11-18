@@ -137,6 +137,16 @@ export const settings: Catalog = {
     'settings.about.transcriptClipped': 'Copied — long transcripts are capped at 50,000 characters.',
     'settings.about.counts': '{logs} log lines · {msgs} messages',
 
+    'settings.updates.check': 'Check for updates',
+    'settings.updates.checking': 'Checking for updates…',
+    'settings.updates.uptodate': 'Up to date ✓',
+    'settings.updates.ready.row': 'Update ready — restart to apply',
+    'settings.updates.ready.title': 'Update downloaded',
+    'settings.updates.ready.body': 'The latest improvements are downloaded. Restart Moch to apply them.',
+    'settings.updates.restart': 'Restart now',
+    'settings.updates.failed': 'Update check failed: {why}',
+    'settings.updates.a11y': 'Check for over-the-air updates',
+
   },
   ar: {
     'settings.title': 'الإعدادات',
@@ -264,6 +274,16 @@ export const settings: Catalog = {
     'settings.about.transcriptClipped': 'تم النسخ — تُقصّ المحادثات الطويلة عند 50,000 حرف.',
     'settings.about.counts': '{logs} سطر سجل · {msgs} رسالة',
 
+    'settings.updates.check': 'التحقق من التحديثات',
+    'settings.updates.checking': 'جارٍ التحقق من التحديثات…',
+    'settings.updates.uptodate': 'محديث ✓',
+    'settings.updates.ready.row': 'التحديث جاهز — أعد التشغيل لتطبيقه',
+    'settings.updates.ready.title': 'تم تنزيل التحديث',
+    'settings.updates.ready.body': 'تم تنزيل أحدث التحسينات. أعد تشغيل موك لتطبيقها.',
+    'settings.updates.restart': 'أعد التشغيل الآن',
+    'settings.updates.failed': 'فشل التحقق من التحديثات: {why}',
+    'settings.updates.a11y': 'التحقق من التحديثات الفورية',
+
   },
   zh: {
     'settings.title': '设置',
@@ -388,6 +408,16 @@ export const settings: Catalog = {
     'settings.about.transcriptCopied': '对话记录已复制到剪贴板。',
     'settings.about.transcriptClipped': '已复制 —— 长对话记录上限为 50,000 个字符。',
     'settings.about.counts': '{logs} 行日志 · {msgs} 条消息',
+
+    'settings.updates.check': '检查更新',
+    'settings.updates.checking': '正在检查更新…',
+    'settings.updates.uptodate': '已是最新 ✓',
+    'settings.updates.ready.row': '更新已就绪 — 重启后生效',
+    'settings.updates.ready.title': '更新已下载',
+    'settings.updates.ready.body': '最新改进已下载。重启 Moch 即可应用。',
+    'settings.updates.restart': '立即重启',
+    'settings.updates.failed': '检查更新失败：{why}',
+    'settings.updates.a11y': '检查在线更新',
 
   },
   fr: {
@@ -520,6 +550,16 @@ export const settings: Catalog = {
     'settings.about.transcriptCopied': 'Discussion copiée dans le presse-papiers.',
     'settings.about.transcriptClipped': 'Copié — les longues discussions sont tronquées à 50 000 caractères.',
     'settings.about.counts': '{logs} lignes de journal · {msgs} messages',
+
+    'settings.updates.check': 'Rechercher des mises à jour',
+    'settings.updates.checking': 'Recherche de mises à jour…',
+    'settings.updates.uptodate': 'À jour ✓',
+    'settings.updates.ready.row': 'Mise à jour prête — redémarrez pour l’appliquer',
+    'settings.updates.ready.title': 'Mise à jour téléchargée',
+    'settings.updates.ready.body': 'Les dernières améliorations sont téléchargées. Redémarrez Moch pour les appliquer.',
+    'settings.updates.restart': 'Redémarrer',
+    'settings.updates.failed': 'Échec de la recherche de mise à jour : {why}',
+    'settings.updates.a11y': 'Rechercher des mises à jour over-the-air',
 
   },
 }
