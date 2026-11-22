@@ -20,6 +20,7 @@
  * a blank row — the roster must still render on an older gateway.
  */
 import { rowStatus, type AttentionRecord, type RowStatus } from './attention'
+import { botDisplayTitle } from './botMode'
 
 /** The profile that IS the assistant (not a fleet bot). */
 export const DEFAULT_PROFILE = 'default'
@@ -47,7 +48,8 @@ export interface RosterRow {
   key: string
   /** The real profile name (never `''`), used for RPCs and status lookups. */
   profile: string
-  /** Display name — `Moch` for the default profile. */
+  /** Display name from the NATIVE Bot Mode identity (`ui_meta['hermes-bots'].title`,
+   *  else `display_name`, else the folder id); `Moch` for the default profile. */
   name: string
   description: string
   isDefault: boolean
@@ -55,6 +57,8 @@ export interface RosterRow {
   canonical: boolean
   /** The canonical chat's stored id (the fail-closed probe's key), if any. */
   canonicalId?: string
+  /** The canonical chat's live compression tip (`resolved_id`), when reported. */
+  canonicalResolvedId?: string
   /** Frozen bots are paused: they can ask, but they are never "working". */
   frozen: boolean
   /** Newest human-facing conversation (drives the preview). */
@@ -74,7 +78,12 @@ export interface RosterRow {
  */
 export interface RosterProfileLike {
   name?: unknown
+  /** Native display title (fleet.ts maps `ui_meta['hermes-bots'].title` here). */
+  title?: unknown
   description?: unknown
+  /** Raw native metadata, for raw `profiles.list` rows that skip fleet.ts. */
+  ui_meta?: unknown
+  display_name?: unknown
   is_default?: unknown
   isDefault?: unknown
   frozen?: unknown
@@ -88,6 +97,8 @@ export interface RosterProfileLike {
 
 interface SessionLike {
   id?: unknown
+  /** Live compression tip of a lineage (`session.list` by title). */
+  resolved_id?: unknown
   title?: unknown
   root_title?: unknown
   preview?: unknown
@@ -111,13 +122,15 @@ function obj(v: unknown): SessionLike | null {
 }
 
 /** A session summary, or null when there is no usable id (nothing to open). */
-function sessionOf(raw: unknown): RosterSession | null {
+function sessionOf(raw: unknown): (RosterSession & { resolvedId?: string }) | null {
   const s = obj(raw)
   if (!s) return null
   const id = str(s.id)
   if (!id) return null
+  const resolvedId = str(s.resolved_id)
   return {
     id,
+    ...(resolvedId ? { resolvedId } : {}),
     title: str(s.title) || str(s.root_title),
     preview: str(s.preview),
     // Canonical rows report `last_active` (the live tip's heartbeat); the
@@ -161,6 +174,14 @@ export function rosterRows(
     const profile = str(p?.name)
     if (!profile) continue
     const isDefault = profile === DEFAULT_PROFILE || p?.is_default === true || p?.isDefault === true
+    // Native Bot Mode identity: the marker title wins (fleet.ts already maps
+    // it to `title`); raw wire rows fall back to ui_meta/display_name.
+    const name =
+      str(p?.title) ||
+      botDisplayTitle(profile, p?.ui_meta, {
+        displayName: str(p?.display_name),
+        isDefault,
+      })
     const canonical = sessionOf(p?.canonicalSession ?? p?.canonical_session)
     const lastSession = sessionOf(p?.lastSession ?? p?.last_session)
     const worker = sessionOf(p?.workerSession ?? p?.worker_session)
@@ -172,19 +193,21 @@ export function rosterRows(
     rows.push({
       key: isDefault ? '' : profile,
       profile,
-      name: isDefault ? DEFAULT_BOT_LABEL : profile,
+      name: isDefault ? DEFAULT_BOT_LABEL : name,
       description: str(p?.description),
       isDefault,
       canonical: !!canonical,
       ...(canonical ? { canonicalId: canonical.id } : {}),
+      ...(canonical?.resolvedId ? { canonicalResolvedId: canonical.resolvedId } : {}),
       frozen: p?.frozen === true,
       lastSession,
       worker,
       lastActiveTs,
-      // The canonical chat is the forever-chat, so its preview is what the bot
-      // last said THERE. Falling back to any newer conversation keeps a fresh
-      // side chat from hiding the row's text.
-      preview: botPreview(lastSession?.preview || canonical?.preview || ''),
+      // The canonical Bot Chat IS the bot's conversation: its preview is the
+      // row's text, full stop. A newer task/side session on the same profile
+      // must never stand in for it (Bot Mode rule — separate task sessions do
+      // not replace or reset the canonical chat).
+      preview: botPreview(canonical?.preview || ''),
     })
   }
   rows.sort((a, b) => {
