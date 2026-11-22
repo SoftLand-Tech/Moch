@@ -177,11 +177,30 @@ async function main() {
     )
     check('roster: task session stays out of the row text', !rows.some((r) => r.preview.includes('kanban')))
 
-    // fleet.ts maps the same identity into a typed row; rosterRows accepts it.
+    // fleet.ts maps the same identity into a typed row (camelCase session
+    // shapes); rosterRows accepts it and keeps the canonical preview.
     const mapped = rosterRows([
-      { name: 'writer', title: 'Scribe', description: 'writes', ui_meta: { 'hermes-bots': { title: 'Scribe' } } },
+      {
+        name: 'writer',
+        title: 'Scribe',
+        description: 'writes',
+        ui_meta: { 'hermes-bots': { title: 'Scribe' } },
+        canonicalSession: {
+          id: 'root-2',
+          resolvedId: 'tip-2',
+          preview: 'Typed canonical preview',
+          lastActive: 1_700_000_400,
+        },
+        lastSession: { id: 'side-2', preview: 'newer task text', lastActive: 1_700_000_900 },
+      },
     ])
     check('roster: mapped FleetProfile title is used', mapped[0]?.name === 'Scribe', String(mapped[0]?.name))
+    check('roster: mapped canonical id + tip are kept', mapped[0]?.canonicalId === 'root-2' && mapped[0]?.canonicalResolvedId === 'tip-2')
+    check(
+      'roster: mapped canonical preview wins over a newer task session',
+      mapped[0]?.preview === 'Typed canonical preview',
+      String(mapped[0]?.preview),
+    )
 
     // No canonical chat yet = NO preview (a task session must not impersonate it).
     const noCanonical = rosterRows([

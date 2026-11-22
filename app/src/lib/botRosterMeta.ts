@@ -99,11 +99,16 @@ interface SessionLike {
   id?: unknown
   /** Live compression tip of a lineage (`session.list` by title). */
   resolved_id?: unknown
+  /** Camel spelling used by the typed `FleetCanonicalSession` (fleet.ts). */
+  resolvedId?: unknown
   title?: unknown
   root_title?: unknown
   preview?: unknown
   started_at?: unknown
+  startedAt?: unknown
   last_active?: unknown
+  /** Camel spelling used by the typed `FleetCanonicalSession` (fleet.ts). */
+  lastActive?: unknown
 }
 
 /** `started_at` / `last_active` are fractional SECONDS; be unit-defensive. */
@@ -127,15 +132,17 @@ function sessionOf(raw: unknown): (RosterSession & { resolvedId?: string }) | nu
   if (!s) return null
   const id = str(s.id)
   if (!id) return null
-  const resolvedId = str(s.resolved_id)
+  const resolvedId = str(s.resolved_id) || str(s.resolvedId)
   return {
     id,
     ...(resolvedId ? { resolvedId } : {}),
     title: str(s.title) || str(s.root_title),
     preview: str(s.preview),
     // Canonical rows report `last_active` (the live tip's heartbeat); the
-    // last-session row reports it too, falling back to `started_at`.
-    lastActiveTs: toMs(s.last_active) || toMs(s.started_at),
+    // last-session row reports it too, falling back to `started_at`. The typed
+    // `FleetCanonicalSession` carries the camel spellings.
+    lastActiveTs:
+      toMs(s.last_active) || toMs(s.lastActive) || toMs(s.started_at) || toMs(s.startedAt),
   }
 }
 
