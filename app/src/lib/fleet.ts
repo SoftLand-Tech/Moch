@@ -211,7 +211,9 @@ const identityInFlight = new Set<string>()
  *  is never clobbered. */
 export async function ensureBotModeIdentity(profile: string): Promise<void> {
   const name = (profile || '').trim()
-  if (!name || name === 'default') return
+  if (!name) return
+  // The launch profile is the DEFAULT BOT (`Moch`) in Moch's Bot Mode — it
+  // gets the same native marker as any named bot.
   const row = fleetProfiles.get().find((p) => p.name === name)
   if (row?.botMode) return
   if (identityInFlight.has(name)) return

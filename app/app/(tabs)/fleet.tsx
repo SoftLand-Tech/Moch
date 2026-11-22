@@ -331,6 +331,7 @@ export default function Fleet() {
                         onPress={() => { void openBotConversation(item.name) }}
                         style={s.chatBtn}
                       />
+                      {item.isDefault ? null : (
                       <GhostBtn
                         small
                         disabled={busy === item.name}
@@ -348,6 +349,7 @@ export default function Fleet() {
                           </Txt>
                         )}
                       </GhostBtn>
+                      )}
                     </View>
                   </Card>
                 )

@@ -187,8 +187,10 @@ export interface BotChatDeps {
    *  `chat.newChat()`/`switchToSession()` clear it, and nothing ever uses it
    *  to scope session creation — bots are identities, not session folders. */
   setActiveBot: (profile: string) => Promise<void> | void
-  /** Bring a stored chat on screen: shared resume + activation. */
-  openChat: (storedId: string) => Promise<void>
+  /** Bring a stored chat on screen: shared resume + activation. `profile`
+   *  is the bot whose HERMES_HOME owns the row — a profile-less resume would
+   *  look in the launch profile's store and answer "session not found". */
+  openChat: (storedId: string, profile: string) => Promise<void>
   /** Best-effort: ensure the profile carries the native Bot Mode marker
    *  (`ui_meta['hermes-bots']`) before its first chat opens — legacy bots
    *  become managed when Moch actually opens them, never by a roster sweep. */
@@ -207,14 +209,18 @@ async function botChatDeps(): Promise<BotChatDeps> {
   return {
     setActiveBot: (profile) => fleet.setActiveBot(profile),
     ensureIdentity: (profile) => fleet.ensureBotModeIdentity(profile),
-    openChat: async (storedId) => {
+    openChat: async (storedId, profile) => {
+      // Register the row's owning profile FIRST: later resumes of this stored
+      // id (boot paint, a notification tap, attention hop) carry no profile
+      // argument, and a profile-less resume would search the launch store.
+      chat.trackServerOnlySession(storedId, profile)
       // `resumeShared` is THE shared resume primitive — one in-flight resume
       // per stored id, so a tap racing a switch cannot mint a second live
       // handle. Unlike `switchToSession` it FAILS LOUDLY on a missing chat
       // (the bot screen turns that into an alert) instead of quietly landing
       // the user in a brand-new empty chat.
       const before = chat.activeSession.get()
-      const r = await chat.resumeShared(storedId)
+      const r = await chat.resumeShared(storedId, { profile })
       // `runResume` only re-points the screen for a chat the app was already
       // tracking; a cold open from the bot screen leaves the tab on the
       // PREVIOUS conversation, so activate here — unless something moved the
@@ -330,23 +336,20 @@ async function recoverBotChat(profile: string, deps: BotChatDeps): Promise<strin
       )
     }
     log('info', 'botchat', `${profile}: recovery race lost — adopting ${winner.storedId}`)
-    await deps.openChat(winner.storedId)
+    await deps.openChat(winner.storedId, profile)
     return winner.storedId
   }
-  await deps.openChat(created.storedId)
+  await deps.openChat(created.storedId, profile)
   return created.storedId
 }
 
-/** The bot-profile guard shared by every door: bots are named profiles; the
- *  launch profile is the assistant itself and has no Bot Chat. */
+/** Bot-profile guard: EVERY live profile is a bot — the launch profile
+ *  included. In Bot Mode the launch profile is just the default bot (`Moch`),
+ *  with its own canonical Bot Chat; the Sessions surface is a separate list of
+ *  ordinary/background sessions, not this conversation. */
 function normalizeBotProfile(profile: string): string {
   const name = (profile || '').trim()
   if (!name) throw new Error('No bot profile to open')
-  if (name === 'default') {
-    throw new Error(
-      'The default agent has no Bot Chat — Bot Mode conversations belong to bot profiles',
-    )
-  }
   return name
 }
 
@@ -411,7 +414,7 @@ async function openBotChatOnce(profile: string): Promise<string> {
   const ref = await ensureBotChat(profile)
   let openedId: string
   try {
-    await deps.openChat(ref.storedId)
+    await deps.openChat(ref.storedId, profile)
     openedId = ref.storedId
   } catch (err) {
     if (!isDefinitiveStaleSession(err)) throw err

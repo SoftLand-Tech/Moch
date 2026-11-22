@@ -1169,9 +1169,13 @@ export async function createSession(title?: string): Promise<ResumeResult> {
  *  withBootPaint, switches through switchToSession) — removed; resumeShared
  *  is the primitive every path uses. */
 async function runResume(storedId: string, profile?: string): Promise<ResumeResult> {
+  // A bot chat / bot task session lives in THAT profile's state.db. Callers
+  // like boot paint and notification taps have no profile argument, so fall
+  // back to the profile we recorded when the chat was first opened.
+  const scoped = profile?.trim() || (await profileForServerOnlySession(storedId))
   const res = await rpc<{ session_id?: string; stored_session_id?: string; messages?: Array<Record<string, unknown>>; info?: { model?: string; provider?: string; reasoning_effort?: string }; running?: boolean; status?: string }>(
     'session.resume',
-    { session_id: storedId, cols: CREATE_COLS, ...(profile ? { profile } : {}) },
+    { session_id: storedId, cols: CREATE_COLS, ...(scoped ? { profile: scoped } : {}) },
   )
   const id = res?.session_id
   if (!id) throw new Error('session.resume returned no id')
@@ -1664,8 +1668,10 @@ export async function openServerSession(
 ): Promise<string> {
   chatBanner.set(opts?.banner ? { text: opts.banner } : null)
   void setActiveBot(null)
-  const r = await resumeShared(storedId, opts?.profile ? { profile: opts.profile } : undefined)
-  trackServerOnlySession(r.storedId)
+  const profile = opts?.profile?.trim() || undefined
+  if (profile) trackServerOnlySession(storedId, profile)
+  const r = await resumeShared(storedId, profile ? { profile } : undefined)
+  trackServerOnlySession(r.storedId, profile)
   activeSession.set(r.sessionId)
   clearAttention(r.storedId)
   void AsyncStorage.setItem(LAST_SESSION_KEY, r.storedId)
@@ -1675,7 +1681,10 @@ export async function openServerSession(
 /** Forget a session locally (backend delete is the caller's job). */
 export async function forgetSession(liveId: string) {
   const stored = sessionsById.get()[liveId]?.storedId
-  if (stored) serverOnlyStoredIds.delete(stored)
+  if (stored) {
+    serverOnlyStoredIds.delete(stored)
+    if (serverOnlyProfiles.delete(stored)) persistServerOnlyProfiles()
+  }
   const map = { ...sessionsById.get() }
   delete map[liveId]
   sessionsById.set(map)
@@ -3364,13 +3373,69 @@ function formatUsage(u: Record<string, unknown>): string {
 // truncated one proves nothing about absence), drop tracked sessions whose
 // stored id is absent — except the chat on screen and provisional windows.
 // Sessions opened through a NON-launch profile (a bot's canonical Bot Chat,
-// or one of its Hermes task sessions). The launch-profile session list cannot
-// prove anything about them, so reconciliation must never evict them — doing
-// so also deleted their cached transcript (device-only tool log).
+// or one of its Hermes task sessions). Two jobs:
+//  1. the launch-profile session list cannot prove anything about them, so
+//     reconciliation must never evict them (that also deleted their cached
+//     transcript / device-only tool log);
+//  2. EVERY later resume of such a stored id (boot paint, notification tap,
+//     attention hop) must carry the owning `profile`, or the gateway searches
+//     the launch DB and answers "session not found" — the bot-chat bug.
 const serverOnlyStoredIds = new Set<string>()
-/** Keep a non-launch-profile session out of the launch-list prune. */
-export function trackServerOnlySession(storedId: string) {
-  if (storedId && !isPseudoStoredId(storedId)) serverOnlyStoredIds.add(storedId)
+const serverOnlyProfiles = new Map<string, string>()
+const SERVER_ONLY_MAP_KEY = 'hermes.serverOnlySessions.v1'
+let serverOnlyProfilesLoaded = false
+let loadingServerOnlyProfiles: Promise<void> | null = null
+
+function trackServerOnlySessionNow(storedId: string, profile?: string) {
+  if (!storedId || isPseudoStoredId(storedId)) return
+  serverOnlyStoredIds.add(storedId)
+  if (profile) serverOnlyProfiles.set(storedId, profile)
+}
+
+async function loadServerOnlyProfiles(): Promise<void> {
+  if (serverOnlyProfilesLoaded) return
+  if (!loadingServerOnlyProfiles) {
+    loadingServerOnlyProfiles = (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(SERVER_ONLY_MAP_KEY)
+        if (raw) {
+          const parsed = JSON.parse(raw) as Record<string, unknown>
+          for (const [id, profile] of Object.entries(parsed)) {
+            if (typeof id === 'string' && typeof profile === 'string' && profile) {
+              serverOnlyStoredIds.add(id)
+              serverOnlyProfiles.set(id, profile)
+            }
+          }
+        }
+      } catch {
+        /* best-effort: a missing/corrupt map only loses link routing */
+      } finally {
+        serverOnlyProfilesLoaded = true
+        loadingServerOnlyProfiles = null
+      }
+    })()
+  }
+  await loadingServerOnlyProfiles
+}
+
+function persistServerOnlyProfiles(): void {
+  const out: Record<string, string> = {}
+  for (const [id, profile] of serverOnlyProfiles) out[id] = profile
+  void AsyncStorage.setItem(SERVER_ONLY_MAP_KEY, JSON.stringify(out)).catch(() => {})
+}
+
+/** Register a session that lives on a NON-launch profile. `profile` makes all
+ *  future resumes of this stored id profile-scoped even when the caller has no
+ *  profile in hand. */
+export function trackServerOnlySession(storedId: string, profile?: string) {
+  trackServerOnlySessionNow(storedId, profile)
+  if (profile) persistServerOnlyProfiles()
+}
+
+/** The owning profile of a non-launch session, if we ever saw one. */
+async function profileForServerOnlySession(storedId: string): Promise<string | undefined> {
+  if (!serverOnlyProfilesLoaded) await loadServerOnlyProfiles()
+  return serverOnlyProfiles.get(storedId)
 }
 
 sessionRows.subscribe((rows) => {

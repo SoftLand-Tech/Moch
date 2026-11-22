@@ -472,22 +472,18 @@ export function ScreenShell({
 
   // ── Bots mode: open a bot's canonical Bot Chat ───────────────────────────
   // `openBotChat` owns the whole identity story (exact-title lookup, create-
-  // if-absent, single-flight, adopt-on-race) and switches the screen itself
-  // via switchToSession. The extra navigate is the belt-and-braces the other
-  // hand-offs use, so the tab is already up while the RPC runs.
+  // if-absent, single-flight, adopt-on-race, profile-scoped resume) and
+  // switches the screen itself via the shared resume. The extra navigate is
+  // the belt-and-braces the other hand-offs use, so the tab is already up
+  // while the RPC runs.
   //
-  // `key === ''` is the DEFAULT agent (the row reads "Moch"): it has no
-  // `Bot Chat` — the canonical chat is a per-bot artifact, and minting one on
-  // `default` would put a second forever-chat beside the assistant — so its
-  // row just returns to the chat the user was in.
+  // EVERY bot row is a bot — `Moch` (the launch profile) included: it owns its
+  // own canonical Bot Chat exactly like a named bot. Ordinary chat history
+  // lives on the Sessions surface, not here.
   const openBot = useCallback(
-    (key: string) => {
-      if (!key) {
-        router.navigate('/(tabs)/chat')
-        return
-      }
+    (profile: string) => {
       router.navigate('/(tabs)/chat')
-      void openBotChat(key).catch((e) => {
+      void openBotChat(profile).catch((e) => {
         // Same failure language as app/bot.tsx's hand-off.
         showAlert(tr('bot.chat.failed', { why: e instanceof Error ? e.message : String(e) }))
       })

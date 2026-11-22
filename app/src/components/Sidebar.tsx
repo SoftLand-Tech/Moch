@@ -177,10 +177,10 @@ interface Props {
   /** Bots mode roster source (`profiles.list` via `fleetProfiles`). */
   profiles?: readonly FleetProfile[]
   /**
-   * Open a bot's canonical Bot Chat. `''` = the default agent (an ordinary
-   * chat — `default` has no `Bot Chat` of its own).
+   * Open a bot's canonical Bot Chat. Every row is a bot, `Moch` (the launch
+   * profile) included — its Bot Chat is its ONE persistent conversation.
    */
-  onOpenBot?: (key: string) => void
+  onOpenBot?: (profile: string) => void
   /** Open the bot create flow (the Fleet screen). */
   onNewBot?: () => void
   recent: RecentChat[]

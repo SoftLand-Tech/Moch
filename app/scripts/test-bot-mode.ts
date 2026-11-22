@@ -47,7 +47,7 @@ async function main() {
     botModeMarkerPatch,
     markBotModeManaged,
   } = botMode
-  const { rosterRows, botPreview, taskSessionRows, DEFAULT_PROFILE, DEFAULT_BOT_LABEL } = roster
+  const { rosterRows, withSessionPreviews, botPreview, taskSessionRows, DEFAULT_PROFILE, DEFAULT_BOT_LABEL } = roster
 
   // ── A. Native marker shape ───────────────────────────────────────────────
   check('BOT_META_KEY is the native ui_meta key', BOT_META_KEY === 'hermes-bots')
@@ -168,8 +168,13 @@ async function main() {
     const byKey = new Map(rows.map((r) => [r.key, r]))
 
     check('roster: one row per profile', rows.length === 2, String(rows.length))
-    check('roster: default row opens the chat surface (key "")', !!byKey.get(''))
-    check('roster: default row reads Moch', byKey.get('')?.name === DEFAULT_BOT_LABEL)
+    check('roster: Moch is a bot row like any other (key = profile)', !!byKey.get('default'))
+    check('roster: default row reads Moch', byKey.get('default')?.name === DEFAULT_BOT_LABEL)
+    check('roster: default row can carry its own canonical chat', byKey.get('default')?.isDefault === true)
+    const mochCanonical = rosterRows([
+      { name: 'default', is_default: true, canonical_session: { id: 'moch-chat', preview: 'hi' } },
+    ])[0]
+    check('roster: default row exposes its Bot Chat', mochCanonical?.canonicalId === 'moch-chat')
     const bot = byKey.get('researcher')
     check('roster: row key is the profile name', !!bot && bot.profile === 'researcher')
     check('roster: name comes from the NATIVE marker title', bot?.name === 'Dr. Foo', String(bot?.name))
@@ -212,6 +217,27 @@ async function main() {
       { name: 'newbot', last_session: { id: 'side', preview: 'side chat text', last_active: 1 } },
     ])
     check('roster: no canonical chat means no preview', noCanonical[0]?.preview === '', JSON.stringify(noCanonical[0]?.preview))
+
+    // The canonical Bot Chat stays the face even when the launch list has a
+    // newer ordinary session on the same profile (Moch's Sessions surface).
+    const overlaid = withSessionPreviews(
+      rosterRows([
+        {
+          name: 'default',
+          is_default: true,
+          canonical_session: { id: 'moch-chat', preview: 'canonical text', last_active: 100 },
+        },
+        { name: 'researcher', canonical_session: { id: 'r-chat', preview: '' } },
+      ]),
+      [
+        { id: 'ordinary', profile: 'default', preview: 'ordinary session text', last_active: 999 },
+        { id: 'side', profile: 'researcher', preview: 'task text', last_active: 999 },
+      ],
+    )
+    const mochRow = overlaid.find((r) => r.profile === 'default')
+    check('roster: canonical preview is never overlaid by an ordinary session', mochRow?.preview === 'canonical text', String(mochRow?.preview))
+    const researcherRow = overlaid.find((r) => r.profile === 'researcher')
+    check('roster: a canonical row with no text stays empty (task sessions do not fill it)', researcherRow?.preview === '', JSON.stringify(researcherRow?.preview))
 
     // Existing helper stays honest.
     check(
