@@ -71,7 +71,7 @@ import { AttachmentChip } from '../../src/components/media/AttachmentChip'
 import { AttachSheet } from '../../src/components/media/AttachSheet'
 import { chatTabFocused } from '../../src/lib/attention'
 import { draftFor, setDraft } from '../../src/lib/drafts'
-import { activeBotAtom, setActiveBot, fleetProfiles, type FleetProfile } from '../../src/lib/fleet'
+import { activeBotAtom, fleetProfiles, type FleetProfile } from '../../src/lib/fleet'
 import { openBotChat } from '../../src/lib/botChat'
 import { BotAvatar } from '../../src/components/BotAvatar'
 import { shareInInbox, ackShareIn, applySharedToDraft, type SharedFile } from '../../src/lib/shareIn'
@@ -128,6 +128,9 @@ export default function Chat() {
   // Bot Switcher (round-2 feedback): the pill under the header opens this
   // sheet — the roster lives here instead of a "Switch back" dead end.
   const profiles = useStore(fleetProfiles)
+  // Native Bot Mode title for the active bot (marker title, else profile id).
+  const activeBotTitle = (name: string | null) =>
+    (name ? profiles.find((p) => p.name === name)?.title : '') || name || ''
   const [botSwitcherOpen, setBotSwitcherOpen] = useState(false)
   /** The bot currently being switched to ('' = the default agent). */
   const [switchingBot, setSwitchingBot] = useState<string | null>(null)
@@ -316,10 +319,11 @@ export default function Chat() {
     setSwitchingBot(name ?? '')
     try {
       if (name) {
-        await setActiveBot(name)
+        // The bot's ONE canonical Bot Chat — openBotChat owns the identity
+        // marker; an ordinary bot-scoped chat is never created (Bot Mode).
         await openBotChat(name)
       } else {
-        await setActiveBot(null)
+        // Launch identity: a fresh chat (newChat clears the bot view marker).
         await newChat()
       }
       setBotSwitcherOpen(false)
@@ -1275,11 +1279,11 @@ export default function Chat() {
                 style={({ pressed }) => [s.botPill, { flexDirection: dir.row }, pressed && s.btnPressed]}
                 onPress={() => setBotSwitcherOpen(true)}
                 accessibilityRole="button"
-                accessibilityLabel={t('chat.bot.a11y', { name: activeBot })}
+                accessibilityLabel={t('chat.bot.a11y', { name: activeBotTitle(activeBot) })}
               >
                 <Dot kind="green" size={8} />
                 <Txt size={11} color={C.textDim}>{t('chat.bot.label')}</Txt>
-                <Txt size={11} weight="700" numberOfLines={1} style={s.botName}>@{activeBot}</Txt>
+                <Txt size={11} weight="700" numberOfLines={1} style={s.botName}>@{activeBotTitle(activeBot)}</Txt>
                 <Icon name="chevron-down" size={12} color={C.textFaint} />
               </Pressable>
             </View>
@@ -2000,12 +2004,12 @@ export default function Chat() {
                         onPress={() => { if (!isOn) void pickBot(p.name) }}
                         disabled={isOn || switchingBot !== null}
                         accessibilityRole="button"
-                        accessibilityLabel={t('chat.bot.switchTo', { name: p.name })}
+                        accessibilityLabel={t('chat.bot.switchTo', { name: p.title })}
                         accessibilityState={{ selected: isOn, busy: isSwitching }}
                       >
                         <BotAvatar profile={p.name} size={34} frozen={p.frozen} />
                         <View style={s.botSheetRowText}>
-                          <Txt size={13} weight="700" numberOfLines={1}>{p.name}</Txt>
+                          <Txt size={13} weight="700" numberOfLines={1}>{p.title}</Txt>
                           {!!p.description ? (
                             <Txt size={11} color={C.textDim} numberOfLines={1}>{p.description}</Txt>
                           ) : null}

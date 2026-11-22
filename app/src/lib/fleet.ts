@@ -10,6 +10,8 @@
 import { atom } from 'nanostores'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { rpc } from './gateway'
+import { botDisplayTitle, isBotModeManaged, markBotModeManaged } from './botMode'
+import { ensureBotChat } from './botChat'
 
 const ACTIVE_BOT_KEY = 'hermes.fleet.activeBot.v1'
 
@@ -55,11 +57,24 @@ export interface FleetCanonicalSession {
 
 export interface FleetProfile {
   name: string
+  /**
+   * Display name from the NATIVE Bot Mode identity: `profiles.list` →
+   * `ui_meta['hermes-bots'].title`, else `display_name`, else the folder id
+   * (the launch profile reads `Moch`). Never a Moch-side alias table.
+   */
+  title: string
   description: string
   soul?: string
   frozen?: boolean
   gateHeld?: boolean
   model?: { provider: string; default: string }
+  /** True for the launch profile — the assistant itself, not a fleet bot. */
+  isDefault?: boolean
+  /** Present only when the profile carries the native Bot Mode marker. */
+  botMode: boolean
+  /** Raw `ui_meta` / its per-key CAS revisions, straight from the gateway. */
+  uiMeta?: Record<string, unknown>
+  uiMetaRevisions?: Record<string, number>
   /** Present only when the profile HAS a canonical Bot Chat. */
   canonicalSession?: FleetCanonicalSession
 }
@@ -86,7 +101,10 @@ export const fleetError = atom<string>('')
 interface ProfilesListRow {
   name: string
   description?: string
+  display_name?: string
+  is_default?: boolean
   ui_meta?: Record<string, unknown>
+  ui_meta_revisions?: Record<string, number>
   /** Roster session fields — only with `include_sessions` (the default). */
   canonical_session?: {
     id?: unknown
@@ -131,17 +149,30 @@ export async function refreshFleet(): Promise<void> {
     // dependency and is ignored by older peers that predate it.
     const lst = await rpc<ProfilesListResult>('profiles.list', { include_sessions: true }, 15000)
     const rows = lst.profiles ?? lst.items ?? (Array.isArray(lst) ? (lst as never) : [])
+    const wireRows = rows as ProfilesListRow[]
     fleetProfiles.set(
-      (rows as ProfilesListRow[]).map((r) => {
+      wireRows.map((r) => {
         const canonicalSession = canonicalSessionOf(r)
+        const isDefault = r.is_default === true || r.name === 'default'
         return {
           name: r.name,
+          title: botDisplayTitle(r.name, r.ui_meta, { displayName: r.display_name, isDefault }),
           description: r.description ?? '',
+          ...(isDefault ? { isDefault: true } : {}),
+          // Native marker: unmarked profiles are ordinary Hermes profiles and
+          // are migrated below (best-effort) so legacy Moch bots become real
+          // Bot Mode bots instead of staying session containers.
+          botMode: isBotModeManaged(r.ui_meta),
+          ...(r.ui_meta ? { uiMeta: r.ui_meta } : {}),
+          ...(r.ui_meta_revisions ? { uiMetaRevisions: r.ui_meta_revisions } : {}),
           ...(canonicalSession ? { canonicalSession } : {}),
         }
       }),
     )
     fleetError.set('')
+    // Best-effort, non-blocking: upgrade pre-Bot-Mode profiles through the
+    // native `profiles.configure` door. The refresh above already paints.
+    void migrateLegacyBots(wireRows)
   } catch (e) {
     fleetError.set(e instanceof Error ? e.message : String(e))
   }
@@ -150,6 +181,54 @@ export async function refreshFleet(): Promise<void> {
     fleetStatusAtom.set(st)
   } catch {
     fleetStatusAtom.set(null) // fleet runtime not armed on this gateway — fine
+  }
+}
+
+// ── Native Bot Mode migration ───────────────────────────────────────────────
+// Bot Mode activation is the `ui_meta['hermes-bots']` marker (see
+// lib/botMode.ts). Bots created before the audit have profiles without it, so
+// Hermes treats them as ordinary profiles: no teammate protocol, no
+// `message_agent`, no native roster title. This upgrades them once, through
+// the native configure door, with the roster's CAS revisions so another
+// client's concurrent write is never clobbered.
+const markerInFlight = new Set<string>()
+const markerRetryAfter = new Map<string, number>()
+const MARKER_RETRY_MS = 30_000
+let markerRefreshQueued = false
+
+async function migrateLegacyBots(rows: ProfilesListRow[]): Promise<void> {
+  const now = Date.now()
+  const pending = rows.filter((r) => {
+    const name = (r.name ?? '').trim()
+    if (!name || name === 'default' || r.is_default === true) return false
+    if (isBotModeManaged(r.ui_meta)) return false
+    if (markerInFlight.has(name)) return false
+    return now >= (markerRetryAfter.get(name) ?? 0)
+  })
+  if (!pending.length) return
+  let wrote = false
+  await Promise.all(
+    pending.map(async (r) => {
+      const name = r.name.trim()
+      markerInFlight.add(name)
+      try {
+        const ok = await markBotModeManaged(name, rpc, {
+          existing: r.ui_meta,
+          revisions: r.ui_meta_revisions,
+        })
+        if (ok) wrote = true
+        else markerRetryAfter.set(name, Date.now() + MARKER_RETRY_MS)
+      } finally {
+        markerInFlight.delete(name)
+      }
+    }),
+  )
+  // Re-read once so the roster (and the UI) reflects the native marker.
+  if (wrote && !markerRefreshQueued) {
+    markerRefreshQueued = true
+    void refreshFleet().finally(() => {
+      markerRefreshQueued = false
+    })
   }
 }
 
@@ -239,6 +318,18 @@ export async function createProfile(input: {
     // platform/bot tokens) so a fresh bot can actually answer.
     mirror_credentials: true,
   })
+  // Bot Mode identity: the profile is born a Bot-Mode-managed bot through the
+  // native marker (`profile.yaml` → `ui_meta['hermes-bots']`, see
+  // lib/botMode.ts). Without it Hermes would hand the new bot to the world as
+  // an ordinary profile — no teammate protocol, no `message_agent`, no
+  // native roster title — which is exactly the "bots are session templates"
+  // bug. Best-effort: `refreshFleet` retries an unmarked profile.
+  await markBotModeManaged(input.name, rpc)
+  // Every bot HAS its one canonical Bot Chat (native: the hidden session
+  // titled exactly `Bot Chat` on this profile). Create it now, best-effort and
+  // non-blocking, so a bot never exists without one; the open path
+  // (`openBotChat` → `ensureBotChat`) resolves the same row idempotently.
+  void ensureBotChat(input.name).catch(() => {})
   // Checklist seeding is BEST-EFFORT post-create: the bot exists either way;
   // a seed failure is surfaced, never fatal (never clone_from — that would
   // copy the whole .env/config.yaml and silently upgrade §2.8 mirroring).

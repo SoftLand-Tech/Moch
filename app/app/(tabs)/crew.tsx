@@ -147,7 +147,7 @@ export default function Crew() {
   /** Assignee chips: Moch (the launch profile) + every fleet bot. */
   const assignees = useMemo(
     () => [{ name: 'default', label: t('crew.moch') },
-      ...roster.map((p) => ({ name: p.name, label: p.name }))],
+      ...roster.map((p) => ({ name: p.name, label: p.title }))],
     [roster, t],
   )
 

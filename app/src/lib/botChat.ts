@@ -1,24 +1,28 @@
 /**
- * Canonical Bot Chat (UI-1, slice B).
+ * Canonical Bot Chat (UI-1, slice B) — the CLIENT half of Hermes' native Bot
+ * Mode (audit + architecture: BOT-MODE.md).
  *
- * A bot is a profile with ONE canonical conversation titled exactly
- * `Bot Chat` — the forever-chat its roster row opens. Hermes itself treats
- * that NAME as the identity: the desktop, `hermes peer dm` and the TUI all
- * resolve it by exact-title lookup, and the session store's title
- * uniqueness allows at most one row per profile. So the phone must never
- * grow a per-bot chat list, and must never mint a second `Bot Chat` just
- * because a lookup failed for a non-absence reason — a duplicate splits the
- * bot's memory in two and the desktop then flip-flops between them.
+ * Native Bot Mode says: a bot is a Hermes profile, and its ONE conversation is
+ * the hidden session titled exactly `Bot Chat` on that profile
+ * (`hermes_state.CANONICAL_BOT_CHAT_TITLE`). Hermes itself resolves it by that
+ * NAME — `profiles.list` returns it as `canonical_session` (with `resolved_id`
+ * = the live compression tip), and `session.list {title}` is a windowless
+ * exact-title lookup. The phone must therefore never grow a per-bot chat list,
+ * never mint a second `Bot Chat`, and never fall back to an ordinary
+ * bot-scoped session: that session would be a task chat, not the bot.
  *
  * Wire contract (verified in `tui_gateway`):
  *  - `session.list { profile, title, limit, include_hidden }` is the
  *    identity lookup: exact title, windowless (a busy profile's ordinary
- *    listing can push the row out of the window), hidden rows INCLUDED —
+ *    listing can push the row out), hidden rows INCLUDED —
  *    canonical chats are born hidden.
  *  - `session.create { profile, title, hidden, follow_profile_config }` is
  *    LAZY: it mints a live session but no DB row until the first prompt.
  *    `session.title` therefore writes the row + the name immediately, so
  *    the second device sees the canonical chat instead of minting its own.
+ *  - `session.resume` on the stored id re-binds the Bot Chat to its
+ *    compression tip (`_resume_follow_tip`), so the phone inherits the
+ *    native continuity across restarts AND context compaction.
  *  - A title write rejected with "already in use" means another client won
  *    the race: adopt ITS row, never fail the tap and never create again.
  *
@@ -179,13 +183,12 @@ export async function findBotChat(profile: string): Promise<BotChatRef | null> {
 
 // ── Opening the chat on screen ─────────────────────────────────────────────
 export interface BotChatDeps {
-  /** Scope new sessions to the bot (`fleet.setActiveBot`). */
+  /** Mark the bot as the identity of the chat being opened. A VIEW marker:
+   *  `chat.newChat()`/`switchToSession()` clear it, and nothing ever uses it
+   *  to scope session creation — bots are identities, not session folders. */
   setActiveBot: (profile: string) => Promise<void> | void
   /** Bring a stored chat on screen: shared resume + activation. */
   openChat: (storedId: string) => Promise<void>
-  /** Fresh chat scoped to the active bot (the chat module's `newChat`) —
-   *  the last-resort recovery when the canonical chat cannot be restored. */
-  newChat?: () => Promise<string>
 }
 
 let depsOverride: BotChatDeps | null = null
@@ -218,10 +221,6 @@ async function botChatDeps(): Promise<BotChatDeps> {
       // Boot restores this key, so a relaunch lands back in the bot chat.
       const storage = (await import('@react-native-async-storage/async-storage')).default
       void storage.setItem(chat.SESSION_KEY, r.storedId).catch(() => {})
-    },
-    newChat: async () => {
-      // chat.newChat already scopes to getActiveBot() (set above).
-      return chat.newChat()
     },
   }
 }
@@ -290,68 +289,62 @@ async function createBotChat(profile: string): Promise<CreateOutcome> {
 const STALE_SESSION_RX = /session not found|no such session|not found|404/i
 
 /**
- * Last-resort recovery after a stale canonical row: mint a fresh canonical
- * `Bot Chat` (handling the "already in use" race like the main create path),
- * and if even that fails, fall back to a fresh chat scoped to the bot.
- * Resolves with the id actually opened, or throws a REAL (non-stale) error.
+ * Recovery after a stale canonical row (the registry row outlived its live
+ * session): mint a fresh CANONICAL `Bot Chat`, handling the "already in use"
+ * race like the main create path. NEVER falls back to an ordinary
+ * bot-scoped chat — a side chat is a task session, not the bot, and opening
+ * one here would silently replace the forever-chat (the exact bug this
+ * architecture exists to prevent). A failure is a real failure: throw.
  */
 async function recoverBotChat(profile: string, deps: BotChatDeps): Promise<string> {
+  let created: CreateOutcome
   try {
-    const created = await createBotChat(profile)
-    if (created.kind === 'conflict') {
-      // Same race the main path handles: another client claimed the name
-      // between our lookup and our title write — adopt its row.
-      const winner = await findBotChat(profile)
-      if (!winner) {
-        throw botChatFailure(
-          `Could not open ${profile}'s ${BOT_CHAT_TITLE} — another client just claimed ` +
-            'the name but the chat is not visible yet. Try again.',
-        )
-      }
-      log('info', 'botchat', `${profile}: recovery race lost — adopting ${winner.storedId}`)
-      await deps.openChat(winner.storedId)
-      return winner.storedId
-    }
-    await deps.openChat(created.storedId)
-    return created.storedId
+    created = await createBotChat(profile)
   } catch (err) {
-    log('warn', 'botchat', `${profile}: canonical recovery failed — falling back to a fresh chat`)
-    // Fallback: a fresh chat scoped to the bot (setActiveBot already ran).
-    if (deps.newChat) {
-      const id = await deps.newChat()
-      // The fallback succeeded — the recovery attempt's recorded failure
-      // must not linger as a banner on a chat that actually opened.
-      botChatError.set('')
-      return id
-    }
-    throw err
+    throw botChatFailure(
+      `Could not restore ${profile}'s ${BOT_CHAT_TITLE}: ${errMessage(err)}`,
+    )
   }
+  if (created.kind === 'conflict') {
+    // Another client claimed the name between our lookup and title write —
+    // adopt its row.
+    const winner = await findBotChat(profile)
+    if (!winner) {
+      throw botChatFailure(
+        `Could not open ${profile}'s ${BOT_CHAT_TITLE} — another client just claimed ` +
+          'the name but the chat is not visible yet. Try again.',
+      )
+    }
+    log('info', 'botchat', `${profile}: recovery race lost — adopting ${winner.storedId}`)
+    await deps.openChat(winner.storedId)
+    return winner.storedId
+  }
+  await deps.openChat(created.storedId)
+  return created.storedId
 }
 
-async function openBotChatOnce(profile: string): Promise<string> {
-  botChatError.set('')
-  const deps = await botChatDeps()
-  // Identity FIRST: every session this app creates while the bot is active
-  // must live on the bot's profile, so `createSession` keeps scoping new
-  // chats to it.
-  await deps.setActiveBot(profile)
-
-  const found = await findBotChat(profile)
-  if (found) {
-    try {
-      await deps.openChat(found.storedId)
-      return found.storedId
-    } catch (err) {
-      if (!STALE_SESSION_RX.test(errMessage(err))) throw err
-      // The registry row outlived its session. Retire the stale row
-      // (best-effort) and give the bot a fresh canonical chat instead of
-      // throwing the confusing "session not found" at the user.
-      log('warn', 'botchat', `${profile}: stale ${BOT_CHAT_TITLE} row ${found.storedId} — recovering`)
-      void botRpc('session.delete', { session_id: found.storedId }).catch(() => {})
-      return await recoverBotChat(profile, deps)
-    }
+/** The bot-profile guard shared by every door: bots are named profiles; the
+ *  launch profile is the assistant itself and has no Bot Chat. */
+function normalizeBotProfile(profile: string): string {
+  const name = (profile || '').trim()
+  if (!name) throw new Error('No bot profile to open')
+  if (name === 'default') {
+    throw new Error(
+      'The default agent has no Bot Chat — Bot Mode conversations belong to bot profiles',
+    )
   }
+  return name
+}
 
+/**
+ * Resolve-or-create the canonical Bot Chat WITHOUT opening it, through the
+ * native identity: exact-title registry lookup, then create + claim when the
+ * profile truly has none. Single-flighted per profile so two surfaces racing
+ * cannot mint two forever-chats.
+ */
+async function ensureBotChatOnce(profile: string): Promise<BotChatRef> {
+  const found = await findBotChat(profile)
+  if (found) return found
   const created = await createBotChat(profile)
   if (created.kind === 'conflict') {
     // Another client (desktop, peer DM, a second phone) claimed the name
@@ -365,12 +358,51 @@ async function openBotChatOnce(profile: string): Promise<string> {
       )
     }
     log('info', 'botchat', `${profile}: title race lost — adopting ${winner.storedId}`)
-    await deps.openChat(winner.storedId)
-    return winner.storedId
+    return winner
   }
+  return { storedId: created.storedId }
+}
 
-  await deps.openChat(created.storedId)
-  return created.storedId
+const ensureInFlight = new Map<string, Promise<BotChatRef>>()
+
+/** Resolve the bot's canonical Bot Chat (never mints an ordinary chat). */
+export function ensureBotChat(profile: string): Promise<BotChatRef> {
+  let name: string
+  try {
+    name = normalizeBotProfile(profile)
+  } catch (e) {
+    return Promise.reject(e)
+  }
+  const running = ensureInFlight.get(name)
+  if (running) return running
+  const p: Promise<BotChatRef> = ensureBotChatOnce(name).finally(() => {
+    if (ensureInFlight.get(name) === p) ensureInFlight.delete(name)
+  })
+  ensureInFlight.set(name, p)
+  return p
+}
+
+async function openBotChatOnce(profile: string): Promise<string> {
+  botChatError.set('')
+  const deps = await botChatDeps()
+  // Identity view for the chat surface (banner/avatar). NOT a session scope:
+  // chat.newChat()/switchToSession() clear it and createSession never reads
+  // it — a bot is an identity, not a session folder.
+  await deps.setActiveBot(profile)
+
+  const ref = await ensureBotChat(profile)
+  try {
+    await deps.openChat(ref.storedId)
+    return ref.storedId
+  } catch (err) {
+    if (!STALE_SESSION_RX.test(errMessage(err))) throw err
+    // The registry row outlived its session. Retire the stale row
+    // (best-effort) and give the bot a fresh CANONICAL chat instead of
+    // throwing the confusing "session not found" at the user.
+    log('warn', 'botchat', `${profile}: stale ${BOT_CHAT_TITLE} row ${ref.storedId} — recovering`)
+    void botRpc('session.delete', { session_id: ref.storedId }).catch(() => {})
+    return await recoverBotChat(profile, deps)
+  }
 }
 
 // One shared in-flight open per profile: a double-tap (or a tap racing the
@@ -386,8 +418,12 @@ const inFlight = new Map<string, Promise<string>>()
  * ever treating a failed lookup as "absent".
  */
 export function openBotChat(profile: string): Promise<string> {
-  const name = (profile || '').trim()
-  if (!name) return Promise.reject(new Error('No bot profile to open'))
+  let name: string
+  try {
+    name = normalizeBotProfile(profile)
+  } catch (e) {
+    return Promise.reject(e)
+  }
   const running = inFlight.get(name)
   if (running) return running
   const p: Promise<string> = openBotChatOnce(name).finally(() => {

@@ -22,9 +22,10 @@ import { Icon } from '../src/components/Icon'
 import { showAlert } from '../src/components/AlertDialog'
 import { C, useStyles } from '../src/lib/theme'
 import { rpc } from '../src/lib/gateway'
-import { refreshFleet, setActiveBot } from '../src/lib/fleet'
+import { fleetProfiles, refreshFleet, setActiveBot } from '../src/lib/fleet'
 import { openBotChat } from '../src/lib/botChat'
 import { useDir, useT } from '../src/lib/strings'
+import { useStore } from '@nanostores/react'
 
 /**
  * Bot detail (M9.2): SOUL viewer/editor, description, freeze, chat hand-off,
@@ -44,6 +45,10 @@ export default function BotDetail() {
   const router = useRouter()
   const { name } = useLocalSearchParams<{ name?: string }>()
   const bot = name ?? ''
+  const profiles = useStore(fleetProfiles)
+  // Native Bot Mode identity: the marker title is what the roster calls this
+  // bot; the folder id stays the RPC handle (profiles.* take `name`).
+  const botTitle = profiles.find((p) => p.name === bot)?.title || bot
   const [soul, setSoul] = useState<string>('')
   const [desc, setDesc] = useState<string>('')
   const [loading, setLoading] = useState(true)
@@ -183,7 +188,7 @@ export default function BotDetail() {
         </GhostBtn>
         <View style={s.titleBlock}>
           <Txt size={14.5} weight="800" center numberOfLines={1} style={s.titleName}>
-            {bot || t('bot.fallbackName')}
+            {botTitle || t('bot.fallbackName')}
           </Txt>
           <Txt size={9.5} weight="700" center color={C.textFaint} style={s.brand}>
             {t('bot.brand')}
@@ -192,7 +197,7 @@ export default function BotDetail() {
         <PrimaryBtn
           onPress={openChat}
           disabled={opening}
-          accessibilityLabel={t('bot.chat', { name: bot })}
+          accessibilityLabel={t('bot.chat', { name: botTitle || bot })}
           style={s.chatBtn}
         >
           {opening ? (

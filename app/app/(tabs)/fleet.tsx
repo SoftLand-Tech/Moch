@@ -303,14 +303,14 @@ export default function Fleet() {
                     <View style={[s.cardHead, { flexDirection: dir.row }]}>
                       <Pressable
                         accessibilityRole="button"
-                        accessibilityLabel={item.name}
+                        accessibilityLabel={item.title}
                         hitSlop={4}
                         onPress={() => router.push({ pathname: '/bot', params: { name: item.name } } as never)}
                         style={[s.nameHit, { flexDirection: dir.row }]}
                       >
                         <Dot kind={frozen ? 'idle' : 'green'} />
                         <Txt size={13.5} weight="800" numberOfLines={1} style={s.cardName}>
-                          {item.name}
+                          {item.title}
                         </Txt>
                       </Pressable>
                       <Pill kind={frozen ? 'amber' : 'green'}>

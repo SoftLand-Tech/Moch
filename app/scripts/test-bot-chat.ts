@@ -3,14 +3,19 @@
  * no RN. A fake RPC + fake open deps are injected through the module's test
  * seams (the `_useSessionRpcForTests` pattern from lib/sessionList).
  *
- * Covered:
+ * Covered (Hermes Bot Mode contract — audit: BOT-MODE.md):
  *  1. existing `Bot Chat` row → lookup only, no create, opens the stored id
  *  2. missing row → create + title + open, with the exact wire params
  *  3. title conflict ("already in use") → adopt the winner, no second create
  *  4. lookup RPC throws → openBotChat throws and creates NOTHING
+ *  5. ensureBotChat → resolve-or-create only, single canonical row across a
+ *     simulated restart, never an ordinary bot-scoped chat
+ *  6. recovery after a stale row only ever mints the canonical row (an
+ *     ordinary `Bot · <name>` session is NEVER a fallback — bots are
+ *     identities, not session containers)
  * Plus the supporting rules: trimmed exact-title matching, `resolved_id`
- * pass-through, roster-says-it-exists fail-closed, single-flight, and the
- * title-write failure paths.
+ * pass-through, roster-says-it-exists fail-closed, single-flight, the launch
+ * profile's "no Bot Chat" guard, and the title-write failure paths.
  *
  *   npx tsx scripts/test-bot-chat.ts
  */
@@ -318,8 +323,7 @@ async function main() {
     active = null
     const { rpc, calls } = fakeRpc({
       // First lookup: the stale row exists. After the best-effort delete the
-      // re-lookup (none needed here — the create path succeeds directly) and
-      // the recovery's lookup still report an empty registry.
+      // recovery's lookup reports an empty registry and the create path runs.
       'session.list': (() => {
         let n = 0
         return () => (++n === 1
@@ -335,12 +339,8 @@ async function main() {
     })
     mod._useBotChatRpcForTests(rpc)
     mod._useBotChatRosterForTests(() => false)
-    // The real resume throws "session not found" for the stale row; every
-    // later open (the fresh canonical) succeeds.
-    const realDeps = mod._useBotChatDepsForTests
     let openCalls = 0
-    let newChats = 0
-    realDeps({
+    mod._useBotChatDepsForTests({
       setActiveBot: (profile) => { active = profile },
       openChat: async (storedId) => {
         openCalls++
@@ -348,7 +348,6 @@ async function main() {
         opened.push(storedId)
         active = storedId
       },
-      newChat: async () => { newChats++; return 'fallback-chat' },
     })
 
     let id = ''
@@ -360,35 +359,100 @@ async function main() {
     check('stale row: the stale row is deleted', callsTo(calls, 'session.delete').length === 1)
     check('stale row: delete targets the STALE id', JSON.stringify(callsTo(calls, 'session.delete')[0]?.params) === JSON.stringify({ session_id: 'stale-1' }))
     check('stale row: a fresh canonical is minted', callsTo(calls, 'session.create').length === 1)
-    check('stale row: bot stays scoped', active === 'fresh-stored', String(active))
-    check('stale row: newChat fallback NOT used (mint succeeded)', newChats === 0)
+    check(
+      'stale row: the mint is the CANONICAL create (hidden + title Bot Chat)',
+      callsTo(calls, 'session.create')[0]?.params?.hidden === true &&
+        callsTo(calls, 'session.create')[0]?.params?.title === 'Bot Chat',
+      JSON.stringify(callsTo(calls, 'session.create')[0]?.params),
+    )
+    check('stale row: bot identity marked while viewing', active === 'fresh-stored', String(active))
 
-    // Recovery whose mint ALSO fails falls back to a fresh bot-scoped chat.
+    // Recovery whose canonical mint ALSO fails must FAIL — never fall back to
+    // an ordinary bot-scoped chat (that is the "bots are session templates"
+    // bug this architecture forbids).
     opened = []
     const mintBoom = fakeRpc({
       'session.list': () => ({ sessions: [{ id: 'stale-2', title: 'Bot Chat' }] }),
       'session.create': () => { throw new Error('gateway down') },
     })
-    let fellBack = ''
     mod._useBotChatRpcForTests(mintBoom.rpc)
     mod._useBotChatDepsForTests({
       setActiveBot: () => {},
       openChat: async () => { throw new Error('session not found') },
-      newChat: async () => { fellBack = 'fallback-2'; return 'fallback-2' },
     })
     id = ''
     err = ''
     try { id = await openBotChat('stale-bot-2') } catch (e) { err = e instanceof Error ? e.message : String(e) }
-    check('stale row: mint failure still resolves via fallback', !err && id === 'fallback-2', err || id)
-    check('stale row: fallback chat is opened in the app too', fellBack === 'fallback-2')
+    check('stale row: mint failure THROWS (no ordinary-chat fallback)', !!err && id === '', err || id)
+    check('stale row: nothing opened on mint failure', opened.length === 0)
+    check(
+      'stale row: no ordinary bot-scoped session was ever created',
+      !mintBoom.calls.some((c) => typeof c.params?.title === 'string' && /^Bot · /.test(c.params.title)),
+    )
 
-    // Restore the happy-path deps for the suites below.
+    // Restore happy-path deps for the suites below.
     opened = []
-    realDeps({
+    mod._useBotChatDepsForTests({
       setActiveBot: (profile) => { active = profile },
       openChat: async (storedId) => { opened.push(storedId); active = storedId },
-      newChat: async () => 'new-chat',
     })
+  }
+
+  // ── ensureBotChat: resolve-or-create only, ONE canonical row ─────────────
+  {
+    let rows: Array<{ id: string; title: string; resolved_id?: string }> = []
+    let creates = 0
+    const { rpc, calls } = fakeRpc({
+      'session.list': () => ({ sessions: rows }),
+      'session.create': () => {
+        creates++
+        return { session_id: 'live-c1', stored_session_id: 'stored-c1' }
+      },
+      'session.title': () => {
+        // The title claim persists the row the way the gateway does.
+        rows = [{ id: 'stored-c1', title: 'Bot Chat', resolved_id: 'tip-c1' }]
+        return { title: 'Bot Chat', pending: false }
+      },
+    })
+    mod._useBotChatRpcForTests(rpc)
+    mod._useBotChatRosterForTests(() => false)
+
+    const ref1 = await mod.ensureBotChat('ensure-bot')
+    check('ensureBotChat: mints the canonical row once', ref1.storedId === 'stored-c1' && creates === 1, ref1.storedId)
+    check('ensureBotChat: never opens a chat (resolve only)', opened.length === 0)
+
+    // Second open — a restart, a second device, the roster's own probe — reads
+    // the persisted canonical row and mints nothing.
+    const ref2 = await mod.ensureBotChat('ensure-bot')
+    check('ensureBotChat: reuses the canonical row (no second create)', ref2.storedId === 'stored-c1' && creates === 1, `${ref2.storedId} creates=${creates}`)
+    check('ensureBotChat: reports the live compression tip', ref2.resolvedId === 'tip-c1', String(ref2.resolvedId))
+    check('ensureBotChat: still never opened anything', opened.length === 0)
+
+    // The launch profile is the assistant itself, not a bot: no Bot Chat.
+    let defErr = ''
+    try { await mod.ensureBotChat('default') } catch (e) { defErr = e instanceof Error ? e.message : String(e) }
+    check('ensureBotChat: default profile has no Bot Chat', /default agent has no Bot Chat/.test(defErr), defErr)
+    let defOpenErr = ''
+    try { await openBotChat('default') } catch (e) { defOpenErr = e instanceof Error ? e.message : String(e) }
+    check('openBotChat: default profile is rejected before any RPC', /default agent has no Bot Chat/.test(defOpenErr), defOpenErr)
+
+    // A failed canonical create is a hard failure — no ordinary session.
+    const boom = fakeRpc({
+      'session.list': () => ({ sessions: [] }),
+      'session.create': () => { throw new Error('gateway down') },
+    })
+    mod._useBotChatRpcForTests(boom.rpc)
+    let boomErr = ''
+    try { await mod.ensureBotChat('boom-bot') } catch (e) { boomErr = e instanceof Error ? e.message : String(e) }
+    check('ensureBotChat: create failure throws', !!boomErr, boomErr)
+    check(
+      'ensureBotChat: no ordinary bot-scoped create is attempted',
+      !boom.calls.some((c) => typeof c.params?.title === 'string' && /^Bot · /.test(c.params.title)),
+    )
+    check('ensureBotChat: canonical create attempted once', callsTo(boom.calls, 'session.create').length === 1)
+    // reset the fake so the next blocks start clean
+    mod._useBotChatRpcForTests(rpc)
+    mod._useBotChatRosterForTests(() => false)
   }
 
   // Reset the injected seams so nothing leaks past this suite.

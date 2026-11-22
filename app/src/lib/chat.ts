@@ -9,7 +9,7 @@ import { bindLiveId, liveIdFor, sessionRows, sessionListComplete, toMs, upsertOp
 import { hookModelState, noteSessionInfo } from './modelState'
 import { markAttention, clearAttention, pushToast, chatTabFocused, pendingOpenStoredId, type AttentionKind } from './attention'
 import { clearDraft, draftFor, setDraft } from './drafts'
-import { getActiveBot } from './fleet'
+import { setActiveBot } from './fleet'
 import { activeProjectIdAtom, projectsAtom } from './workspace'
 import { pickProjectCwd } from './projectScope'
 import { sendQueue, peekQueued, removeQueued, clearSendQueue, queueFor, enqueueSend, type QueuedSend } from './sendQueue'
@@ -1116,11 +1116,11 @@ async function createSessionRpc<T>(params: Record<string, unknown>): Promise<T> 
 }
 
 export async function createSession(title?: string): Promise<ResumeResult> {
-  // M9.2 bot-scoped chats: when a fleet bot is active, the session is created
-  // under that profile (memory/skills/cron ride the profile server-side) and
-  // carries its identity as a manual title so the sidebar shows who it is.
-  const bot = getActiveBot()
-  const botParams = bot ? { profile: bot, ...(title ? {} : { title: `Bot · ${bot}` }) } : {}
+  // Bot Mode rule (audit: BOT-MODE.md): an ordinary chat is NEVER scoped to a
+  // bot profile. A bot's only conversation is its canonical `Bot Chat`,
+  // resolved/created by lib/botChat.ts through the native exact-title
+  // registry (`session.create { profile, title: 'Bot Chat', hidden: true }`).
+  // New chats therefore belong to the launch profile, always.
   // UI-2: a chat belongs to a project by its `cwd` (session.create has no
   // project field). The drawer's selected project wins; Personal falls
   // through to the runtime workspace below.
@@ -1137,7 +1137,7 @@ export async function createSession(title?: string): Promise<ResumeResult> {
     // Embedded runtime: root the session in the on-phone workspace
     // (files/Moch/workspace) so file tools operate there (M5). Remote
     // machines keep their own cwd semantics.
-    { ...(title ? { title } : {}), ...botParams, cols: CREATE_COLS, source: 'mobile', ...(projectCwd ? { cwd: projectCwd } : embedded) },
+    { ...(title ? { title } : {}), cols: CREATE_COLS, source: 'mobile', ...(projectCwd ? { cwd: projectCwd } : embedded) },
   )
   const id = res?.session_id
   if (!id) throw new Error('session.create returned no id')
@@ -1420,6 +1420,10 @@ function createForWindow(tempId: string): Promise<string> {
  */
 export function newChat(): Promise<string> {
   chatBanner.set(null)
+  // A new chat belongs to the launch identity: leaving a bot's Bot Chat for a
+  // fresh conversation is a switch back to Moch, never "a new session in the
+  // bot" (bots are identities, not session folders).
+  void setActiveBot(null)
   // Sweep dead provisional windows (a failed create kept around for its
   // banner, a superseded double-tap) so they can't linger as ghost entries.
   const mapNow = sessionsById.get()
@@ -1563,6 +1567,10 @@ function seedPlaceholder(storedId: string): string {
  */
 export function switchToSession(storedId: string): Promise<string> {
   chatBanner.set(null)
+  // An ordinary saved chat (drawer, notification deep-link) is the launch
+  // profile's conversation, not a bot's — drop the bot view marker so the
+  // chat surface stops labeling it as a bot chat.
+  void setActiveBot(null)
   // Already there (a detached active chat falls through — the tap
   // re-attaches it).
   const curId = activeSession.get()
