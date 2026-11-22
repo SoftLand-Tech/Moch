@@ -47,7 +47,7 @@ async function main() {
     botModeMarkerPatch,
     markBotModeManaged,
   } = botMode
-  const { rosterRows, botPreview, DEFAULT_PROFILE, DEFAULT_BOT_LABEL } = roster
+  const { rosterRows, botPreview, taskSessionRows, DEFAULT_PROFILE, DEFAULT_BOT_LABEL } = roster
 
   // ── A. Native marker shape ───────────────────────────────────────────────
   check('BOT_META_KEY is the native ui_meta key', BOT_META_KEY === 'hermes-bots')
@@ -109,7 +109,8 @@ async function main() {
 
   // ── D. markBotModeManaged (best-effort, idempotent) ──────────────────────
   {
-    const { rpc: fake, calls } = fakeRpc(() => ({ ok: true }))
+    // The native gateway reports success explicitly: `applied.ui_meta === true`.
+    const { rpc: fake, calls } = fakeRpc(() => ({ ok: true, applied: { ui_meta: true } }))
     const wrote = await markBotModeManaged('researcher', fake)
     check('mark writes through the native configure door', wrote === true && calls.length === 1)
     check('mark calls profiles.configure', calls[0]?.method === 'profiles.configure')
@@ -124,6 +125,10 @@ async function main() {
     const managed = fakeRpc(() => ({ ok: true }))
     const noop = await markBotModeManaged('researcher', managed.rpc, { existing: { 'hermes-bots': { title: 'X' } } })
     check('already-managed profiles are not re-written', noop === false && managed.calls.length === 0)
+
+    // A gateway that ignores the ui_meta param returns no `applied`: not success.
+    const ignored = fakeRpc(() => ({ ok: true }))
+    check('mark without an applied verdict is NOT success', (await markBotModeManaged('researcher', ignored.rpc)) === false)
 
     const broken = fakeRpc(() => { throw new Error('socket closed') })
     const failed = await markBotModeManaged('researcher', broken.rpc)
@@ -212,6 +217,28 @@ async function main() {
     check(
       'botPreview strips the Bot Mode DM envelope',
       botPreview('Message from 🤖 dex (@dex): hello there') === 'hello there',
+    )
+  }
+
+  // ── F. Task sessions are SEPARATE from the canonical Bot Chat ────────────
+  {
+    const rows = taskSessionRows([
+      { id: 'canonical', title: 'Bot Chat', preview: 'the forever chat', last_active: 1_700_000_900 },
+      { id: 'task-1', title: 'nightly report', preview: 'job finished', last_active: 1_700_000_800 },
+      { id: 'task-2', title: '', root_title: 'untitled worker', last_active: 1_700_000_700 },
+      { id: 'task-3', title: 'typed shape', preview: 'camel', lastActive: 1_700_000_600 },
+      { id: '', title: 'no id' },
+    ])
+    check('task rows: canonical Bot Chat is filtered out', rows.length === 3, String(rows.length))
+    check('task rows: no canonical id leaks', !rows.some((r) => r.id === 'canonical'))
+    check('task rows: keep order (newest first, as listed)', rows.map((r) => r.id).join(',') === 'task-1,task-2,task-3')
+    check('task rows: preview is flattened', rows[0]?.preview === 'job finished')
+    check('task rows: root_title fallback', rows[1]?.title === 'untitled worker')
+    check('task rows: camel lastActive is read', rows[2]?.lastActiveTs === 1_700_000_600 * 1000)
+    check(
+      'task rows: cap at TASK_SESSION_LIMIT',
+      taskSessionRows(Array.from({ length: 60 }, (_, i) => ({ id: `t${i}`, title: `t${i}` }))).length ===
+        roster.TASK_SESSION_LIMIT,
     )
   }
 

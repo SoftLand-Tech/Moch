@@ -183,9 +183,7 @@ export async function refreshFleet(): Promise<void> {
       }),
     )
     fleetError.set('')
-    // Best-effort, non-blocking: upgrade pre-Bot-Mode profiles through the
-    // native `profiles.configure` door. The refresh above already paints.
-    void migrateLegacyBots(wireRows)
+
   } catch (e) {
     fleetError.set(e instanceof Error ? e.message : String(e))
   }
@@ -197,55 +195,40 @@ export async function refreshFleet(): Promise<void> {
   }
 }
 
-// ── Native Bot Mode migration ───────────────────────────────────────────────
-// Bot Mode activation is the `ui_meta['hermes-bots']` marker (see
-// lib/botMode.ts). Bots created before the audit have profiles without it, so
-// Hermes treats them as ordinary profiles: no teammate protocol, no
-// `message_agent`, no native roster title. This upgrades them once, through
-// the native configure door, with the roster's CAS revisions so another
-// client's concurrent write is never clobbered.
-const markerInFlight = new Set<string>()
-const markerRetryAfter = new Map<string, number>()
-const MARKER_RETRY_MS = 30_000
-let markerRefreshQueued = false
+// ── Native Bot Mode identity on open ───────────────────────────────────────
+// Bot Mode activation is the `ui_meta['hermes-bots']` marker (lib/botMode.ts).
+// Bots created by Moch get it at creation; profiles that predate the marker are
+// upgraded when Moch actually OPENS them as a bot (`openBotChat` →
+// `ensureBotModeIdentity`), never by a roster-wide sweep — an unmarked named
+// profile may belong to the desktop/CLI, and this marker flips Hermes' global
+// `is_bot_mode_managed` gate (teammate protocol + `message_agent`), which we
+// only assert for a profile the user is using as a Moch bot.
+const identityInFlight = new Set<string>()
 
-async function migrateLegacyBots(rows: ProfilesListRow[]): Promise<void> {
-  const now = Date.now()
-  const pending = rows.filter((r) => {
-    const name = (r.name ?? '').trim()
-    if (!name || name === 'default' || r.is_default === true) return false
-    if (isBotModeManaged(r.ui_meta)) return false
-    if (markerInFlight.has(name)) return false
-    return now >= (markerRetryAfter.get(name) ?? 0)
-  })
-  if (!pending.length) return
-  let wrote = false
-  await Promise.all(
-    pending.map(async (r) => {
-      const name = r.name.trim()
-      markerInFlight.add(name)
-      try {
-        const ok = await markBotModeManaged(name, rpc, {
-          existing: r.ui_meta,
-          revisions: r.ui_meta_revisions,
-          // A desktop-set display_name is the human name; the marker title
-          // outranks it in native resolution, so carry it over rather than
-          // downgrading the roster to the folder id.
-          title: (r.display_name ?? '').trim() || name,
-        })
-        if (ok) wrote = true
-        else markerRetryAfter.set(name, Date.now() + MARKER_RETRY_MS)
-      } finally {
-        markerInFlight.delete(name)
-      }
-    }),
-  )
-  // Re-read once so the roster (and the UI) reflects the native marker.
-  if (wrote && !markerRefreshQueued) {
-    markerRefreshQueued = true
-    void refreshFleet().finally(() => {
-      markerRefreshQueued = false
+/** Make `profile` a Bot-Mode-managed bot through the native configure door.
+ *  Idempotent, serialized per profile, best-effort (failure = next open
+ *  retries). Carries the roster's CAS revisions so a concurrent desktop write
+ *  is never clobbered. */
+export async function ensureBotModeIdentity(profile: string): Promise<void> {
+  const name = (profile || '').trim()
+  if (!name || name === 'default') return
+  const row = fleetProfiles.get().find((p) => p.name === name)
+  if (row?.botMode) return
+  if (identityInFlight.has(name)) return
+  identityInFlight.add(name)
+  try {
+    // A desktop-set display_name is the human name; the marker title outranks
+    // it in native resolution, so carry it over rather than downgrading to the
+    // folder id. No title means "use the profile name".
+    const display = (row?.title ?? '').trim()
+    const ok = await markBotModeManaged(name, rpc, {
+      existing: row?.uiMeta,
+      revisions: row?.uiMetaRevisions,
+      ...(display && display !== name ? { title: display } : {}),
     })
+    if (ok) void refreshFleet()
+  } finally {
+    identityInFlight.delete(name)
   }
 }
 

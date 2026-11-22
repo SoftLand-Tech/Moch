@@ -189,6 +189,10 @@ export interface BotChatDeps {
   setActiveBot: (profile: string) => Promise<void> | void
   /** Bring a stored chat on screen: shared resume + activation. */
   openChat: (storedId: string) => Promise<void>
+  /** Best-effort: ensure the profile carries the native Bot Mode marker
+   *  (`ui_meta['hermes-bots']`) before its first chat opens — legacy bots
+   *  become managed when Moch actually opens them, never by a roster sweep. */
+  ensureIdentity?: (profile: string) => Promise<void> | void
 }
 
 let depsOverride: BotChatDeps | null = null
@@ -202,6 +206,7 @@ async function botChatDeps(): Promise<BotChatDeps> {
   const [fleet, chat] = await Promise.all([import('./fleet'), import('./chat')])
   return {
     setActiveBot: (profile) => fleet.setActiveBot(profile),
+    ensureIdentity: (profile) => fleet.ensureBotModeIdentity(profile),
     openChat: async (storedId) => {
       // `resumeShared` is THE shared resume primitive — one in-flight resume
       // per stored id, so a tap racing a switch cannot mint a second live
@@ -218,7 +223,12 @@ async function botChatDeps(): Promise<BotChatDeps> {
       // The user is looking at this chat now: its badge is served.
       const { clearAttention } = await import('./attention')
       clearAttention(r.storedId)
-      // Boot restores this key, so a relaunch lands back in the bot chat.
+      // A bot chat is NOT in the launch profile's session list, so the
+      // launch-list reconciliation must never prune it (nor drop its cached
+      // transcript). The chat itself lives server-side — restart continuity
+      // is the native session, not this key (cold boot deliberately starts a
+      // local chat; reopening the bot resolves the same Bot Chat again).
+      chat.trackServerOnlySession(r.storedId)
       const storage = (await import('@react-native-async-storage/async-storage')).default
       void storage.setItem(chat.SESSION_KEY, r.storedId).catch(() => {})
     },
@@ -286,7 +296,11 @@ async function createBotChat(profile: string): Promise<CreateOutcome> {
  * user already navigated to the chat tab, so an alert would land them on a
  * chat AND a scary error for the same tap.
  */
-const STALE_SESSION_RX = /session not found|no such session|not found|404/i
+// Hermes' definitive stale-handle shape (4001/4007 "session not found"). NOT
+// a generic "not found"/404: a provider/model error must never be mistaken for
+// a dead canonical row (recovery deletes the stale registry row).
+const STALE_SESSION_RX = /session not found/i
+const isDefinitiveStaleSession = (err: unknown): boolean => STALE_SESSION_RX.test(errMessage(err))
 
 /**
  * Recovery after a stale canonical row (the registry row outlived its live
@@ -385,25 +399,35 @@ export function ensureBotChat(profile: string): Promise<BotChatRef> {
 async function openBotChatOnce(profile: string): Promise<string> {
   botChatError.set('')
   const deps = await botChatDeps()
+  // Native Bot Mode identity first (best-effort): a legacy Moch bot whose
+  // profile predates the marker becomes managed the moment Moch opens it —
+  // never by a roster-wide sweep that would relabel profiles Moch never made.
+  try {
+    await deps.ensureIdentity?.(profile)
+  } catch {
+    /* identity is best-effort; the chat below is the load-bearing part */
+  }
 
   const ref = await ensureBotChat(profile)
-  // Identity view for the chat surface (banner/avatar), set only once the
-  // canonical row is known to exist. NOT a session scope: newChat() /
-  // switchToSession() clear it and createSession never reads it — a bot is an
-  // identity, not a session folder.
-  await deps.setActiveBot(profile)
+  let openedId: string
   try {
     await deps.openChat(ref.storedId)
-    return ref.storedId
+    openedId = ref.storedId
   } catch (err) {
-    if (!STALE_SESSION_RX.test(errMessage(err))) throw err
-    // The registry row outlived its session. Retire the stale row
+    if (!isDefinitiveStaleSession(err)) throw err
+    // The registry row outlived its live session. Retire the stale row
     // (best-effort) and give the bot a fresh CANONICAL chat instead of
     // throwing the confusing "session not found" at the user.
     log('warn', 'botchat', `${profile}: stale ${BOT_CHAT_TITLE} row ${ref.storedId} — recovering`)
     void botRpc('session.delete', { session_id: ref.storedId }).catch(() => {})
-    return await recoverBotChat(profile, deps)
+    openedId = await recoverBotChat(profile, deps)
   }
+  // Identity view for the chat surface (banner/avatar), set only after the
+  // canonical chat is the one actually on screen. NOT a session scope:
+  // newChat()/switchToSession() clear it and createSession never reads it —
+  // a bot is an identity, not a session folder.
+  await deps.setActiveBot(profile)
+  return openedId
 }
 
 // One shared in-flight open per profile: a double-tap (or a tap racing the

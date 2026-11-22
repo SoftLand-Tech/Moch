@@ -21,6 +21,7 @@
  */
 import { rowStatus, type AttentionRecord, type RowStatus } from './attention'
 import { botDisplayTitle } from './botMode'
+import { BOT_CHAT_TITLE } from './botChat'
 
 /** The profile that IS the assistant (not a fleet bot). */
 export const DEFAULT_PROFILE = 'default'
@@ -365,6 +366,45 @@ export function botInitials(name: string): string {
   if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase()
   const one = words[0] ?? ''
   return (one.slice(0, 2) || '?').toUpperCase()
+}
+
+/** One Hermes-side task session of a bot, flattened for the bot screen. */
+export interface TaskSessionRow {
+  id: string
+  title: string
+  preview: string
+  lastActiveTs: number
+}
+
+/** Most task sessions the bot screen renders (newest first). */
+export const TASK_SESSION_LIMIT = 25
+
+/**
+ * Flatten `session.list {profile}` rows into the bot screen's "Task sessions"
+ * list — the bot's Hermes-side workers/side conversations, shown SEPARATELY
+ * from its canonical Bot Chat (Bot Mode rule: a task session never replaces
+ * or resets the canonical chat). The canonical row itself is filtered out by
+ * exact title, and hidden rows never reach this list (the listing call omits
+ * `include_hidden`, exactly like a plain human listing).
+ */
+export function taskSessionRows(sessions: readonly unknown[] | null | undefined): TaskSessionRow[] {
+  const rows: TaskSessionRow[] = []
+  for (const raw of sessions ?? []) {
+    const s = obj(raw as unknown)
+    if (!s) continue
+    const id = str(s.id)
+    const title = str(s.title) || str(s.root_title)
+    if (!id || title === BOT_CHAT_TITLE) continue
+    rows.push({
+      id,
+      title,
+      preview: botPreview(str(s.preview)),
+      lastActiveTs:
+        toMs(s.last_active) || toMs(s.lastActive) || toMs(s.started_at) || toMs(s.startedAt),
+    })
+    if (rows.length >= TASK_SESSION_LIMIT) break
+  }
+  return rows
 }
 
 /** Stable 0..3 disc slot for a name (the row maps it onto the theme tints). */

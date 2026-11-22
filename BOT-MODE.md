@@ -59,10 +59,14 @@ normal sessions, and no amount of hiding buttons would change that.
   folder id; launch profile reads `Moch`).
 - `markBotModeManaged()` writes through **`profiles.configure`** with
   `ui_meta['hermes-bots'].title` and the roster's **per-key CAS revision**
-  (`ui_meta_expected_revisions`), merging — never replacing — unknown keys.
-- `fleet.ts::createProfile` marks every newly created bot, and
-  `refreshFleet()` best-effort migrates pre-existing Moch bots once (30 s retry
-  cooldown, serialized, never blocking the roster paint).
+  (`ui_meta_expected_revisions`); success is the explicit
+  `applied.ui_meta === true` verdict (a CAS conflict or a gateway that ignores
+  the param is a no-op that retries later).
+- `fleet.ts::createProfile` marks every newly created bot. Profiles that
+  predate the marker are upgraded **when Moch opens them as a bot**
+  (`openBotChat` → `ensureBotModeIdentity`, serialized, best-effort) — never by
+  a roster-wide sweep: an unmarked named profile may belong to the desktop or
+  CLI, and the marker flips Hermes' global `is_bot_mode_managed` gate.
 
 **One canonical Bot Chat (`app/src/lib/botChat.ts`)**
 - `fleet.ts::createProfile` calls `ensureBotChat` best-effort right after
@@ -102,6 +106,20 @@ normal sessions, and no amount of hiding buttons would change that.
 - Chat pill/switcher, Fleet cards, Crew assignee chips and the bot screen
   header display the native title; RPCs keep using the profile folder id.
 
+**Restarts, pruning and legacy data**
+- The launch-profile session list can no longer prove anything about a bot's
+  sessions, so reconciliation (`sessionRows.subscribe`) skips sessions opened
+  through a non-launch profile (`chat.trackServerOnlySession`): a Bot Chat the
+  user leaves is not evicted, and its cached transcript is not deleted.
+- Stale-handle recovery is gated on Hermes' definitive `session not found`
+  shape (4001/4007) — a provider/model 404 can no longer be mistaken for a dead
+  canonical row and delete it.
+- The bot screen lists the bot's Hermes-side **task sessions** separately
+  (`botRosterMeta.taskSessionRows` + `chat.openServerSession`), so pre-existing
+  `Bot · <bot>` side conversations (and any worker/side session) stay
+  reachable while remaining visibly NOT the canonical Bot Chat. They open as
+  ordinary chats with a banner naming the bot; they never reset the Bot Chat.
+
 ## 4. Unchanged on purpose
 
 - **`moch.fleet.*`** (freeze, turn gate, budgets, queue) stays — it is Moch's
@@ -116,24 +134,28 @@ normal sessions, and no amount of hiding buttons would change that.
 
 ## 5. How this is tested
 
-- `app/scripts/test-bot-chat.ts` — native canonical contract: existing row
-  opens with no create; missing row creates + titles with the exact wire
-  params; title conflict adopts the winner; lookup failure mints nothing; a
-  second `ensureBotChat` after a simulated restart reuses the same row and its
-  compression tip; a failed canonical create/restore **throws** and never mints
-  an ordinary `Bot · <name>` session; the launch profile is rejected.
-- `app/scripts/test-bot-mode.ts` — marker shape/CAS/merge, identity
-  precedence, `markBotModeManaged` idempotence, roster mapping (one row per
-  profile, native title, canonical-only preview, DM envelope stripping).
+- `app/scripts/test-bot-chat.ts` (73 checks) — native canonical contract:
+  existing row opens with no create; missing row creates + titles with the
+  exact wire params; title conflict adopts the winner; lookup failure mints
+  nothing; a second `ensureBotChat` after a simulated restart reuses the same
+  row and its compression tip; a failed canonical create/restore **throws** and
+  never mints an ordinary `Bot · <name>` session; a provider/model error is not
+  treated as a stale session (canonical row survives); the launch profile is
+  rejected; the identity marker is set only after a successful open.
+- `app/scripts/test-bot-mode.ts` (46 checks) — marker shape/CAS/merge, explicit
+  `applied` verdict, identity precedence, `markBotModeManaged` idempotence,
+  roster mapping (one row per profile, native title, canonical-only preview,
+  DM envelope stripping) and task-session flattening (canonical filtered, wire
+  + typed shapes, cap).
 - `npm run typecheck`, `npm run lint`, `npm run test:imports`, and the offline
   protocol suites (`npm test`) run in CI and locally. Both bot suites are now
   part of `npm run verify`.
 
 ## 6. Follow-ups (not required for the Bot Mode fix)
 
-- Surface a bot's Hermes-side **task sessions** (worker/kanban children) in the
-  bot screen as a clearly separate "Task sessions" list; today they stay in the
-  bot's `state.db` and are reachable from the desktop/TUI but not from Moch.
 - Avatar: `profiles.set_asset/get_asset` is the native per-bot avatar door; the
   app still uses local mochi profiles keyed by name (fallback is fine, but the
   native asset should win when present).
+- The bot editor still exposes only SOUL/description; native
+  `profiles.configure` also supports model/provider, disabled skills,
+  enabled toolsets/MCP servers — adopting those is a UI follow-up.

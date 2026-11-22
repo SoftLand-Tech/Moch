@@ -1168,10 +1168,10 @@ export async function createSession(title?: string): Promise<ResumeResult> {
  *  BUG-062: the exported wrapper had zero callers (boot goes through
  *  withBootPaint, switches through switchToSession) — removed; resumeShared
  *  is the primitive every path uses. */
-async function runResume(storedId: string): Promise<ResumeResult> {
+async function runResume(storedId: string, profile?: string): Promise<ResumeResult> {
   const res = await rpc<{ session_id?: string; stored_session_id?: string; messages?: Array<Record<string, unknown>>; info?: { model?: string; provider?: string; reasoning_effort?: string }; running?: boolean; status?: string }>(
     'session.resume',
-    { session_id: storedId, cols: CREATE_COLS },
+    { session_id: storedId, cols: CREATE_COLS, ...(profile ? { profile } : {}) },
   )
   const id = res?.session_id
   if (!id) throw new Error('session.resume returned no id')
@@ -1263,13 +1263,19 @@ const inflightResumes = new Map<string, Promise<ResumeResult>>()
  *  live handle for a stored id goes through. Exported for surface-agnostic
  *  callers that must resolve a live id before a live-session RPC (BUG-006
  *  rename). */
-export function resumeShared(storedId: string): Promise<ResumeResult> {
-  const inflight = inflightResumes.get(storedId)
+export function resumeShared(storedId: string, opts?: { profile?: string }): Promise<ResumeResult> {
+  // A stored id is unique per profile database but a task session opened from
+  // the Bot screen resumes under that profile's HERMES_HOME; key the sharing
+  // map by both so a launch-profile resume can never hand back a bot-profile
+  // handle (or vice versa).
+  const profile = opts?.profile?.trim() || ''
+  const key = profile ? `${profile}\u0000${storedId}` : storedId
+  const inflight = inflightResumes.get(key)
   if (inflight) return inflight
-  const p = runResume(storedId).finally(() => {
-    if (inflightResumes.get(storedId) === p) inflightResumes.delete(storedId)
+  const p = runResume(storedId, profile || undefined).finally(() => {
+    if (inflightResumes.get(key) === p) inflightResumes.delete(key)
   })
-  inflightResumes.set(storedId, p)
+  inflightResumes.set(key, p)
   return p
 }
 
@@ -1645,9 +1651,31 @@ export function switchToSession(storedId: string): Promise<string> {
     })
 }
 
+/**
+ * Open a session that lives on a NON-launch profile — a bot's Hermes-side task
+ * session. Bot Mode rule: these are separate task sessions, never the
+ * canonical Bot Chat; they open as ordinary chats on the launch identity
+ * (bot pill cleared) and are protected from the launch-list prune. `banner`
+ * tells the user which bot the task belongs to.
+ */
+export async function openServerSession(
+  storedId: string,
+  opts?: { profile?: string; banner?: string },
+): Promise<string> {
+  chatBanner.set(opts?.banner ? { text: opts.banner } : null)
+  void setActiveBot(null)
+  const r = await resumeShared(storedId, opts?.profile ? { profile: opts.profile } : undefined)
+  trackServerOnlySession(r.storedId)
+  activeSession.set(r.sessionId)
+  clearAttention(r.storedId)
+  void AsyncStorage.setItem(LAST_SESSION_KEY, r.storedId)
+  return r.sessionId
+}
+
 /** Forget a session locally (backend delete is the caller's job). */
 export async function forgetSession(liveId: string) {
   const stored = sessionsById.get()[liveId]?.storedId
+  if (stored) serverOnlyStoredIds.delete(stored)
   const map = { ...sessionsById.get() }
   delete map[liveId]
   sessionsById.set(map)
@@ -3335,6 +3363,16 @@ function formatUsage(u: Record<string, unknown>): string {
 // failed to the retry banner. When a COMPLETE server list is in hand (a
 // truncated one proves nothing about absence), drop tracked sessions whose
 // stored id is absent — except the chat on screen and provisional windows.
+// Sessions opened through a NON-launch profile (a bot's canonical Bot Chat,
+// or one of its Hermes task sessions). The launch-profile session list cannot
+// prove anything about them, so reconciliation must never evict them — doing
+// so also deleted their cached transcript (device-only tool log).
+const serverOnlyStoredIds = new Set<string>()
+/** Keep a non-launch-profile session out of the launch-list prune. */
+export function trackServerOnlySession(storedId: string) {
+  if (storedId && !isPseudoStoredId(storedId)) serverOnlyStoredIds.add(storedId)
+}
+
 sessionRows.subscribe((rows) => {
   if (!rows.length || !sessionListComplete.get()) return
   const active = activeSession.get()
@@ -3346,7 +3384,7 @@ sessionRows.subscribe((rows) => {
   const pend = { ...pendingBySession.get() }
   for (const [liveId, s] of Object.entries(map)) {
     if (liveId === active || s.provisional || liveId.startsWith('pending:')) continue
-    if (present.has(s.storedId)) continue
+    if (present.has(s.storedId) || serverOnlyStoredIds.has(s.storedId)) continue
     delete next[liveId]
     changed = true
     if (pend[liveId]) {
