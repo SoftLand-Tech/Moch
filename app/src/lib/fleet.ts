@@ -52,6 +52,10 @@ export interface FleetCanonicalSession {
   id: string
   resolvedId?: string
   title?: string
+  /** Newest message preview from the live tip — the roster row's text. */
+  preview?: string
+  /** Last-activity seconds (fractional) of the live tip. */
+  lastActive?: number
   messageCount?: number
 }
 
@@ -111,6 +115,9 @@ interface ProfilesListRow {
     resolved_id?: unknown
     root_title?: unknown
     title?: unknown
+    preview?: unknown
+    last_active?: unknown
+    started_at?: unknown
     message_count?: unknown
   } | null
 }
@@ -130,6 +137,10 @@ function canonicalSessionOf(row: ProfilesListRow): FleetCanonicalSession | undef
   const resolvedId = typeof cs.resolved_id === 'string' ? cs.resolved_id.trim() : ''
   const rawTitle = typeof cs.title === 'string' ? cs.title : typeof cs.root_title === 'string' ? cs.root_title : ''
   const title = rawTitle.trim()
+  const preview = typeof cs.preview === 'string' ? cs.preview : ''
+  const rawLastActive =
+    typeof cs.last_active === 'number' ? cs.last_active : typeof cs.started_at === 'number' ? cs.started_at : 0
+  const lastActive = Number.isFinite(rawLastActive) && rawLastActive > 0 ? rawLastActive : undefined
   const messageCount = typeof cs.message_count === 'number' && Number.isFinite(cs.message_count)
     ? cs.message_count
     : undefined
@@ -137,6 +148,8 @@ function canonicalSessionOf(row: ProfilesListRow): FleetCanonicalSession | undef
     id,
     ...(resolvedId ? { resolvedId } : {}),
     ...(title ? { title } : {}),
+    ...(preview ? { preview } : {}),
+    ...(lastActive === undefined ? {} : { lastActive }),
     ...(messageCount === undefined ? {} : { messageCount }),
   }
 }
@@ -215,6 +228,10 @@ async function migrateLegacyBots(rows: ProfilesListRow[]): Promise<void> {
         const ok = await markBotModeManaged(name, rpc, {
           existing: r.ui_meta,
           revisions: r.ui_meta_revisions,
+          // A desktop-set display_name is the human name; the marker title
+          // outranks it in native resolution, so carry it over rather than
+          // downgrading the roster to the folder id.
+          title: (r.display_name ?? '').trim() || name,
         })
         if (ok) wrote = true
         else markerRetryAfter.set(name, Date.now() + MARKER_RETRY_MS)
@@ -325,11 +342,6 @@ export async function createProfile(input: {
   // native roster title — which is exactly the "bots are session templates"
   // bug. Best-effort: `refreshFleet` retries an unmarked profile.
   await markBotModeManaged(input.name, rpc)
-  // Every bot HAS its one canonical Bot Chat (native: the hidden session
-  // titled exactly `Bot Chat` on this profile). Create it now, best-effort and
-  // non-blocking, so a bot never exists without one; the open path
-  // (`openBotChat` → `ensureBotChat`) resolves the same row idempotently.
-  void ensureBotChat(input.name).catch(() => {})
   // Checklist seeding is BEST-EFFORT post-create: the bot exists either way;
   // a seed failure is surfaced, never fatal (never clone_from — that would
   // copy the whole .env/config.yaml and silently upgrade §2.8 mirroring).
@@ -349,6 +361,12 @@ export async function createProfile(input: {
       seedError = e instanceof Error ? e.message : String(e)
     }
   }
+  // Every bot HAS its one canonical Bot Chat (native: the hidden session
+  // titled exactly `Bot Chat` on this profile). Create it now — after the seed
+  // so the build sees the seeded skills/memory — best-effort and
+  // non-blocking; the open path (`openBotChat` → `ensureBotChat`) resolves the
+  // same row idempotently and self-heals a failed eager create.
+  void ensureBotChat(input.name).catch(() => {})
   await refreshFleet()
   return { ok: res.ok !== false, path: res.path, seed, seedError }
 }

@@ -385,12 +385,13 @@ export function ensureBotChat(profile: string): Promise<BotChatRef> {
 async function openBotChatOnce(profile: string): Promise<string> {
   botChatError.set('')
   const deps = await botChatDeps()
-  // Identity view for the chat surface (banner/avatar). NOT a session scope:
-  // chat.newChat()/switchToSession() clear it and createSession never reads
-  // it — a bot is an identity, not a session folder.
-  await deps.setActiveBot(profile)
 
   const ref = await ensureBotChat(profile)
+  // Identity view for the chat surface (banner/avatar), set only once the
+  // canonical row is known to exist. NOT a session scope: newChat() /
+  // switchToSession() clear it and createSession never reads it — a bot is an
+  // identity, not a session folder.
+  await deps.setActiveBot(profile)
   try {
     await deps.openChat(ref.storedId)
     return ref.storedId
