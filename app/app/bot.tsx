@@ -24,6 +24,8 @@ import { C, useStyles } from '../src/lib/theme'
 import { rpc } from '../src/lib/gateway'
 import { fleetProfiles, refreshFleet, setActiveBot } from '../src/lib/fleet'
 import { openBotChat } from '../src/lib/botChat'
+import { taskSessionRows, type TaskSessionRow } from '../src/lib/botRosterMeta'
+import { openServerSession } from '../src/lib/chat'
 import { useDir, useT } from '../src/lib/strings'
 import { useStore } from '@nanostores/react'
 
@@ -59,6 +61,8 @@ export default function BotDetail() {
   const [noProvider, setNoProvider] = useState(false)
   const [mirroring, setMirroring] = useState(false)
   const [opening, setOpening] = useState(false)
+  const [tasks, setTasks] = useState<TaskSessionRow[]>([]) 
+  const [tasksLoading, setTasksLoading] = useState(false)
 
   const load = useCallback(async () => {
     if (!bot) return
@@ -80,6 +84,19 @@ export default function BotDetail() {
       // profile listing stays authoritative; editor starts blank on failure
     } finally {
       setLoading(false)
+    }
+    // Hermes-side task sessions: separate from the canonical Bot Chat. Shown
+    // read-only so legacy/side conversations stay reachable (they are not
+    // chats in the drawer anymore) and so a task session is visibly NOT the
+    // bot's permanent home. Best-effort.
+    setTasksLoading(true)
+    try {
+      const res = await rpc<{ sessions?: unknown[] }>('session.list', { profile: bot, limit: 50 }, 15000)
+      setTasks(taskSessionRows(res?.sessions))
+    } catch {
+      setTasks([])
+    } finally {
+      setTasksLoading(false)
     }
   }, [bot])
 
@@ -164,6 +181,22 @@ export default function BotDetail() {
       showAlert(t('bot.chat.failed', { why: e instanceof Error ? e.message : String(e) }))
     } finally {
       setOpening(false)
+    }
+  }
+
+  // Task sessions belong to the bot profile but are NOT the Bot Chat: they open
+  // as ordinary chats (launch identity, bot pill cleared) with a banner naming
+  // the bot, and never replace/reset the canonical conversation.
+  const openTask = async (id: string) => {
+    if (!id) return
+    try {
+      await openServerSession(id, {
+        profile: bot,
+        banner: t('bot.tasks.banner', { name: botTitle || bot }),
+      })
+      router.navigate('/(tabs)/chat')
+    } catch (e) {
+      showAlert(t('bot.tasks.failed', { why: e instanceof Error ? e.message : String(e) }))
     }
   }
 
@@ -267,6 +300,41 @@ export default function BotDetail() {
             )}
           </View>
 
+          <Kicker style={s.tasksKicker}>{t('bot.tasks.kicker')}</Kicker>
+          <Card>
+            <Txt size={11} color={C.textFaint} style={s.tasksHint}>
+              {t('bot.tasks.hint')}
+            </Txt>
+            {tasksLoading ? (
+              <View style={s.tasksSpin}>
+                <Spinner size="small" />
+              </View>
+            ) : tasks.length === 0 ? (
+              <Txt size={11.5} color={C.textDim}>{t('bot.tasks.empty')}</Txt>
+            ) : (
+              tasks.map((task) => (
+                <Pressable
+                  key={task.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={task.title || t('bot.tasks.untitled')}
+                  onPress={() => { void openTask(task.id) }}
+                  style={({ pressed }) => [s.taskRow, { flexDirection: dir.row }, pressed && s.taskRowPressed]}
+                >
+                  <Icon name="git-branch-outline" size={13} color={C.textDim} />
+                  <View style={s.taskText}>
+                    <Txt size={12} weight="600" numberOfLines={1} style={s.taskTitle}>
+                      {task.title || t('bot.tasks.untitled')}
+                    </Txt>
+                    {task.preview ? (
+                      <Txt size={11} color={C.textDim} numberOfLines={1}>{task.preview}</Txt>
+                    ) : null}
+                  </View>
+                  <Icon name={dir.icon.forward} size={12} color={C.textFaint} />
+                </Pressable>
+              ))
+            )}
+          </Card>
+
           <Kicker style={s.dangerKicker}>{t('bot.delete.title')}</Kicker>
           <Card style={s.dangerCard}>
             <Txt size={11.5} color={C.textDim} style={s.dangerBody}>
@@ -337,6 +405,13 @@ const makeS = () =>
       gap: 10,
       marginTop: 10,
     },
+    tasksKicker: { marginTop: 22 },
+    tasksHint: { lineHeight: 16, marginBottom: 8 },
+    tasksSpin: { paddingVertical: 8 },
+    taskRow: { alignItems: 'center', gap: 8, paddingVertical: 7 },
+    taskRowPressed: { opacity: 0.6 },
+    taskText: { flex: 1, minWidth: 0 },
+    taskTitle: { marginBottom: 1 },
     dangerKicker: { color: C.red, marginTop: 22 },
     dangerCard: {
       backgroundColor: C.redSoft,

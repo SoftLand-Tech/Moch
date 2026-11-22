@@ -63,9 +63,11 @@ async function main() {
   // only asserts WHICH stored id was opened (and how many times).
   let opened: string[] = []
   let active: string | null = null
+  let identities: string[] = []
   mod._useBotChatDepsForTests({
     setActiveBot: (profile) => { active = profile },
     openChat: async (storedId) => { opened.push(storedId); active = storedId },
+    ensureIdentity: (profile) => { identities.push(profile) },
   })
 
   check('BOT_CHAT_TITLE is the exact canonical name', BOT_CHAT_TITLE === 'Bot Chat')
@@ -88,7 +90,8 @@ async function main() {
     const id = await openBotChat('researcher')
     check('existing row: returns the STORED id', id === 'bot-chat-1', id)
     check('existing row: opens that chat', opened.length === 1 && opened[0] === 'bot-chat-1')
-    check('existing row: scopes the bot first', active === 'bot-chat-1')
+    check('existing row: marks the bot identity after open', active === 'researcher', String(active))
+    check('existing row: native Bot Mode identity is ensured', identities.includes('researcher'), JSON.stringify(identities))
     check('existing row: no session.create', callsTo(calls, 'session.create').length === 0)
     check('existing row: no session.title', callsTo(calls, 'session.title').length === 0)
 
@@ -365,7 +368,7 @@ async function main() {
         callsTo(calls, 'session.create')[0]?.params?.title === 'Bot Chat',
       JSON.stringify(callsTo(calls, 'session.create')[0]?.params),
     )
-    check('stale row: bot identity marked while viewing', active === 'fresh-stored', String(active))
+    check('stale row: bot identity marked after the recovered open', active === 'stale-bot', String(active))
 
     // Recovery whose canonical mint ALSO fails must FAIL — never fall back to
     // an ordinary bot-scoped chat (that is the "bots are session templates"
@@ -392,6 +395,34 @@ async function main() {
 
     // Restore happy-path deps for the suites below.
     opened = []
+    mod._useBotChatDepsForTests({
+      setActiveBot: (profile) => { active = profile },
+      openChat: async (storedId) => { opened.push(storedId); active = storedId },
+    })
+  }
+
+  // ── A provider/model error is NOT a stale session ────────────────────────
+  // Recovery deletes the stale registry row; the old broad /not found|404/
+  // matcher would have deleted the canonical Bot Chat on, say, a model 404.
+  {
+    opened = []
+    active = null
+    const { rpc, calls } = fakeRpc({
+      'session.list': () => ({ sessions: [{ id: 'canonical-9', title: 'Bot Chat' }] }),
+    })
+    mod._useBotChatRpcForTests(rpc)
+    mod._useBotChatRosterForTests(() => false)
+    mod._useBotChatDepsForTests({
+      setActiveBot: (profile) => { active = profile },
+      openChat: async () => { throw new Error('provider error: 404 model not found') },
+    })
+    let err = ''
+    try { await openBotChat('provider-bot') } catch (e) { err = e instanceof Error ? e.message : String(e) }
+    check('provider error: rejects (no silent recovery)', /404 model not found/.test(err), err)
+    check('provider error: canonical row is NOT deleted', callsTo(calls, 'session.delete').length === 0)
+    check('provider error: no replacement chat is minted', callsTo(calls, 'session.create').length === 0)
+    check('provider error: no bot identity marker is left behind', active === null, String(active))
+
     mod._useBotChatDepsForTests({
       setActiveBot: (profile) => { active = profile },
       openChat: async (storedId) => { opened.push(storedId); active = storedId },

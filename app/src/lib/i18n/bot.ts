@@ -34,6 +34,14 @@ export const bot: Catalog = {
     'bot.provider.failed.title': 'Mirror failed',
 
     // 3-tap armed delete wizard (real moch.profiles.delete RPC).
+    'bot.tasks.kicker': 'Task sessions',
+    'bot.tasks.hint':
+      'Side conversations Hermes runs for this bot. Its Bot Chat stays the permanent home.',
+    'bot.tasks.empty': 'No task sessions yet.',
+    'bot.tasks.untitled': 'Untitled task',
+    'bot.tasks.banner': 'Task session · {name}',
+    'bot.tasks.failed': 'Could not open that task session: {why}',
+
     'bot.delete.desc': 'Permanently remove @{name} and its isolated memory.',
     'bot.delete.action': 'Delete bot',
     'bot.delete.actionConfirm': 'Tap again to confirm delete',
@@ -61,6 +69,14 @@ export const bot: Catalog = {
       'لا يملك بوتك الرئيسي مفاتيح API لنسخها. أضف مفتاحًا من الموصلات أولًا.',
     'bot.provider.failed.title': 'فشل النسخ',
 
+    'bot.tasks.kicker': 'الجلسات الفرعية',
+    'bot.tasks.hint':
+      'محادثات جانبية يشغّلها هيرميس لهذا البوت. محادثة البوت الدائمة تبقى كما هي.',
+    'bot.tasks.empty': 'لا توجد جلسات فرعية بعد.',
+    'bot.tasks.untitled': 'جلسة بلا عنوان',
+    'bot.tasks.banner': 'جلسة فرعية · {name}',
+    'bot.tasks.failed': 'تعذّر فتح تلك الجلسة: {why}',
+
     'bot.delete.desc': 'يزيل @{name} نهائيًا مع ذاكرته المعزولة.',
     'bot.delete.action': 'حذف البوت',
     'bot.delete.actionConfirm': 'اضغط مجددًا لتأكيد الحذف',
@@ -86,6 +102,13 @@ export const bot: Catalog = {
     'bot.provider.nothing.title': '没有可镜像的内容',
     'bot.provider.nothing.body': '你的主机器人没有可镜像的 API 密钥。请先在连接器中添加一个。',
     'bot.provider.failed.title': '镜像失败',
+
+    'bot.tasks.kicker': '子会话',
+    'bot.tasks.hint': 'Hermes 为此机器人运行的旁路会话。它的 Bot Chat 仍是永久主页。',
+    'bot.tasks.empty': '还没有子会话。',
+    'bot.tasks.untitled': '未命名任务',
+    'bot.tasks.banner': '子会话 · {name}',
+    'bot.tasks.failed': '无法打开该子会话：{why}',
 
     'bot.delete.desc': '永久删除 @{name} 及其隔离记忆。',
     'bot.delete.action': '删除机器人',
@@ -114,6 +137,14 @@ export const bot: Catalog = {
     'bot.provider.nothing.body':
       'Ton bot principal n’a aucune clé API à copier. Ajoute-en une dans Connecteurs d’abord.',
     'bot.provider.failed.title': 'Échec de la copie',
+
+    'bot.tasks.kicker': 'Sessions tâche',
+    'bot.tasks.hint':
+      'Conversations annexes exécutées par Hermes pour ce bot. Son Bot Chat reste le foyer permanent.',
+    'bot.tasks.empty': 'Aucune session tâche pour le moment.',
+    'bot.tasks.untitled': 'Tâche sans titre',
+    'bot.tasks.banner': 'Session tâche · {name}',
+    'bot.tasks.failed': 'Impossible d’ouvrir cette session tâche : {why}',
 
     'bot.delete.desc': 'Supprime définitivement @{name} et sa mémoire isolée.',
     'bot.delete.action': 'Supprimer le bot',

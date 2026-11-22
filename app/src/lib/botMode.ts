@@ -97,8 +97,10 @@ export function botModeMarkerPatch(
   const current = readBotModeMeta(opts.existing)
   const title = (opts.title || current?.title || name).trim() || name
   return {
-    // Merge, never replace: unknown keys another client wrote stay intact
-    // (`_configure_ui_meta` replaces this KEY's value, so spread the block).
+    // `_configure_ui_meta` replaces this KEY's value wholesale, so spread any
+    // block we already know about: production writes a fresh block (an
+    // unmarked profile has none), but keeping unknown desktop keys when a
+    // block exists costs nothing and avoids stripping them on a title edit.
     ui_meta: { [BOT_META_KEY]: { ...(rawBotModeBlock(opts.existing) ?? {}), title } },
     ui_meta_expected_revisions: { [BOT_META_KEY]: uiMetaRevision(opts.revisions) },
   }
@@ -131,10 +133,11 @@ export async function markBotModeManaged(
       { name, ...botModeMarkerPatch(name, opts) },
       opts.timeoutMs ?? 15000,
     )
-    // CAS mismatch comes back as `applied.ui_meta: false` (+ conflicts), not a
-    // thrown RPC error: another client wrote the marker first, so this is a
-    // no-op, not a success (the next roster refresh sees its title).
-    return res?.applied?.ui_meta !== false
+    // Success is explicit: the gateway reports `applied.ui_meta === true`.
+    // A CAS mismatch comes back as `applied.ui_meta: false` (+ conflicts) and
+    // a gateway that ignores the param returns no `applied` at all — both mean
+    // "the marker is not ours", so this is a no-op that the next open retries.
+    return res?.applied?.ui_meta === true
   } catch {
     return false
   }
