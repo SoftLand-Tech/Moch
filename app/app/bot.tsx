@@ -88,7 +88,13 @@ export default function BotDetail() {
     // Hermes-side task sessions: separate from the canonical Bot Chat. Shown
     // read-only so legacy/side conversations stay reachable (they are not
     // chats in the drawer anymore) and so a task session is visibly NOT the
-    // bot's permanent home. Best-effort.
+    // bot's permanent home. Moch (the default bot) has none of its own here —
+    // the launch profile's ordinary sessions are the Sessions surface.
+    if (bot === 'default') {
+      setTasks([])
+      setTasksLoading(false)
+      return
+    }
     setTasksLoading(true)
     try {
       const res = await rpc<{ sessions?: unknown[] }>('session.list', { profile: bot, limit: 50 }, 15000)

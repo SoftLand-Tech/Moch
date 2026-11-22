@@ -6,6 +6,9 @@ Mode), `app/hermes-src/tui_gateway/methods_profiles.py` (the roster/config RPCs)
 
 ---
 
+Build in question: **1.0.48-botmode** (versionCode 51), CI build of the Bot
+Mode fix.
+
 ## 0. The ask, in one line
 
 Bots must be **persistent, independent agent identities with one canonical Bot
@@ -68,6 +71,18 @@ normal sessions, and no amount of hiding buttons would change that.
   a roster-wide sweep: an unmarked named profile may belong to the desktop or
   CLI, and the marker flips Hermes' global `is_bot_mode_managed` gate.
 
+**Profile-scoped resume (the “session not found” bug)**
+- A bot chat lives in THAT profile's `state.db`, but the open path resumed it
+  with no `profile` argument — the gateway therefore searched the launch DB
+  and answered `session not found` for every bot. The open path now passes the
+  bot's profile on `session.resume` (`resumeShared(storedId, { profile })`),
+  and every later resume of that stored id (boot paint, notification tap,
+  attention hop) resolves the owning profile from a persisted
+  `storedId → profile` map (`chat.trackServerOnlySession`). A wrong-profile
+  lookup can no longer be mistaken for a dead canonical row (recovery only
+  runs on the definitive `session not found`, and a provider/model error
+  never deletes anything).
+
 **One canonical Bot Chat (`app/src/lib/botChat.ts`)**
 - `fleet.ts::createProfile` calls `ensureBotChat` best-effort right after
   creation, so every bot HAS its canonical Bot Chat from birth; the open path
@@ -78,6 +93,12 @@ normal sessions, and no amount of hiding buttons would change that.
   then `session.create { profile, title, hidden: true, follow_profile_config: true }`
   + `session.title` claim, adopting the winner on an "already in use" race.
   Single-flighted and **resolve-only** (no screen side effects).
+- **`Moch` — the launch/default profile — is the default BOT**, not the shell:
+  it gets the same native marker and its own canonical Bot Chat (“Moch” in the
+  roster, opened from the Bots rail/switcher like any bot). Ordinary chat
+  history lives on the separate **Sessions** surface (the canonical Bot Chat
+  is hidden, so it never leaks there; the default bot's screen has no
+  task-session card because its ordinary sessions ARE that surface).
 - `openBotChat()` = mark identity view → `ensureBotChat()` → `session.resume`
   (which natively follows the compression tip) → recovery that can only mint
   the canonical chat. **The ordinary-chat fallback is gone**; a failure throws
@@ -134,7 +155,8 @@ normal sessions, and no amount of hiding buttons would change that.
 
 ## 5. How this is tested
 
-- `app/scripts/test-bot-chat.ts` (73 checks) — native canonical contract:
+- `app/scripts/test-bot-chat.ts` (79 checks) — native canonical contract
+  (including profile-scoped resume for named AND default bots):
   existing row opens with no create; missing row creates + titles with the
   exact wire params; title conflict adopts the winner; lookup failure mints
   nothing; a second `ensureBotChat` after a simulated restart reuses the same
@@ -142,7 +164,7 @@ normal sessions, and no amount of hiding buttons would change that.
   never mints an ordinary `Bot · <name>` session; a provider/model error is not
   treated as a stale session (canonical row survives); the launch profile is
   rejected; the identity marker is set only after a successful open.
-- `app/scripts/test-bot-mode.ts` (46 checks) — marker shape/CAS/merge, explicit
+- `app/scripts/test-bot-mode.ts` (50 checks) — marker shape/CAS/merge, explicit
   `applied` verdict, identity precedence, `markBotModeManaged` idempotence,
   roster mapping (one row per profile, native title, canonical-only preview,
   DM envelope stripping) and task-session flattening (canonical filtered, wire

@@ -62,11 +62,12 @@ async function main() {
   // The opener is a seam too: real apps resume the chat on screen; the suite
   // only asserts WHICH stored id was opened (and how many times).
   let opened: string[] = []
+  let openedProfiles: string[] = []
   let active: string | null = null
   let identities: string[] = []
   mod._useBotChatDepsForTests({
     setActiveBot: (profile) => { active = profile },
-    openChat: async (storedId) => { opened.push(storedId); active = storedId },
+    openChat: async (storedId, profile) => { opened.push(storedId); openedProfiles.push(profile); active = storedId },
     ensureIdentity: (profile) => { identities.push(profile) },
   })
 
@@ -75,6 +76,7 @@ async function main() {
   // ── 1. existing row opens, nothing is minted ──────────────────────────────
   {
     opened = []
+    openedProfiles = []
     active = null
     const { rpc, calls } = fakeRpc({
       'session.list': () => ({
@@ -91,6 +93,7 @@ async function main() {
     check('existing row: returns the STORED id', id === 'bot-chat-1', id)
     check('existing row: opens that chat', opened.length === 1 && opened[0] === 'bot-chat-1')
     check('existing row: marks the bot identity after open', active === 'researcher', String(active))
+    check('existing row: resume is PROFILE-scoped (bot profile, not launch)', openedProfiles[0] === 'researcher', JSON.stringify(openedProfiles))
     check('existing row: native Bot Mode identity is ensured', identities.includes('researcher'), JSON.stringify(identities))
     check('existing row: no session.create', callsTo(calls, 'session.create').length === 0)
     check('existing row: no session.title', callsTo(calls, 'session.title').length === 0)
@@ -459,13 +462,54 @@ async function main() {
     check('ensureBotChat: reports the live compression tip', ref2.resolvedId === 'tip-c1', String(ref2.resolvedId))
     check('ensureBotChat: still never opened anything', opened.length === 0)
 
-    // The launch profile is the assistant itself, not a bot: no Bot Chat.
-    let defErr = ''
-    try { await mod.ensureBotChat('default') } catch (e) { defErr = e instanceof Error ? e.message : String(e) }
-    check('ensureBotChat: default profile has no Bot Chat', /default agent has no Bot Chat/.test(defErr), defErr)
-    let defOpenErr = ''
-    try { await openBotChat('default') } catch (e) { defOpenErr = e instanceof Error ? e.message : String(e) }
-    check('openBotChat: default profile is rejected before any RPC', /default agent has no Bot Chat/.test(defOpenErr), defOpenErr)
+    // Moch (the launch/default profile) IS the default BOT: it has one
+    // canonical Bot Chat like every named bot, and its resume is profile-scoped
+    // exactly like theirs (`default` resolves to the launch home natively).
+    {
+      opened = []
+      openedProfiles = []
+      active = null
+      const moch = fakeRpc({
+        'session.list': () => ({
+          sessions: [{ id: 'moch-bot-chat', title: 'Bot Chat', resolved_id: 'moch-tip' }],
+        }),
+      })
+      mod._useBotChatRpcForTests(moch.rpc)
+      mod._useBotChatRosterForTests(() => false)
+      mod._useBotChatDepsForTests({
+        setActiveBot: (profile) => { active = profile },
+        openChat: async (storedId, profile) => {
+          opened.push(storedId)
+          openedProfiles.push(profile)
+          active = storedId
+        },
+        ensureIdentity: (profile) => { identities.push(profile) },
+      })
+
+      const ref = await mod.ensureBotChat('default')
+      check('default bot: ensure resolves its canonical Bot Chat', ref.storedId === 'moch-bot-chat' && ref.resolvedId === 'moch-tip', JSON.stringify(ref))
+      const id = await openBotChat('default')
+      check('default bot: opening Moch opens ITS Bot Chat', id === 'moch-bot-chat' && opened.includes('moch-bot-chat'), id)
+      check('default bot: resume is profile-scoped', openedProfiles[openedProfiles.length - 1] === 'default', JSON.stringify(openedProfiles))
+      check('default bot: identity marker set for the Moch pill', active === 'default' && identities.includes('default'))
+      check('default bot: nothing is minted when it exists', callsTo(moch.calls, 'session.create').length === 0)
+
+      // Absent canonical chat: created ON the default profile (the Bot Chat
+      // row lives in the launch store, hidden from the Sessions surface).
+      const created = fakeRpc({
+        'session.list': () => ({ sessions: [] }),
+        'session.create': () => ({ session_id: 'live-d', stored_session_id: 'stored-d' }),
+        'session.title': () => ({ title: 'Bot Chat', pending: false }),
+      })
+      mod._useBotChatRpcForTests(created.rpc)
+      const ref2 = await mod.ensureBotChat('default')
+      check('default bot: canonical create is emitted when absent', ref2.storedId === 'stored-d', ref2.storedId)
+      check(
+        'default bot: create carries profile "default"',
+        callsTo(created.calls, 'session.create')[0]?.params?.profile === 'default',
+        JSON.stringify(callsTo(created.calls, 'session.create')[0]?.params),
+      )
+    }
 
     // A failed canonical create is a hard failure — no ordinary session.
     const boom = fakeRpc({

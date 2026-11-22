@@ -314,22 +314,19 @@ export default function Chat() {
   // pick the default agent → a fresh default chat. The sheet stays up with
   // a spinner while the switch runs, and a failure surfaces as an alert
   // with the sheet still open (the user can retry or pick another bot).
-  const pickBot = async (name: string | null) => {
+  const pickBot = async (name: string) => {
     if (switchingBot !== null) return
-    setSwitchingBot(name ?? '')
+    setSwitchingBot(name)
     try {
-      if (name) {
-        // The bot's ONE canonical Bot Chat — openBotChat owns the identity
-        // marker; an ordinary bot-scoped chat is never created (Bot Mode).
-        await openBotChat(name)
-      } else {
-        // Launch identity: a fresh chat (newChat clears the bot view marker).
-        await newChat()
-      }
+      // A bot's ONE canonical Bot Chat — `Moch` (the launch/default profile)
+      // is a bot too, so it opens ITS Bot Chat rather than minting a fresh
+      // launch-profile session. openBotChat owns the identity marker; an
+      // ordinary bot-scoped chat is never created (Bot Mode).
+      await openBotChat(name)
       setBotSwitcherOpen(false)
     } catch (e) {
       alertOk(
-        t('chat.bot.switchFailed', { name: name ?? t('chat.bot.defaultLabel') }),
+        t('chat.bot.switchFailed', { name: activeBotTitle(name) }),
         e instanceof Error ? e.message : String(e),
       )
     } finally {
@@ -1963,33 +1960,34 @@ export default function Chat() {
                   </HeaderButton>
                 </View>
                 <ScrollView style={s.botSheetList} keyboardShouldPersistTaps="handled">
-                  {/* Default agent row — selected when no bot is active. */}
+                  {/* Moch — the DEFAULT BOT. Like every bot it has ONE
+                      canonical Bot Chat; it is not the plain launch surface. */}
                   <Pressable
                     style={({ pressed }) => [
                       s.botSheetRow,
                       { flexDirection: dir.row },
-                      !activeBot && s.botSheetRowOn,
+                      activeBot === 'default' && s.botSheetRowOn,
                       pressed && switchingBot === null && s.btnPressed,
                     ]}
-                    onPress={() => { if (activeBot !== null) void pickBot(null) }}
-                    disabled={activeBot === null || switchingBot !== null}
+                    onPress={() => { if (activeBot !== 'default') void pickBot('default') }}
+                    disabled={activeBot === 'default' || switchingBot !== null}
                     accessibilityRole="button"
                     accessibilityLabel={t('chat.bot.switchTo', { name: t('chat.bot.defaultLabel') })}
-                    accessibilityState={{ selected: activeBot === null, busy: switchingBot === '' }}
+                    accessibilityState={{ selected: activeBot === 'default', busy: switchingBot === 'default' }}
                   >
                     <BotAvatar profile="default" isDefault size={34} />
                     <View style={s.botSheetRowText}>
                       <Txt size={13} weight="700" numberOfLines={1}>{t('chat.bot.defaultLabel')}</Txt>
                       <Txt size={11} color={C.textDim} numberOfLines={1}>{t('chat.bot.defaultDesc')}</Txt>
                     </View>
-                    {switchingBot === '' ? (
+                    {switchingBot === 'default' ? (
                       <Spinner size="small" />
-                    ) : activeBot === null ? (
+                    ) : activeBot === 'default' ? (
                       <Icon name="checkmark-circle" size={18} color={C.accent} />
                     ) : null}
                   </Pressable>
-                  {/* Named bots from the fleet roster. */}
-                  {profiles.map((p: FleetProfile) => {
+                  {/* Named bots from the fleet roster (Moch has its own row). */}
+                  {profiles.filter((p) => !p.isDefault).map((p: FleetProfile) => {
                     const isOn = activeBot === p.name
                     const isSwitching = switchingBot === p.name
                     return (

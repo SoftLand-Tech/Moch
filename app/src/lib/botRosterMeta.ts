@@ -199,7 +199,10 @@ export function rosterRows(
       worker?.lastActiveTs ?? 0,
     )
     rows.push({
-      key: isDefault ? '' : profile,
+      // Every row is a BOT — Moch (the launch profile) included. The Bots
+      // surface is bot identities with one canonical Bot Chat each; the
+      // Sessions surface is a separate list of ordinary/background sessions.
+      key: profile,
       profile,
       name: isDefault ? DEFAULT_BOT_LABEL : name,
       description: str(p?.description),
@@ -261,6 +264,11 @@ export function withSessionPreviews(
     }
   }
   return rows.map((row) => {
+    // The canonical Bot Chat is authoritative for a bot's face: a newer
+    // ordinary/task session on the same profile must never stand in for it —
+    // and for Moch (the default bot) the launch list is the Sessions surface,
+    // a different product surface entirely.
+    if (row.canonical) return row
     const hit = newest.get(row.profile)
     if (!hit) return row
     return {

@@ -185,8 +185,6 @@ export function BotsRoster({ profiles, onOpenBot, onNewBot, onCloseDrawer, activ
     }
   }
 
-  const named = rows.filter((r) => !r.isDefault)
-
   return (
     <View style={s.root}>
       <Kicker style={s.kicker}>{tr('chrome.bots.kicker')}</Kicker>
@@ -206,11 +204,10 @@ export function BotsRoster({ profiles, onOpenBot, onNewBot, onCloseDrawer, activ
           ]
           const status = botStatusOf(row, ids, busy, attention, pending)
           const age = ageLabel(row.lastActiveTs)
-          // Highlight the bot whose identity new chats currently take. The
-          // default agent is never highlighted: `activeBot == null` is its
-          // resting state, so a permanent highlight on row 1 read as a
-          // selection the user never made.
-          const on = !row.isDefault && myActiveBot === row.profile
+          // Highlight the bot whose canonical Bot Chat is on screen — Moch
+          // (the default bot) included. A normal chat from the Sessions
+          // surface has no bot marker, so nothing is highlighted there.
+          const on = myActiveBot === row.profile
           const name = row.name
           const subtitle = row.preview
             || row.description
@@ -259,7 +256,7 @@ export function BotsRoster({ profiles, onOpenBot, onNewBot, onCloseDrawer, activ
           )
         })}
 
-        {named.length === 0 ? (
+        {rows.length === 0 ? (
           <Txt size={13} color={C.textFaint} style={s.empty}>{tr('bots.empty')}</Txt>
         ) : null}
 
@@ -287,11 +284,10 @@ export function BotsRoster({ profiles, onOpenBot, onNewBot, onCloseDrawer, activ
             <Txt size={10.5} weight="700" color={C.textFaint} style={s.sheetTitle} numberOfLines={1}>
               {sheet.row.name}
             </Txt>
-            {/* The default agent has no `Bot Chat` of its own, so its row says
-                "Chat" (the plain surface) instead of promising a Bot Chat. */}
+            {/* Every row is a bot with ONE canonical Bot Chat — Moch included. */}
             <SheetRow
               icon="chat-outline"
-              label={sheet.row.isDefault ? tr('sidebar.chats') : tr('bots.menu.open')}
+              label={tr('bots.menu.open')}
               onPress={() => openChat(sheet.row)}
             />
             {sheet.row.isDefault ? null : (
