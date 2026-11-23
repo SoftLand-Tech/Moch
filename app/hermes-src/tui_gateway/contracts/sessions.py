@@ -200,6 +200,9 @@ class SessionListRow(Result):
     started_at: float = 0
     message_count: int = 0
     source: str = ""
+    # Owning profile (BUG-112): the mobile client splits bot chats from
+    # ordinary launch-profile sessions on this; "" = unscoped/legacy.
+    profile: str = ""
 
 
 class SessionListResult(Result):

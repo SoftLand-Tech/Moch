@@ -58,6 +58,7 @@ import {
   projectsAtom,
   setActiveProject,
 } from '../../src/lib/workspace'
+import { BOT_CHAT_TITLE } from '../../src/lib/botChat'
 
 // BUG-063: the row type IS SessionRow — the local duplicate dropped.
 type Sess = SessionRow
@@ -74,11 +75,13 @@ const STATUS_KIND: Record<Exclude<RowStatus, 'busy'>, DotKind> = {
 
 /**
  * Bot Mode (UI-1 identity split): a row carrying a real profile name is a
- * bot chat, not a launch-profile conversation. The drawer already hides those
- * from its Sessions identity; this screen must apply the same rule or bot
- * task sessions leak into "Chats" as ordinary conversations.
+ * bot chat, not a launch-profile conversation. The canonical Bot Chat's exact
+ * title is reserved too — legacy rows that lost their hidden flag (or were
+ * minted in the launch profile by an older build) must never render here as
+ * ordinary conversations. The drawer applies the same rule.
  */
-const isBotRow = (r: { profile?: string }) => !!r.profile && r.profile !== 'default'
+const isBotRow = (r: { profile?: string; title?: string }) =>
+  (!!r.profile && r.profile !== 'default') || (r.title ?? '').trim() === BOT_CHAT_TITLE
 
 /** Row status → its already-translated accessibility label (legacy keys). */
 const STATUS_A11Y: Record<RowStatus, string> = {
