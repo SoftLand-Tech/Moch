@@ -1,12 +1,13 @@
 import { atom } from 'nanostores'
 import { log } from './log'
 import { joinRunningSessions, type ActiveListSession } from './sessionRunning'
-import { optimisticSessionRow, type SessionRow } from './sessionRowMeta'
+import { isBotSessionRow, optimisticSessionRow, type SessionRow } from './sessionRowMeta'
 // Re-exported for every existing consumer; canonical definition (and its
 // docs) lives in lib/sessionRowMeta so the scripts suites can import rows
 // without pulling this module's gateway→RN graph into their tsconfig.
 // (fleet stays a LAZY import below — a static one re-breaks node-loading.)
 export type { SessionRow }
+export { isBotSessionRow }
 /**
  * The server's conversation list.
  *
@@ -225,11 +226,22 @@ export function loadSessions(opts?: { force?: boolean }): Promise<SessionRow[]> 
       // sessions inside a bot profile are Hermes-side workers, not chats.
       // (This replaces BUG-112's per-profile fan-out, which is what made bots
       // read as ordinary session folders.)
+      //
+      // The filter is load-bearing, not a tidy-up: the wire contract only
+      // keeps bot rows out when the gateway honours it — a profile-scoped
+      // row can still arrive here (peer gateways, rows restored from an
+      // archive, a canonical Bot Chat whose hidden flag was lost), and every
+      // Sessions surface renders THIS store. Dropping bot rows at the store
+      // means no surface can leak them by forgetting its own filter; the
+      // Bots surface never reads this store (it resolves canonical chats
+      // through lib/botChat / profiles.list), so nothing is lost.
+      const visible = rows.filter((r) => !isBotSessionRow(r))
       if (gen !== loadGen) return sessionRows.get()
-      sessionRows.set(rows)
-      // BUG-025: only a non-truncated list proves absence elsewhere.
+      sessionRows.set(visible)
+      // BUG-025: only a non-truncated list proves absence elsewhere — judged
+      // on the RAW fetch, before the bot filter above shrinks it.
       sessionListComplete.set(rows.length < LIST_LIMIT)
-      return rows
+      return visible
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Could not load chats'
       if (gen === loadGen) sessionListError.set(msg)

@@ -52,6 +52,7 @@ import {
   pendingCount,
   pendingStoredIds,
   forgetSession,
+  isServerOnlySession,
   isSessionNotFound,
   newChat,
   patchSession,
@@ -61,21 +62,10 @@ import {
   sessionsSummaryKey,
 } from '../lib/chat'
 import { loadCatalog } from '../lib/slash'
-import { loadLastActive, loadSessions, lastActiveByStoredId, lastActiveFor, patchRowTitle, refreshRunningSessions, sessionRows, toMs } from '../lib/sessionList'
+import { isBotSessionRow, loadLastActive, loadSessions, lastActiveByStoredId, lastActiveFor, patchRowTitle, refreshRunningSessions, sessionRows, toMs } from '../lib/sessionList'
 import { forgetChatMarks, loadChatMarks, toggleArchive, togglePin } from '../lib/chatListState'
 import { inboxCount } from '../lib/inbox'
-import { BOT_CHAT_TITLE, openBotChat } from '../lib/botChat'
-
-/**
- * Bot Mode's UI-1 identity split: a row carrying a real profile name is a bot
- * chat, and the canonical Bot Chat's exact title is reserved (server-side
- * `hermes_state.CANONICAL_BOT_CHAT_TITLE`) — its name IS its identity. Legacy
- * rows that lost their hidden flag (or were minted in the launch profile by an
- * older build) must never render as ordinary Sessions, whatever their profile
- * column says; the Bots roster is their surface.
- */
-const isBotProfileRow = (profile?: string) => !!profile && profile !== 'default'
-const isCanonicalBotChat = (title?: string) => (title ?? '').trim() === BOT_CHAT_TITLE
+import { openBotChat } from '../lib/botChat'
 import { fleetProfiles, refreshFleet } from '../lib/fleet'
 import { showAlert } from './AlertDialog'
 
@@ -306,11 +296,13 @@ export function ScreenShell({
     void locale // tr() copy below re-reads on a language switch
     const statusOf = (id: string) => rowStatus(busy.includes(id), attention[id], pendingStored.includes(id))
 
-    // UI-1 identity split: bots are profiles, so a row carrying a real
-    // profile name is a bot chat. `default` is the assistant itself, not a
-    // bot — counting it as one would hide every ordinary chat in Bots mode
-    // and show nothing in Sessions.
-    const isBotRow = isBotProfileRow
+    // Bots and Sessions are different things (Bot Mode, BOT-MODE.md): bots
+    // are profiles with ONE canonical Bot Chat each, reached through the
+    // Bots roster — never through this list. The shared store already drops
+    // bot rows (lib/sessionList), and `isBotSessionRow` (lib/sessionRowMeta)
+    // is applied again here so a row that reaches this memo by any other
+    // path still cannot render. In Bots identity this list is not rendered
+    // at all (the roster is), so server rows contribute nothing either way.
 
     // UI-1 project filter: only when a project is selected. Rows that carry
     // the project id filter on it; rows without one resolve through the
@@ -334,19 +326,10 @@ export function ScreenShell({
     }
 
     const fromServer = rows
-      .filter((r) => (identity === 'bots' ? isBotRow(r.profile) : !isBotRow(r.profile)))
-      .filter((r) => !isCanonicalBotChat(r.title))
+      .filter((r) => identity !== 'bots' && !isBotSessionRow(r))
       .filter(inProject)
       .map((r) => {
-      const rawTitle = r.title || r.preview?.slice(0, 60) || tr('sidebar.untitled')
-      // BUG-112: a row from a bot profile identifies itself in the drawer even
-      // when its title doesn't (chats started while a bot was active are
-      // auto-titled). Fleet-created chats already carry "Bot · <name>", so the
-      // prefix is only added when the name isn't already in the title.
-      const title =
-        r.profile && r.profile !== 'default' && !rawTitle.toLowerCase().includes(r.profile.toLowerCase())
-          ? `${r.profile} · ${rawTitle}`
-          : rawTitle
+      const title = r.title || r.preview?.slice(0, 60) || tr('sidebar.untitled')
       return {
       id: r.id,
       title,
@@ -362,12 +345,32 @@ export function ScreenShell({
     })
 
     const seen = new Set(fromServer.map((c) => c.id))
+    // In-memory entries are the OTHER half of the list — and the half the
+    // bot leak actually came through. Server rows are filtered above, but a
+    // Bot Chat OPENED this run lives in `sessionsById` (opening it is what
+    // puts it there), carries no profile column, and its title is the
+    // canonical "Bot Chat" — so unfiltered locals rendered one identical
+    // "Bot Chat" row per bot the user had opened, right inside Sessions.
+    // The markers that identify them, in order:
+    //  1. lib/chat's server-only registry — every bot chat (and bot task
+    //     session) is registered there with its owning profile the moment
+    //     it opens (`trackServerOnlySession` in lib/botChat / chat).
+    //  2. The canonical title itself, via the shared classifier — catches
+    //     an entry whose registration was lost (e.g. a restored transcript).
+    // Also deduped by stored id: two live handles for one stored chat
+    // (resume + boot paint) must render ONE row, not twins.
+    const localSeen = new Set<string>()
     const locals = Object.values(all)
       // `new:` pseudo ids are the optimistic new-chat window's stand-ins —
       // never drawer rows (their create may still fail).
       .filter((s) => s.storedId && !s.storedId.startsWith('new:') && !seen.has(s.storedId))
-      // In-memory entries carry no profile: they belong to the identity that
-      // created them, so they only render in Sessions.
+      .filter((s) => {
+        if (localSeen.has(s.storedId)) return false
+        localSeen.add(s.storedId)
+        return true
+      })
+      .filter((s) => !isServerOnlySession(s.storedId) && !isBotSessionRow({ title: s.title }))
+      // In Bots identity the drawer renders the roster, not this list.
       .filter(() => identity !== 'bots')
       .sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0))
       .map((s) => ({
@@ -396,17 +399,12 @@ export function ScreenShell({
     const ownerIndex = buildSessionOwnerIndex(projectSessionIds)
     const out: Record<string, RecentChat[]> = {}
     for (const r of rows) {
-      // Bots mode's identity split (same rule as `recent`): profile rows are
-      // bot chats, not project sessions. Canonical Bot Chats are never rows.
-      if (isBotProfileRow(r.profile)) continue
-      if (isCanonicalBotChat(r.title)) continue
+      // Bots are not project sessions (same shared classifier as `recent`):
+      // bot-profile rows and canonical Bot Chats never appear here.
+      if (isBotSessionRow(r)) continue
       const pid = projectIdForSession(r, ownerIndex)
       if (!pid) continue // null = Home bucket, undefined = unclassified
-      const rawTitle = r.title || r.preview?.slice(0, 60) || tr('sidebar.untitled')
-      const title =
-        r.profile && r.profile !== 'default' && !rawTitle.toLowerCase().includes(r.profile.toLowerCase())
-          ? `${r.profile} · ${rawTitle}`
-          : rawTitle
+      const title = r.title || r.preview?.slice(0, 60) || tr('sidebar.untitled')
       const chat: RecentChat = {
         id: r.id,
         title,

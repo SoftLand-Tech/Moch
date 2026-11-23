@@ -49,6 +49,56 @@ export interface SessionRow {
   cwd?: string
   /** Owning project id, when the gateway stamps rows with one. */
   project_id?: string
+  /**
+   * Born-hidden flag, when a gateway build sends it. Canonical Bot Chats are
+   * created hidden (`session.create {hidden: true}` in lib/botChat) and the
+   * plain `session.list` contract already excludes them server-side — but a
+   * peer that ignores `include_hidden`, or a row whose hidden flag was lost
+   * and later restored, must still never surface as an ordinary chat. Absent
+   * on most rows today; honoured whenever present.
+   */
+  hidden?: boolean
+}
+
+/**
+ * The canonical Bot Chat's title. Identity, not decoration: Hermes resolves
+ * a bot's ONE conversation by this exact name
+ * (`hermes_state.CANONICAL_BOT_CHAT_TITLE`; lib/botChat's `BOT_CHAT_TITLE`
+ * is the same string). Kept as a literal here so this module stays
+ * import-free — the scripts suites load it in plain node.
+ */
+export const BOT_CHAT_TITLE = 'Bot Chat'
+
+/**
+ * THE bot-session classifier — the single rule every Sessions surface
+ * (drawer Recent Chats, the Sessions/Chats screen, project mini-lists,
+ * content-search hits) applies, so bots and sessions can never drift apart
+ * again. A row is a BOT session when ANY of these hold:
+ *
+ *  1. `profile` names a real bot profile (present and not `default` — the
+ *     launch profile's ordinary chats are Sessions; its Bot Chat is caught
+ *     by rule 2). This is the marker the gateway stamps on profile-scoped
+ *     rows, and the one the Bot Mode audit (BOT-MODE.md) built on.
+ *  2. Its title is exactly the canonical `Bot Chat` title — that name is
+ *     RESERVED identity, never an ordinary chat's name, whatever profile
+ *     column the row carries (legacy rows minted in the launch profile, or
+ *     rows that lost their profile stamp, are still bot chats).
+ *  3. It is flagged `hidden` — hidden rows are owned by the Bots surface
+ *     (and pickers that explicitly ask for them), never by Sessions.
+ *
+ * Deliberately NOT here: in-memory `sessionsById` entries carry no profile
+ * column. The ones that are bot chats are registered in lib/chat's
+ * server-only set (`isServerOnlySession`) at the moment a bot chat opens,
+ * and surfaces must check that set too — see ScreenShell's drawer list.
+ */
+export function isBotSessionRow(row: {
+  profile?: string | null
+  title?: string | null
+  hidden?: boolean | null
+}): boolean {
+  if (row.hidden === true) return true
+  if (row.profile && row.profile !== 'default') return true
+  return (row.title ?? '').trim() === BOT_CHAT_TITLE
 }
 
 /**
@@ -107,7 +157,7 @@ export function messageCountText(count: number | null | undefined): string {
 export function searchHitToRow(r: Record<string, unknown>): SessionRow | null {
   const id = typeof r.session_id === 'string' || typeof r.session_id === 'number' ? String(r.session_id) : ''
   if (!id) return null
-  return {
+  const row: SessionRow = {
     id,
     title: typeof r.title === 'string' ? r.title : undefined,
     // The snippet IS the matching content — show it where a row shows its
@@ -117,7 +167,14 @@ export function searchHitToRow(r: Record<string, unknown>): SessionRow | null {
     profile: typeof r.profile === 'string' ? r.profile : undefined,
     message_count: typeof r.message_count === 'number' ? r.message_count : undefined,
     source: typeof r.source === 'string' ? r.source : undefined,
+    hidden: typeof r.hidden === 'boolean' ? r.hidden : undefined,
   }
+  // Content search runs over every profile's store on some gateways: a hit
+  // inside a bot's chat is a bot session, and the Sessions screen is not
+  // its surface — drop it here so no caller can leak it by forgetting to
+  // filter (the screen filters again, belt and braces).
+  if (isBotSessionRow(row)) return null
+  return row
 }
 
 /**

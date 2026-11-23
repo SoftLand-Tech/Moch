@@ -3526,6 +3526,27 @@ async function profileForServerOnlySession(storedId: string): Promise<string | u
   return serverOnlyProfiles.get(storedId)
 }
 
+/**
+ * Synchronous membership test for the server-only set — the drawer's
+ * Sessions list uses it to keep bot conversations out of Recent Chats.
+ *
+ * Why this set is the right marker for in-memory sessions: `sessionsById`
+ * entries carry no profile column, so a row-based classifier cannot tell a
+ * Bot Chat opened this run from an ordinary chat. But EVERY bot chat enters
+ * memory through `openBotChat` / `openServerSession`, and both register
+ * their stored id here (with the owning profile) before the session lands
+ * in `sessionsById`. A bot chat the app has never opened this run has no
+ * in-memory entry at all, so it cannot leak through the local list either.
+ */
+export function isServerOnlySession(storedId: string): boolean {
+  return !!storedId && serverOnlyStoredIds.has(storedId)
+}
+
+/** The bot profile that owns a server-only session, when one was recorded. */
+export function serverOnlyProfileForSession(storedId: string): string | undefined {
+  return serverOnlyProfiles.get(storedId)
+}
+
 sessionRows.subscribe((rows) => {
   if (!rows.length || !sessionListComplete.get()) return
   const active = activeSession.get()

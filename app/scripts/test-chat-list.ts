@@ -152,6 +152,22 @@ async function main() {
   check('searchHitToRow "—" decision applies to hits', meta.messageCountText(bare.message_count) === '—')
   check('searchHitToRow rejects hits without an id', meta.searchHitToRow({ snippet: 'orphan' }) === null)
 
+  // isBotSessionRow: THE shared bots-vs-sessions classifier (drawer, Chats
+  // screen, project mini-lists, the session store). Bots are profiles with
+  // one canonical "Bot Chat"; sessions are launch-profile conversations.
+  check('bot classifier: ordinary launch row is a session', !meta.isBotSessionRow({ profile: 'default', title: 'Groceries' }))
+  check('bot classifier: profile-less row is a session', !meta.isBotSessionRow({ title: 'Groceries' }))
+  check('bot classifier: named-profile row is a bot session', meta.isBotSessionRow({ profile: 'tesr-helper', title: 'Anything' }))
+  check('bot classifier: canonical title on default profile is a bot session', meta.isBotSessionRow({ profile: 'default', title: 'Bot Chat' }))
+  check('bot classifier: canonical title without a profile is a bot session', meta.isBotSessionRow({ title: ' Bot Chat ' }))
+  check('bot classifier: hidden row is a bot-owned session', meta.isBotSessionRow({ profile: 'default', title: 'Groceries', hidden: true }))
+  check('bot classifier: a title merely containing Bot Chat stays a session', !meta.isBotSessionRow({ profile: 'default', title: 'Bot Chat notes' }))
+  check(
+    'searchHitToRow drops bot hits (profile + canonical title)',
+    meta.searchHitToRow({ session_id: 'b1', snippet: 'x', title: 'Task', profile: 'tesr-helper' }) === null &&
+      meta.searchHitToRow({ session_id: 'b2', snippet: 'x', title: 'Bot Chat', profile: 'default' }) === null,
+  )
+
   // optimisticSessionRow: a just-created chat has NO known count — undefined,
   // never the old hard 0 that read "0 msgs" until the next poll.
   const opt = meta.optimisticSessionRow('newly-created', 'New chat', 1760000100)
