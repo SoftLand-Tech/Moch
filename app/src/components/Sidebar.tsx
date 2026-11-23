@@ -147,8 +147,8 @@ interface Props {
   onRequestOpen?: () => void
   nav: NavItem[]
   /**
-   * Bottom-docked nav (ChatGPT-style): rendered after the chat list, pinned
-   * above the New-chat pill at the panel's bottom edge.
+   * Bottom-docked nav: rendered as a labelled bottom bar (Settings) pinned
+   * at the panel's bottom edge, below the chat list / roster.
    */
   bottomNav?: NavItem[]
   /** Sessions | Bots switch, rendered directly under the brand row. */
@@ -311,18 +311,28 @@ export function settleTo(anim: Animated.Value, toValue: 0 | 1, duration: number)
 }
 
 /**
- * ChatGPT-style slide-in sidebar, restyled to the redesign mockup
- * (`design.html` renderSidebarDrawer):
+ * ChatGPT-style slide-in sidebar. Layout (UX pass — one scan, top to bottom):
  *
  *   panel (292dp, bgCard, hairline side border, 12dp gutters)
  *   ├─ MochiMark + "Moch" + search affordance + close
- *   ├─ Sessions | Bots Segmented (identity state stays in lib/workspace)
- *   ├─ Sessions body: Workspace 2-col nav grid → Projects (expandable, with
- *   │  per-project recent chats) → Recent Chats
+ *   ├─ Sessions | Bots Segmented (identity state stays in lib/workspace) —
+ *   │  the ONLY place the two surfaces meet; their contents never mix
+ *   ├─ Sessions body, in priority order:
+ *   │  1. "+ New chat" — a full-width accent action, always in the same spot
+ *   │  2. Projects (expandable, with per-project recent chats)
+ *   │  3. Workspace — the six destinations as full-width labelled rows
+ *   │  4. Recent Chats — grouped, ≥48dp rows, bot sessions NEVER appear
  *   │  (OpenCode mode swaps the chat list for the server's sessions)
  *   ├─ Bots body: BotsRoster cards + dashed "+ New bot"
  *   ├─ amber pending-questions card (owner-provided footer)
- *   └─ bottom-docked nav (Settings)
+ *   └─ bottom bar: Settings as a labelled row (icon + text), pinned to the
+ *      panel's bottom edge — no floating icon-only button
+ *
+ * The old layout competed with itself: the workspace grid sat ABOVE the
+ * projects it scopes, "New chat" was an 11px text link trailing the Recent
+ * Chats heading, and Settings was a floating centred gear with no label.
+ * Everything here is now one column of ≥48dp targets in a fixed order, so
+ * the eye learns one path: act → scope → navigate → resume.
  *
  * Implemented as an overlay rather than a Drawer navigator: the app already
  * routes through expo-router tabs, and an overlay keeps that intact while
@@ -595,19 +605,22 @@ export function Sidebar({
     return () => clearTimeout(id)
   }, [searchOpen])
 
-  // ── Navigation tiles (mockup "Workspace" 2-column grid) ──────────────────
-  // Same items/routes/labels and badges as before; the mockup renders them as
-  // compact elevated tiles instead of icon rows. Running automations keep
-  // their mini-Mochi indicator, inbox keeps its amber count pill.
-  const renderNavTile = (item: NavItem) => {
+  // ── Navigation rows ("Workspace") ────────────────────────────────────────
+  // UX pass: the old 2-column tile grid rendered label-ONLY tiles at 32dp —
+  // no icon to scan by, targets under the 48dp floor, and a grid that read
+  // as a tag cloud competing with Projects above the chats. The destinations
+  // are now full-width rows in ONE column: leading icon (the scannable
+  // signal), label, then the same trailing indicators as before (running
+  // automations keep their mini-Mochis, inbox keeps its amber count pill).
+  const renderNavRow = (item: NavItem) => {
     const on = item.key === activeKey
     return (
       <Pressable
         key={item.key}
         style={({ pressed }) => [
-          s.navTile,
+          s.navRow,
           { flexDirection: dir.row },
-          on && s.navTileOn,
+          on && s.navRowOn,
           pressed && s.rowPressed,
         ]}
         onPress={() => {
@@ -618,12 +631,13 @@ export function Sidebar({
         accessibilityState={{ selected: on }}
         accessibilityLabel={item.label}
       >
+        <Icon name={item.icon} size={19} color={on ? C.accent : C.textDim} />
         <Txt
-          size={11.5}
+          size={13.5}
           weight="600"
-          color={C.text}
+          color={on ? C.text : C.textDim}
           numberOfLines={1}
-          style={s.navTileLabel}
+          style={s.navRowLabel}
         >
           {item.label}
         </Txt>
@@ -661,48 +675,46 @@ export function Sidebar({
     )
   }
 
-  const renderNavGrid = (items: NavItem[], columns = 2) => {
+  const renderNavList = (items: NavItem[]) => {
     if (!items.length) return null
-    const rows: NavItem[][] = []
-    for (let i = 0; i < items.length; i += columns) rows.push(items.slice(i, i + columns))
-    return (
-      <View style={s.navGrid}>
-        {rows.map((row, ri) => (
-          <View key={ri} style={[s.navGridRow, { flexDirection: dir.row }]}>
-            {row.map((item) => renderNavTile(item))}
-            {row.length < columns
-              ? Array.from({ length: columns - row.length }).map((_, i) => (
-                  <View key={`spacer-${i}`} style={s.navTileSpacer} />
-                ))
-              : null}
-          </View>
-        ))}
-      </View>
-    )
+    return <View style={s.navList}>{items.map((item) => renderNavRow(item))}</View>
   }
 
-  // Feedback round 2 [2]: the docked Settings control is an icon-ONLY small
-  // card (≈44×44, radius 12, bgElev + hairline) centered at the panel bottom —
-  // the label lives on the accessibilityLabel, not in the pixels. Any future
-  // second bottom item keeps the old labeled grid.
-  const renderBottomTile = (item: NavItem) => {
-    const on = item.key === activeKey
-    return (
-      <Pressable
-        key={item.key}
-        style={({ pressed }) => [s.bottomTile, on && s.bottomTileOn, pressed && s.rowPressed]}
-        onPress={() => {
-          onNav(item.key)
-          onClose()
-        }}
-        accessibilityRole="button"
-        accessibilityState={{ selected: on }}
-        accessibilityLabel={item.label}
-      >
-        <Icon name={item.icon} size={20} color={on ? C.accent : C.textDim} />
-      </Pressable>
-    )
-  }
+  // Bottom bar: Settings (and any future docked item) as a LABELLED row —
+  // icon + text, full width, hairline above. The old floating centred
+  // icon-only gear (feedback round 2 [2]) read as decoration, not as a
+  // control, and gave the panel's most persistent action the smallest,
+  // least discoverable target in the drawer.
+  const renderBottomBar = (items: NavItem[]) => (
+    <View style={s.bottomBar}>
+      {items.map((item) => {
+        const on = item.key === activeKey
+        return (
+          <Pressable
+            key={item.key}
+            style={({ pressed }) => [
+              s.bottomBarRow,
+              { flexDirection: dir.row },
+              on && s.navRowOn,
+              pressed && s.rowPressed,
+            ]}
+            onPress={() => {
+              onNav(item.key)
+              onClose()
+            }}
+            accessibilityRole="button"
+            accessibilityState={{ selected: on }}
+            accessibilityLabel={item.label}
+          >
+            <Icon name={item.icon} size={19} color={on ? C.accent : C.textDim} />
+            <Txt size={13.5} weight="600" color={on ? C.text : C.textDim} numberOfLines={1}>
+              {item.label}
+            </Txt>
+          </Pressable>
+        )
+      })}
+    </View>
+  )
 
   // Open/close slide. A layout effect on the `open` prop flip, so no extra
   // render sits between the tap/gesture-release and the first animated frame;
@@ -1091,34 +1103,50 @@ export function Sidebar({
   const showBots = !ocMode && identity === 'bots'
   const showFooter = !ocMode && identity === 'sessions' && footer != null
 
-  // Drawer section header rows (mockup order): Projects, Workspace, chats.
+  // The drawer's primary action, promoted out of the Recent Chats heading
+  // (where it was an 11px text link competing with the section label): a
+  // full-width accent button directly under the identity switch, in the
+  // same place on every open. Sessions identity only — Bots mode's primary
+  // action is the roster's "+ New bot", and OpenCode mode mints OC chats
+  // through the same owner callback.
+  const newChatButton = (
+    <Pressable
+      style={({ pressed }) => [s.newChatBtn, { flexDirection: dir.row }, pressed && s.newChatBtnPressed]}
+      onPress={() => {
+        onNewChat()
+        onClose()
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={tr('sidebar.newChat')}
+    >
+      <Icon name="add" size={18} color={C.onAccent} />
+      <Txt size={13.5} weight="700" color={C.onAccent}>
+        {tr('sidebar.newChat')}
+      </Txt>
+    </Pressable>
+  )
+
+  // Section heading for the chat list — a label only now; the action that
+  // used to trail it lives in `newChatButton` above.
   const chatsHeading = (
     <View style={[s.chatsHead, { flexDirection: dir.row }]}>
       <Kicker style={s.chatsKicker}>
         {ocMode ? tr('chrome.drawer.ocSessions') : tr('chrome.drawer.recentChats')}
       </Kicker>
-      <Pressable
-        onPress={() => {
-          onNewChat()
-          onClose()
-        }}
-        hitSlop={8}
-        accessibilityRole="button"
-        accessibilityLabel={tr('sidebar.newChat')}
-      >
-        <Txt size={11} weight="700" color={C.accent}>{tr('chrome.drawer.newChat')}</Txt>
-      </Pressable>
     </View>
   )
 
-  // Feedback round 2 [11]: Workspace grid ABOVE Projects. Selection state lives
-  // in lib/workspace; "More" hands off to the owner (activates the project +
-  // navigates to the Chats screen, which filters on the active project).
+  // Section order (UX pass): Projects BEFORE Workspace. A project scopes
+  // everything below it (the chat list filters on it, new chats land in
+  // it), so the scope picker leads and the global destinations follow —
+  // the old order put the unscoped grid first and made Projects read as
+  // an afterthought between the grid and the chats. Selection state lives
+  // in lib/workspace; "More" hands off to the owner (activates the project
+  // + navigates to the Chats screen, which filters on the active project).
   const navAndProjects = (
     <>
-      <Kicker style={s.firstKicker}>{tr('chrome.drawer.workspace')}</Kicker>
-      {renderNavGrid(shownNav)}
-      <Kicker>{tr('sidebar.projects')}</Kicker>
+      {newChatButton}
+      <Kicker style={s.firstKicker}>{tr('sidebar.projects')}</Kicker>
       <ProjectList
         projects={projects}
         activeProjectId={activeProjectId}
@@ -1130,6 +1158,8 @@ export function Sidebar({
         onOpenProjectChat={openProjectChat}
         onProjectMore={onProjectChatsMore}
       />
+      <Kicker>{tr('chrome.drawer.workspace')}</Kicker>
+      {renderNavList(shownNav)}
     </>
   )
 
@@ -1380,17 +1410,10 @@ export function Sidebar({
           </Pressable>
         ) : null}
 
-        {/* Bottom-docked nav (Settings), pinned like ChatGPT's primary action.
-            Bots mode has no "New chat": its primary action is the roster's
-            `+ New bot`. Evidence of the mockup's Settings-in-the-grid lives
-            here so it stays reachable from every drawer mode. */}
-        {shownBottomNav?.length ? (
-          <View style={s.bottomNav}>
-            {shownBottomNav.length === 1
-              ? renderBottomTile(shownBottomNav[0])
-              : renderNavGrid(shownBottomNav, 1)}
-          </View>
-        ) : null}
+        {/* Bottom bar (Settings), pinned at the panel's bottom edge and
+            reachable from every drawer mode — Sessions, Bots and OpenCode
+            alike. Labelled, full-width, ≥48dp (see renderBottomBar). */}
+        {shownBottomNav?.length ? renderBottomBar(shownBottomNav) : null}
       </Animated.View>
 
       {/* ── Per-chat popover, anchored where the row was pressed ──────────── */}
@@ -1600,11 +1623,11 @@ const RecentRow = React.memo(function RecentRow({
         pressed && s.recentRowPressed,
       ]}
       accessibilityRole="button"
-      accessibilityLabel={tr('sidebar.openChat', { title: c.title })}
+      accessibilityLabel={age ? `${tr('sidebar.openChat', { title: c.title })}, ${age}` : tr('sidebar.openChat', { title: c.title })}
     >
       <StatusDot status={c.status} />
       <Txt
-        size={12}
+        size={13}
         weight="600"
         color={c.active ? C.text : C.textDim}
         numberOfLines={1}
@@ -1613,7 +1636,7 @@ const RecentRow = React.memo(function RecentRow({
         {c.title}
       </Txt>
       {isPinned ? <Icon name="pin" size={11} color={C.textFaint} /> : null}
-      {age ? <Txt size={10} color={C.textFaint}>{age}</Txt> : null}
+      {age ? <Txt size={10.5} color={C.textFaint}>{age}</Txt> : null}
       <Pressable
         style={s.rowMenu}
         hitSlop={6}
@@ -1742,26 +1765,30 @@ const makeS = () => StyleSheet.create({
   searchField: { flex: 1 },
   clearBtn: { width: 26, height: 26, alignItems: 'center', justifyContent: 'center' },
   iconBtnPressed: { opacity: 0.5 },
-  // "Workspace" 2-column nav grid (mockup: bgElev tiles, borderSoft hairline).
-  navGrid: { gap: 4, marginBottom: 10 },
-  navGridRow: { gap: 4 },
-  navTile: {
-    flex: 1,
-    minWidth: 0,
+  // Primary action: full-width accent button under the identity switch.
+  newChatBtn: {
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    minHeight: 32,
-    borderRadius: 8,
-    backgroundColor: C.bgElev,
-    borderWidth: 1,
-    borderColor: C.borderSoft,
+    justifyContent: 'center',
+    gap: 6,
+    minHeight: 48,
+    borderRadius: 12,
+    backgroundColor: C.accent,
+    marginBottom: 12,
   },
-  navTileOn: { backgroundColor: C.accentSoft, borderColor: C.border },
-  navTileLabel: { flexShrink: 1 },
-  navTileSpacer: { flex: 1 },
+  newChatBtnPressed: { opacity: 0.85 },
+  // "Workspace" destination rows: one column, icon + label, ≥48dp targets.
+  navList: { gap: 2, marginBottom: 10 },
+  navRow: {
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 10,
+    minHeight: 48,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  navRowOn: { backgroundColor: C.accentSoft, borderColor: C.borderSoft },
+  navRowLabel: { flex: 1, flexShrink: 1 },
   navBadge: {
     minWidth: 18,
     paddingHorizontal: 5,
@@ -1786,24 +1813,29 @@ const makeS = () => StyleSheet.create({
   sectionLabelRow: {
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
+    // Section headers are also the archive toggle's tap target — give the
+    // row real height instead of relying on the kicker's text height.
+    minHeight: 28,
   },
   sectionKicker: { flex: 1, marginHorizontal: 0, marginBottom: 2 },
   sectionGap: { height: 4 },
   recentRow: {
     alignItems: 'center',
-    gap: 7,
-    paddingVertical: 7,
-    paddingHorizontal: 8,
-    minHeight: 38,
-    borderRadius: 9,
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    // ≥48dp touch target (was 38): rows are the drawer's main content and
+    // the ⋯ menu inside them needs room to miss by.
+    minHeight: 48,
+    borderRadius: 10,
   },
   recentRowPressed: { backgroundColor: C.bgHover },
   recentRowActive: { backgroundColor: C.bgHover },
   recentTitle: { flex: 1 },
   rowMenu: {
-    width: 24,
-    height: 24,
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1826,19 +1858,23 @@ const makeS = () => StyleSheet.create({
     borderColor: 'rgba(245,165,36,0.28)',
   },
   pendingBody: { flex: 1, minWidth: 0 },
-  bottomNav: { marginTop: 8, alignItems: 'center' },
-  // [2] icon-only docked Settings card.
-  bottomTile: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: C.bgElev,
-    borderWidth: 1,
-    borderColor: C.border,
+  // Bottom bar: hairline-separated, full-width labelled rows (Settings).
+  bottomBar: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: C.borderSoft,
+    gap: 2,
   },
-  bottomTileOn: { borderColor: C.accent },
+  bottomBarRow: {
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 10,
+    minHeight: 48,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
 
   // Anchored chat menu + dialogs — in-app overlays (Alert.alert is a no-op on
   // web). The container carries no background: each overlay fades its own
