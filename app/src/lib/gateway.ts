@@ -59,6 +59,12 @@ export const connectionState = atom<ConnectionState>('idle')
 export const connConfig = atom<ConnConfig | null>(null)
 export const gatewayError = atom<string | null>(null)
 export const reconnectAttempt = atom(0)
+/** True while an automatic reconnect timer is armed. The boot veil uses this
+ *  with `reconnectAttempt` to distinguish "the first refusal is being retried
+ *  right now" (keep showing the connecting treatment) from a terminal failure
+ *  that threw before `failOnce` could schedule anything (runtime boot error,
+ *  refused plaintext config) — that one must show the failure UI immediately. */
+export const retryPending = atom(false)
 export const isConnected = computed(connectionState, (s) => s === 'open')
 /** True once any dial has fully opened this app run. The boot connection
  *  veil only owns the screen BEFORE the first successful connect — after
@@ -485,6 +491,7 @@ function ensureClient(): JsonRpcGatewayClient {
 
 function cancelReconnect() {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
+  retryPending.set(false)
 }
 
 function scheduleReconnect() {
@@ -497,8 +504,13 @@ function scheduleReconnect() {
   const base = Math.min(1000 * 2 ** Math.min(attempt - 1, 5), 30_000)
   const delay = Math.min(Math.round(base * (0.7 + Math.random() * 0.6)), 30_000)
   log('warn', 'gateway', `socket closed — retry #${attempt} in ${Math.round(delay / 1000)}s`)
+  retryPending.set(true)
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null
+    // The retry is now running, not pending: if this dial throws BEFORE
+    // failOnce (e.g. the runtime reports a boot error), nothing re-arms a
+    // timer — the veil must be free to show the terminal failure.
+    retryPending.set(false)
     if (!wantConnection || manualClose || !lastConfig) return
     void dial(lastConfig, { isRetry: true }).catch(() => {})
   }, delay)
@@ -742,6 +754,10 @@ export function disconnect() {
   manualClose = true
   wantConnection = false
   cancelReconnect()
+  // A user-initiated Cancel starts the next attempt from a clean slate: a
+  // leftover count would otherwise turn the NEXT boot's first (normal)
+  // refusal into the red failure screen.
+  reconnectAttempt.set(0)
   connectGen++
   try { client?.close() } catch {}
   connectionState.set('idle')

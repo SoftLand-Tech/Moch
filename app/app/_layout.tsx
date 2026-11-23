@@ -14,7 +14,7 @@ import { SessionToasts } from '../src/components/SessionToasts'
 import { MochiStage } from '../src/components/Mascot'
 import {
   isConnected as isConnectedAtom, connectionState, connConfig, loadSavedConfig,
-  connectThisPhone, gatewayError, retryNow, disconnect, reconnectAttempt, onForeground, redactedUrl,
+  connectThisPhone, gatewayError, retryNow, disconnect, reconnectAttempt, retryPending, onForeground, redactedUrl,
   onDialConfig, everConnected,
 } from '../src/lib/gateway'
 import { loadSessions, refreshRunningSessions } from '../src/lib/sessionList'
@@ -64,6 +64,7 @@ export default function RootLayout() {
   const cfg = useStore(connConfig)
   const err = useStore(gatewayError)
   const attempt = useStore(reconnectAttempt)
+  const retryArmed = useStore(retryPending)
   const online = useStore(isConnectedAtom)
   const thinker = useStore(thinkerAtom)
   const ocOneShot = useStore(ocOneShotAtom)
@@ -324,8 +325,19 @@ export default function RootLayout() {
     )
   }
 
-  const failed = !online && (state === 'error' || state === 'closed')
-  const connecting = !online && state === 'connecting'
+  // Cold-boot race: the embedded gateway flips `ready` a beat before its port
+  // actually accepts connections, so the FIRST dial can be refused. That is
+  // normal — the client immediately arms retry #1 (reconnectAttempt → 1).
+  // Flipping the veil to red for that one refusal is the flicker users see.
+  // Only surface the hard failure once that first auto-retry has ALSO failed
+  // (attempt > 1 = the 3rd total dial) — or when nothing is retrying at all
+  // (a terminal pre-connect throw such as an embedded boot error, which never
+  // reaches failOnce and therefore never arms a timer). Until then the veil
+  // stays in its connecting treatment and the queued retry lands without a
+  // flash. `closed` is included: a socket can open and drop during the
+  // gateway.ready wait before everConnected flips.
+  const failed = !online && (state === 'error' || state === 'closed') && (attempt > 1 || !retryArmed)
+  const connecting = !online && (state === 'connecting' || ((state === 'error' || state === 'closed') && attempt <= 1 && retryArmed))
   // BUG-005: the full-screen veil only owns the screen BEFORE the first
   // successful connect of this run (boot / boot-failure). Once the app has
   // been connected, a mid-session drop must degrade to the chat screen's
@@ -386,7 +398,7 @@ export default function RootLayout() {
           ) : connecting ? (
             <>
               <Text style={s.connecting}>
-                {attempt > 0 ? t('setup.boot.connectingTry', { n: attempt + 1 }) : t('setup.boot.connecting')}
+                {attempt > 1 ? t('setup.boot.connectingTry', { n: attempt + 1 }) : t('setup.boot.connecting')}
               </Text>
               <Pressable style={({ pressed }) => [s.ghostBtn, pressed && s.pressed]} onPress={() => { disconnect() }}>
                 <Text style={s.ghostText}>{t('common.cancel')}</Text>
