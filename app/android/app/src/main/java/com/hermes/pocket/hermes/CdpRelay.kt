@@ -648,7 +648,7 @@ object CdpRelay {
       val req = StringBuilder("GET $fullTarget HTTP/1.1\r\n")
       for ((k, v) in head.headers) {
         if (k == "host") continue // upstream wants localhost, not our port
-        req.append(k.replaceFirstChar { it.uppercase() }).append(": ").append(v).append("\r\n")
+        req.append(canonicalHeaderName(k)).append(": ").append(v).append("\r\n")
       }
       req.append("Host: localhost\r\n\r\n")
       upstream.outputStream.write(req.toString().toByteArray(StandardCharsets.ISO_8859_1))
@@ -717,6 +717,25 @@ object CdpRelay {
     val path: String,
     val headers: Map<String, String>,
   )
+
+  /**
+   * readHttpHead stores header names LOWERCASE. Forwarding them by
+   * capitalizing only the first character produced `Sec-websocket-key`, which
+   * the DevTools upgrade path did not reliably accept (the upstream computed
+   * its accept over a key it had parsed differently, so clients saw an accept
+   * mismatch). Canonical upgrade-header names are required; everything else
+   * keeps the first-letter fallback.
+   */
+  private fun canonicalHeaderName(lowercaseName: String): String = when (lowercaseName) {
+    "sec-websocket-key" -> "Sec-WebSocket-Key"
+    "sec-websocket-version" -> "Sec-WebSocket-Version"
+    "sec-websocket-protocol" -> "Sec-WebSocket-Protocol"
+    "sec-websocket-extensions" -> "Sec-WebSocket-Extensions"
+    "upgrade" -> "Upgrade"
+    "connection" -> "Connection"
+    "origin" -> "Origin"
+    else -> lowercaseName.replaceFirstChar { it.uppercase() }
+  }
 
   private fun readHttpHead(input: InputStream): ParsedHead {
     val requestLine = readLineAscii(input) ?: throw EOFException("empty request")

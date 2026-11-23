@@ -12,9 +12,11 @@ Covers the three seams the device path depends on, against a FAKE relay:
    command sequence ``seed_opencode_config`` issues (mkdir → cat → base64
    pipe write), including the refuse-to-clobber-corrupt-file rule.
 
-The CDP WebSocket leg is stood in by a fake client class — the wire shapes
-under test here are the relay HTTP calls and the URL the adapter dials;
-frame-level RFC6455 behavior is stdlib-plain and exercised on-device.
+The tool-path CDP leg is stood in by a fake client class — the wire shapes
+under test there are the relay HTTP calls and the URL the adapter dials. The
+REAL CdpWebSocket handshake/frame plumbing gets its own raw-TCP tests: a
+deliberately WRONG Sec-WebSocket-Accept must be tolerated (with a warning)
+while non-101 responses still raise.
 
 Run:
 
@@ -27,8 +29,11 @@ Local, stdlib-only, self-contained: expect exit 0 with ``OK``.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
+import socket
+import struct
 import sys
 import threading
 import unittest
@@ -168,6 +173,188 @@ class FakeCdpWebSocket:
     def __exit__(self, *exc):
         self.close()
         return False
+
+
+# ── real CdpWebSocket against a raw TCP peer (no relay, no client mocks) ────
+
+
+def _server_text_frame(payload: bytes) -> bytes:
+    """An unmasked, single-shot server text frame (FIN=1, opcode=1)."""
+    header = bytearray([0x81])
+    n = len(payload)
+    if n < 126:
+        header.append(n)
+    elif n < 65536:
+        header.append(126)
+        header += struct.pack(">H", n)
+    else:
+        header.append(127)
+        header += struct.pack(">Q", n)
+    return bytes(header) + payload
+
+
+class RawHandshakeServer:
+    """Tiny threaded TCP peer for CdpWebSocket handshake/frame tests.
+
+    Sends ``response_head`` as soon as the client dials, then (optionally)
+    reads ONE masked client frame and answers it with a CDP result frame
+    keyed by the request id. Errors are surfaced through ``self.error`` so
+    the test can assert them instead of dangling in a thread.
+    """
+
+    def __init__(self, response_head: bytes, answer_frames: bool = True):
+        self._listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._listener.bind(("127.0.0.1", 0))
+        self._listener.listen(1)
+        self.port = self._listener.getsockname()[1]
+        self.response_head = response_head
+        self.answer_frames = answer_frames
+        self.requests: list[bytes] = []
+        self.frames: list[tuple[int, bytes]] = []
+        self.error: BaseException | None = None
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self):
+        try:
+            conn, _ = self._listener.accept()
+            with conn:
+                conn.settimeout(5)
+                self.requests.append(self._read_until(conn, b"\r\n\r\n"))
+                conn.sendall(self.response_head)
+                if not self.answer_frames:
+                    return
+                opcode, payload = self._read_frame(conn)
+                self.frames.append((opcode, payload))
+                request = json.loads(payload.decode("utf-8"))
+                body = json.dumps({
+                    "id": request.get("id"),
+                    "result": {"result": {"value": "ok"}},
+                }).encode("utf-8")
+                conn.sendall(_server_text_frame(body))
+        except BaseException as e:  # noqa: BLE001 — asserted via self.error
+            self.error = e
+
+    @staticmethod
+    def _read_until(conn, marker):
+        buf = b""
+        while marker not in buf:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+        return buf
+
+    @staticmethod
+    def _read_exact(conn, n):
+        buf = b""
+        while len(buf) < n:
+            chunk = conn.recv(n - len(buf))
+            if not chunk:
+                raise EOFError("client closed mid-frame")
+            buf += chunk
+        return buf
+
+    def _read_frame(self, conn):
+        b1, b2 = self._read_exact(conn, 2)
+        opcode, masked, length = b1 & 0x0F, bool(b2 & 0x80), b2 & 0x7F
+        if length == 126:
+            length = struct.unpack(">H", self._read_exact(conn, 2))[0]
+        elif length == 127:
+            length = struct.unpack(">Q", self._read_exact(conn, 8))[0]
+        mask = self._read_exact(conn, 4) if masked else b""
+        payload = self._read_exact(conn, length)
+        if masked:
+            payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+        return opcode, payload
+
+    def wait(self, timeout: float = 5.0) -> None:
+        self._thread.join(timeout)
+        if self._thread.is_alive():
+            raise AssertionError("raw websocket server thread did not finish")
+
+    def close(self):
+        try:
+            self._listener.close()
+        except OSError:
+            pass
+
+
+class CdpWebSocketHandshakeTest(unittest.TestCase):
+    """The 101 is proof of upgrade; a bad accept only warns. Non-101 refuses."""
+
+    _KEY = "dGhlIHNhbXBsZSBub25jZQ=="
+
+    def _head(self, accept_line: str) -> bytes:
+        return (
+            b"HTTP/1.1 101 Switching Protocols\r\n"
+            b"Upgrade: websocket\r\n"
+            b"Connection: Upgrade\r\n"
+            + accept_line.encode("latin-1")
+            + b"\r\n"
+        )
+
+    # ── the pure helper ──
+
+    def test_accept_matches_correct_value_any_header_case(self):
+        expected = obm._ws_accept_expected(self._KEY)
+        head = ("HTTP/1.1 101 Switching Protocols\r\n"
+                f"sec-websocket-accept: {expected}\r\n\r\n").encode("latin-1")
+        self.assertTrue(obm._ws_accept_matches(head, self._KEY))
+
+    def test_accept_matches_rejects_wrong_value(self):
+        head = ("HTTP/1.1 101 Switching Protocols\r\n"
+                "Sec-WebSocket-Accept: not-the-right-value\r\n\r\n").encode("latin-1")
+        self.assertFalse(obm._ws_accept_matches(head, self._KEY))
+
+    def test_accept_matches_rejects_missing_header(self):
+        head = b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n"
+        self.assertFalse(obm._ws_accept_matches(head, self._KEY))
+
+    def test_accept_matches_rejects_accept_for_a_different_key(self):
+        expected = obm._ws_accept_expected(self._KEY)
+        head = ("HTTP/1.1 101 Switching Protocols\r\n"
+                f"Sec-WebSocket-Accept: {expected}\r\n\r\n").encode("latin-1")
+        self.assertFalse(obm._ws_accept_matches(head, "a-different-key"))
+
+    # ── end-to-end over a real socket ──
+
+    def test_wrong_accept_is_tolerated_and_cdp_still_works(self):
+        server = RawHandshakeServer(self._head(
+            "Sec-WebSocket-Accept: deliberately-wrong-accept\r\n"))
+        self.addCleanup(server.close)
+        with self.assertLogs("moch.oc_browser_mcp", level="WARNING") as logs:
+            ws = obm.CdpWebSocket(
+                f"ws://127.0.0.1:{server.port}/devtools/page/p1", timeout=5)
+        self.addCleanup(ws.close)
+        self.assertTrue(
+            any("accept" in line.lower() for line in logs.output), logs.output)
+
+        self.assertEqual(ws.evaluate("1"), "ok")
+        server.wait()
+        self.assertIsNone(server.error)
+
+        # The client's upgrade request kept canonical header names.
+        request = server.requests[0]
+        self.assertIn(b"Sec-WebSocket-Key:", request)
+        self.assertIn(b"Sec-WebSocket-Version: 13", request)
+        # ...and the framed Runtime.evaluate actually arrived, masked.
+        opcode, payload = server.frames[0]
+        self.assertEqual(opcode, 0x1)
+        self.assertEqual(json.loads(payload)["method"], "Runtime.evaluate")
+
+    def test_non_101_still_raises_upgrade_refused(self):
+        server = RawHandshakeServer(
+            b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n",
+            answer_frames=False)
+        self.addCleanup(server.close)
+        with self.assertRaises(obm.RelayError) as ctx:
+            obm.CdpWebSocket(
+                f"ws://127.0.0.1:{server.port}/devtools/page/p1", timeout=5)
+        self.assertIn("websocket upgrade refused", str(ctx.exception))
+        server.wait()
+        self.assertIsNone(server.error)
 
 
 class OcBrowserMcpTest(unittest.TestCase):
