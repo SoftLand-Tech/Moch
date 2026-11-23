@@ -356,6 +356,62 @@ export async function ocStream(
  * (desktop tests / fakes).
  */
 export async function ocEnsureServer(): Promise<{ ok: boolean; error?: string }> {
+  const run = ensureInFlight ?? (ensureInFlight = ensureServerOnce().finally(() => {
+    ensureInFlight = null
+  }))
+  return run
+}
+
+/**
+ * One serialized ensure. The old path typed a fresh `opencode serve` line
+ * into the user's terminal on EVERY call — even when the server was already
+ * healthy — so the Terminal screen filled with repeated launch commands,
+ * job numbers, and the server password. This path now:
+ *   - probes liveness first and never touches the terminal for a live server;
+ *   - single-flights concurrent callers (boot, drawer, model sheet, turn);
+ *   - types the launch HIDDEN (`stty -echo`, stderr silenced, leading space
+ *     for HISTCONTROL=ignorespace) and only after a 15 s cooldown.
+ */
+let ensureInFlight: Promise<{ ok: boolean; error?: string }> | null = null
+let lastLaunchAt = 0
+const LAUNCH_COOLDOWN_MS = 15_000
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** POSIX single-quote a secret for the guest shell. */
+function shQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+/**
+ * Type the launch into the existing PTY without leaving it in the visible
+ * terminal: echo off before the command, the shell's own stderr muted while
+ * it prints the job line, restore echo after. The first write carries no
+ * secret (it only sets the history rule and disables echo) and is the one
+ * visible line; the launch itself never echoes. Returns true when the
+ * launch line was accepted by the bridge.
+ */
+async function typeOpencodeLaunchHidden(password: string): Promise<boolean> {
+  const write = (text: string) => linuxTermWrite(b64ascii(text))
+  try {
+    if (!(await write(' export HISTCONTROL=ignorespace; stty -echo\n'))) return false
+    await sleepMs(200)
+    const cmd =
+      ` exec 2>/dev/null; cd /root && export OPENCODE_PASSWORD=${shQuote(password)} && ` +
+      `opencode serve --hostname 127.0.0.1 --port ${OC_PORT} ` +
+      `>/root/opencode.log 2>&1 & exec 2>&1\n`
+    const wrote = await write(cmd)
+    await sleepMs(200)
+    return wrote
+  } finally {
+    // Never leave the user's shell with echo disabled.
+    await write(' stty echo\n').catch(() => false)
+  }
+}
+
+async function ensureServerOnce(): Promise<{ ok: boolean; error?: string }> {
   /** BUG-148: the python ensure path now also starts the host-side browser
    * MCP adapter and seeds the guest's opencode.json (mcp → moch-browser).
    * The port comes back here only for the LOG — the guest already has the
@@ -371,27 +427,32 @@ export async function ocEnsureServer(): Promise<{ ok: boolean; error?: string }>
   }
   try {
     const password = await opencodePassword()
-    const probe = await linuxTermProbe()
-    if (probe?.pty) {
-      const started = await linuxTermStart(80, 24) // idempotent: alive stays alive
-      if (started?.ok) {
-        const cmd =
-          `cd /root && export OPENCODE_PASSWORD=${password} && ` +
-          `opencode serve --hostname 127.0.0.1 --port ${OC_PORT} ` +
-          `>/root/opencode.log 2>&1 &\n`
-        const wrote = await linuxTermWrite(b64ascii(cmd))
-        if (wrote) {
-          const r = await rpc<{ ok?: boolean; error?: string; browser_mcp?: { ok?: boolean; port?: number; error?: string } }>(
-            'moch.opencode.ensure', { password, launch: false }, 90_000)
-          logBrowserMcp(r)
-          return { ok: r?.ok !== false, error: r?.error }
+    const alive = await ocAlive()
+    let hasPty = false
+    let launchTyped = false
+    if (!alive) {
+      const probe = await linuxTermProbe()
+      hasPty = !!probe?.pty
+      if (hasPty) {
+        const started = await linuxTermStart(80, 24) // idempotent: alive stays alive
+        if (started?.ok) {
+          if (Date.now() - lastLaunchAt < LAUNCH_COOLDOWN_MS) {
+            log('info', 'opencode', 'launch cooldown — waiting for the in-flight server start')
+          } else {
+            lastLaunchAt = Date.now()
+            launchTyped = await typeOpencodeLaunchHidden(password)
+          }
         }
       }
     }
-    // No bridge (or the write failed): the python-side launch remains.
+    // A live server (or a just-typed launch) only needs the gateway-side
+    // health wait + browser-MCP seed. With no pty bridge, the python-side
+    // launch is the remaining path (it uses the same hidden typing there).
+    const pythonLaunches = !alive && !hasPty
     const r = await rpc<{ ok?: boolean; error?: string; browser_mcp?: { ok?: boolean; port?: number; error?: string } }>(
-      'moch.opencode.ensure', { password }, 90_000)
+      'moch.opencode.ensure', { password, launch: pythonLaunches }, 90_000)
     logBrowserMcp(r)
+    if (!r?.ok && launchTyped) log('warn', 'opencode', 'typed launch did not come up in time — retry later')
     return { ok: r?.ok !== false, error: r?.error }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

@@ -248,7 +248,13 @@ html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hi
     convertEol: false,
     fontSize: 13,
     fontFamily: 'monospace',
-    cursorBlink: false,
+    // Type indicator: a visible accent cursor. The RN screen drives typing
+    // through its own hidden input, so the WebView's textarea is usually
+    // unfocused — 'block' keeps the cursor drawn in that state instead of
+    // showing nothing, and blink makes its position obvious.
+    cursorBlink: true,
+    cursorStyle: 'block',
+    cursorInactiveStyle: 'block',
     // BUG-135 OSC-8 seam: xterm's auto-registered OscLinkProvider calls
     // linkHandler.activate for explicit OSC-8 hyperlinks. The xterm default
     // (confirm() + window.open) is unhandled in the RN WebView — route to
@@ -260,7 +266,7 @@ html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hi
     theme: {
       background: '#000000',
       foreground: '#E8E8E8',
-      cursor: '#E8E8E8',
+      cursor: '#F79236',
       cursorAccent: '#000000',
       selectionBackground: 'rgba(232,232,232,0.3)'
     }

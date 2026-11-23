@@ -25,6 +25,7 @@ import base64
 import json
 import os
 import shlex
+import threading
 import time
 import urllib.request
 import urllib.error
@@ -32,6 +33,15 @@ from typing import Any, Optional
 
 OC_PORT = 4096
 OC_USER = "opencode"
+
+# Launch hygiene (device report): ensure_server used to type a fresh
+# `opencode serve` line — password included — into the user's visible
+# terminal on EVERY call, even while a launch was already in flight. The
+# Terminal screen filled with repeated commands and job numbers. Serialize
+# launches and give a just-typed launch time to come up before typing another.
+_LAUNCH_COOLDOWN_S = 15.0
+_launch_lock = threading.Lock()
+_last_launch_at = 0.0
 
 
 def _guest_exec(command: str, timeout_s: int = 60) -> dict:
@@ -107,6 +117,41 @@ def _start_browser_stack() -> dict:
         return {"browser_mcp": {"ok": False, "error": f"{type(e).__name__}: {e}"}}
 
 
+def _type_hidden_launch(password: str) -> bool:
+    """Type the guest launch into the user's PTY without leaving it visible.
+
+    Echo is disabled before the command line, the shell's own stderr is muted
+    while it prints the background job line, and both are restored after. The
+    command starts with a space and HISTCONTROL=ignorespace keeps the secret
+    out of bash history. Returns False only when the launch line itself could
+    not be written (the restore still runs).
+    """
+    from moch import terminal as mterm
+
+    def _write(text: str) -> bool:
+        try:
+            return bool(mterm.write(base64.b64encode(text.encode()).decode("ascii")).get("ok"))
+        except Exception:  # noqa: BLE001 — the caller reports the failure
+            return False
+
+    try:
+        if not _write(" export HISTCONTROL=ignorespace; stty -echo\n"):
+            return False
+        time.sleep(0.2)
+        cmd = (
+            " exec 2>/dev/null; cd /root && "
+            f"export OPENCODE_PASSWORD={shlex.quote(password)} && "
+            f"opencode serve --hostname 127.0.0.1 --port {OC_PORT} "
+            ">/root/opencode.log 2>&1 & exec 2>&1\n"
+        )
+        wrote = _write(cmd)
+        time.sleep(0.2)
+        return wrote
+    finally:
+        # Never leave the user's shell with echo disabled.
+        _write(" stty echo\n")
+
+
 def ensure_server(password: str, launch: bool = True) -> dict:
     """Start the guest server if it is not answering; idempotent.
 
@@ -135,19 +180,21 @@ def ensure_server(password: str, launch: bool = True) -> dict:
         _browser = _start_browser_stack()
         from moch import terminal as mterm
 
-        if not mterm.is_running():
-            boot = mterm.start()
-            if not boot.get("ok"):
-                return {"ok": False, "error": (boot.get("error") or "the terminal session could not start").strip()}
-        typed = mterm.write(base64.b64encode(
-            (
-                f'cd /root && export OPENCODE_PASSWORD={shlex.quote(password)} && '
-                f'opencode serve --hostname 127.0.0.1 --port {OC_PORT} '
-                f'>/root/opencode.log 2>&1 &'
-            ).encode()
-        ).decode("ascii"))
-        if not typed.get("ok"):
-            return {"ok": False, "error": (typed.get("error") or "could not type the launch command").strip()}
+        global _last_launch_at
+        with _launch_lock:
+            if not mterm.is_running():
+                boot = mterm.start()
+                if not boot.get("ok"):
+                    return {"ok": False, "error": (boot.get("error") or "the terminal session could not start").strip()}
+            now = time.monotonic()
+            if now - _last_launch_at < _LAUNCH_COOLDOWN_S:
+                # A launch was typed moments ago — let it come up instead of
+                # stacking another command (and another server) on top.
+                print("[moch-opencode] launch cooldown — waiting for the in-flight server start", flush=True)
+            else:
+                _last_launch_at = now
+                if not _type_hidden_launch(password):
+                    return {"ok": False, "error": "could not type the launch command into the terminal"}
     else:
         _browser = {}
     deadline = time.time() + 45
