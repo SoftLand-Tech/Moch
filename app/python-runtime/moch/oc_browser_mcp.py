@@ -53,6 +53,12 @@ MCP_SERVER_VERSION = "1.0.0"
 _DEFAULT_PROTOCOL_VERSION = "2025-03-26"
 _SNAPSHOT_CHARS = 4000
 _NAV_WAIT_S = 8.0
+# Preferred loopback port for the adapter. A surviving guest `opencode serve`
+# keeps the URL from the config seeded on an earlier app run; an ephemeral
+# port would leave that URL dead until the guest restarts (BUG-148 P2). 9336
+# is unused in this repo (gateway=9119, CDP relay prefers 9334, opencode
+# serve=4096). If it is taken, ensure_started() falls back to port 0.
+_PREFERRED_PORT = 9336
 # The seed path inside the guest. opencode reads it at startup (~/.config
 # under its HOME=/root); see seed_opencode_config for the write mechanics.
 OC_CONFIG_PATH = "/root/.config/opencode/opencode.json"
@@ -162,6 +168,32 @@ def _ws_url_for(root: str, target_id: str) -> str:
 
 # ── minimal CDP-over-WebSocket client (stdlib only) ─────────────────────────
 
+_WS_ACCEPT_GUID = "258EAFA9-E714-47DA-95CA-C5AB0DC85B11"
+
+
+def _ws_accept_expected(key: str) -> str:
+    """RFC 6455 accept value: base64(sha1(client key + magic GUID))."""
+    return base64.b64encode(hashlib.sha1(
+        (key + _WS_ACCEPT_GUID).encode("ascii")).digest()).decode("ascii")
+
+
+def _ws_accept_header(head: bytes) -> Optional[str]:
+    """The handshake response's Sec-WebSocket-Accept (header name any case)."""
+    for line in head.split(b"\r\n"):
+        name, sep, value = line.partition(b":")
+        if sep and name.strip().lower() == b"sec-websocket-accept":
+            return value.strip().decode("latin-1", errors="replace")
+    return None
+
+
+def _ws_accept_matches(head: bytes, key: str) -> bool:
+    """Pure check: an exact accept match, or False when absent/mismatched.
+
+    Never raises — the handshake uses this only to decide whether to log.
+    """
+    received = _ws_accept_header(head)
+    return received is not None and received == _ws_accept_expected(key)
+
 
 class CdpWebSocket:
     """A blocking, one-command-at-a-time CDP client over a raw WebSocket.
@@ -200,12 +232,19 @@ class CdpWebSocket:
         if " 101" not in f" {first} ":
             self.close()
             raise RelayError(f"websocket upgrade refused: {first}")
-        accept = base64.b64encode(hashlib.sha1(
-            (key + "258EAFA9-E714-47DA-95CA-C5AB0DC85B11").encode("ascii")
-        ).digest()).decode("ascii")
-        if accept.encode("ascii") not in head:
-            self.close()
-            raise RelayError("websocket accept header mismatch")
+        # Tolerant accept check: a 101 is proof the upgrade reached the
+        # DevTools target. The relay is pid-gated + token-gated loopback and
+        # the accept value is not used after the handshake, so a mismatch (or
+        # an absent header) is a WARNING, not a failure. Strict RFC
+        # verification false-positived on-device — the Kotlin tunnel re-cased
+        # the upgrade headers — and broke every browser tool.
+        if not _ws_accept_matches(head, key):
+            logger.warning(
+                "websocket accept mismatch (continuing): received=%r expected=%r "
+                "head=%r",
+                _ws_accept_header(head), _ws_accept_expected(key),
+                head[:300].decode("latin-1", errors="replace"),
+            )
 
     # ── framing ──
     def _read_until(self, marker: bytes) -> bytes:
@@ -799,26 +838,43 @@ _LOCK = threading.Lock()
 def ensure_started() -> dict:
     """Start the adapter once per process; idempotent.
 
-    Bound to 127.0.0.1 on an EPHEMERAL port (the guest reaches it over the
-    shared loopback; the port is logged and returned so the config seed can
-    point at it). A daemon thread — the adapter lives as long as the app
-    process, which already runs the gateway and the terminal session.
+    Bound to 127.0.0.1, preferring the STABLE port ``_PREFERRED_PORT`` so a
+    surviving guest ``opencode serve`` keeps a valid seeded
+    ``~/.config/opencode/opencode.json`` across app restarts. If that port is
+    taken, falls back to an ephemeral port (port 0) exactly as before. Either
+    way the bound port is logged and returned — it remains the authoritative
+    value, and seeding still runs on every ensure. A daemon thread: the
+    adapter lives as long as the app process, which already runs the gateway
+    and the terminal session.
     """
     global _SERVER, _PORT
     with _LOCK:
         if _SERVER is not None:
             return {"ok": True, "port": _PORT, "started": False}
+        server: Optional[ThreadingHTTPServer] = None
+        stable = False
         try:
-            server = ThreadingHTTPServer(("127.0.0.1", 0), _McpHandler)
-        except Exception as e:  # noqa: BLE001 — an unbindable loopback is the answer
-            return {"ok": False, "error": f"bind failed: {type(e).__name__}: {e}"}
+            server = ThreadingHTTPServer(("127.0.0.1", _PREFERRED_PORT), _McpHandler)
+            stable = True
+        except OSError as e:
+            logger.warning(
+                "moch browser MCP adapter could not bind 127.0.0.1:%d (%s); "
+                "falling back to an ephemeral port", _PREFERRED_PORT, e)
+        if server is None:
+            try:
+                server = ThreadingHTTPServer(("127.0.0.1", 0), _McpHandler)
+            except Exception as e:  # noqa: BLE001 — an unbindable loopback is the answer
+                return {"ok": False, "error": f"bind failed: {type(e).__name__}: {e}"}
         port = int(server.server_address[1])
         thread = threading.Thread(
             target=server.serve_forever, name="oc-browser-mcp", daemon=True)
         thread.start()
         _SERVER, _PORT = server, port
-        logger.info("moch browser MCP adapter listening on 127.0.0.1:%d", port)
+        logger.info(
+            "moch browser MCP adapter listening on 127.0.0.1:%d (%s port)",
+            port, "preferred" if stable else "ephemeral")
         # stdout too: the phone-side log capture reads the interpreter's
         # stdout; logger alone may not survive every log sink.
-        print(f"[oc-browser-mcp] listening on 127.0.0.1:{port}", flush=True)
+        print(f"[oc-browser-mcp] listening on 127.0.0.1:{port} "
+              f"({'preferred' if stable else 'ephemeral'} port)", flush=True)
         return {"ok": True, "port": port, "started": True}
