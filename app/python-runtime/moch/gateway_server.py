@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import socket
 import threading
@@ -302,6 +303,154 @@ def _moch_prompt_note(*, relay_armed: bool, moch_platform: bool, tools_ready: bo
     return None
 
 
+# Bug 5: capability notes are MODEL-ONLY. ``_moch_note_dispatch`` stashes the
+# note here on the live session record instead of rewriting the submitted text;
+# ``_install_moch_model_note`` then appends it to hermes' ``_hud_surface_note``,
+# whose result ``_prepare_turn_input`` prepends to ``run_message`` — the model
+# input only. Nothing reaches the transcript, the session title or any client,
+# so no fake USER bubble is ever rendered or persisted.
+#
+# Entries are bound to the submitted TEXT and delivered only when the live
+# inflight turn's user text matches: a prompt that is steered/redirected or
+# rejected before starting a turn must never leak its note into an unrelated
+# later turn (including a HUD/voice turn or the synthetic auto-continue).
+_MOCH_MODEL_NOTE_KEY = "_moch_model_note"
+_MOCH_MODEL_NOTE_MAX = 4
+
+_BROWSER_WORDS = (
+    "browser",
+    "webpage",
+    "web page",
+    "website",
+    "google",
+    "search the web",
+)
+_BROWSER_PAGE_NOUN = re.compile(r"\b(?:site|page|url|link|tab)\b")
+_BROWSER_VERB = re.compile(r"\b(?:open|browse|navigate|visit|load|go to)\b")
+# A bare domain ("example.com", "open example.com", "browse example.com").
+# Deliberately requires a 2+ letter TLD so "e.g." / "U.S." do not match.
+_BARE_DOMAIN = re.compile(r"\b(?:[a-z0-9][a-z0-9-]{0,62}\.)+[a-z]{2,24}\b")
+
+
+def _looks_like_browser_request(text: str) -> bool:
+    """True only when ``text`` plausibly asks for a browsing task.
+
+    Gates the warm-up auto-continue (Bug 5): a session whose only prompt was
+    "Hi" must never receive the synthetic "the browser is ready" turn. Kept
+    deliberately dumb and local — no registry probe, no session lookup.
+    """
+    if not isinstance(text, str):
+        return False
+    lowered = text.strip().lower()
+    if not lowered:
+        return False
+    if "http://" in lowered or "https://" in lowered or "www." in lowered:
+        return True
+    if _BARE_DOMAIN.search(lowered):
+        return True
+    if any(word in lowered for word in _BROWSER_WORDS):
+        return True
+    # "open the site/link/tab/page/url", "browse that page", "navigate to X" —
+    # a browsing verb within ~40 chars of a page noun.
+    for match in _BROWSER_VERB.finditer(lowered):
+        if _BROWSER_PAGE_NOUN.search(lowered, match.end(), match.end() + 40):
+            return True
+    return False
+
+
+def _stash_moch_model_note(session: Any, text: Any, note: Any) -> None:
+    """Bind ``note`` to the submitted ``text`` for the next matching turn.
+
+    The gateway starts the inflight turn with the SAME ``text``
+    (session_history._start_inflight_turn -> ``user``), so delivery can require
+    an exact text match instead of handing the note to whichever turn runs next.
+    Only plain-string prompts are eligible; a structured payload skips the note
+    rather than risking a wrong match.
+    """
+    if not isinstance(session, dict) or not isinstance(text, str) or not isinstance(note, str) or not note:
+        return
+    key = text.strip()
+    if not key:
+        return
+    entries = session.get(_MOCH_MODEL_NOTE_KEY)
+    if not isinstance(entries, list):
+        entries = []
+    entries.append({"text": key, "note": note})
+    session[_MOCH_MODEL_NOTE_KEY] = entries[-_MOCH_MODEL_NOTE_MAX:]
+
+
+def _take_moch_model_note(session: dict) -> str:
+    """Pop the note bound to THIS turn's user text ("" when none).
+
+    Model-only channel: the only caller is the wrapped ``_hud_surface_note``,
+    whose result ``_prepare_turn_input`` prepends to ``run_message`` — the text
+    reaches the model but never the transcript, title or UI. A non-matching
+    turn takes nothing, so a note whose prompt never started a turn stays
+    parked (and is eventually evicted by the bounded list), never misdelivered.
+    """
+    if not isinstance(session, dict):
+        return ""
+    entries = session.get(_MOCH_MODEL_NOTE_KEY)
+    if not isinstance(entries, list):
+        session.pop(_MOCH_MODEL_NOTE_KEY, None)
+        return ""
+    turn = session.get("inflight_turn")
+    user = turn.get("user") if isinstance(turn, dict) else ""
+    user = user.strip() if isinstance(user, str) else ""
+    if not user:
+        return ""
+    for index, entry in enumerate(entries):
+        if isinstance(entry, dict) and entry.get("text") == user:
+            del entries[index]
+            if not entries:
+                session.pop(_MOCH_MODEL_NOTE_KEY, None)
+            note = entry.get("note")
+            return note if isinstance(note, str) else ""
+    return ""
+
+
+def _install_moch_model_note(_tg_server: Any) -> bool:
+    """Wrap hermes' ``_hud_surface_note`` to carry Moch's per-turn note.
+
+    ``prompt_turn._prepare_turn_input`` calls ``_hud_surface_note(session)``
+    and prepends the result to ``run_message`` — the model input ONLY (see
+    the vendored ``_prepend_note`` contract). Appending the stashed
+    ``_MOCH_MODEL_NOTE_KEY`` note here therefore gives the model the warming /
+    gate-off guidance while the transcript and every client stay clean. Never
+    prepend the note to ``params["text"]``.
+
+    The note rides hermes' ``<system-reminder>`` control wrapper so the title
+    generator strips it and titles from the user's actual message instead of
+    "[SYSTEM: The in-…".
+
+    Idempotent. Returns True when this call installed the wrapper.
+    """
+    if getattr(_tg_server, "_moch_model_note_installed", False):
+        return False
+    original = getattr(_tg_server, "_hud_surface_note", None)
+    if not callable(original):
+        return False
+
+    def _hud_surface_note_with_moch(session: dict) -> str:
+        note = original(session)
+        if not isinstance(note, str):
+            note = ""
+        moch_note = _take_moch_model_note(session)
+        if not moch_note:
+            return note
+        # <system-reminder> is hermes' own control wrapper: the title machinery
+        # (agent/title_generator.py::strip_control_wrappers) strips it and titles
+        # from the user's real text that follows. A bare "[SYSTEM: …]" note is NOT
+        # in its machine prefixes and would still title the session
+        # ("[SYSTEM: The in-…"), so the wrapper is what keeps the title clean.
+        bare = f"<system-reminder>{moch_note}</system-reminder>"
+        return f"{note}\n\n{bare}" if note else bare
+
+    _tg_server._hud_surface_note = _hud_surface_note_with_moch
+    _tg_server._moch_model_note_installed = True
+    return True
+
+
 def _neutralize_root_token_handshake(application: Any) -> bool:
     """BUG-120 / GitHub #67 — stop the loopback root from serving the session token.
 
@@ -385,6 +534,13 @@ def _run_server(port: int) -> None:
         from moch.slash_worker_bridge import InProcessSlashWorker
 
         _tg_server._SlashWorker = InProcessSlashWorker
+
+        # Bug 5: Moch's capability notes must never rewrite the submitted text.
+        # Route them through hermes' model-only per-turn note (_hud_surface_note
+        # feeds _prepare_turn_input's run_message), so the model sees them while
+        # the transcript, the session title and every client stay clean.
+        # Idempotent; re-armed on every boot attempt.
+        _install_moch_model_note(_tg_server)
 
         # BUG-109: ARM the fleet runtime for the embedded install. Every moch/
         # fleet module (fleet.py, fleet_worker.py, dm_bridge.py) and the install
@@ -553,11 +709,14 @@ def _run_server(port: int) -> None:
             def _action() -> None:
                 _warm_rearm()
                 print("[moch] browser toolset warm", flush=True)
-                # Auto-continue: every session that asked during the window
-                # gets ONE short continuation turn — the user's original
-                # request is already in the agent's context, so this is a
-                # single cheap prompt, submitted through the same queue the
-                # app uses (safe if a turn is still running).
+                # Auto-continue: every session that asked for a BROWSING task
+                # during the window gets ONE short continuation turn — the
+                # user's original request is already in the agent's context,
+                # so this is a single cheap prompt, submitted through the same
+                # queue the app uses (safe if a turn is still running).
+                # display_kind="hidden" keeps the synthetic note out of the
+                # visible chat (only "hidden" is honored by the contract); the
+                # text still reaches the model.
                 for _sid in list(_warm_waiters):
                     _warm_waiters.discard(_sid)
                     try:
@@ -569,6 +728,7 @@ def _run_server(port: int) -> None:
                                 "params": {
                                     "session_id": _sid,
                                     "text": "[SYSTEM: The in-app browser is now ready. Carry out the user's earlier browser request now.]",
+                                    "display_kind": "hidden",
                                 },
                             }
                         )
@@ -584,11 +744,11 @@ def _run_server(port: int) -> None:
         _prewarm = threading.Thread(target=_prewarm_browser, name="moch-browser-prewarm", daemon=True)
         _prewarm.start()
 
-        # While warming, MOCHI tells the user — no silent curl fallback, no
-        # "Moch looks down". A bracketed system note rides the prompt (the
-        # established out-of-band pattern) while the warming window is live,
-        # and (BUG-121, gate-off half) also when the platform is Moch but the
-        # browser tools are absent from the catalog outright.
+        # While warming, MOCHI tells the MODEL — no silent curl fallback, no
+        # "Moch looks down". The note is model-only (stashed on the session and
+        # carried by _hud_surface_note into the turn's run_message): the user
+        # sees nothing, the transcript and title stay clean. Same channel for
+        # the BUG-121 gate-off half (Moch platform, browser tools absent).
         def _moch_note_dispatch(req, transport=None):
             try:
                 if isinstance(req, dict) and req.get("method") == "prompt.submit":
@@ -615,9 +775,23 @@ def _run_server(port: int) -> None:
                         if note is not None:
                             warming = note is _MOCH_WARMING_NOTE
                             _sid = str(params.get("session_id") or "")
-                            if warming and _sid:
+                            # Bug 5: deliver the note on the MODEL-ONLY channel.
+                            # NEVER rewrite params["text"] — that persisted the
+                            # note as a user row, rendered a fake USER bubble,
+                            # became the session title and fired the
+                            # auto-continue for sessions that never asked for
+                            # the browser. Bind it to the submitted text;
+                            # _hud_surface_note carries it into
+                            # _prepare_turn_input's run_message only for the
+                            # matching turn.
+                            sessions = getattr(_tg_server, "_sessions", None) or {}
+                            session = sessions.get(_sid) if _sid else None
+                            if isinstance(session, dict):
+                                _stash_moch_model_note(session, params.get("text"), note)
+                            # Arm the auto-continue ONLY for a plausible
+                            # browsing task ("Hi" must never be resumed).
+                            if warming and _sid and _looks_like_browser_request(text):
                                 _warm_waiters.add(_sid)
-                            params["text"] = note + "\n\n" + text
                             # NOTE (PR #139): the status.update emit here was
                             # removed — the event payload is pydantic-validated
                             # and the extra waiting_for/note fields raised
