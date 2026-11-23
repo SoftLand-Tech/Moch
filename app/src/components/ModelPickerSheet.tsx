@@ -497,6 +497,7 @@ export function ModelPickerSheet({
       horizontal
       showsHorizontalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
+      style={s.chipsScroll}
       contentContainerStyle={[s.chips, { flexDirection: dir.row }]}
     >
       {providers.map((p) => {
@@ -668,7 +669,7 @@ export function ModelPickerSheet({
           onPress={onClose}
           accessibilityLabel={tr('common.close')}
         />
-        <SheetCard>
+        <SheetCard style={s.pickerSheet}>
           <SheetGrabber />
           <View style={[s.head, { flexDirection: dir.row }]}>
             <View style={s.headText}>
@@ -832,16 +833,20 @@ export function ModelPickerSheet({
 
 const makeS = () => StyleSheet.create({
   flex: { flex: 1, justifyContent: 'flex-end' },
-  head: { alignItems: 'center', gap: 8, marginBottom: 8 },
+  // Bound THIS sheet only: the shared SheetCard is also used by settings,
+  // connectors and the bot switcher, none of which should start clipping.
+  pickerSheet: { flexShrink: 1, overflow: 'hidden' },
+  head: { alignItems: 'center', gap: 8, marginBottom: 8, flexShrink: 0 },
   headText: { flex: 1, minWidth: 0 },
   headBtn: { width: 26, height: 26, borderRadius: 8 },
-  nowLine: { marginBottom: 6 },
+  nowLine: { marginBottom: 6, flexShrink: 0 },
   warning: { lineHeight: 16, marginBottom: 6 },
-  searchRow: { alignItems: 'center', gap: 6, marginBottom: 8 },
+  searchRow: { alignItems: 'center', gap: 6, marginBottom: 8, flexShrink: 0 },
   searchField: { flex: 1 },
   searchInput: { fontSize: 12.5, paddingVertical: 7, minHeight: 32 },
   clear: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
   pressed: { opacity: 0.6 },
+  chipsScroll: { flexGrow: 0, flexShrink: 0, minHeight: 28 },
   chips: { gap: 5, paddingBottom: 8, alignItems: 'center' },
   chip: {
     paddingHorizontal: 10,
@@ -852,7 +857,7 @@ const makeS = () => StyleSheet.create({
     borderColor: C.border,
   },
   chipOn: { backgroundColor: C.accentSoft, borderColor: C.accent },
-  body: { flexShrink: 1 },
+  body: { flexShrink: 1, minHeight: 0 },
   bodyContent: { paddingBottom: 4 },
   center: { paddingVertical: 32, alignItems: 'center' },
   providerRow: {
