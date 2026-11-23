@@ -47,7 +47,7 @@ import {
   refreshRunningSessions, runningStoredIds, type SessionRow,
 } from '../../src/lib/sessionList'
 import {
-  searchHitToRow, sourceLabel, messageCountText, isDeleteRefusalBusy,
+  searchHitToRow, sourceLabel, messageCountText, isDeleteRefusalBusy, isBotSessionRow,
 } from '../../src/lib/sessionRowMeta'
 import { apiFetch } from '../../src/lib/http'
 import {
@@ -58,8 +58,6 @@ import {
   projectsAtom,
   setActiveProject,
 } from '../../src/lib/workspace'
-import { BOT_CHAT_TITLE } from '../../src/lib/botChat'
-
 // BUG-063: the row type IS SessionRow — the local duplicate dropped.
 type Sess = SessionRow
 
@@ -74,14 +72,16 @@ const STATUS_KIND: Record<Exclude<RowStatus, 'busy'>, DotKind> = {
 }
 
 /**
- * Bot Mode (UI-1 identity split): a row carrying a real profile name is a
- * bot chat, not a launch-profile conversation. The canonical Bot Chat's exact
- * title is reserved too — legacy rows that lost their hidden flag (or were
- * minted in the launch profile by an older build) must never render here as
- * ordinary conversations. The drawer applies the same rule.
+ * Bot Mode (UI-1 identity split): bots and sessions are different things —
+ * a bot-profile row, a canonical `Bot Chat`, or a hidden row is a bot
+ * session, never a launch-profile conversation here. The rule is the SHARED
+ * classifier (`isBotSessionRow` in lib/sessionRowMeta): the drawer, the
+ * project mini-lists and the shared session store all apply the same one,
+ * and the store already drops bot rows before this screen sees them — this
+ * filter is the belt to that braces (e.g. for content-search hits, which
+ * the mapper also pre-filters).
  */
-const isBotRow = (r: { profile?: string; title?: string }) =>
-  (!!r.profile && r.profile !== 'default') || (r.title ?? '').trim() === BOT_CHAT_TITLE
+const isBotRow = isBotSessionRow
 
 /** Row status → its already-translated accessibility label (legacy keys). */
 const STATUS_A11Y: Record<RowStatus, string> = {

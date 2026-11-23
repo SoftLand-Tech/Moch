@@ -152,6 +152,44 @@ async function main() {
   check('complete flag set when under the limit', m.sessionListComplete.get() === true)
   check('no error after a good load', m.sessionListError.get() === null)
 
+  // ── Bot rows never enter the Sessions store ─────────────────────────────
+  // Bots and sessions are different things: a bot-profile row, a canonical
+  // "Bot Chat" on ANY profile (the default bot's chat lives on the launch
+  // profile), and a hidden row must be dropped by loadSessions itself, so
+  // no Sessions surface can leak them by forgetting its own filter. The
+  // Bots surface never reads this store, so nothing is lost by dropping.
+  m.resetSessionList()
+  m._useSessionRpcForTests(async <T,>(method: string): Promise<T> => {
+    if (method !== 'session.list') throw new Error(`unexpected method ${method}`)
+    return {
+      sessions: [
+        { id: 'keep-1', title: 'Ordinary chat', profile: 'default', started_at: 1_700_000_000 },
+        { id: 'bot-profile-row', title: 'Task session', profile: 'tesr-helper', started_at: 1_700_000_100 },
+        { id: 'bot-canonical-default', title: 'Bot Chat', profile: 'default', started_at: 1_700_000_200 },
+        { id: 'bot-canonical-noprofile', title: 'Bot Chat', started_at: 1_700_000_300 },
+        { id: 'bot-hidden-row', title: 'Hidden thing', profile: 'default', hidden: true, started_at: 1_700_000_400 },
+        { id: 'keep-2', title: 'Another ordinary chat', started_at: 1_700_000_500 },
+      ],
+    } as T
+  })
+  const botFiltered = await m.loadSessions({ force: true })
+  check(
+    'loadSessions drops bot rows at the store (profile / canonical title / hidden)',
+    m.sessionRows.get().map((r) => r.id).join(',') === 'keep-1,keep-2',
+    m.sessionRows.get().map((r) => r.id).join(','),
+  )
+  check('loadSessions return value is the filtered list too', botFiltered.map((r) => r.id).join(',') === 'keep-1,keep-2')
+  check('complete flag is judged on the raw fetch, not the filtered count', m.sessionListComplete.get() === true)
+
+  // Restore the server-order fake + store for the suites below.
+  m._useSessionRpcForTests(async <T,>(method: string, params?: Record<string, unknown>): Promise<T> => {
+    rpcCalls++
+    seenParams = params ?? null
+    if (method !== 'session.list') throw new Error(`unexpected method ${method}`)
+    return { sessions: serverOrder } as T
+  })
+  await m.loadSessions({ force: true })
+
   // Concurrent callers share ONE fetch.
   rpcCalls = 0
   const p1 = m.loadSessions()
