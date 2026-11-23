@@ -160,6 +160,27 @@ class BrowserRelayModule(reactContext: ReactApplicationContext) :
   }
 
   /**
+   * Publish the DevTools target ids of the REAL Browser tabs. The relay
+   * restricts /json/list to this set so the agent can never navigate one of
+   * the process's other WebViews (Mochi mascot surfaces, the hidden agent
+   * host) that also show up as page targets at about:blank.
+   */
+  @ReactMethod
+  fun setVisibleTargets(ids: com.facebook.react.bridge.ReadableArray, promise: Promise) {
+    try {
+      val out = ArrayList<String>(ids.size())
+      for (i in 0 until ids.size()) {
+        val id = ids.getString(i)
+        if (!id.isNullOrEmpty()) out.add(id)
+      }
+      CdpRelay.setVisibleTargetIds(out)
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.reject("cdp_relay_visible_targets", e.message, e)
+    }
+  }
+
+  /**
    * Process-wide WebView debugging switch. Guarded: only flips when
    * [enabled] differs from the cached state, so remounts don't spam it.
    * The DevTools socket only exists while this is on — the relay's upstream

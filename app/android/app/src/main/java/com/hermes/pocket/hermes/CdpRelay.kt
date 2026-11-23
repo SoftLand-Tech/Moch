@@ -203,6 +203,26 @@ object CdpRelay {
     activeUrlPrefix = url?.take(2048)
   }
 
+  /**
+   * DevTools ids of the REAL Browser-tab WebViews, published by RN.
+   *
+   * The app runs other WebViews in the same process (the Mochi mascot
+   * surfaces and the hidden AgentBrowserHost) and every one of them appears
+   * in the upstream /json/list as a page target — usually at about:blank.
+   * `chosenPageJson`'s old "first page" fallback could therefore hand the
+   * agent one of those targets, and a `Page.navigate` replaced the mascot
+   * with the website. Only ids RN actually owns as tabs are eligible; until
+   * RN publishes the first set, only http(s) pages are (never a blank/other
+   * WebView).
+   */
+  @Volatile private var visibleTargetIds: Set<String> = emptySet()
+
+  /** RN registration of the real Browser-tab DevTools ids (see above). */
+  fun setVisibleTargetIds(ids: List<String>) {
+    visibleTargetIds = ids.filter { it.isNotEmpty() }.toSet()
+    log("visible browser targets: ${visibleTargetIds.size}")
+  }
+
   // ── Tab lifecycle round-trip (BUG-136) ───────────────────────────────────
   //
   // The RN tab store is the single owner of the tab strip; the relay ASKS it
@@ -381,11 +401,22 @@ object CdpRelay {
   }
 
   /**
-   * The ONE advertised page target: the WebView whose URL matches the
-   * active URL when unambiguous, else the first. Null when none exist.
+   * The ONE advertised page target: a REAL Browser tab (RN-published target
+   * id) whose URL matches the active URL when unambiguous, else the first
+   * eligible tab. Null when none exist. Mochi surfaces / the agent host are
+   * never eligible, even when they are the only WebViews alive.
    */
   private fun chosenPageJson(): JSONObject? {
-    val pages = upstreamPages().map { it.json }
+    val allow = visibleTargetIds
+    val all = upstreamPages()
+    val eligible = if (allow.isNotEmpty()) {
+      all.filter { allow.contains(it.id) }
+    } else {
+      // RN has not registered its tabs yet: a real tab is a live web page.
+      // about:blank/data: targets here are mascot surfaces, not tabs.
+      all.filter { it.url.startsWith("http://") || it.url.startsWith("https://") }
+    }
+    val pages = eligible.map { it.json }
     val prefix = activeUrlPrefix
     val chosen = if (!prefix.isNullOrEmpty()) {
       val matching = pages.filter { it.optString("url", "").startsWith(prefix) }
@@ -440,9 +471,15 @@ object CdpRelay {
     writeJsonResponse(out, arr)
   }
 
-  /** The moch-tabs page list (same data as the endpoint) for the RN bridge. */
+  /** The moch-tabs page list (same data as the endpoint) for the RN bridge.
+   *  Only real web pages are mappable: a blank/HTML mascot WebView is also a
+   *  page target and must never be bound to a browser tab (or published to
+   *  the relay as an eligible target). */
   fun tabTargets(): List<JSONObject> =
-    upstreamPages().filter { !isHiddenAgentPage(it.url) }
+    upstreamPages().filter {
+      !isHiddenAgentPage(it.url) &&
+        (it.url.startsWith("http://") || it.url.startsWith("https://"))
+    }
       .map { it.json.put("webSocketDebuggerUrl", pageWsUrl(it.id)) }
 
   // ── /json/new|close|activate — the RN round-trip (BUG-136) ───────────────
@@ -561,7 +598,13 @@ object CdpRelay {
       }
       // A brand-new WebView can sit at about:blank for a beat before its
       // first navigation commits — remember a lone such target as fallback.
-      freshLoading = fresh.singleOrNull { it.url.isEmpty() || it.url == "about:blank" }?.json ?: freshLoading
+      // Once RN has registered its real tabs, the fallback must be one of
+      // them: a freshly remounted mascot/agent WebView is about:blank too.
+      val allow = visibleTargetIds
+      freshLoading = fresh.singleOrNull {
+        (it.url.isEmpty() || it.url == "about:blank") &&
+          (allow.isEmpty() || allow.contains(it.id))
+      }?.json ?: freshLoading
       if (System.currentTimeMillis() >= deadlineMs) break
       // Speed pass: front-load the cadence — a fresh target normally appears
       // within a few hundred ms of the RN ack, so poll fast first (an agent

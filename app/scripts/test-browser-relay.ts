@@ -57,6 +57,10 @@ function makeFakeNative() {
         calls.push({ fn: 'setWebDebugEnabled', args: [enabled] })
         return enabled
       },
+      async setVisibleTargets(ids: string[]) {
+        calls.push({ fn: 'setVisibleTargets', args: [ids] })
+        return true
+      },
       tabOpAck(requestId: string, ok: boolean, error?: string | null) {
         calls.push({ fn: 'tabOpAck', args: [requestId, ok, error] })
         acks.push({ requestId, ok, error: error ?? null })
@@ -152,6 +156,7 @@ async function main() {
     status: () => Promise.resolve({} as never),
     setActiveUrl: () => Promise.resolve(true),
     setWebDebugEnabled: () => Promise.resolve(true),
+    setVisibleTargets: () => Promise.resolve(true),
     tabOpAck: () => {},
     tabTargets: () => Promise.resolve([]),
   })
@@ -189,6 +194,12 @@ async function main() {
   fx.setTabTargets([{ id: 'TG-NEW', url: 'https://round.trip/new', title: 'New' }])
   await m.refreshTabTargetIds(true)
   check('registry maps the tab to its DevTools target', m.browserTabs.get()[0].targetId === 'TG-NEW')
+  check(
+    'registry publishes only real tab targets to the relay',
+    fx.calls.some(
+      (c) => c.fn === 'setVisibleTargets' && JSON.stringify(c.args) === JSON.stringify([['TG-NEW']]),
+    ),
+  )
 
   // activate → switchTab by targetId
   const tB = m.addTab('https://round.trip/b')

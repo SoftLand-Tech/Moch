@@ -69,6 +69,14 @@ type RelayModule = {
   status(): Promise<RelayStatus>
   setActiveUrl(url: string | null): Promise<boolean>
   setWebDebugEnabled(enabled: boolean): Promise<boolean>
+  /**
+   * Publish the DevTools target ids of the real Browser tabs. The relay's
+   * /json/list selection is restricted to these, so the agent can never
+   * navigate the Mochi mascot surfaces / hidden agent host (all WebViews in
+   * this process appear as page targets). Optional on pre-1.0.50 native
+   * builds — an OTA JS bundle must not crash against an older APK.
+   */
+  setVisibleTargets?(ids: string[]): Promise<boolean>
   /** RN ack for a mochTabOp round-trip (bridge method, fire-and-forget). */
   tabOpAck(requestId: string, ok: boolean, error?: string | null): void
   /** The relay's full upstream page list — the tab⇔target registry source. */
@@ -97,6 +105,7 @@ export function _useBrowserRelayForTests(m: RelayModule | null, e?: EmitterLike 
   moduleOverride = m
   cached = null
   tabOpEmitterOverride = e ?? null
+  lastVisibleKey = ''
   tabOpSub?.remove()
   tabOpSub = null
 }
@@ -229,6 +238,10 @@ export function closeTab(id: string) {
     activeTabId.set(fallback?.id ?? null)
     syncActiveUrl(fallback?.url ?? null)
   }
+  // The relay's eligible-target set must shrink with the strip NOW; a forced
+  // refresh publishes [] when the last tab closes (so /json/list never falls
+  // back to a mascot/about:blank target).
+  void refreshTabTargetIds(true)
 }
 
 export function switchTab(id: string) {
@@ -331,7 +344,30 @@ function onMochTabOp(ev: MochTabOpEvent | null | undefined) {
 
 let refreshInFlight: Promise<void> | null = null
 let lastRefreshAt = 0
+/** Last id set published to the relay (dedupes bridge calls). */
+let lastVisibleKey = ''
 const REFRESH_MIN_INTERVAL_MS = 800
+
+/**
+ * Tell the relay which DevTools targets are REAL Browser tabs. This is the
+ * only thing keeping `browser_navigate` off the mascot/agent-host WebViews
+ * (they are page targets too). Best-effort, and guarded for an OTA JS bundle
+ * running on a native build that predates the bridge method.
+ */
+function publishVisibleTargets(ids: string[]) {
+  const key = ids.join('|')
+  if (key === lastVisibleKey) return
+  lastVisibleKey = key
+  try {
+    const m = native()
+    if (typeof m.setVisibleTargets !== 'function') return
+    void m.setVisibleTargets(ids).catch((e) => {
+      log('warn', 'browserRelay', `setVisibleTargets failed: ${e}`)
+    })
+  } catch (e) {
+    log('warn', 'browserRelay', `setVisibleTargets failed: ${e}`)
+  }
+}
 
 function urlsMatch(a: string, b: string): boolean {
   if (!a || !b) return false
@@ -356,7 +392,14 @@ export async function refreshTabTargetIds(force = false): Promise<void> {
       const raw = await native().tabTargets()
       targets = (Array.isArray(raw) ? raw : []).filter(
         (t): t is TabTarget =>
-          !!t && typeof (t as TabTarget).id === 'string' && (t as TabTarget).id !== '',
+          !!t &&
+          typeof (t as TabTarget).id === 'string' &&
+          (t as TabTarget).id !== '' &&
+          // Mascot surfaces / the agent host are page targets too (usually
+          // about:blank or a data: document). Only real web pages can be a
+          // Browser tab; binding one of the others would let the agent
+          // navigate the mascot.
+          /^https?:\/\//i.test(String((t as TabTarget).url ?? '')),
       )
     } catch (e) {
       log('warn', 'browserRelay', `tabTargets failed: ${e}`)
@@ -385,6 +428,11 @@ export async function refreshTabTargetIds(force = false): Promise<void> {
       return tab
     })
     if (changed) browserTabs.set(next)
+    // Publish even when no mapping changed: the first refresh after boot has
+    // to register the existing tabs with the relay.
+    publishVisibleTargets(
+      next.map((t) => t.targetId).filter((id): id is string => !!id),
+    )
   })().finally(() => {
     refreshInFlight = null
   })
