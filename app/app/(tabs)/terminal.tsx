@@ -563,8 +563,13 @@ function TerminalInner() {
       <KeyRow onKey={onPadKey} armed={armed} onArm={(m) => { armedRef.current = m; setArmed(m) }} />
 
       {dead ? null : (
-        <Txt size={11.5} color={C.textDim} center style={s.hint}>
-          {t('terminal.tapHint')}
+        <Txt
+          size={11.5}
+          color={keyboardVisible ? C.accent : C.textDim}
+          center
+          style={s.hint}
+        >
+          {keyboardVisible ? t('terminal.typingHint') : t('terminal.tapHint')}
         </Txt>
       )}
     </Animated.View>

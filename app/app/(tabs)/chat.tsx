@@ -387,14 +387,36 @@ export default function Chat() {
   // screen re-opens the window, while a landing resume (sid set) does not.
 
   // OpenCode hydration: an OC-backed chat's transcript lives on the OpenCode
-  // server, not in the gateway's resume payload. When the active chat is
-  // empty and idle, pull its history once per stored chat (chat.ts owns the
-  // guard set and the row mapping).
+  // server, not in the gateway's resume payload. Pull while idle — forced on
+  // mount/switch so a turn that completed while away (or a partial row left
+  // by a retired stream) is reconciled with the completed server history.
+  // chat.ts owns the throttle, in-flight guard, busy re-check and the merge.
+  // `msgs.length` is deliberately NOT a dep: hydration changes messages, and
+  // re-running on that change would loop.
   useEffect(() => {
     if (!ocMode || !sid || !storedId) return
     if (busy) return // never fight the streaming path
-    void hydrateOcHistory(sid).catch(() => {})
-  }, [ocMode, sid, storedId, busy, msgs.length])
+    void hydrateOcHistory(sid, { force: true }).catch(() => {})
+  }, [ocMode, sid, storedId, busy])
+
+  // Coming back to this tab (app resume, another tab, drawer) must refresh an
+  // OpenCode transcript: the turn may have finished while SSE was detached.
+  // The stable callback reads live values through a ref, and the local guard
+  // plus chat.ts's per-live-id in-flight set make rapid tab switches safe.
+  const ocHydrateCtx = useRef({ ocMode, sid, storedId, busy })
+  ocHydrateCtx.current = { ocMode, sid, storedId, busy }
+  const focusHydrating = useRef(false)
+  useFocusEffect(
+    useCallback(() => {
+      const h = ocHydrateCtx.current
+      if (!h.ocMode || !h.sid || !h.storedId || h.busy) return
+      if (focusHydrating.current) return
+      focusHydrating.current = true
+      void hydrateOcHistory(h.sid, { force: true })
+        .catch(() => {})
+        .finally(() => { focusHydrating.current = false })
+    }, []),
+  )
 
   useEffect(() => {
     if (!online) return

@@ -17,8 +17,8 @@ import {
   ocStream,
   describeOcError,
   type OcEvent,
-  type OcHistoryMessage,
 } from './opencodeClient'
+import { mapOcHistory, type OcHistoryRow } from './ocHistory'
 import { loadOcCommands } from './ocCommands'
 import { guestRun } from './thinker'
 import { log } from './log'
@@ -574,42 +574,9 @@ export async function runOneShotTurn(opts: OcOneShotOptions): Promise<OcOneShotR
 
 // ── history hydration ────────────────────────────────────────────────────────
 
-export interface OcHistoryRow {
-  role: 'user' | 'assistant'
-  text: string
-  ts: number
-  /** Tool rows the UI may render (name + one-line status). */
-  tools?: Array<{ id: string; name: string; ok: boolean }>
-  thinking?: string
-}
-
-/** Map GET /api/session/:id/message (NEWEST FIRST) into chat rows, oldest first. */
-export function mapOcHistory(messages: OcHistoryMessage[]): OcHistoryRow[] {
-  const rows: OcHistoryRow[] = []
-  for (const m of [...(messages ?? [])].reverse()) {
-    if (m.type === 'user') {
-      const text = String(m.payload?.text ?? '').trim()
-      if (text) rows.push({ role: 'user', text, ts: m.time?.created ?? Date.now() })
-      continue
-    }
-    if (m.type !== 'assistant') continue
-    let text = ''
-    let thinking = ''
-    const tools: Array<{ id: string; name: string; ok: boolean }> = []
-    for (const part of m.content ?? []) {
-      if (part.type === 'text' && part.text) text += (text ? '\n' : '') + part.text
-      else if (part.type === 'reasoning' && part.text) thinking += part.text
-      else if (part.type === 'tool' && part.name) {
-        const st = String(part.state?.status ?? 'done')
-        tools.push({ id: String(part.id ?? part.name), name: part.name, ok: st !== 'error' })
-      }
-    }
-    if (text || thinking || tools.length) {
-      rows.push({ role: 'assistant', text: text.trim(), ts: m.time?.created ?? Date.now(), tools, thinking: thinking.trim() || undefined })
-    }
-  }
-  return rows
-}
+// The pure mapper lives in ./ocHistory (no RN imports) so the script suite can
+// test it; re-exported here for chat.ts and the drawer's existing imports.
+export { mapOcHistory, type OcHistoryRow, type OcHistorySegment } from './ocHistory'
 
 export async function loadOcHistory(mapKey: string): Promise<OcHistoryRow[] | null> {
   const ocId = await ocSessionFor(mapKey)

@@ -2173,15 +2173,26 @@ function ocRowsToMessages(rows: OcHistoryRow[]): { messages: ChatMessage[]; tool
       msgs.push({ id: nid(), role: 'user', text: r.text.slice(0, 8000), ts: r.ts })
       continue
     }
-    // Same ordered-segments contract as the live stream: thinking precedes
-    // its text; `text` stays the joined text segments.
-    const segments: ChatSegment[] = []
-    if (r.thinking) segments.push({ kind: 'thinking', text: r.thinking.slice(0, 8000), startedAt: r.ts })
-    if (r.text) segments.push({ kind: 'text', text: r.text.slice(0, 8000) })
+    // Grouped rows carry the turn's blocks in stream order (thinking/text
+    // interleaved across steps); fall back to thinking-then-text for older
+    // rows. `text` stays the joined text blocks in both paths.
+    let segments: ChatSegment[]
+    if (r.segments?.length) {
+      segments = r.segments.map((seg) =>
+        seg.kind === 'thinking'
+          ? { kind: 'thinking' as const, text: seg.text.slice(0, 8000), startedAt: r.ts }
+          : { kind: 'text' as const, text: seg.text.slice(0, 8000) },
+      )
+    } else {
+      segments = []
+      if (r.thinking) segments.push({ kind: 'thinking', text: r.thinking.slice(0, 8000), startedAt: r.ts })
+      if (r.text) segments.push({ kind: 'text', text: r.text.slice(0, 8000) })
+    }
+    const text = segments.filter((x) => x.kind === 'text').map((x) => x.text).join('\n')
     msgs.push({
       id: nid(),
       role: 'assistant',
-      text: r.text.slice(0, 8000),
+      text: text.slice(0, 8000),
       ts: r.ts,
       ...(segments.length ? { segments } : {}),
     })
@@ -2192,26 +2203,103 @@ function ocRowsToMessages(rows: OcHistoryRow[]): { messages: ChatMessage[]; tool
   return { messages: msgs, tools }
 }
 
-/** Hydrate an OpenCode-backed chat from the OC server, once per stored chat. */
-export async function hydrateOcHistory(liveId: string): Promise<void> {
+/** Last index matching `pred`, or -1 (findLastIndex is ES2023; the app's
+ *  tsconfig libs stop at ES2022). */
+function lastIndexWhere<T>(list: T[], pred: (x: T) => boolean): number {
+  for (let i = list.length - 1; i >= 0; i--) if (pred(list[i])) return i
+  return -1
+}
+
+/** Live ids with a hydration fetch in flight (focus + deps can both fire). */
+const ocHydrating = new Set<string>()
+
+/** Last FORCED fetch per stored id (ms). Focus churn must not hammer the
+ *  server; the transcript is only stale until the next focus/dep change. */
+const ocHydrateAt = new Map<string, number>()
+const OC_HYDRATE_THROTTLE_MS = 1500
+
+/**
+ * Hydrate an OpenCode-backed chat from the OC server.
+ *
+ * Cold path (empty transcript): pull once per stored chat.
+ *
+ * Forced path (`force`, used on focus and session switch): re-pull even when
+ * the transcript is non-empty — a turn that completed while the user was on
+ * another tab exists only in the server history. A non-empty transcript is
+ * MERGED, not replaced: keep it up to the last local user row and append the
+ * mapped rows after that same user row (replacing a partial assistant row
+ * with the complete grouped turn, while keeping local-only rows before it).
+ * If that user text is not in the history (not persisted / failed send), the
+ * local transcript is left untouched. Never touches a busy chat.
+ */
+export async function hydrateOcHistory(liveId: string, opts?: { force?: boolean }): Promise<void> {
+  const force = opts?.force === true
   const s = sessionsById.get()[liveId]
   const stored = s?.storedId ?? ''
   if (!s || !stored || isPseudoStoredId(stored)) return
-  if (s.messages.length || ocHydrated.has(stored)) return
-  const rows = await loadOcHistory(stored)
-  if (!rows) return // error or no mapping yet — leave unmarked so it retries
-  ocHydrated.add(stored)
-  if (!rows.length) return
-  // Re-read after the await: a turn may have started (or the chat re-keyed)
-  // meanwhile — never fight live state.
-  const cur = sessionsById.get()[liveId]
-  if (!cur || cur.messages.length) return
-  const { messages: mapped, tools: mappedTools } = ocRowsToMessages(rows)
-  patchSession(liveId, {
-    messages: [...cur.messages, ...mapped].slice(-MAX_MESSAGES),
-    tools: [...cur.tools, ...mappedTools].slice(-MAX_TOOLS),
-  })
-  schedulePersist(liveId)
+  if (!force && (s.messages.length || ocHydrated.has(stored))) return
+  if (ocHydrating.has(liveId)) return
+  if (force) {
+    const at = ocHydrateAt.get(stored) ?? 0
+    if (Date.now() - at < OC_HYDRATE_THROTTLE_MS) return
+    ocHydrateAt.set(stored, Date.now())
+  }
+  ocHydrating.add(liveId)
+  try {
+    const rows = await loadOcHistory(stored)
+    if (!rows) return // error or no mapping yet — leave unmarked so it retries
+    ocHydrated.add(stored)
+    // Re-read after the await: a turn may have started (or the chat re-keyed)
+    // meanwhile — never fight live state.
+    const cur = sessionsById.get()[liveId]
+    if (!cur || cur.storedId !== stored || cur.busy) return
+    if (!rows.length) return
+    const { messages: mapped, tools: mappedTools } = ocRowsToMessages(rows)
+    if (!cur.messages.length) {
+      // Cold path: nothing local to protect.
+      patchSession(liveId, {
+        messages: [...cur.messages, ...mapped].slice(-MAX_MESSAGES),
+        tools: [...cur.tools, ...mappedTools].slice(-MAX_TOOLS),
+      })
+      schedulePersist(liveId)
+      return
+    }
+    if (!force) return // messages appeared mid-fetch — cold path stays put
+    // Forced merge. Anchor on the last local user row the server persisted;
+    // everything after it (a partial assistant row, or nothing at all when
+    // the turn landed while away) is authoritative server history now.
+    const localUserIdx = lastIndexWhere(cur.messages, (m) => m.role === 'user' && m.text.trim().length > 0)
+    if (localUserIdx < 0) return
+    const anchor = cur.messages[localUserIdx]
+    if (anchor.status === 'failed') return // never persisted — keep the local transcript
+    const localUser = anchor.text.trim()
+    const mappedUserIdx = lastIndexWhere(mapped, (m) => m.role === 'user' && m.text.trim() === localUser)
+    if (mappedUserIdx < 0) return // not persisted (failed send) — keep local
+    const tail = mapped.slice(mappedUserIdx + 1)
+    // No server rows after the anchor: the turn is not persisted yet. Keep
+    // the local tail rather than replacing it with nothing (a live answer must
+    // not be swallowed by a history read that raced the server's write).
+    if (!tail.length) return
+    const merged = [
+      ...cur.messages.slice(0, localUserIdx + 1),
+      ...tail,
+    ].slice(-MAX_MESSAGES)
+    // The live stream keys tools by the server's part id; drop those local
+    // rows for the turn being replaced so the hydrated copies (prefixed for
+    // history) don't render twice. Everything else is kept, then deduped by
+    // id against the returned tools.
+    const tailToolIds = new Set<string>()
+    for (const row of rows.slice(mappedUserIdx + 1)) {
+      for (const t of row.tools ?? []) tailToolIds.add(t.id)
+    }
+    const keptTools = cur.tools.filter((t) => !tailToolIds.has(t.id))
+    const seen = new Set(keptTools.map((t) => t.id))
+    const added = mappedTools.filter((t) => (seen.has(t.id) ? false : (seen.add(t.id), true)))
+    patchSession(liveId, { messages: merged, tools: [...keptTools, ...added].slice(-MAX_TOOLS) })
+    schedulePersist(liveId)
+  } finally {
+    ocHydrating.delete(liveId)
+  }
 }
 
 /**
