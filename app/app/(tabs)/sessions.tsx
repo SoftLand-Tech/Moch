@@ -72,6 +72,14 @@ const STATUS_KIND: Record<Exclude<RowStatus, 'busy'>, DotKind> = {
   error: 'red',
 }
 
+/**
+ * Bot Mode (UI-1 identity split): a row carrying a real profile name is a
+ * bot chat, not a launch-profile conversation. The drawer already hides those
+ * from its Sessions identity; this screen must apply the same rule or bot
+ * task sessions leak into "Chats" as ordinary conversations.
+ */
+const isBotRow = (r: { profile?: string }) => !!r.profile && r.profile !== 'default'
+
 /** Row status → its already-translated accessibility label (legacy keys). */
 const STATUS_A11Y: Record<RowStatus, string> = {
   input: 'status.input',
@@ -100,7 +108,10 @@ function SessionsInner() {
   // so matches render above the keys instead of behind them.
   const kb = useReanimatedKeyboardAnimation()
   const kbPad = useAnimatedStyle(() => ({ paddingBottom: -kb.height.value }))
-  const list = useStore(sessionRows)
+  const allRows = useStore(sessionRows)
+  // Bots are profiles (UI-1 identity split); their chats/task sessions belong
+  // to the Bots surface, never this launch-profile conversation list.
+  const list = useMemo(() => allRows.filter((r) => !isBotRow(r)), [allRows])
   const [query, setQuery] = useState('')
   // BUG-114 (client half): the box above used to filter the loaded titles only.
   // The server can now search message CONTENT (its LIKE fallback runs when the
@@ -222,7 +233,7 @@ function SessionsInner() {
     // it composes after the search merge, so a hit from another project is
     // dropped here rather than leaking in.
     const seen = new Set(titleMatches.map((s) => s.id))
-    const combined = [...titleMatches, ...hits.filter((h) => !seen.has(h.id))]
+    const combined = [...titleMatches, ...hits.filter((h) => !isBotRow(h) && !seen.has(h.id))]
     return selectedProject ? combined.filter(inActiveProject) : combined
   }, [list, query, hits, selectedProject, inActiveProject])
 

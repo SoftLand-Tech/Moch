@@ -22,7 +22,7 @@ import { Field, HeaderButton, Kicker, Txt } from './ui'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
 import RAnimated, { useAnimatedStyle } from 'react-native-reanimated'
-import { usePathname } from 'expo-router'
+import { router, usePathname } from 'expo-router'
 import { useStore } from '@nanostores/react'
 import { isConnected as isConnectedAtom } from '../lib/gateway'
 import { archivedIds, groupChats, pinnedIds } from '../lib/chatListState'
@@ -773,6 +773,12 @@ export function Sidebar({
       style={({ pressed }) => [s.recentRow, { flexDirection: dir.row }, pressed && s.recentRowPressed]}
       onPress={() => {
         onClose()
+        // Navigate FIRST, same contract as the hermes recent-chat rows and
+        // every other deep-link hand-off. This row used to only call
+        // openOcChat, so tapping an OC session while the Browser/Terminal
+        // tab was focused silently swapped the chat underneath without
+        // bringing it on screen.
+        router.navigate('/(tabs)/chat')
         void openOcChat(c.id).catch(() => {})
       }}
       accessibilityRole="button"
