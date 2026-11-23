@@ -120,7 +120,12 @@ def _session_row_summary(row: dict, *, tip_row: dict | None = None, resolved_id=
     return {"id": row["id"], **({} if resolved_id is None else {"resolved_id": resolved_id}),
             "title": row.get("title") or "", "preview": tip_row.get("preview") or "",
             "started_at": row.get("started_at") or 0, "message_count": tip_row.get("message_count") or 0,
-            "source": row.get("source") or ""}
+            "source": row.get("source") or "",
+            # BUG-112: the owner profile is part of the row contract — the
+            # mobile drawer/Chats surfaces split bot chats (profiles) from
+            # ordinary launch-profile sessions on it. Dropping it made every
+            # bot row look like a launch session.
+            "profile": tip_row.get("profile_name") or row.get("profile_name") or ""}
 
 
 from hermes_state_sessions import INTERNAL_LISTING_SOURCES

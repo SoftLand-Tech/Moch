@@ -64,7 +64,18 @@ import { loadCatalog } from '../lib/slash'
 import { loadLastActive, loadSessions, lastActiveByStoredId, lastActiveFor, patchRowTitle, refreshRunningSessions, sessionRows, toMs } from '../lib/sessionList'
 import { forgetChatMarks, loadChatMarks, toggleArchive, togglePin } from '../lib/chatListState'
 import { inboxCount } from '../lib/inbox'
-import { openBotChat } from '../lib/botChat'
+import { BOT_CHAT_TITLE, openBotChat } from '../lib/botChat'
+
+/**
+ * Bot Mode's UI-1 identity split: a row carrying a real profile name is a bot
+ * chat, and the canonical Bot Chat's exact title is reserved (server-side
+ * `hermes_state.CANONICAL_BOT_CHAT_TITLE`) — its name IS its identity. Legacy
+ * rows that lost their hidden flag (or were minted in the launch profile by an
+ * older build) must never render as ordinary Sessions, whatever their profile
+ * column says; the Bots roster is their surface.
+ */
+const isBotProfileRow = (profile?: string) => !!profile && profile !== 'default'
+const isCanonicalBotChat = (title?: string) => (title ?? '').trim() === BOT_CHAT_TITLE
 import { fleetProfiles, refreshFleet } from '../lib/fleet'
 import { showAlert } from './AlertDialog'
 
@@ -299,7 +310,7 @@ export function ScreenShell({
     // profile name is a bot chat. `default` is the assistant itself, not a
     // bot — counting it as one would hide every ordinary chat in Bots mode
     // and show nothing in Sessions.
-    const isBotRow = (profile?: string) => !!profile && profile !== 'default'
+    const isBotRow = isBotProfileRow
 
     // UI-1 project filter: only when a project is selected. Rows that carry
     // the project id filter on it; rows without one resolve through the
@@ -324,6 +335,7 @@ export function ScreenShell({
 
     const fromServer = rows
       .filter((r) => (identity === 'bots' ? isBotRow(r.profile) : !isBotRow(r.profile)))
+      .filter((r) => !isCanonicalBotChat(r.title))
       .filter(inProject)
       .map((r) => {
       const rawTitle = r.title || r.preview?.slice(0, 60) || tr('sidebar.untitled')
@@ -385,8 +397,9 @@ export function ScreenShell({
     const out: Record<string, RecentChat[]> = {}
     for (const r of rows) {
       // Bots mode's identity split (same rule as `recent`): profile rows are
-      // bot chats, not project sessions.
-      if (r.profile && r.profile !== 'default') continue
+      // bot chats, not project sessions. Canonical Bot Chats are never rows.
+      if (isBotProfileRow(r.profile)) continue
+      if (isCanonicalBotChat(r.title)) continue
       const pid = projectIdForSession(r, ownerIndex)
       if (!pid) continue // null = Home bucket, undefined = unclassified
       const rawTitle = r.title || r.preview?.slice(0, 60) || tr('sidebar.untitled')
