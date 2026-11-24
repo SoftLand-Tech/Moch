@@ -2,11 +2,13 @@ import React, { useEffect, useRef, useState } from 'react'
 import { View, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
+import * as Clipboard from 'expo-clipboard'
 import { MochiMark } from '../src/components/MochiMark'
 import { Card, GhostBtn, PrimaryBtn, Txt } from '../src/components/ui'
 import { C, useStyles } from '../src/lib/theme'
 import { useDir, useT } from '../src/lib/strings'
 import { connectThisPhone, connect, loadSavedConfig, type ConnConfig } from '../src/lib/gateway'
+import { logText } from '../src/lib/log'
 import { getEmbeddedGateway } from '../src/lib/mochiRuntime'
 import { loadOnboarded, onboardedAtom } from '../src/lib/aboutMe'
 
@@ -26,6 +28,7 @@ export default function Onboarding() {
   const dir = useDir()
   const [phase, setPhase] = useState<'starting' | 'error'>('starting')
   const [detail, setDetail] = useState('')
+  const [copiedDiag, setCopiedDiag] = useState(false)
   const [legacy, setLegacy] = useState<ConnConfig | null>(null)
   const mounted = useRef(true)
 
@@ -156,6 +159,18 @@ export default function Onboarding() {
               label={t('setup.entry.openAnyway')}
               style={s.ghost}
             />
+            <GhostBtn
+              onPress={() => {
+                const body = [detail ? `Error: ${detail}` : '', logText().slice(-4000)].filter(Boolean).join('\n\n')
+                void Clipboard.setStringAsync(body || 'No diagnostic logs captured.').then(() => {
+                  if (!mounted.current) return
+                  setCopiedDiag(true)
+                  setTimeout(() => { if (mounted.current) setCopiedDiag(false) }, 3000)
+                })
+              }}
+              label={copiedDiag ? t('common.copied') : t('settings.about.copyDiagnostics')}
+              style={s.diagBtn}
+            />
           </>
         )}
 
@@ -220,4 +235,5 @@ const makeS = () => StyleSheet.create({
   legacyTitle: { marginBottom: 3 },
   primary: { width: '100%', marginBottom: 8, marginTop: 2 },
   ghost: { width: '100%' },
+  diagBtn: { width: '100%', marginTop: 8 },
 })

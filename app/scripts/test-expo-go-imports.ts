@@ -59,24 +59,71 @@ load._load = function (id: string, parent: unknown, isMain: boolean): unknown {
 }
 
 stub('expo', { isRunningInExpoGo: () => true, useEvent: () => ({ status: 'idle' }), useEventListener: () => {} })
+stub('expo/fetch', { fetch: globalThis.fetch })
+stub('expo-modules-core', {
+  EventEmitter: class {
+    addListener() { return { remove() {} } }
+    removeAllListeners() {}
+    emit() {}
+  },
+  NativeModule: class {},
+  SharedObject: class {},
+  NativeModulesProxy: {},
+  requireNativeModule: () => ({}),
+  requireOptionalNativeModule: () => null,
+})
+stub('expo-updates', {
+  isEnabled: false,
+  checkForUpdateAsync: async () => ({ isAvailable: false }),
+  fetchUpdateAsync: async () => ({ isNew: false }),
+  reloadAsync: async () => {},
+})
+stub('@react-native-community/netinfo', {
+  default: { addEventListener: () => () => {}, fetch: async () => ({ isConnected: true }) },
+})
 stub('expo-constants', { default: { expoConfig: null, easConfig: null } })
 stub('expo-device', { isDevice: false })
 stub('react-native', {
   Platform: { OS: 'android', select: (o: Record<string, unknown>) => o.android ?? o.default },
   AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) },
+  BackHandler: { addEventListener: () => ({ remove() {} }) },
   NativeModules: {},
+  NativeEventEmitter: class {
+    addListener() { return { remove() {} } }
+    removeAllListeners() {}
+  },
   StyleSheet: {
     create: <T,>(s: T): T => s,
     flatten: (s: unknown) => s,
     absoluteFill: {},
     absoluteFillObject: {},
   },
+  Animated: {
+    Value: class {
+      interpolate() { return {} }
+      setValue() {}
+      stopAnimation() {}
+    },
+    View: () => null,
+    timing: () => ({ start() {}, stop() {} }),
+    loop: () => ({ start() {}, stop() {} }),
+    sequence: () => ({ start() {}, stop() {} }),
+    delay: () => ({}),
+    multiply: () => ({}),
+  },
+  PanResponder: { create: () => ({ panHandlers: {} }) },
+  Easing: { out: () => () => {}, in: () => () => {}, cubic: () => {} },
+  Dimensions: { get: () => ({ width: 390, height: 844 }) },
+  useWindowDimensions: () => ({ width: 390, height: 844 }),
   View: () => null,
   Text: () => null,
+  Image: () => null,
+  Modal: () => null,
   Pressable: () => null,
   TextInput: () => null,
   ScrollView: () => null,
   FlatList: () => null,
+  SectionList: () => null,
   KeyboardAvoidingView: () => null,
   Switch: () => null,
   ActivityIndicator: () => null,
@@ -99,10 +146,22 @@ stub('expo-secure-store', {
   setItemAsync: async () => {},
   deleteItemAsync: async () => {},
 })
+const routerStub = {
+  push: () => {},
+  replace: () => {},
+  navigate: () => {},
+  back: () => {},
+  canDismiss: () => false,
+  dismissAll: () => {},
+  dismiss: () => {},
+}
 stub('expo-router', {
-  Stack: () => null,
-  Tabs: () => null,
-  router: { push: () => {}, replace: () => {} },
+  Stack: Object.assign(() => null, { Screen: () => null }),
+  Tabs: Object.assign(() => null, { Screen: () => null }),
+  router: routerStub,
+  useRouter: () => routerStub,
+  usePathname: () => '/chat',
+  useLocalSearchParams: () => ({}),
   useFocusEffect: () => {},
 })
 stub('expo-linking', { getInitialURL: async () => null, addEventListener: () => ({ remove() {} }) })
@@ -115,6 +174,9 @@ stub('expo-status-bar', { StatusBar: () => null })
 stub('react-native-keyboard-controller', {
   KeyboardProvider: ({ children }: { children: unknown }) => children,
   KeyboardAvoidingView: ({ children }: { children: unknown }) => children,
+  KeyboardAwareScrollView: ({ children }: { children: unknown }) => children,
+  useReanimatedKeyboardAnimation: () => ({ height: { value: 0 } }),
+  useKeyboardState: () => false,
 })
 // chat.tsx now imports reanimated directly (keyboard-inset padding). Its
 // module entry needs TurboModuleRegistry, absent from the RN stub above;
@@ -122,9 +184,15 @@ stub('react-native-keyboard-controller', {
 stub('react-native-reanimated', {
   default: { View: () => null },
   useAnimatedStyle: () => ({}),
+  useSharedValue: (v: unknown) => ({ value: v }),
+  withTiming: (v: unknown) => v,
+  withDelay: (_: unknown, v: unknown) => v,
+  withRepeat: (v: unknown) => v,
+  cancelAnimation: () => {},
   createAnimatedComponent: () => (props: unknown) => props,
 })
-stub('@expo/vector-icons', { Ionicons: () => null })
+stub('react-native-webview', { WebView: () => null })
+stub('@expo/vector-icons', { Ionicons: () => null, MaterialCommunityIcons: () => null })
 // Markdown surface as the REAL dist exports it (BUG-135): a default
 // component plus the re-exported raw MarkdownIt constructor (and
 // createMarkdownIt) — Chat.tsx builds its linkified instance from
@@ -157,8 +225,12 @@ stub('react-native-safe-area-context', { SafeAreaView: () => null, useSafeAreaIn
 stub('react-native-markdown-display', { default: () => null })
 const reactStub: Record<string, unknown> = {
   createElement: () => null,
+  forwardRef: (fn: unknown) => fn,
+  createContext: () => ({ Provider: () => null, Consumer: () => null }),
+  useContext: () => null,
   useState: () => [null, () => {}],
   useEffect: () => {},
+  useLayoutEffect: () => {},
   useRef: () => ({ current: null }),
   useCallback: (f: unknown) => f,
   useMemo: (f: () => unknown) => f(),
@@ -171,12 +243,23 @@ stub('react', reactStub)
 const routes = [
   'app/index.tsx',
   'app/_layout.tsx',
-  'app/add-computer.tsx',
+  'app/bot.tsx',
+  'app/onboarding/environment.tsx',
+  'app/onboarding/thinker.tsx',
+  'app/onboarding/providers.tsx',
+  'app/onboarding/about.tsx',
   'app/(tabs)/_layout.tsx',
   'app/(tabs)/chat.tsx',
   'app/(tabs)/sessions.tsx',
   'app/(tabs)/agent.tsx',
   'app/(tabs)/settings.tsx',
+  'app/(tabs)/browser.tsx',
+  'app/(tabs)/terminal.tsx',
+  'app/(tabs)/fleet.tsx',
+  'app/(tabs)/automations.tsx',
+  'app/(tabs)/connectors.tsx',
+  'app/(tabs)/skills.tsx',
+  'app/(tabs)/inbox.tsx',
 ]
 
 console.log('Evaluating every route with expo-notifications THROWING on import\n')

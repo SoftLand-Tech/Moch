@@ -34,7 +34,6 @@ import {
   connConfig,
   connectionState,
   gatewayError,
-  disconnect,
   retryNow,
   redactedUrl,
 } from '../../src/lib/gateway'
@@ -399,6 +398,13 @@ function SettingsInner() {
     ])
   }
 
+  const confirmLinuxReinstall = () => {
+    showAlert(t('settings.linux.reinstall.title'), t('settings.linux.reinstall.body'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('settings.linux.reinstall.confirm'), onPress: () => { void linux.runInstall() } },
+    ])
+  }
+
   const retryServerMode = () => {
     void (async () => {
       await setOpencodeOneShot(false)
@@ -590,7 +596,10 @@ function SettingsInner() {
             />
             <Row
               label={linux.installed ? t('settings.linux.reinstall') : t('settings.linux.install')}
-              onPress={() => { void linux.runInstall() }}
+              onPress={() => {
+                if (linux.installed) confirmLinuxReinstall()
+                else void linux.runInstall()
+              }}
               disabled={linux.busy}
               right={linux.busy ? <Spinner size="small" color={C.accent} /> : undefined}
             />
@@ -690,7 +699,8 @@ function SettingsInner() {
           </Group>
         </Section>
 
-        {/* This phone — local-only facts + reconnect/disconnect pair. */}
+        {/* This phone — local-only facts + reconnect action (local-only build
+            has no pairing screen, so Disconnect is intentionally omitted). */}
         <Section title={t('settings.section.phone')}>
           <Group>
             <Row label={t('settings.phone.local')} />
@@ -698,12 +708,6 @@ function SettingsInner() {
           </Group>
           <View style={[s.btnPair, { flexDirection: dir.row }]}>
             <GhostBtn label={t('settings.phone.reconnect')} onPress={reconnect} style={s.btnPairItem} />
-            <GhostBtn
-              label={t('settings.phone.disconnect')}
-              onPress={() => { disconnect() }}
-              textStyle={s.btnDangerText}
-              style={s.btnPairItem}
-            />
           </View>
         </Section>
 
@@ -967,7 +971,6 @@ const makeS = () => StyleSheet.create({
   // Button pairs
   btnPair: { gap: 6, marginBottom: 2 },
   btnPairItem: { flex: 1 },
-  btnDangerText: { color: C.red },
   aboutCounts: { marginTop: 6, marginHorizontal: 2 },
   // Language sheet
   sheetRoot: { flex: 1, justifyContent: 'flex-end' },
