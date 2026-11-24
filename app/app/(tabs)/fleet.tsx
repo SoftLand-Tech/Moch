@@ -159,17 +159,12 @@ export default function Fleet() {
   // Open a bot's ONE forever-chat (`Bot Chat`) — the exact same hand-off the
   // bot modal and the drawer roster use. Never mints a fresh session: that
   // made every Fleet "Chat" tap look like a new normal chat with extra prompts.
-  const openBotConversation = useCallback(async (name: string) => {
+  const openBotConversation = useCallback((name: string) => {
     if (opening) return
-    setOpening(name)
-    try {
-      await openBotChat(name)
-      router.navigate('/(tabs)/chat')
-    } catch (e) {
+    router.navigate('/(tabs)/chat')
+    void openBotChat(name).catch((e) => {
       showAlert(t('bot.chat.failed', { why: e instanceof Error ? e.message : String(e) }))
-    } finally {
-      setOpening(null)
-    }
+    })
   }, [opening, router, t])
 
   const waiting = status?.queue.waiting ?? []

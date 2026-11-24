@@ -177,33 +177,26 @@ export default function BotDetail() {
   // (`Bot Chat`), never a fresh per-visit session. openBotChat resolves the
   // exact-title chat, mints it only when the profile truly has none, and
   // single-flights per profile — so a double-tap cannot mint two.
-  const openChat = async () => {
+  const openChat = () => {
     if (!bot || opening) return
-    setOpening(true)
-    try {
-      await openBotChat(bot)
-      router.navigate('/(tabs)/chat')
-    } catch (e) {
+    router.navigate('/(tabs)/chat')
+    void openBotChat(bot).catch((e) => {
       showAlert(t('bot.chat.failed', { why: e instanceof Error ? e.message : String(e) }))
-    } finally {
-      setOpening(false)
-    }
+    })
   }
 
   // Task sessions belong to the bot profile but are NOT the Bot Chat: they open
   // as ordinary chats (launch identity, bot pill cleared) with a banner naming
   // the bot, and never replace/reset the canonical conversation.
-  const openTask = async (id: string) => {
+  const openTask = (id: string) => {
     if (!id) return
-    try {
-      await openServerSession(id, {
-        profile: bot,
-        banner: t('bot.tasks.banner', { name: botTitle || bot }),
-      })
-      router.navigate('/(tabs)/chat')
-    } catch (e) {
+    router.navigate('/(tabs)/chat')
+    void openServerSession(id, {
+      profile: bot,
+      banner: t('bot.tasks.banner', { name: botTitle || bot }),
+    }).catch((e) => {
       showAlert(t('bot.tasks.failed', { why: e instanceof Error ? e.message : String(e) }))
-    }
+    })
   }
 
   const armed = confirmDelete > 0 || deleting
