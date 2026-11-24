@@ -341,27 +341,31 @@ export default function BotDetail() {
             )}
           </Card>
 
-          <Kicker style={s.dangerKicker}>{t('bot.delete.title')}</Kicker>
-          <Card style={s.dangerCard}>
-            <Txt size={11.5} color={C.textDim} style={s.dangerBody}>
-              {t('bot.delete.desc', { name: bot })}
-            </Txt>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={deleteLabel}
-              accessibilityState={{ disabled: deleting }}
-              disabled={deleting}
-              onPress={() => {
-                if (confirmDelete === 0) { setConfirmDelete(1); return }
-                if (confirmDelete === 1) { setConfirmDelete(2); void doDelete() }
-              }}
-              style={[s.deleteBtn, { flexDirection: dir.row }, armed && s.deleteArmed]}
-            >
-              <Txt size={12} weight="700" center color={armed ? '#FFFFFF' : C.red}>
-                {deleteLabel}
-              </Txt>
-            </Pressable>
-          </Card>
+          {bot !== 'default' ? (
+            <>
+              <Kicker style={s.dangerKicker}>{t('bot.delete.title')}</Kicker>
+              <Card style={s.dangerCard}>
+                <Txt size={11.5} color={C.textDim} style={s.dangerBody}>
+                  {t('bot.delete.desc', { name: bot })}
+                </Txt>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={deleteLabel}
+                  accessibilityState={{ disabled: deleting }}
+                  disabled={deleting}
+                  onPress={() => {
+                    if (confirmDelete === 0) { setConfirmDelete(1); return }
+                    if (confirmDelete === 1) { setConfirmDelete(2); void doDelete() }
+                  }}
+                  style={[s.deleteBtn, { flexDirection: dir.row }, armed && s.deleteArmed]}
+                >
+                  <Txt size={12} weight="700" center color={armed ? '#FFFFFF' : C.red}>
+                    {deleteLabel}
+                  </Txt>
+                </Pressable>
+              </Card>
+            </>
+          ) : null}
         </KeyboardAwareScrollView>
       )}
     </SafeAreaView>
