@@ -98,9 +98,8 @@ function useLinuxGuest() {
     const timer = setInterval(tick, 60_000)
     return () => { alive = false; clearInterval(timer) }
   }, [])
-  // #112 / BUG-016 pattern (setup.tsx): the bootstrap/reset are long, fallible
-  // operations — the old handlers fired-and-forgot, so a failed install left
-  // the row silently unchanged with no retry hint.
+  // #112 / BUG-016: bootstrap/reset are long, fallible operations. Await each
+  // one, hold the busy state through completion, and surface any failure.
   const runInstall = async () => {
     if (busy) return
     setBusy(true)

@@ -211,12 +211,12 @@ export default function Controls() {
 
   const tapProvider = (p: ProviderOption) => {
     if (!p.authenticated) {
-      // api_key providers connect right here; OAuth/etc must run on the host.
+      // API-key providers connect inline; OAuth/CLI logins run in the built-in Terminal.
       if (p.auth_type === 'api_key') {
         setKeyFor(p)
       } else {
-        // BUG-053: no dead CLI references — the npm `moch` package is
-        // deprecated; sign-in flows live on the computer's agent settings.
+        // BUG-053: provider-supplied setup guidance wins; the fallback points
+        // to the built-in Terminal rather than the removed pairing flow.
         void showAlert(p.name, p.warning ?? t('agent.providers.oauthHint'))
       }
       return
