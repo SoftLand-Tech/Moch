@@ -69,6 +69,23 @@ export async function ocForgetSession(mapKey: string): Promise<void> {
   await writeMap(map)
 }
 
+/** Reverse lookup: find an existing local chat handle (`storedId`) mapped to `ocId`, if any. */
+export async function findStoredIdForOcSession(ocId: string, liveKeys?: Iterable<string>): Promise<string | null> {
+  if (!ocId) return null
+  const map = await readMap()
+  const candidates: string[] = []
+  for (const [k, v] of Object.entries(map)) {
+    if (v === ocId) candidates.push(k)
+  }
+  if (!candidates.length) return null
+  if (liveKeys) {
+    const liveSet = new Set(liveKeys)
+    const liveMatch = candidates.find((k) => liveSet.has(k))
+    if (liveMatch) return liveMatch
+  }
+  return candidates[candidates.length - 1]
+}
+
 // ── per-chat model picks (one-shot mode has no server to remember them) ────
 // Server mode applies picks live via ocSetModel; one-shot passes `-m` per
 // turn, so the pick must survive restarts here. Same AsyncStorage, own key.
