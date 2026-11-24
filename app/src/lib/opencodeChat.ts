@@ -9,8 +9,10 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import {
+  ocActiveSessions,
   ocCreateSession,
   ocEnsureServer,
+  ocGetSession,
   ocHistory,
   ocListForms,
   ocPrompt,
@@ -22,6 +24,12 @@ import {
 import { extractOcEventSessionId, parseOcForm, type OcFormInfo } from './ocForm'
 import { mapOcHistory, type OcHistoryRow } from './ocHistory'
 import { loadOcCommands } from './ocCommands'
+import {
+  OC_ACTIVITY_CAP_MS,
+  OC_IDLE_SILENCE_MS,
+  computeOcSilenceLimitMs,
+  decideOcDisconnectAction,
+} from './ocTurnWatchdog'
 import { guestRun } from './thinker'
 import { log } from './log'
 // BUG-149: session mints carry the active project's cwd, exactly like
@@ -210,26 +218,34 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
   const ocId = await ensureOcSession(mapKey, opts.title || text.slice(0, 60))
   if (isCancelled?.()) return
 
-  // One SSE connection per turn. Events for other sessions are filtered.
+  // Watch and reconnect SSE across long tool generation, retries, or brief drops.
   let started = false
   let hasActivity = false
   let turnDone = false
   let failed = false
   let errorMsg: string | undefined
   let finalText = ''
+  let compacting = false
+  let retryAtMs: number | null = null
+  let rebindCount = 0
   const toolNames = new Map<string, string>()
   const toolStartTs = new Map<string, number>()
   let cancelPoll: ReturnType<typeof setInterval> | null = null
   let silenceTimer: ReturnType<typeof setTimeout> | null = null
   let cap: ReturnType<typeof setTimeout> | null = null
   let resolveSilent: (v: 'silent') => void = () => {}
-  // Our own controller always; an external signal (if any) forwards into it,
-  // so finishOnce can unconditionally abort the SSE connection.
-  const controller = new AbortController()
+  let attemptController: AbortController | null = null
+  let disposed = false
+
+  const abortExternal = () => {
+    disposed = true
+    attemptController?.abort()
+    resolveSilent('silent')
+  }
   if (signal) {
-    if (signal.aborted) controller.abort()
+    if (signal.aborted) abortExternal()
     else {
-      try { signal.addEventListener('abort', () => controller.abort(), { once: true }) } catch {}
+      try { signal.addEventListener('abort', abortExternal, { once: true }) } catch {}
     }
   }
 
@@ -238,42 +254,83 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
     return () => {
       if (called) return
       called = true
+      disposed = true
       if (cancelPoll) clearInterval(cancelPoll)
       if (silenceTimer) clearTimeout(silenceTimer)
       if (cap) clearTimeout(cap)
-      controller.abort()
+      if (signal) {
+        try { signal.removeEventListener('abort', abortExternal) } catch {}
+      }
+      attemptController?.abort()
     }
   })()
 
-  // Events in flight: a tool that has STARTED but not finished legitimately
-  // produces no frames while it generates/runs (a big file write can stream
-  // its input for minutes). The 15 s wedge detector must not fire through
-  // that — it killed healthy turns mid-write. Tracked by id, removed on
-  // success/failed. Interactive prompts (permission / form question) also
-  // wait on the human rather than the model, so pause the silence watchdog
-  // while one is open.
+  // Events in flight: track active tool calls, compaction, scheduled retries,
+  // and interactive prompts (permission / form question) so silent gaps during
+  // slow reasoning or large tool writes wait generously and probe OpenCode
+  // before failing.
   const activeTools = new Set<string>()
   const awaitingUser = new Set<string>()
-  let lastSilenceLimitMs = 15_000
+  let lastSilenceLimitMs = OC_IDLE_SILENCE_MS
   const armSilence = () => {
-    // No frame at all means the relay is wedged — end the turn. Heartbeats
-    // arrive as comment lines, which never reach onEvent, so a truly silent
-    // stream trips this; an active model keeps resetting it. In-flight
-    // tools get a much longer leash: silence during a running tool is normal.
     if (silenceTimer) {
       clearTimeout(silenceTimer)
       silenceTimer = null
     }
-    if (awaitingUser.size > 0) return
-    lastSilenceLimitMs = activeTools.size > 0 ? 300_000 : 15_000
-    silenceTimer = setTimeout(() => resolveSilent('silent'), lastSilenceLimitMs)
+    if (disposed || turnDone) return
+    const limit = computeOcSilenceLimitMs({
+      awaitingUserCount: awaitingUser.size,
+      activeToolCount: activeTools.size,
+      compacting,
+      retryAtMs,
+    })
+    if (limit === null) return
+    lastSilenceLimitMs = limit
+    silenceTimer = setTimeout(() => resolveSilent('silent'), limit)
+  }
+
+  const armActivityCap = () => {
+    if (cap) {
+      clearTimeout(cap)
+      cap = null
+    }
+    if (disposed || turnDone || awaitingUser.size > 0) return
+    cap = setTimeout(() => resolveSilent('silent'), OC_ACTIVITY_CAP_MS)
+  }
+
+  const syncForms = async () => {
+    try {
+      const forms = await ocListForms(ocId)
+      if (disposed || turnDone || !Array.isArray(forms)) return
+      for (const raw of forms) {
+        const form = parseOcForm(raw)
+        if (!form || awaitingUser.has(`form:${form.id}`)) continue
+        awaitingUser.add(`form:${form.id}`)
+        hooks.question?.(form)
+        armSilence()
+        armActivityCap()
+      }
+    } catch {}
   }
 
   const onEvent = (e: OcEvent) => {
     const d = e.data || {}
     if (extractOcEventSessionId(d) !== ocId) return
+    rebindCount = 0
     switch (e.type) {
+      case 'session.text.started':
+      case 'session.reasoning.started':
+      case 'session.step.started': {
+        hasActivity = true
+        retryAtMs = null
+        if (!started) {
+          hooks.start()
+          started = true
+        }
+        break
+      }
       case 'session.text.delta': {
+        retryAtMs = null
         const delta = String(d.delta ?? '')
         if (delta) {
           finalText += delta
@@ -287,6 +344,7 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
         break
       }
       case 'session.reasoning.delta': {
+        retryAtMs = null
         const delta = String(d.delta ?? '')
         if (delta) {
           if (!started) {
@@ -299,6 +357,7 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
         break
       }
       case 'session.tool.input.started': {
+        retryAtMs = null
         // The FIRST signal a tool exists. Show the row NOW — waiting for
         // .called hid long tools (big file writes) for their whole input
         // phase, so a turn could die with the tool never rendered at all.
@@ -316,9 +375,21 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
         hooks.tool(id, name, 'running')
         break
       }
+      case 'session.tool.input.delta':
+      case 'session.tool.input.ended': {
+        retryAtMs = null
+        const id = String(d.id ?? '')
+        if (id) {
+          activeTools.add(id)
+          hasActivity = true
+        }
+        break
+      }
       case 'session.tool.called': {
+        retryAtMs = null
         const id = String(d.id ?? '')
         if (!id) break
+        activeTools.add(id)
         if (!started) {
           hooks.start()
           started = true
@@ -349,6 +420,23 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
           undefined,
           dur ? (Date.now() - dur) / 1000 : undefined,
         )
+        break
+      }
+      case 'session.retry.scheduled': {
+        const at = typeof d.at === 'number' && Number.isFinite(d.at) ? d.at : Date.now() + 60_000
+        retryAtMs = at
+        hasActivity = true
+        break
+      }
+      case 'session.compaction.started':
+      case 'session.compaction.delta': {
+        compacting = true
+        hasActivity = true
+        break
+      }
+      case 'session.compaction.ended': {
+        compacting = false
+        hasActivity = true
         break
       }
       case 'permission.asked': {
@@ -388,12 +476,13 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
       case 'session.execution.succeeded':
         turnDone = true
         break
+      case 'session.execution.interrupted':
+        turnDone = true
+        if (errorMsg) failed = true
+        break
       case 'session.execution.failed':
         turnDone = true
         failed = true
-        // `error` is usually a string, but the server also ships objects/
-        // arrays — stringify those (tail) so the actual reason survives
-        // instead of collapsing to the generic 'The turn failed'.
         errorMsg =
           typeof d.error === 'string'
             ? d.error
@@ -402,15 +491,9 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
               : 'The turn failed'
         break
       case 'session.error':
-        // Field-level model error: keep streaming (a retry may follow), but
-        // remember it so an idle-without-success still fails honestly.
         errorMsg = typeof d.error === 'string' ? d.error : errorMsg
         break
       case 'session.idle':
-        // Idle with no terminal frame: only ends a turn that actually DID
-        // something (text/tool arrived). An idle between prompt-accept and
-        // first output — another client, an instant interrupt — is not an
-        // end; the real answer may still stream afterward.
         if (hasActivity && !turnDone) {
           turnDone = true
           if (errorMsg) failed = true
@@ -419,39 +502,40 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
       default:
         break
     }
-    // Re-arm AFTER the switch: the silence limit depends on whether a tool
-    // is in flight (events above may have added/removed one).
     armSilence()
+    armActivityCap()
     if (turnDone) finishOnce()
   }
 
-  // Watchdogs: a prompt whose stream dies mid-turn must not spin busy forever.
-  // The rejection reason is KEPT — a stream that drops without a terminal
-  // frame reports WHY it died (403/quota, 5xx, network) via describeOcError.
   let streamErr: unknown = null
-  const streamDropped = new Promise<'dropped'>((resolve) => {
-    ocStream(onEvent, controller.signal)
-      .then(() => resolve('dropped'))
-      .catch((e: unknown) => {
-        streamErr = e
-        resolve('dropped')
-      })
-  })
-  // isCancelled poll (stop button) + silence (armSilence, per event) + an
-  // absolute 15-minute cap: with no terminal frame by then the turn is dead.
-  const silent = new Promise<'silent'>((resolve) => {
-    resolveSilent = resolve
-    cancelPoll = setInterval(() => {
-      if (isCancelled?.()) resolve('silent')
-    }, 500)
-  })
-  cap = setTimeout(() => resolveSilent('silent'), 15 * 60 * 1000)
+  const openStreamLeg = (): { promise: Promise<'dropped'>; controller: AbortController } => {
+    const controller = new AbortController()
+    attemptController = controller
+    streamErr = null
+    const promise = new Promise<'dropped'>((resolve) => {
+      ocStream(onEvent, controller.signal, () => armActivityCap())
+        .then(() => resolve('dropped'))
+        .catch((e: unknown) => {
+          streamErr = e
+          resolve('dropped')
+        })
+    })
+    return { promise, controller }
+  }
+
+  const makeSilentLeg = () =>
+    new Promise<'silent'>((resolve) => {
+      resolveSilent = resolve
+    })
+
+  cancelPoll = setInterval(() => {
+    if (isCancelled?.()) resolveSilent('silent')
+  }, 500)
+
+  let firstStream = openStreamLeg()
 
   try {
     if (opts.command) {
-      // Official command (issue 16): same session, same SSE stream — only
-      // the submit endpoint differs. An OcError here propagates exactly
-      // like a failed prompt submit.
       await ocRunCommand(ocId, opts.command.name, opts.command.text)
     } else {
       await ocPrompt(ocId, text)
@@ -460,46 +544,92 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
     finishOnce()
     throw e instanceof Error ? e : new Error(String(e))
   }
-  // The assistant row begins only when the prompt is ACCEPTED — a failed
-  // submit must never leave a phantom "typing" bubble behind.
   hooks.start()
   started = true
   armSilence()
+  armActivityCap()
+  void syncForms()
 
-  // Catch-up: if the tool asked a question before SSE finished attaching,
-  // hydrate pending forms directly from GET /api/session/:id/form.
-  void ocListForms(ocId)
-    .then((forms) => {
-      if (turnDone || !Array.isArray(forms)) return
-      for (const raw of forms) {
-        const form = parseOcForm(raw)
-        if (!form || awaitingUser.has(`form:${form.id}`)) continue
-        awaitingUser.add(`form:${form.id}`)
-        hooks.question?.(form)
-        armSilence()
-      }
+  // Keep re-attaching SSE whenever OpenCode confirms the session is still running
+  // (long tool writes, reasoning pauses, transient mobile socket drops).
+  let currentStream = firstStream
+  while (!turnDone && !disposed) {
+    const silentLeg = makeSilentLeg()
+    const winner = await Promise.race([currentStream.promise, silentLeg])
+    currentStream.controller.abort()
+    if (turnDone || isCancelled?.() || disposed) {
+      if (isCancelled?.()) failed = false
+      break
+    }
+
+    await syncForms()
+    const activeMap = await ocActiveSessions().catch(() => null)
+    const isActive = activeMap ? activeMap[ocId]?.type === 'running' : null
+    const sessionInfo = isActive === true ? null : await ocGetSession(ocId).catch(() => null)
+
+    const decision = decideOcDisconnectAction({
+      cancelled: !!isCancelled?.(),
+      turnDone,
+      winner,
+      hasActivity,
+      lastSilenceLimitMs,
+      pendingFormCount: awaitingUser.size,
+      sessionActive: isActive,
+      sessionOutcome: sessionInfo?.outcome,
+      sessionIdle: sessionInfo?.time?.idle != null,
+      rebindCount,
+      existingError: errorMsg,
+      streamErrorText: streamErr ? describeOcError(streamErr) : undefined,
     })
-    .catch(() => {})
 
-  const winner = await Promise.race([streamDropped, silent])
+    if (decision.kind === 'reconnect') {
+      if (decision.countSilentRebind) rebindCount++
+      log('info', 'opencode', `re-attaching SSE for ${ocId} (${decision.reason})`)
+      armSilence()
+      armActivityCap()
+      await new Promise((r) => setTimeout(r, 250))
+      if (turnDone || disposed || isCancelled?.()) break
+      currentStream = openStreamLeg()
+      continue
+    }
+
+    if (decision.kind === 'complete') {
+      if (decision.syncHistory) {
+        try {
+          const hist = mapOcHistory((await ocHistory(ocId)) ?? [])
+          const last = [...hist].reverse().find((r) => r.role === 'assistant')
+          if (last) {
+            if (last.text && last.text.startsWith(finalText) && last.text.length > finalText.length) {
+              const tail = last.text.slice(finalText.length)
+              finalText += tail
+              hooks.text(tail)
+            } else if (!finalText && last.text) {
+              finalText = last.text
+              hooks.text(last.text)
+            }
+            for (const t of last.tools ?? []) {
+              if (!toolNames.has(t.id)) {
+                hooks.tool(t.id, t.name, t.ok ? 'done' : 'failed')
+              }
+            }
+          }
+        } catch {}
+      }
+      turnDone = true
+      failed = decision.failed
+      errorMsg = decision.errorMsg ?? errorMsg
+      break
+    }
+
+    failed = true
+    errorMsg = decision.message
+    break
+  }
+
   finishOnce()
-  if (winner === 'silent' && !turnDone && isCancelled?.()) {
-    finishOnce()
+  if (!turnDone && isCancelled?.()) {
     hooks.complete(finalText, false)
     return
-  }
-  if (!turnDone) {
-    // No terminal frame: the SSE connection died mid-turn (or went silent —
-    // a wedged relay). The turn is dead either way; the message says which,
-    // with the drop reason when the stream rejected. The silence message
-    // reports the limit that actually fired (15 s idle / 180 s with a tool
-    // in flight) so a long silent tool reads differently from a dead stream.
-    failed = true
-    errorMsg = errorMsg ?? (winner === 'silent'
-      ? `The model stopped responding (no events for ${Math.round(lastSilenceLimitMs / 1000)}s, ${hasActivity ? 'mid-answer' : 'before any output'})`
-      : streamErr
-        ? `The OpenCode connection dropped mid-turn — ${describeOcError(streamErr)}`
-        : 'The OpenCode connection dropped mid-turn')
   }
   hooks.complete(finalText, failed, failed ? errorMsg : undefined)
 }

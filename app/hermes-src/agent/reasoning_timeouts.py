@@ -22,7 +22,8 @@ _REASONING_STALE_TIMEOUT_FLOORS: dict[int, tuple[str, ...]] = {
         # DeepSeek R1 / V4 (reasoning_content streamed before final content).
         # ``deepseek-flash`` is the version-less canonical Flash id (2026-09 Flash refresh);
         # ``deepseek-v4-flash`` still aliases onto it server-side.
-        "deepseek-r1", "deepseek-reasoner", "deepseek-flash", "deepseek-v4-flash", "deepseek-v4.1-flash", "deepseek-v4-pro",
+        "deepseek-r1", "deepseek-reasoner", "deepseek-flash", "deepseek-v4", "deepseek-v4.1",
+        "deepseek-v4-flash", "deepseek-v4.1-flash", "deepseek-v4-pro", "deepseek-v3.2", "deepseek-chat",
         # OpenAI o-series: each variant enumerated so bare ``o1`` cannot over-match ``olmo-1``.
         "o1", "o1-mini", "o1-pro", "o1-preview", "o3", "o3-pro",
         # OpenAI named reasoning lines (gpt-5.6-sol/-terra/-luna, gpt-6-astra, their -pro/-900k
