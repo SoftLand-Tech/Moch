@@ -1,0 +1,237 @@
+{
+ "agent": "A_architecture_logic",
+ "status": "completed",
+ "collected_at": "2026-10-12T00:29:30Z",
+ "note": "Verbatim result from subagent faa36a9b-99e8-42d1-8c7b-9725b7a11012 (message form; closing notice may follow).",
+ "result": {
+  "agent": "A_architecture_logic",
+  "coverage": {
+   "files_examined": [
+    "app/src/lib/chat.ts (full)",
+    "app/src/lib/gateway.ts (full)",
+    "app/src/lib/sendQueue.ts (full)",
+    "app/src/lib/sessionList.ts (full)",
+    "app/src/lib/attention.ts (full)",
+    "app/src/lib/drafts.ts (full)",
+    "app/src/lib/backendIdentity.ts (full)",
+    "app/src/lib/modelState.ts (full)",
+    "app/src/lib/mediaSend.ts (full)",
+    "app/src/lib/browserRelay.ts (full)",
+    "app/src/lib/mochiRuntime.ts (full)",
+    "app/src/lib/shareIn.ts (full)",
+    "app/src/lib/voice.ts (full)",
+    "app/src/lib/push.ts (full)",
+    "app/src/lib/http.ts (full)",
+    "app/src/lib/fleet.ts (full)",
+    "app/src/lib/automationsState.ts (full)",
+    "app/src/lib/terminal.ts (full)",
+    "app/src/protocol/json-rpc-channel.ts (full)",
+    "app/src/protocol/json-rpc-gateway.ts (full)",
+    "app/src/lib/slash.ts (isKnownSlashCommand/parseSlashCommand region)",
+    "app/src/components/SessionToasts.tsx (timer region)",
+    "app/app/(tabs)/chat.tsx (full)",
+    "app/app/_layout.tsx (full)"
+   ],
+   "areas_not_examined": [
+    "app/src/lib/mediaCache.ts, media.ts, mediaState.ts, chatListState.ts, mcpState.ts, log.ts, strings.ts, theme.ts, pairing.ts, slash.ts (full) — only pattern-scanned for timers/leaks, not line-audited; time-boxed",
+    "app/src/components/ (Chat.tsx, Sidebar.tsx, ScreenShell.tsx, ModelPickerSheet.tsx, ProviderKeyForm.tsx, AgentBrowserHost.tsx, mochi/*) — not line-audited",
+    "Remaining route screens ((tabs)/sessions, settings, agent, terminal, automations, connectors, browser, fleet, crew, skills, setup, index, bot, add-computer) — not line-audited",
+    "Python/Kotlin/native sides — out of scope per brief; no cross-contract reads were needed beyond what the TS comments cite"
+   ]
+  },
+  "findings": [
+   {
+    "temp_key": "A-01",
+    "category": "race",
+    "severity": "high",
+    "confidence": "medium",
+    "title": "inflightCreate is shared across provisional windows: a send in a SECOND new-chat window lands in the FIRST window's session",
+    "file": "app/src/lib/chat.ts",
+    "line_start": 1182,
+    "line_end": 1192,
+    "failure_scenario": "User taps New (provisional A, pseudo storedId new:x) and sends; sendPrompt -> ensureSession starts runNewChat(A) and sets the module-global inflightCreate. While that session.create RPC is still in flight (slow/remote gateway), the user taps New again (provisional B becomes active) and sends. sendPrompt sees ps.provisional (B) and calls ensureSession(), which returns `await inflightCreate` — A's session id. The message typed into chat B is submitted to chat A and the user bubble is grafted onto A's transcript (patchSession(sid=A)), while the user keeps looking at B. activeLiveId() (lines 1247-1250) has the same defect, so slash-completion and option-sheet RPCs can also hit the wrong window's session.",
+    "evidence": [
+     "app/src/lib/chat.ts:1184 — `if (inflightCreate) return await inflightCreate` without checking that the in-flight create belongs to the CURRENT provisional window",
+     "app/src/lib/chat.ts:1187-1191 — inflightCreate is a single module-global; only `inflightCreate === p` clears it",
+     "app/src/lib/chat.ts:1755-1760 — sendPrompt: `if (ps?.provisional) { sid = await ensureSession() }` — resolves the ACTIVE window's create, not the pinned one",
+     "app/src/lib/chat.ts:1271-1302 — newChat() is fully local; a second tap mints a second provisional while the first create is still in flight",
+     "app/src/lib/chat.ts:1247-1250 — activeLiveId: same unconditional `return await inflightCreate`"
+    ],
+    "reproduction_steps": [
+     "1. Tap the New-chat button; immediately type a message and send (session.create now in flight).",
+     "2. While the create is still pending (easy on a slow link), tap New again — screen shows a fresh empty chat.",
+     "3. Type a second message and send.",
+     "4. Observe: the second message's user bubble appears in chat 1 (switch to it via the drawer); chat 2 never receives it."
+    ],
+    "related_known_bug": null,
+    "suggested_remediation": "Key the in-flight create to its provisional window (e.g. Map<tempId, Promise<string>>), and in ensureSession/activeLiveId only await the promise for the SAME tempId; otherwise start a new runNewChat for the current window.",
+    "limitations": "Timing-dependent: requires the second send while the first create RPC is unsettled; could not run the app (read-only audit)."
+   },
+   {
+    "temp_key": "A-02",
+    "category": "logic",
+    "severity": "medium",
+    "confidence": "high",
+    "title": "Pinned send to a provisional chat resolves ensureSession() against the ACTIVE chat — offline text composed in a new-chat window is delivered to whichever chat is open at flush time",
+    "file": "app/src/lib/chat.ts",
+    "line_start": 1755,
+    "line_end": 1770,
+    "failure_scenario": "User composes a message in a provisional new-chat window offline; sendPrompt's resolution-phase catch enqueues it to the outbox pinned to t0.storedId — which for a provisional window is the pseudo id `new:…` (line 1799). On reconnect, flushOutbox finds the provisional entry by storedId and calls sendPrompt(item.text, { session: tempKey }) (line 834). sendPrompt's `ps?.provisional` branch calls `ensureSession()` with no argument, which resolves/creates the ACTIVE session — if the user has since switched to chat C, the message is submitted to chat C, violating the pinned-delivery invariant the file documents for BUG-008.",
+    "evidence": [
+     "app/src/lib/chat.ts:1799 — `enqueueOffline(text, t0?.storedId ?? '')` — t0 can be the provisional entry, so the outbox item's storedId is a `new:…` pseudo id",
+     "app/src/lib/chat.ts:832-834 — flushOutbox resolves `find(s => s.storedId === item.storedId)?.id` and pins the send to it (the provisional temp key)",
+     "app/src/lib/chat.ts:1757-1760 — `if (ps?.provisional) { sid = await ensureSession() }` — ensureSession reads activeSession.get(), ignoring `pinned` entirely",
+     "app/src/lib/chat.ts:1176-1192 — ensureSession resolves whatever window is currently active, or creates one"
+    ],
+    "reproduction_steps": [
+     "1. Go offline (airplane mode). Tap New, type a message, send — it fails and is parked in the outbox pinned to the `new:` pseudo id.",
+     "2. Stay on the provisional window (do not let the create succeed) and switch to another chat, then reconnect with the provisional still present.",
+     "3. flushOutbox runs on the online edge (app/(tabs)/chat.tsx:276-286).",
+     "4. The message is submitted to the currently active session, not the chat it was composed in."
+    ],
+    "related_known_bug": "BUG-008",
+    "suggested_remediation": "In sendPrompt's provisional branch, if `pinned` is set, await the create for THAT window (pass tempId through, per A-01's keyed map); otherwise treat a pseudo-pinned outbox item as unpinned-with-target rather than falling back to the active chat.",
+    "limitations": "Requires the provisional window to still exist at flush time; otherwise resumeShared('new:…') fails and the item is (correctly) dropped or retried."
+   },
+   {
+    "temp_key": "A-03",
+    "category": "error-handling",
+    "severity": "high",
+    "confidence": "high",
+    "title": "BUG-036 (timeout double-submit) is still unfixed and flushOutbox automates the duplicate: a timed-out prompt.submit is re-sent on the next flush",
+    "file": "app/src/protocol/json-rpc-channel.ts",
+    "line_start": 251,
+    "line_end": 258,
+    "failure_scenario": "prompt.submit has no idempotency key and the channel's 120s timeout only rejects the client-side promise — the server may have received and started the turn. sendPrompt's catch marks the user row failed and rethrows; when the send came from flushOutbox, its catch re-enqueues the item (text not re-enqueued by sendPrompt's submit-phase path), so the NEXT flush (next reconnect edge) submits the same text again while the first turn is still running/finished — duplicate turn, duplicate reply, double tool spend. Same for a user tapping retry on the failed row.",
+    "evidence": [
+     "app/src/protocol/json-rpc-channel.ts:252-258 — timeout deletes the pending call and rejects; the frame was already sent, no cancellation",
+     "app/src/lib/chat.ts:1847-1863 — prompt.submit has no dedupe/idempotency field; retry only on session-not-found",
+     "app/src/lib/chat.ts:852-862 — flushOutbox catch re-enqueues the item because sendPrompt's submit-phase failure did not re-enqueue it",
+     "app/src/lib/chat.ts:1896-1915 — retryMessage resubmits the same text with no server-side dedupe"
+    ],
+    "reproduction_steps": [
+     "1. Send a prompt against a loaded gateway where prompt.submit acks slower than 120s (or throttle the link).",
+     "2. Request times out; row shows failed.",
+     "3. The server actually received the submit and runs the turn.",
+     "4. Tap retry (or trigger any reconnect flush with the item still in the outbox): the same prompt runs twice."
+    ],
+    "related_known_bug": "BUG-036",
+    "suggested_remediation": "Client half: carry a client-generated submit id in prompt.submit params and skip resubmission when the same id was already acked/seen; tracker's note stands that the real fix is server-side dedupe."
+   },
+   {
+    "temp_key": "A-04",
+    "category": "state",
+    "severity": "high",
+    "confidence": "high",
+    "title": "BUG-086 confirmed still open in this commit: server requests for untracked sessions are filed under a key pendingRequest can never match — unanswerable, and no dot anywhere",
+    "file": "app/src/lib/chat.ts",
+    "line_start": 2091,
+    "line_end": 2107,
+    "failure_scenario": "An approval/clarify arrives for a session this app instance never tracked (automation/CLI/another device). onServerRequestMessage's rebind (storedIdFor -> sessionsById scan) finds nothing, so the request is filed under a live id with no sessionsById entry. pendingRequest (computed over activeSession) can never equal that key, so no question card renders on any screen; pendingStoredIds maps it through map[liveId]?.storedId which is undefined, so the row gets no amber dot. The request sits until the backend deadline — matches the tracker's open BUG-086 exactly.",
+    "evidence": [
+     "app/src/lib/chat.ts:2096-2100 — rebind only succeeds when a tracked entry shares the stored id; otherwise sessionId stays untracked",
+     "app/src/lib/chat.ts:2110-2134 — withPending files the item regardless of whether sessionsById has the key",
+     "app/src/lib/chat.ts:232-236 — pendingRequest = pendingBySession[activeSession]; an untracked key never equals activeSession",
+     "app/src/lib/chat.ts:255-264 — pendingStoredIds drops entries whose live id has no map entry (stored = undefined, filtered)"
+    ],
+    "reproduction_steps": [
+     "1. Start a long-running automation/CLI session on the machine (not from the phone).",
+     "2. Let it raise an approval question.",
+     "3. Phone receives the server request; no card, no dot, and the question cannot be answered from the phone until the backend deadline."
+    ],
+    "related_known_bug": "BUG-086",
+    "suggested_remediation": "Materialize a minimal sessionsById entry (or a side-map keyed by stored id) for untracked-request sessions so pendingRequest/pendingStoredIds can surface and answer them, mirroring the sessionRows path."
+   },
+   {
+    "temp_key": "A-05",
+    "category": "logic",
+    "severity": "low",
+    "confidence": "low",
+    "title": "steerRun falls through to session.steer on any unrecognized session.redirect status, potentially applying the text twice",
+    "file": "app/src/lib/chat.ts",
+    "line_start": 1957,
+    "line_end": 1969,
+    "failure_scenario": "steerRun treats only 'redirected'/'queued' as success. If session.redirect resolves with any other status (new server version, partial application, or a shape drift), the code assumes the redirect did nothing and also calls session.steer with the same text. If the redirect actually applied the message server-side, the user's steer is processed twice (two user messages / two agent iterations).",
+    "evidence": [
+     "app/src/lib/chat.ts:1958-1965 — only 'redirected'|'queued' short-circuits; every other resolved value falls through",
+     "app/src/lib/chat.ts:1968 — fallback `await rpc('session.steer', …)` runs unconditionally after the fall-through"
+    ],
+    "reproduction_steps": [
+     "1. Send a steer while a turn runs against a gateway whose session.redirect returns an unexpected status value.",
+     "2. If the redirect applied the text, session.steer applies it again — visible as a duplicated user steer in the transcript."
+    ],
+    "related_known_bug": null,
+    "suggested_remediation": "Whitelist the statuses that mean 'not applied' before falling back, or log-and-return on unknown statuses instead of double-sending.",
+    "limitations": "Server-side status vocabulary not verified (Python side out of scope); severity depends entirely on whether unknown statuses can co-occur with an applied redirect."
+   },
+   {
+    "temp_key": "A-06",
+    "category": "edge-case",
+    "severity": "low",
+    "confidence": "high",
+    "title": "isKnownSlashCommand returns true whenever the catalog is empty, so offline/boot any '/…' text is routed to the command pipeline and answered with 'Command failed' instead of being sent as a message",
+    "file": "app/src/lib/slash.ts",
+    "line_start": 260,
+    "line_end": 269,
+    "failure_scenario": "Before loadCatalog() succeeds (cold boot, offline, gateway error), commandCatalog is {} and isKnownSlashCommand short-circuits to true for ANY leading-slash text. Chat.send() then routes e.g. '/usr/bin/env — what's in there?' into runSlash -> activeLiveId (may force a session create while offline -> throws) -> runCommand -> RPC failure -> the composer text is restored but the user gets a 'Command failed' alert and the message is never sent, contrary to BUG-042's stated intent that unknown slash-text is a normal message.",
+    "evidence": [
+     "app/src/lib/slash.ts:266-267 — `const catalog = commandCatalog.get(); if (Object.keys(catalog).length === 0) return true`",
+     "app/app/(tabs)/chat.tsx:620-623 — send() dispatches to runSlash when isKnownSlashCommand(text)",
+     "app/app/(tabs)/chat.tsx:425-426,456-461 — runSlash awaits activeLiveId()/runCommand and on failure alerts 'Command failed' instead of sending the text as a turn"
+    ],
+    "reproduction_steps": [
+     "1. Fresh install or offline start (catalog never loaded).",
+     "2. Type '/etc/hosts — summarize this' and tap send.",
+     "3. Instead of the message being sent (or queued), an error alert appears and nothing is delivered."
+    ],
+    "related_known_bug": "BUG-042",
+    "suggested_remediation": "Only default-to-true when a catalog load has actually been attempted and the gateway confirmed an empty catalog; otherwise return false (treat as a message) when offline/catalog-empty."
+   },
+   {
+    "temp_key": "A-07",
+    "category": "logic",
+    "severity": "low",
+    "confidence": "high",
+    "title": "migrateV1Transcript's interim-key early return skips the legacy live-keyed v1 cleanup, stranding those blobs in AsyncStorage",
+    "file": "app/src/lib/chat.ts",
+    "line_start": 624,
+    "lineend": 629,
+    "failure_scenario": "When the interim stored-keyed `.v1` blob exists, the function copies it to v2 and returns BEFORE the loop at line 645 that removes every legacy live-keyed `.v1` transcript mapped to this stored id. Those blobs (up to 300 messages each, several vintages per chat) stay in AsyncStorage indefinitely for live chats; they are only swept on chat deletion or a backend-identity purge.",
+    "evidence": [
+     "app/src/lib/chat.ts:624-629 — `if (interim) { …; return interim }` precedes the cleanup",
+     "app/src/lib/chat.ts:637-645 — legacy live-keyed removal loop only runs on the non-interim path"
+    ],
+    "reproduction_steps": [
+     "1. Upgrade from a build that wrote both interim stored-keyed v1 and legacy live-keyed v1 blobs for the same chat.",
+     "2. Open the chat (v2 hydrates via the interim path).",
+     "3. Inspect AsyncStorage: the old hermes.transcript.<liveId>.v1 keys remain."
+    ],
+    "related_known_bug": null,
+    "suggested_remediation": "Run the legacy live-keyed removal loop before the interim early return (it is read-only work already computed above)."
+   },
+   {
+    "temp_key": "A-08",
+    "category": "validation",
+    "severity": "low",
+    "confidence": "medium",
+    "title": "Batch clarify Send submits without requiring an answer per question — unanswered qids are silently omitted from the answers map",
+    "file": "app/src/lib/chat.ts",
+    "line_start": 2064,
+    "line_end": 2070,
+    "failure_scenario": "The batch clarify card's Send button is always enabled (chat.tsx:1245-1250). respondClarifyBatch forwards batchAnswers verbatim; questions the user never answered (no choice tapped, empty free-text) are simply missing qids in { answers }. If the backend applies only the provided answers, those questions stay blocking or get retried; the user gets no indication that a question went back unanswered. There is also no client-side guard against submitting a completely empty map.",
+    "evidence": [
+     "app/app/(tabs)/chat.tsx:1245-1250 — Send button with no validation of batchAnswers coverage",
+     "app/src/lib/chat.ts:2064-2070 — `answer(req.id, { answers })` sends the map as-is; no per-qid completeness check"
+    ],
+    "reproduction_steps": [
+     "1. Trigger a multi-question clarify (questions array with 2+ entries, at least one free-text).",
+     "2. Answer only the first question and tap Send.",
+     "3. The answers frame contains a single qid; the other question's fate depends entirely on backend behavior."
+    ],
+    "related_known_bug": null,
+    "suggested_remediation": "Require every qid to have a non-empty answer before enabling Send (or send explicit empty answers per qid, whichever the v7 contract specifies).",
+    "limitations": "Backend tolerance for partial answers not verified (server side out of scope)."
+   }
+  ]
+ }
+}

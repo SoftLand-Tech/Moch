@@ -1,0 +1,328 @@
+{
+ "agent": "D_tests_reproduction",
+ "status": "completed",
+ "collected_at": "2026-10-12T00:29:00Z",
+ "note": "Verbatim closing message from subagent 5ea28f2a-d599-44ee-88a2-a84560510946 (supersedes the lead's interim summary previously stored here; temp keys D-01..D-06 are the agent's own).",
+ "commands": [
+  {
+   "cmd": "npm run typecheck",
+   "exit_code": 0,
+   "summary": "pass — tsc clean on both app and scripts tsconfigs"
+  },
+  {
+   "cmd": "npm run lint",
+   "exit_code": 1,
+   "summary": "fail — 1 error, 32 warnings. Error: src/components/PairForm.tsx:141 react-hooks/rules-of-hooks on useThisPhone — false positive (plain async function at line 65, not a hook); fails the lint gate"
+  },
+  {
+   "cmd": "npm run test",
+   "exit_code": 0,
+   "summary": "pass — protocol suite 25/25 (reconnect replay, seq dedupe, open_requests re-delivery, per-session streams)"
+  },
+  {
+   "cmd": "npm run test:imports",
+   "exit_code": 0,
+   "summary": "pass — all routes expose default export, survive throwing expo-notifications"
+  },
+  {
+   "cmd": "npm run test:order",
+   "exit_code": 0,
+   "summary": "pass — 7/7, BUT it dialed a LIVE gateway ws://127.0.0.1:9119 with a token from ~/.config/hermes-serve.env; environment-dependent, not offline"
+  },
+  {
+   "cmd": "npm run test:chatlist",
+   "exit_code": 0,
+   "summary": "pass — 19/19"
+  },
+  {
+   "cmd": "npm run test:attention",
+   "exit_code": 0,
+   "summary": "pass — 28/28 incl. drafts persistence/cap"
+  },
+  {
+   "cmd": "npm run test:queue",
+   "exit_code": 0,
+   "summary": "pass — 22/22"
+  },
+  {
+   "cmd": "npm run test:slash",
+   "exit_code": 0,
+   "summary": "pass — 15/15"
+  },
+  {
+   "cmd": "npm run test:interactive",
+   "exit_code": 0,
+   "summary": "pass — 52/52"
+  },
+  {
+   "cmd": "npm run test:command-output",
+   "exit_code": 0,
+   "summary": "pass — 58/58"
+  },
+  {
+   "cmd": "npm run test:media",
+   "exit_code": 0,
+   "summary": "pass — 81/81 incl. boundary cases (glued ~/ tokens, extensionless paths)"
+  },
+  {
+   "cmd": "npm run test:sharein",
+   "exit_code": 0,
+   "summary": "pass — 21/21"
+  },
+  {
+   "cmd": "npm run test:terminal",
+   "exit_code": 0,
+   "summary": "pass — 36/36"
+  },
+  {
+   "cmd": "npm run test:browser-relay",
+   "exit_code": 0,
+   "summary": "pass — 16/16"
+  },
+  {
+   "cmd": "npm run test:voice",
+   "exit_code": 0,
+   "summary": "pass — 14/14"
+  },
+  {
+   "cmd": "python3 -m pytest --version",
+   "exit_code": 1,
+   "summary": "skipped — pytest not installed (system python 3.14.7; ~/.local python3.11 also lacks it; no pip install permitted)"
+  },
+  {
+   "cmd": "python3 tests/test_browser_attach.py (standalone)",
+   "exit_code": 0,
+   "summary": "pass — 8 tests OK"
+  },
+  {
+   "cmd": "python3 tests/test_browser_boot_gate.py (standalone)",
+   "exit_code": 0,
+   "summary": "pass — 9 tests OK (BUG-105 pid-staleness regressions)"
+  },
+  {
+   "cmd": "python3 tests/test_browser_cache_key.py (standalone)",
+   "exit_code": 0,
+   "summary": "pass — 5 tests, 1 skipped (env-conditional: base scope not bypass sentinel here)"
+  },
+  {
+   "cmd": "python3 tests/test_fleet.py (standalone)",
+   "exit_code": 0,
+   "summary": "pass — 17 tests OK (turn gate, queue, freeze, budgets)"
+  },
+  {
+   "cmd": "python3 tests/test_fleet_worker.py (standalone)",
+   "exit_code": 0,
+   "summary": "pass — 5 tests, 1 skipped (hermes imports unavailable under system python)"
+  },
+  {
+   "cmd": "python3 tests/test_linux_exec.py (standalone)",
+   "exit_code": 0,
+   "summary": "pass — 39 tests OK"
+  },
+  {
+   "cmd": "python3 tests/test_rpc_fleet.py (standalone)",
+   "exit_code": 0,
+   "summary": "pass but 4/4 SKIPPED — hermes server deps unavailable; moch.* RPC surface untested in this environment"
+  },
+  {
+   "cmd": "python3 tests/test_search_no_fts.py (standalone)",
+   "exit_code": 0,
+   "summary": "pass — 4 tests OK"
+  },
+  {
+   "cmd": "python3 tests/test_spawn_bot.py (standalone)",
+   "exit_code": 0,
+   "summary": "pass — 21 tests OK"
+  },
+  {
+   "cmd": "python3 tests/test_terminal.py (standalone)",
+   "exit_code": 0,
+   "summary": "pass — 6 tests OK"
+  }
+ ],
+ "coverage": {
+  "suites_run": [
+   "typecheck",
+   "lint",
+   "test (protocol)",
+   "test:imports",
+   "test:order",
+   "test:chatlist",
+   "test:attention",
+   "test:queue",
+   "test:slash",
+   "test:interactive",
+   "test:command-output",
+   "test:media",
+   "test:sharein",
+   "test:terminal",
+   "test:browser-relay",
+   "test:voice",
+   "10 python unittest files (standalone, pytest absent)"
+  ],
+  "suites_skipped": [
+   {
+    "suite": "pytest runner",
+    "reason": "pytest not installed on any available interpreter; all test files are stdlib unittest and were run standalone instead"
+   },
+   {
+    "suite": "test:live",
+    "reason": "needs a live external gateway (per instructions)"
+   },
+   {
+    "suite": "test_rpc_fleet (4 tests)",
+    "reason": "hermes server deps unavailable under system python 3.14"
+   },
+   {
+    "suite": "test_browser_cache_key 1 test, test_fleet_worker 1 test",
+    "reason": "environment-conditional skips"
+   }
+  ],
+  "modules_without_tests": [
+   "src/lib/automationsState.ts",
+   "src/lib/backendIdentity.ts",
+   "src/lib/fleet.ts (JS side)",
+   "src/lib/http.ts",
+   "src/lib/log.ts",
+   "src/lib/mcpLogos.ts",
+   "src/lib/mcpState.ts",
+   "src/lib/mediaCache.ts (281 lines)",
+   "src/lib/mediaSend.ts (343 lines)",
+   "src/lib/mochiRuntime.ts (175 lines)",
+   "src/lib/pairing.ts",
+   "src/lib/push.ts (509 lines)",
+   "src/lib/sessionList.ts (only mirrored in test:order, never imported)",
+   "src/lib/strings.ts",
+   "src/lib/theme.ts",
+   "src/lib/voice.ts (only voiceLevels.ts covered)",
+   "src/lib/gateway.ts dial/backoff state machine (exercised only via fake gateway, no direct unit tests)"
+  ]
+ },
+ "findings": [
+  {
+   "temp_key": "D-01",
+   "category": "test-failure",
+   "severity": "medium",
+   "confidence": "high",
+   "title": "Lint gate fails: rules-of-hooks false positive on PairForm's useThisPhone helper",
+   "file": "app/src/components/PairForm.tsx",
+   "line_start": 65,
+   "line_end": 141,
+   "failure_scenario": "npm run lint exits 1, blocking any lint-gated CI, because eslint's react-hooks rule sees a function named use* called inside an onPress callback at line 141. useThisPhone is an ordinary async function (line 65), not a hook — no React violation exists.",
+   "evidence": [
+    "lint output: 'PairForm.tsx 141:29 error React Hook \"useThisPhone\" cannot be called inside a callback'",
+    "PairForm.tsx:65 — 'const useThisPhone = async () => {' — plain closure, no hook calls inside"
+   ],
+   "reproduction_steps": [
+    "cd app && npm run lint — exit 1, 1 error / 32 warnings"
+   ],
+   "related_known_bug": null,
+   "suggested_remediation": "Rename useThisPhone to e.g. pairThisPhone, or add a targeted eslint-disable-next-line react-hooks/rules-of-hooks at line 141. Not a functional bug.",
+   "limitations": "JS-only check; no runtime impact verified beyond lint."
+  },
+  {
+   "temp_key": "D-02",
+   "category": "weak-test",
+   "severity": "high",
+   "confidence": "high",
+   "title": "test:order is mislabeled offline: it dials a live gateway and tests a mirrored copy of sessionList instead of the real module",
+   "file": "app/scripts/test-session-order.ts",
+   "line_start": 1,
+   "line_end": 70,
+   "failure_scenario": "The suite reads HERMES_DASHBOARD_SESSION_TOKEN from ~/.config/hermes-serve.env and opens ws://127.0.0.1:9119 to fetch real session rows; on any machine without a running gateway it exits 1 with 'no token', so 'test:order pass' does not mean the suite is deterministic. Worse, sortSessions/toMs are re-implemented locally ('/** Mirrors src/lib/sessionList.ts */') — the real src/lib/sessionList.ts is never imported, so the suite can stay green while the shipped sorting logic diverges (the exact BUG-103-class ordering bug it exists to guard could regress undetected).",
+   "evidence": [
+    "test-session-order.ts:6-8 — reads hermes-serve.env, connects ws://127.0.0.1:9119",
+    "test-session-order.ts:35 — '/** Mirrors src/lib/sessionList.ts */' followed by local toMs/sortSessions",
+    "grep of all suite imports: no suite imports src/lib/sessionList"
+   ],
+   "reproduction_steps": [
+    "cd app && npm run test:order — passed 7/7 only because a gateway was live on 127.0.0.1:9119; comment out the gateway process and it prints 'no token' and exit 1"
+   ],
+   "related_known_bug": null,
+   "suggested_remediation": "Import toMs/sortSessions from src/lib/sessionList.ts (strip RN-only deps or split pure helpers), and replace the live-gateway fetch with a fake in-process gateway like the other suites."
+  },
+  {
+   "temp_key": "D-03",
+   "category": "missing-test",
+   "severity": "high",
+   "confidence": "high",
+   "title": "17 src/lib modules including push, mediaCache, mediaSend, pairing, mochiRuntime, fleet, backendIdentity have no test suite",
+   "file": "app/src/lib",
+   "line_start": 1,
+   "line_end": 1,
+   "failure_scenario": "mediaCache (281 lines: eviction/corruption paths), mediaSend (343: upload fallback), push (509: token registration, permission quirks — the exact area of the silent-notification-drop comment in PairForm), pairing (parseConnectUrl — untrusted-input parsing), backendIdentity, mochiRuntime, fleet (JS), automationsState, mcpState/modelState-edge, theme, strings, http, log, sessionList, voice.ts all have zero automated coverage; regressions there are only catchable on device.",
+   "evidence": [
+    "Import grep across scripts/test-*.ts shows only these lib modules ever imported: attention, drafts, browserRelay, chatListState, slash, chat, gateway(injection), modelState, media, mediaState, sendQueue, shareIn, terminal, voiceLevels",
+    "pairing.ts parseConnectUrl is exercised only indirectly via PairForm QR paths, never with adversarial input"
+   ],
+   "reproduction_steps": [
+    "grep -n \"src/lib\" app/scripts/test-*.ts — enumerate covered modules; diff against ls app/src/lib"
+   ],
+   "related_known_bug": null,
+   "suggested_remediation": "Prioritize pairing.parseConnectUrl (fuzz: bad scheme, no token, IPv6 host, url-encoded host), mediaCache eviction, push token flow, and backendIdentity — all pure/JS-testable today."
+  },
+  {
+   "temp_key": "D-04",
+   "category": "regression-gap",
+   "severity": "high",
+   "confidence": "medium",
+   "title": "BUG-132 native fixes (120x1s arm window, native arm-retry) have zero test coverage; BUG-132 still open",
+   "file": "app/android/app/src/main/java/com/hermes/pocket/hermes/BrowserRelayModule.kt",
+   "line_start": 1,
+   "line_end": 1,
+   "failure_scenario": "Commits 122d6bf and 0155696 changed BrowserRelayModule.kt to widen the gate-arm window and retry arming natively; no Kotlin test, no JS test, and the Python gate tests (test_browser_boot_gate.py) only cover pid-staleness. A regression reintroducing the cold-boot race (tools advertised but relay down) would pass every suite in this report. 1290c9f's python-side partition/check_fn fix did add cache_key tests — partial coverage only.",
+   "evidence": [
+    "git show --stat 122d6bf 0155696 — only BrowserRelayModule.kt touched, no test files",
+    "grep of test_browser_boot_gate.py: no coverage of 120s window or native retry",
+    "bugs.md:975 — BUG-132 [HIGH] (NEW, WIP) still open"
+   ],
+   "reproduction_steps": [
+    "git show 122d6bf --stat; git show 0155696 --stat; grep -n '120\\|retry' app/python-runtime/tests/test_browser_boot_gate.py — no matches"
+   ],
+   "related_known_bug": "BUG-132",
+   "suggested_remediation": "Add a python-side test for the widened arm window semantics where testable, plus an instrumented/robolectric test for the native retry loop before closing BUG-132; keep the tracker WIP until on-device evidence lands.",
+   "limitations": "Kotlin untestable at JS/Python level per audit constraints; gradle not run."
+  },
+  {
+   "temp_key": "D-05",
+   "category": "missing-test",
+   "severity": "medium",
+   "confidence": "high",
+   "title": "moch.* fleet RPC layer effectively untested in this environment (test_rpc_fleet 4/4 skipped)",
+   "file": "app/python-runtime/tests/test_rpc_fleet.py",
+   "line_start": 90,
+   "line_end": 100,
+   "failure_scenario": "All 4 RPC tests skip because hermes server deps are unavailable under the available interpreters, so moch.kanban.tasks / moch.runs.timeline (the Crew read view's data path, shipped in M9) have no executing test here. A break in the RPC dispatch layer would pass this audit.",
+   "evidence": [
+    "test_rpc_fleet.py:98 — self.skipTest(f\"hermes server deps unavailable: {exc}\")",
+    "run output: 'Ran 4 tests ... OK (skipped=4)'"
+   ],
+   "reproduction_steps": [
+    "cd app/python-runtime && python3 tests/test_rpc_fleet.py — 4 skipped"
+   ],
+   "related_known_bug": null,
+   "suggested_remediation": "Install pytest + hermes server deps (or vendor a lightweight fake of the server deps) so the RPC suite executes in CI; also add pytest to the environment so `python3 -m pytest tests/` works as documented."
+  },
+  {
+   "temp_key": "D-06",
+   "category": "regression-gap",
+   "severity": "low",
+   "confidence": "high",
+   "title": "BUG-102/BUG-103 UI fixes (Steer chip placement, FlatList inversion) have no regression tests",
+   "file": "app/app/(tabs)/chat.tsx",
+   "line_start": 1,
+   "line_end": 1,
+   "failure_scenario": "Both fixes are pure layout/scroll behavior (commits 012a3e6, 3fcea0a); no offline JS suite can exercise FlatList inversion or chip positioning, so a future refactor of chat.tsx could silently undo either fix.",
+   "evidence": [
+    "git log: 012a3e6 fix(chat) BUG-103, 3fcea0a fix(chat) BUG-102 — no test files touched",
+    "No suite imports app/(tabs)/chat.tsx"
+   ],
+   "reproduction_steps": [
+    "git show --stat 012a3e6 3cfea0a"
+   ],
+   "related_known_bug": "BUG-103",
+   "suggested_remediation": "Extract the ordering/parking logic (parkAtBottomRef/listRevealed) into a pure helper and unit-test it; device-verify per the tracker's pending-check notes.",
+   "limitations": "React Native UI behavior not testable with the offline plain-node harness."
+  }
+ ]
+}

@@ -1,0 +1,538 @@
+[
+ {
+  "id": "BUG-001",
+  "fixed": true
+ },
+ {
+  "id": "BUG-002",
+  "fixed": true
+ },
+ {
+  "id": "BUG-003",
+  "fixed": true
+ },
+ {
+  "id": "BUG-004",
+  "fixed": true
+ },
+ {
+  "id": "BUG-005",
+  "fixed": true
+ },
+ {
+  "id": "BUG-006",
+  "fixed": true
+ },
+ {
+  "id": "BUG-082",
+  "fixed": true
+ },
+ {
+  "id": "BUG-007",
+  "fixed": true
+ },
+ {
+  "id": "BUG-008",
+  "fixed": true
+ },
+ {
+  "id": "BUG-009",
+  "fixed": true
+ },
+ {
+  "id": "BUG-010",
+  "fixed": true
+ },
+ {
+  "id": "BUG-011",
+  "fixed": true
+ },
+ {
+  "id": "BUG-012",
+  "fixed": true
+ },
+ {
+  "id": "BUG-013",
+  "fixed": true
+ },
+ {
+  "id": "BUG-014",
+  "fixed": true
+ },
+ {
+  "id": "BUG-015",
+  "fixed": true
+ },
+ {
+  "id": "BUG-016",
+  "fixed": true
+ },
+ {
+  "id": "BUG-017",
+  "fixed": true
+ },
+ {
+  "id": "BUG-018",
+  "fixed": true
+ },
+ {
+  "id": "BUG-019",
+  "fixed": true
+ },
+ {
+  "id": "BUG-083",
+  "fixed": true
+ },
+ {
+  "id": "BUG-084",
+  "fixed": true
+ },
+ {
+  "id": "BUG-085",
+  "fixed": true
+ },
+ {
+  "id": "BUG-086",
+  "fixed": false
+ },
+ {
+  "id": "BUG-103",
+  "fixed": false
+ },
+ {
+  "id": "BUG-090",
+  "fixed": true
+ },
+ {
+  "id": "BUG-091",
+  "fixed": true
+ },
+ {
+  "id": "BUG-092",
+  "fixed": true
+ },
+ {
+  "id": "BUG-093",
+  "fixed": true
+ },
+ {
+  "id": "BUG-094",
+  "fixed": true
+ },
+ {
+  "id": "BUG-095",
+  "fixed": true
+ },
+ {
+  "id": "BUG-096",
+  "fixed": true
+ },
+ {
+  "id": "BUG-097",
+  "fixed": true
+ },
+ {
+  "id": "BUG-098",
+  "fixed": true
+ },
+ {
+  "id": "BUG-099",
+  "fixed": true
+ },
+ {
+  "id": "BUG-100",
+  "fixed": true
+ },
+ {
+  "id": "BUG-101",
+  "fixed": false
+ },
+ {
+  "id": "BUG-102",
+  "fixed": false
+ },
+ {
+  "id": "BUG-104",
+  "fixed": true
+ },
+ {
+  "id": "BUG-105",
+  "fixed": true
+ },
+ {
+  "id": "BUG-020",
+  "fixed": true
+ },
+ {
+  "id": "BUG-021",
+  "fixed": true
+ },
+ {
+  "id": "BUG-022",
+  "fixed": true
+ },
+ {
+  "id": "BUG-023",
+  "fixed": true
+ },
+ {
+  "id": "BUG-024",
+  "fixed": true
+ },
+ {
+  "id": "BUG-025",
+  "fixed": true
+ },
+ {
+  "id": "BUG-026",
+  "fixed": true
+ },
+ {
+  "id": "BUG-027",
+  "fixed": true
+ },
+ {
+  "id": "BUG-028",
+  "fixed": true
+ },
+ {
+  "id": "BUG-029",
+  "fixed": true
+ },
+ {
+  "id": "BUG-030",
+  "fixed": true
+ },
+ {
+  "id": "BUG-031",
+  "fixed": true
+ },
+ {
+  "id": "BUG-032",
+  "fixed": true
+ },
+ {
+  "id": "BUG-033",
+  "fixed": true
+ },
+ {
+  "id": "BUG-034",
+  "fixed": true
+ },
+ {
+  "id": "BUG-035",
+  "fixed": true
+ },
+ {
+  "id": "BUG-036",
+  "fixed": false
+ },
+ {
+  "id": "BUG-089",
+  "fixed": true
+ },
+ {
+  "id": "BUG-037",
+  "fixed": true
+ },
+ {
+  "id": "BUG-038",
+  "fixed": true
+ },
+ {
+  "id": "BUG-039",
+  "fixed": true
+ },
+ {
+  "id": "BUG-040",
+  "fixed": true
+ },
+ {
+  "id": "BUG-041",
+  "fixed": true
+ },
+ {
+  "id": "BUG-042",
+  "fixed": true
+ },
+ {
+  "id": "BUG-043",
+  "fixed": true
+ },
+ {
+  "id": "BUG-044",
+  "fixed": true
+ },
+ {
+  "id": "BUG-045",
+  "fixed": true
+ },
+ {
+  "id": "BUG-046",
+  "fixed": true
+ },
+ {
+  "id": "BUG-047",
+  "fixed": true
+ },
+ {
+  "id": "BUG-048",
+  "fixed": true
+ },
+ {
+  "id": "BUG-087",
+  "fixed": true
+ },
+ {
+  "id": "BUG-088",
+  "fixed": true
+ },
+ {
+  "id": "BUG-049",
+  "fixed": true
+ },
+ {
+  "id": "BUG-050",
+  "fixed": true
+ },
+ {
+  "id": "BUG-051",
+  "fixed": true
+ },
+ {
+  "id": "BUG-052",
+  "fixed": true
+ },
+ {
+  "id": "BUG-053",
+  "fixed": true
+ },
+ {
+  "id": "BUG-054",
+  "fixed": true
+ },
+ {
+  "id": "BUG-055",
+  "fixed": true
+ },
+ {
+  "id": "BUG-056",
+  "fixed": true
+ },
+ {
+  "id": "BUG-057",
+  "fixed": true
+ },
+ {
+  "id": "BUG-058",
+  "fixed": true
+ },
+ {
+  "id": "BUG-059",
+  "fixed": true
+ },
+ {
+  "id": "BUG-060",
+  "fixed": true
+ },
+ {
+  "id": "BUG-061",
+  "fixed": true
+ },
+ {
+  "id": "BUG-062",
+  "fixed": true
+ },
+ {
+  "id": "BUG-063",
+  "fixed": true
+ },
+ {
+  "id": "BUG-064",
+  "fixed": true
+ },
+ {
+  "id": "BUG-065",
+  "fixed": true
+ },
+ {
+  "id": "BUG-066",
+  "fixed": true
+ },
+ {
+  "id": "BUG-067",
+  "fixed": true
+ },
+ {
+  "id": "BUG-068",
+  "fixed": true
+ },
+ {
+  "id": "BUG-069",
+  "fixed": true
+ },
+ {
+  "id": "BUG-070",
+  "fixed": true
+ },
+ {
+  "id": "BUG-071",
+  "fixed": true
+ },
+ {
+  "id": "BUG-072",
+  "fixed": true
+ },
+ {
+  "id": "BUG-073",
+  "fixed": true
+ },
+ {
+  "id": "BUG-074",
+  "fixed": false
+ },
+ {
+  "id": "BUG-075",
+  "fixed": true
+ },
+ {
+  "id": "BUG-076",
+  "fixed": true
+ },
+ {
+  "id": "BUG-077",
+  "fixed": true
+ },
+ {
+  "id": "BUG-078",
+  "fixed": true
+ },
+ {
+  "id": "BUG-079",
+  "fixed": true
+ },
+ {
+  "id": "BUG-080",
+  "fixed": true
+ },
+ {
+  "id": "BUG-081",
+  "fixed": true
+ },
+ {
+  "id": "BUG-106",
+  "fixed": true
+ },
+ {
+  "id": "BUG-107",
+  "fixed": true
+ },
+ {
+  "id": "BUG-108",
+  "fixed": true
+ },
+ {
+  "id": "BUG-109",
+  "fixed": true
+ },
+ {
+  "id": "BUG-110",
+  "fixed": true
+ },
+ {
+  "id": "BUG-111",
+  "fixed": true
+ },
+ {
+  "id": "BUG-112",
+  "fixed": true
+ },
+ {
+  "id": "BUG-113",
+  "fixed": true
+ },
+ {
+  "id": "BUG-114",
+  "fixed": true
+ },
+ {
+  "id": "BUG-115",
+  "fixed": false
+ },
+ {
+  "id": "BUG-116",
+  "fixed": true
+ },
+ {
+  "id": "BUG-117",
+  "fixed": false
+ },
+ {
+  "id": "BUG-118",
+  "fixed": true
+ },
+ {
+  "id": "BUG-119",
+  "fixed": false
+ },
+ {
+  "id": "BUG-120",
+  "fixed": false
+ },
+ {
+  "id": "BUG-121",
+  "fixed": false
+ },
+ {
+  "id": "BUG-122",
+  "fixed": false
+ },
+ {
+  "id": "BUG-123",
+  "fixed": true
+ },
+ {
+  "id": "BUG-124",
+  "fixed": false
+ },
+ {
+  "id": "BUG-125",
+  "fixed": true
+ },
+ {
+  "id": "BUG-126",
+  "fixed": false
+ },
+ {
+  "id": "BUG-127",
+  "fixed": false
+ },
+ {
+  "id": "BUG-128",
+  "fixed": false
+ },
+ {
+  "id": "BUG-129",
+  "fixed": false
+ },
+ {
+  "id": "BUG-130",
+  "fixed": true
+ },
+ {
+  "id": "BUG-131",
+  "fixed": false
+ },
+ {
+  "id": "BUG-107",
+  "fixed": true
+ },
+ {
+  "id": "BUG-132",
+  "fixed": false
+ },
+ {
+  "id": "BUG-133",
+  "fixed": false
+ }
+]

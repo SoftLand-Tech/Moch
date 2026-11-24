@@ -1,0 +1,19 @@
+{
+  "agent": "F_challenger",
+  "status": "completed",
+  "collected_at": "2026-10-12T00:42:00Z",
+  "note": "Summary form delivered via message (subagent 225de0f5-9989-48d3-a442-68c67209df46); full per-finding verdict JSON announced to follow in the closing message. Verdict events BH-000069..BH-000072 already applied to findings.jsonl.",
+  "summary": {
+    "challenged": "all 20 Priority-1 IDs + Priority-2 spot checks",
+    "verdict_counts": {"uphold": 17, "uphold_with_changes": 2, "reject": 1},
+    "manifest_contradiction": "RESOLVED: AndroidManifest.xml:39 declares HermesService foregroundServiceType=dataSync (mediaPlayback belongs to expo-audio AudioControlsService ~line 36); targetSdk 36 so Android 15+ 6h dataSync cap applies — BH-000046 upheld, status confirmed.",
+    "lint_reproduced": "npm run lint exit 1, exactly 1 error (PairForm.tsx:141:29 rules-of-hooks useThisPhone) + 32 warnings — BH-000026 upheld.",
+    "rejection": "BH-000022 (A-05 steer double-apply): vendored server session.redirect returns closed status set {redirected, queued, rejected} + JSON-RPC errors (methods_session.py:2081-2129); 'rejected' means redirect did NOT apply the text, so the session.steer fallback is single-apply by design — double-apply unreachable.",
+    "confidence_change": "BH-000019 raised medium->high (misdelivery plainly readable at chat.ts:1757).",
+    "priority2": {
+      "BH-000005": "replay-buffer root cause confirmed — terminal.py clears only _state.chunks on start (:202-203) and kill (:294-295), never _state.replay; terminal.ts start() paints native.replay() into the fresh xterm.",
+      "BH-000041": "drift confirmed: moch-link/install.sh 1095 lines vs docs/install.sh 661 (~434-line gap; diff emits 465 lines) — B and C estimates consistent."
+    },
+    "id_bookkeeping_note": "agent B event numbering interleaves annotations among discoveries (049=annotation on 041; 050=debian; 051=linux_session; 055=systemctl). Corrected by lead — see findings.jsonl event BH-000068."
+  }
+}

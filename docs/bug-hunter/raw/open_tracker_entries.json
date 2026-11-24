@@ -1,0 +1,98 @@
+{
+ "086": {
+  "line": 120,
+  "sev": "HIGH",
+  "title": "Sessions started elsewhere (automation/CLI/another device) show NO running/done/error dot in any state \u2014 and their approval questions are unanswerable",
+  "raw": "- [ ] **BUG-086 [HIGH] Sessions started elsewhere (automation/CLI/another device) show NO running/done/error dot in any state \u2014 and their approval questions are unanswerable** \u2014 `src/lib/chat.ts:2065-2066,239-244,282-289,2002-2003,1884,224-228` + `src/lib/sessionList.ts:22-31`"
+ },
+ "036": {
+  "line": 212,
+  "sev": "MEDIUM",
+  "title": "120s request timeout \u2192 2-minute hangs + double-submitted prompts",
+  "raw": "- [ ] **BUG-036 [MEDIUM] 120s request timeout \u2192 2-minute hangs + double-submitted prompts** \u2014 `src/protocol/json-rpc-channel.ts:135,241-249` + `src/lib/chat.ts:1655`. Timeout only rejects; `prompt.submit` has no idempotency key so timed-out-but-delivered + retry double-submits. *(Client-side half; server dedupe is the real fix.)*"
+ },
+ "074": {
+  "line": 270,
+  "sev": "LOW",
+  "title": "Raw server strings in UI",
+  "raw": "- [ ] **BUG-074 [LOW] Raw server strings in UI** \u2014 `item.source` verbatim (\"mobile \u00b7 2 msgs\", sessions.tsx:213); \"cannot delete an active session\"/\"session not found\" alerts; optimistic row stuck at \"0 msgs\" (`sessionList.ts:120`)."
+ },
+ "115": {
+  "line": 341,
+  "sev": "MEDIUM",
+  "title": "Terminal: Kill \u2192 Retry replays the dead session's scrollback into the fresh shell",
+  "raw": "- [ ] **BUG-115 [MEDIUM] Terminal: Kill \u2192 Retry replays the dead session's scrollback into the fresh shell** \u2014 `app/python-runtime/moch/terminal.py:202-203` + `app/src/lib/terminal.ts:226-250`"
+ },
+ "117": {
+  "line": 349,
+  "sev": "MEDIUM",
+  "title": "Model picker opened from Settings shows an internal error banner",
+  "raw": "- [ ] **BUG-117 [MEDIUM] Model picker opened from Settings shows an internal error banner** \u2014 `app/(tabs)/settings.tsx` \u2192 model sheet"
+ },
+ "119": {
+  "line": 357,
+  "sev": "LOW",
+  "title": "About shows `Moch v1.0`, not the installed build",
+  "raw": "- [ ] **BUG-119 [LOW] About shows `Moch v1.0`, not the installed build** \u2014 `app/(tabs)/settings.tsx`"
+ },
+ "121": {
+  "line": 365,
+  "sev": "MEDIUM",
+  "title": "Browser gate failure mode: the agent improvises instead of saying the tools are unavailable",
+  "raw": "- [ ] **BUG-121 [MEDIUM] Browser gate failure mode: the agent improvises instead of saying the tools are unavailable** \u2014 `hermes-src/tools/tool_search.py` hint + `browser_webview._RELAY_DOWN_ERROR` path"
+ },
+ "122": {
+  "line": 369,
+  "sev": "LOW",
+  "title": "SQLite WAL-reset vulnerability warning on every boot, with non-actionable advice",
+  "raw": "- [ ] **BUG-122 [LOW] SQLite WAL-reset vulnerability warning on every boot, with non-actionable advice** \u2014 `errors.log` (`hermes_state`)"
+ },
+ "124": {
+  "line": 402,
+  "sev": "LOW",
+  "title": "A rejected pairing link gives no feedback at all",
+  "raw": "- [ ] **BUG-124 [LOW] A rejected pairing link gives no feedback at all** \u2014 `app/add-computer.tsx` (paste-pairing-link path)"
+ },
+ "126": {
+  "line": 432,
+  "sev": "MEDIUM",
+  "title": "`browser_console` can answer \"JavaScript evaluation is not supported by this browser backend. agent-browser CLI not found (cached)\" in WebView mode",
+  "raw": "- [ ] **BUG-126 [MEDIUM] `browser_console` can answer \"JavaScript evaluation is not supported by this browser backend. agent-browser CLI not found (cached)\" in WebView mode** \u2014 `hermes-src/tools/browser_tool.py` (console backend check)"
+ },
+ "127": {
+  "line": 442,
+  "sev": "MEDIUM",
+  "title": "\"No browser page\" can appear while the relay is up and the tab is loaded \u2014 the attachment is lost across a CDP navigation and only a fresh navigate recovers it",
+  "raw": "- [ ] **BUG-127 [MEDIUM] \"No browser page\" can appear while the relay is up and the tab is loaded \u2014 the attachment is lost across a CDP navigation and only a fresh navigate recovers it** \u2014 `hermes-src/tools/browser_supervisor.py` (per-page attach), `CdpRelay` /json/list filter"
+ },
+ "128": {
+  "line": 460,
+  "sev": "LOW",
+  "title": "`data:` URLs are refused with the wrong reason",
+  "raw": "- [ ] **BUG-128 [LOW] `data:` URLs are refused with the wrong reason** \u2014 `hermes-src/tools/browser_tool.py` (`_url_policy_error` \u2192 `_is_safe_url`)"
+ },
+ "129": {
+  "line": 469,
+  "sev": "MEDIUM",
+  "title": "Settings \u2192 \"Stop runtime\" does nothing \u2014 the app keeps running and the gateway keeps serving, with the failure swallowed",
+  "raw": "- [ ] **BUG-129 [MEDIUM] Settings \u2192 \"Stop runtime\" does nothing \u2014 the app keeps running and the gateway keeps serving, with the failure swallowed** \u2014 `app/app/(tabs)/settings.tsx:125-131` \u2192 `src/lib/mochiRuntime.ts:55-58` \u2192 `android/.../hermes/HermesBridgeModule.kt:58-65` (`HermesService.stop`)"
+ },
+ "131": {
+  "line": 493,
+  "sev": "MEDIUM",
+  "title": "Session list rows carry no running marker",
+  "raw": "- [ ] **BUG-131 [MEDIUM] Session list rows carry no running marker** \u2014 `hermes_cli/web_routers/sessions.py` (list rows), `app/src/lib/sessionList.ts`"
+ },
+ "132": {
+  "line": 975,
+  "sev": "HIGH",
+  "title": "Browser tools are not always available \u2014 the agent boots the relay but a cold-start race still hides the tools",
+  "raw": "## BUG-132 [HIGH] (NEW, WIP) Browser tools are not always available \u2014 the agent boots the relay but a cold-start race still hides the tools"
+ },
+ "133": {
+  "line": 1029,
+  "sev": "HIGH",
+  "title": "Keyboard opens over inputs app-wide \u2014 the input and everything at the bottom must rise ABOVE the keyboard",
+  "raw": "## BUG-133 [HIGH] (NEW, WIP) Keyboard opens over inputs app-wide \u2014 the input and everything at the bottom must rise ABOVE the keyboard"
+ }
+}

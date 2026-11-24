@@ -1,0 +1,285 @@
+{
+ "agent": "G_gap_pass",
+ "subagent_id": "2e5e0074-9d07-4a1a-8bf4-0dcbf4c4836b",
+ "status": "completed",
+ "collected_at": "2026-10-12T00:42:19Z",
+ "note": "Original gap-pass run (believed orphaned, later delivered). G-07 is the corrected authoritative version per the agent's follow-up correction message.",
+ "coverage": {
+  "files_examined": [
+   "app/src/components/AgentBrowserHost.tsx",
+   "AlertDialog.tsx",
+   "AnimatedSplash.tsx",
+   "Chat.tsx",
+   "CommandCatalogSheet.tsx",
+   "CommandOptionsSheet.tsx",
+   "CommandOutput.tsx",
+   "Icon.tsx",
+   "Mascot.tsx",
+   "ModelPickerSheet.tsx",
+   "PairForm.tsx",
+   "ProviderKeyForm.tsx",
+   "ScreenShell.tsx",
+   "SessionToasts.tsx",
+   "Sidebar.tsx",
+   "VoiceRecStrip.tsx",
+   "useReduceMotion.ts",
+   "mochi/useMochiState.ts",
+   "app/index.tsx",
+   "app/setup.tsx",
+   "app/bot.tsx",
+   "app/add-computer.tsx",
+   "app/_layout.tsx (AgentBrowserHost placement + deep-link path only)",
+   "app/(tabs)/_layout.tsx",
+   "app/(tabs)/sessions.tsx",
+   "app/(tabs)/settings.tsx",
+   "app/(tabs)/agent.tsx",
+   "app/(tabs)/terminal.tsx",
+   "app/(tabs)/automations.tsx",
+   "app/(tabs)/connectors.tsx",
+   "app/(tabs)/browser.tsx",
+   "app/(tabs)/fleet.tsx",
+   "app/(tabs)/crew.tsx",
+   "app/(tabs)/skills.tsx",
+   "supporting lib cross-checks: fleet.ts, sessionList.ts, modelState.ts, terminal.ts, mochiRuntime.ts (signatures only)"
+  ],
+  "areas_still_not_examined": [
+   "app/src/components/media/* (AttachmentChip, AttachSheet, AudioBubble, FileCard, ImageBubble, MediaSegmentView, MediaViewerModal, VideoBubble, share.ts)",
+   "app/src/components/mochi/MochiSurface.{native,web}.tsx + mochiStates.gen.ts (gen file)",
+   "deep pass1-audited files skipped per scope"
+  ]
+ },
+ "findings": [
+  {
+   "temp_key": "G-01",
+   "category": "logic",
+   "severity": "medium",
+   "confidence": "high",
+   "title": "Fleet create/freeze failures are silently swallowed (no catch, unhandled rejection)",
+   "file": "app/app/(tabs)/fleet.tsx",
+   "line_start": 57,
+   "line_end": 78,
+   "failure_scenario": "User taps Create bot (or freeze/unfreeze) while the connection blips. createProfile()/freezeProfile() await rpc('profiles.create'/'moch.fleet.freeze') which rejects; fleet.tsx's create()/toggleFreeze() have try/finally with NO catch, and the Pressable handlers don't catch either -> unhandled promise rejection, setJob('')/setCreating(false) skipped for create, and NO error shown anywhere (fleetError is only set inside refreshFleet's own list read, which never runs because the create RPC threw first). The form just sits there; the user cannot tell why nothing happened.",
+   "evidence": [
+    "app/app/(tabs)/fleet.tsx:57-68 — create(): try { ... } finally { setBusy(null) }, no catch",
+    "app/app/(tabs)/fleet.tsx:70-78 — toggleFreeze(): same shape",
+    "app/src/lib/fleet.ts:106-116 — createProfile await rpc throws propagate; only refreshFleet's internal reads are caught",
+    "app/src/lib/fleet.ts:119-122 — freezeProfile: bare await rpc"
+   ],
+   "reproduction_steps": [
+    "Open Fleet, tap Create with a job text while the gateway is unreachable (or kill the gateway mid-submit)",
+    "Tap Create — spinner flashes, form stays filled, no error appears; logcat shows an unhandled rejection"
+   ],
+   "related_known_bug": null,
+   "suggested_remediation": "Wrap create()/toggleFreeze() bodies in try/catch and surface via the existing fleetError atom or showAlert, mirroring agent.tsx's doDisconnect.",
+   "limitations": "Did not execute the app; traced statically."
+  },
+  {
+   "temp_key": "G-02",
+   "category": "logic",
+   "severity": "medium",
+   "confidence": "high",
+   "title": "Bot detail Save and Delete swallow RPC errors — Save shows nothing, Delete leaves the bot alive with no feedback",
+   "file": "app/app/bot.tsx",
+   "line_start": 58,
+   "line_end": 108,
+   "failure_scenario": "On the bot editor, save() has try/finally without catch: if profiles.configure fails (timeout, offline), 'Saved' never appears and no error renders — the user believes it saved if they leave. doDelete() same shape: if moch.profiles.delete fails, router.back() is skipped, deleting resets, and the user sees the armed delete button silently do nothing (the BUG-110 comment fixed the double-tap guard but left the error path unhandled).",
+   "evidence": [
+    "app/app/bot.tsx:58-68 — save(): try { await rpc('profiles.configure'...) ; setSavedAt(...) } finally { setSaving(false) } — no catch",
+    "app/app/bot.tsx:97-108 — doDelete(): no catch; on rejection router.back() never runs and nothing surfaces"
+   ],
+   "reproduction_steps": [
+    "Open a bot, go offline (airplane mode with loopback dead), edit SOUL, tap Save — no Saved, no error",
+    "Tap Delete twice — spinner ends, bot still in the list, no error"
+   ],
+   "related_known_bug": "BUG-110",
+   "suggested_remediation": "Add catch blocks showing showAlert('Save failed'/'Delete failed', message), matching connectProvider() in the same file (bot.tsx:70-88).",
+   "limitations": "Static trace only."
+  },
+  {
+   "temp_key": "G-03",
+   "category": "contract",
+   "severity": "medium",
+   "confidence": "medium",
+   "title": "Automation edit pre-fills the prompt from prompt_preview and writes it back — truncated preview can overwrite the real cron prompt",
+   "file": "app/app/(tabs)/automations.tsx",
+   "line_start": 188,
+   "line_end": 189,
+   "failure_scenario": "openEdit() seeds the form's prompt with j.prompt_preview ?? ''; saveForm() then always sends --prompt ${shq(prompt)} via /cron edit (line 173). If the gateway's prompt_preview is a truncated/normalized preview (its name and the 2-line clamp in the card at line 271 both say preview), editing only the schedule of a long-prompt job silently rewrites the job's prompt to the truncated text — silent data-loss corruption of scheduled automations. The user changed nothing about the prompt.",
+   "evidence": [
+    "app/app/(tabs)/automations.tsx:189 — prompt: j.prompt_preview ?? ''",
+    "app/app/(tabs)/automations.tsx:171-173 — edit path always passes --prompt with the form value",
+    "app/app/(tabs)/automations.tsx:271 — the same field renders as a 2-line preview"
+   ],
+   "reproduction_steps": [
+    "Create an automation with a multi-paragraph prompt (via /cron add on desktop)",
+    "On the phone, open Edit, change only the schedule, Save",
+    "Compare the job's prompt server-side — if prompt_preview is truncated, the prompt is now the truncated preview"
+   ],
+   "related_known_bug": null,
+   "suggested_remediation": "Either fetch the full prompt before editing (a cron.manage detail/show action), or omit --prompt from the edit command when the user didn't touch the prompt field.",
+   "limitations": "Could not read the gateway's cron.manage to confirm prompt_preview truncation; flagged on naming/usage semantics — needs server-side confirmation."
+  },
+  {
+   "temp_key": "G-04",
+   "category": "ui",
+   "severity": "low",
+   "confidence": "high",
+   "title": "Deep-link pairing error toast (linkMsg) is never dismissed — sticks on screen for the rest of the session",
+   "file": "app/app/_layout.tsx",
+   "line_start": 351,
+   "line_end": 353,
+   "failure_scenario": "A rejected hermes://connect link sets linkMsg (line 158), which renders a bottom toast. Nothing ever clears it: no timeout, no tap-to-dismiss, not reset on a subsequent successful connect or route change. After one bad link the error text stays overlaid above the composer/tabs indefinitely (renders in both the !cfg branch line 267 and the main branch line 351), and a later successful pairing leaves the stale 'Bad pairing link' message up. Errors DO surface now (unlike the original BUG-124 report), but the surface is a permanent scar.",
+   "evidence": [
+    "app/app/_layout.tsx:157-159 — setLinkMsg on parse/connect failure",
+    "app/app/_layout.tsx:242 — second setLinkMsg (stale pendingOpen) — also never cleared",
+    "app/app/_layout.tsx:351-353 — toast render; grep shows no setLinkMsg(null) anywhere"
+   ],
+   "reproduction_steps": [
+    "Activate a malformed hermes://connect link",
+    "See the toast; navigate anywhere, pair successfully — the error toast is still on screen until app restart"
+   ],
+   "related_known_bug": "BUG-124",
+   "suggested_remediation": "Auto-clear linkMsg after ~6s (timed effect) and clear it in handleUrl's success path and on pendingOpen consumption.",
+   "limitations": "None."
+  },
+  {
+   "temp_key": "G-05",
+   "category": "lifecycle",
+   "severity": "medium",
+   "confidence": "medium",
+   "title": "AgentBrowserHost gives up permanently if the first relay boot fails — no retry for the whole process lifetime",
+   "file": "app/src/components/AgentBrowserHost.tsx",
+   "line_start": 36,
+   "line_end": 46,
+   "failure_scenario": "The host's one-shot boot effect sets booted.current=true before await; if ensureBrowserRelay() rejects (transient native error, service not yet up at cold start) or resolves with st.running===false, ready stays false and the component returns null forever. The booted ref guarantees no retry on any later render/remount, and the failure is swallowed (.catch(() => {})) — browser tools stay dead until the user force-restarts the app, with no signal anywhere. The BUG-132 placement bug (early-return unmount) IS fixed — the host is child 0 in both _layout returns (_layout.tsx:263,290) — but the retry half of the chain has this silent permanent-give-up path.",
+   "evidence": [
+    "app/src/components/AgentBrowserHost.tsx:36-44 — booted ref latches on first attempt; catch(() => {}) and non-running both leave ready=false",
+    "app/src/components/AgentBrowserHost.tsx:46 — 'if (!ready) return null' with no retry affordance",
+    "app/app/_layout.tsx:263,290 — host mounted in both branches (BUG-132 cause 5 addressed)"
+   ],
+   "reproduction_steps": [
+    "Simulate a failed first boot (e.g. deny the foreground-service start or race the bridge before HermesService binds so ensureBrowserRelay resolves running=false)",
+    "Browser tab shows 'Browser relay unavailable' at best; agent sessions report no browser tools for the rest of the process, even after the native side becomes healthy"
+   ],
+   "related_known_bug": "BUG-132",
+   "suggested_remediation": "Retry ensureBrowserRelay with backoff while !ready (or expose a retry tied to AppState foreground), and log/relay the failure instead of the empty catch.",
+   "limitations": "Static trace; the concrete native failure modes that make the first call fail were not exercised."
+  },
+  {
+   "temp_key": "G-06",
+   "category": "state",
+   "severity": "low",
+   "confidence": "high",
+   "title": "Content-search hit rows in Chats always render '0 msgs' — constructed SessionRow omits message_count",
+   "file": "app/app/(tabs)/sessions.tsx",
+   "line_start": 120,
+   "line_end": 132,
+   "failure_scenario": "BUG-114's server content search maps each hit to a SessionRow carrying only id/title/preview/started_at/profile; message_count is never set, and the row renderer prints item.message_count ?? 0 + ' msgs' (line 308). Every server content hit displays '· 0 msgs' even for long conversations. Also these rows sort AFTER title matches by construction, which is fine, but the count mismatch reads as data loss to users.",
+   "evidence": [
+    "app/app/(tabs)/sessions.tsx:124-132 — rows.push({...}) without message_count",
+    "app/app/(tabs)/sessions.tsx:306-311 — {item.message_count ?? 0} msgs"
+   ],
+   "reproduction_steps": [
+    "Chats tab, search a phrase that exists only inside message bodies",
+    "Result rows show '0 msgs'"
+   ],
+   "related_known_bug": "BUG-114",
+   "suggested_remediation": "Map message_count when the payload carries it and render '— msgs' when undefined, or omit the count for hit rows.",
+   "limitations": "Assumes the /api/sessions/search payload may carry message_count; if it never does, hide the count for hit rows instead."
+  },
+  {
+   "temp_key": "G-07",
+   "category": "logic",
+   "severity": "medium",
+   "confidence": "high",
+   "title": "Settings -> Install Linux environment swallows all bootstrap errors (the BUG-016 pattern fixed in setup.tsx but not here)",
+   "file": "app/app/(tabs)/settings.tsx",
+   "line_start": 62,
+   "line_end": 66,
+   "failure_scenario": "The install row runs void linuxBootstrap('ubuntu-24.04').finally(() => setBusy(false)) — no catch. linuxBootstrap rejects on failure (setup.tsx:99-112 catches its errors, proving the contract), so a failed download in Settings yields an unhandled rejection, the row flips back with no message, and the 60s status poll keeps stale data. Users installing from Settings get a dead button with zero feedback.",
+   "evidence": [
+    "app/app/(tabs)/settings.tsx:62-66 — no catch/error surface",
+    "app/app/setup.tsx:99-112 — same call is try/catch'd with setBootErr"
+   ],
+   "reproduction_steps": [
+    "Settings -> Install Linux environment with a doomed download",
+    "Row spinner stops, no error anywhere"
+   ],
+   "related_known_bug": "BUG-016",
+   "suggested_remediation": "Catch and showAlert('Install failed', message), mirroring EnvStep in setup.tsx.",
+   "limitations": "None."
+  },
+  {
+   "temp_key": "G-08",
+   "category": "ui",
+   "severity": "medium",
+   "confidence": "medium",
+   "title": "Keyboard-avoidance mandated by AGENTS.md is missing on several input surfaces (plain ScrollView / no kbPad)",
+   "file": "app/app/index.tsx",
+   "line_start": 44,
+   "line_end": 44,
+   "failure_scenario": "Per the repo's own rule (app/AGENTS.md, BUG-133), every input needs explicit JS-side avoidance because adjustResize is inert. These surfaces still use a plain RN ScrollView (not KeyboardAwareScrollView) with no kbPad on the list: index.tsx:44 + add-computer.tsx:17 (PairForm host/token/pairing-link inputs), setup.tsx:50 (wizard inputs incl. ProviderKeyForm), bot.tsx:131 (SOUL/desc inputs), agent.tsx:212 (provider search field with results below), sessions.tsx:222-244 / skills.tsx / connectors.tsx (top search fields whose result lists have no kbPad). On the forms the focused input can sit under the IME; on the search screens results are covered. Distinct mechanism from the tracked app-wide issue: these are uncovered surfaces lacking the mandated pattern.",
+   "evidence": [
+    "app/app/index.tsx:44 — ScrollView wrapping PairForm inputs (rule #3 requires KeyboardAwareScrollView)",
+    "app/app/add-computer.tsx:17 — same",
+    "app/app/setup.tsx:50 — same for the multi-step input wizard",
+    "app/app/bot.tsx:131 — ScrollView around TextInput edits",
+    "app/app/(tabs)/agent.tsx:212 — ScrollView; provider search + list, no kbPad",
+    "app/app/(tabs)/sessions.tsx:222-278 — search field + FlatList, no kbPad on the list container"
+   ],
+   "reproduction_steps": [
+    "Open Add a computer -> More options -> focus the token field with the keyboard up",
+    "On a small device the field/results sit behind the IME"
+   ],
+   "related_known_bug": "BUG-133",
+   "suggested_remediation": "Swap the form ScrollViews to react-native-keyboard-controller's KeyboardAwareScrollView, and add the kbPad list-container pattern to sessions/skills/agent/connectors search screens, per AGENTS.md patterns 3 and 4. Verify on-device per the rule.",
+   "limitations": "Static audit only; actual occlusion depends on field position and device height — on-device verification required before triaging severity."
+  },
+  {
+   "temp_key": "G-09",
+   "category": "contract",
+   "severity": "low",
+   "confidence": "medium",
+   "title": "Reasoning-effort writes pass the raw active sid — a provisional (unsent) chat id goes to config.set and fails, though reads are guarded",
+   "file": "app/app/(tabs)/agent.tsx",
+   "line_start": 89,
+   "line_end": 103,
+   "failure_scenario": "refresh() deliberately skips session-scoped reads for provisional chats (BUG-013 guard, line 54), but setAndSave (line 94) and toggleReasoning (line 113) pass the raw sid into applyReasoning/config.set without the guard or an ensureSession() — unlike ModelPickerSheet.apply(), which resolves via ensureSession() first. On a brand-new chat whose session.create hasn't landed, tapping an effort pill (or flipping Show reasoning) sends config.set with a placeholder session_id -> gateway 'session not found' -> the optimistic pill snaps back with a failure alert, and the reasoning toggle silently reverts.",
+   "evidence": [
+    "app/app/(tabs)/agent.tsx:54 — provisional guard applied to reads only",
+    "app/app/(tabs)/agent.tsx:94 — applyReasoning({ ..., sessionId: sid }) — no guard, no ensureSession",
+    "app/app/(tabs)/agent.tsx:113 — rpc('config.set', { ..., ...(sid ? { session_id: sid } : {}) })",
+    "app/src/components/ModelPickerSheet.tsx:151 — the picker's apply path calls ensureSession() before config.set (the contrast)"
+   ],
+   "reproduction_steps": [
+    "Start a brand-new chat, immediately open Models (before first send), tap a reasoning-effort pill",
+    "Error alert 'Failed to save'; pill reverts"
+   ],
+   "related_known_bug": "BUG-013",
+   "suggested_remediation": "Apply the same provisional skip (fall back to scope 'global' or ensureSession({create:true})) in setAndSave/toggleReasoning.",
+   "limitations": "Assumes the gateway rejects unknown session ids on config.set (as it does for session.title per BUG-006); not server-verified here."
+  },
+  {
+   "temp_key": "G-10",
+   "category": "ui",
+   "severity": "low",
+   "confidence": "high",
+   "title": "Crew board: pull-to-refresh spinner can never show and offline renders as an indistinguishable empty board",
+   "file": "app/app/(tabs)/crew.tsx",
+   "line_start": 59,
+   "line_end": 103,
+   "failure_scenario": "loading is set true only at mount; refresh() (also used as onRefresh) never re-sets it, and the RefreshControl is bound to loading — so pull-to-refresh silently updates (or fails) with no spinner. When offline, refresh() early-returns without setting err, so the board shows the stale/empty columns with the neutral 'read-only' hint and zero indication the data is dead — unlike every other screen which has an offline row.",
+   "evidence": [
+    "app/app/(tabs)/crew.tsx:59-75 — refresh(): 'if (!online) return' before setErr; setLoading(false) but no setLoading(true) path after mount",
+    "app/app/(tabs)/crew.tsx:95-103 — 'loading && online ? spinner : FlatList' with RefreshControl refreshing={loading}"
+   ],
+   "reproduction_steps": [
+    "Load Crew once, pull to refresh — no spinner",
+    "Go offline, reopen Crew — board shows 'Read-only' hint with no offline/error state"
+   ],
+   "related_known_bug": null,
+   "suggested_remediation": "Track a separate refreshing state for the RefreshControl (like sessions.tsx) and render an offline row when !online.",
+   "limitations": null
+  }
+ ]
+}

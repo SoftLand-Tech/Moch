@@ -1,0 +1,123 @@
+{
+  "repository": "https://github.com/SoftLand-Tech/Moch",
+  "commit": "3191fe154af7c5b7ed8b87b03412e7bbe94ecb5b",
+  "branch": "feat/browser-always-available",
+  "working_tree_state": "dirty: app/android/app/build.gradle versionCode bump (uncommitted, preserved); untracked local artifacts | NOTE: during the audit window, parallel development by the repo owner (BUG-132/BUG-133 work; updated app/AGENTS.md and worktrees/keyboard-avoidance) additionally modified app/hermes-src/agent/agent_init.py and app/hermes-src/tools/registry.py — not audit writes. All findings are pinned to commit 3191fe154af7c5b7ed8b87b03412e7bbe94ecb5b and the tree as read during the window; line numbers in hermes-src toolset-selection code may shift under that parallel work.",
+  "audit_start": "2026-10-12T00:20:49Z",
+  "audit_end": "2026-10-12T00:50:00Z",
+  "round": 1,
+  "agent_assignments": {
+    "A_architecture_logic": {
+      "status": "completed",
+      "scope": "app/src TS client: state, queues, lifecycle, async",
+      "result": "24 files line-audited (chat.ts, gateway.ts, sendQueue, sessionList, attention, drafts, backendIdentity, modelState, mediaSend, browserRelay, mochiRuntime, shareIn, voice, push, http, fleet, automationsState, terminal, protocol/*, slash region, SessionToasts, chat.tsx, _layout). 8 findings (A-01..A-08): 2 new high (inflightCreate cross-window race; BUG-036 confirmed unfixed + flushOutbox automates double-submit), BUG-086 confirmed still open, offline provisional outbox misdelivery (med), plus steer double-apply, slash catalog-empty misroute, v1 transcript migration leak, batch clarify validation. Not line-audited: mediaCache/media/mediaState/chatListState/mcpState/log/strings/theme/pairing, most components, remaining route screens. Logs: raw/agent_A.json"
+    },
+    "B_runtime_integration": {
+      "status": "completed",
+      "scope": "app/python-runtime + Kotlin bridge + gradle + relay + moch-link + embedded integration seams",
+      "result": "All 12 Kotlin files + all 16 moch python modules + manifest/gradle/proguard + relay + both installers read. 12 findings: 7 new (CdpRelay.stop leaves armed gate vs dead relay; dataSync FGS 6h Android-15 cap with no onTimeout; single-shot boot disables cron knocks permanently; starting flag never set; Debian-12 dead rootfs URL offered in wizard; linux_session timeout desync; install.sh systemctl preflight) + 4 corroborations merged into BH-000005/015/033/041 + 1 negative-results record (verified-clean contracts). Logs: raw/agent_B.json, findings BH-000045..BH-000055"
+    },
+    "C_security": {
+      "status": "completed",
+      "scope": "secrets, auth, relay, WebView/CDP, injection, share-in, network",
+      "result": "Full relay + installer + manifest + python-runtime security read; secret-tracking audit (firebase-service-account.json untracked/0600/no history). 10 findings (C-01..C-10): relay tokenHash-only machine identity (med), raw pairing token in query strings on both relay legs -> VPS access-log exposure + false 'relay never sees token' comments (med), open relay registration + no idle-socket cap (med), release signing falls back to tracked debug.keystore (med), cleartext traffic + tls=0 default pairing (low), process-wide WebView debugging in release (low), unverified bootstrap downloads (low), docs/install.sh drift (low), timing-compare + secrets-posture informational. BUG-120 impact amplified (guest-shell access). No re-filed duplicates. Logs: raw/agent_C.json, findings BH-000034..BH-000044"
+    },
+    "D_tests_reproduction": {
+      "status": "completed",
+      "scope": "run typecheck/lint/all offline test suites + python tests; assess coverage gaps",
+      "result": "typecheck CLEAN; lint FAILS (1 false-positive rules-of-hooks error PairForm.tsx:141 -> npm run verify red at HEAD); 14/14 TS offline suites pass (~433 checks); 10/10 python unittest files pass when run standalone (pytest not installed; test_rpc_fleet 4/4 skipped env-conditionally). 5 findings (D-01..D-05): test:order mislabeled offline + tests a mirror; 16 lib modules untested; BUG-132 native fixes zero coverage; fleet RPC tests env-skipped; verify gate broken. Logs: raw/agent_D.json"
+    },
+    "E_github_history": {
+      "status": "completed",
+      "scope": "gh issues+PRs for SoftLand-Tech/Moch, reconcile vs checkout and bugs.md",
+      "result": "EXHAUSTIVE retrieval: 0 issues (open+closed), 61 PRs (60 merged, 1 open = PR #61 = current branch head, BUG-132 fix unmerged, E2E acceptance pending), 1 release (v1.0.0). 2 findings queued (E-01 high, E-02 info). Logs: github-issues.jsonl (3 records), raw/agent_E.json"
+    },
+    "F_challenger": {
+      "status": "completed",
+      "scope": "adversarial review of all 20 Priority-1 new findings + Priority-2 merge spot-checks",
+      "result": "17 uphold, 2 uphold_with_changes, 1 reject. Rejected BH-000022 (steer double-apply unreachable — server status vocabulary is closed). Confirmed BH-000046 (dataSync manifest verified; no onTimeout). Raised BH-000019 confidence to high. Reproduced the lint failure independently. Reconciled install.sh drift numbers (1095 vs 661 lines). Flagged an ID-mapping slip in the lead's B-append (fixed, event BH-000068). Logs: raw/agent_F.json; verdict events BH-000069..BH-000072. A duplicate retry run (eaf0db95) was still in flight when the original completed — its results, if any, are supplementary only."
+    },
+    "G_coverage": {
+      "status": "completed",
+      "scope": "lead-performed coverage review + targeted gap-pass subagent on the unaudited TS surfaces (app/src/components/* + route screens except chat/_layout)",
+      "result": "Original gap-pass (2e5e0074) delivered after appearing orphaned: 34 files examined across components + all route screens. 10 findings (G-01..G-10 = BH-000080..BH-000089): silent error swallowing on fleet create/freeze, bot save/delete, settings Linux install (BUG-016 pattern); automation edit may overwrite cron prompt from truncated preview (potential data loss); deep-link error toast never dismissed (BUG-124 refined — errors DO surface now); AgentBrowserHost permanent give-up on first boot failure (BUG-132 retry half); search hit rows '0 msgs' (BUG-114); missing keyboard avoidance on several surfaces (BUG-133 distinct mechanism); provisional-sid config.set failure (BUG-013); crew refresh/offline state. Still unexamined: components/media/*, MochiSurface native/web. A duplicate retry run (8d55cd88) was still in flight at report time — supplementary corroboration only; original results are authoritative. Logs: raw/agent_G.json POST-REPORT: the supplementary retry (8d55cd88) delivered and CORROBORATES the original (10 consistent findings; examined MochiSurface variants too; two hypotheses self-rejected). Recorded as event BH-000090 + raw/agent_G_retry.json. FULL JSON RECEIVED: 3 NEW findings filed (BH-000091 WebView renderer recovery, BH-000092 KAV 'height'/core-KAV specifics, BH-000093 browser retry affordance), 7 corroborations with 3 sharpened nuances and one recorded severity dissent (BH-000084 high-vs-medium)."
+    }
+  },
+  "modules_inspected": [],
+  "tests_executed": [
+    "npm run typecheck (pass)",
+    "npm run lint (FAIL: 1 false-positive error PairForm.tsx:141 + 32 warnings)",
+    "npm run test — protocol 25/25",
+    "npm run test:imports (pass)",
+    "npm run test:order 7/7 (caveat: live-gateway + mirror, see D-01)",
+    "npm run test:chatlist 19/19",
+    "npm run test:attention 28 (pass)",
+    "npm run test:queue 22 (pass)",
+    "npm run test:slash 15 (pass)",
+    "npm run test:interactive 52 (pass)",
+    "npm run test:command-output 58 (pass)",
+    "npm run test:media 81 (pass)",
+    "npm run test:sharein 21 (pass)",
+    "npm run test:terminal 36 (pass)",
+    "npm run test:browser-relay 16 (pass)",
+    "npm run test:voice 14 (pass)",
+    "python3 standalone: 10 unittest files ALL PASS (test_rpc_fleet 4/4 env-skipped)"
+  ],
+  "tools_executed": [
+    "git status/log/remote/ls-files",
+    "repo census (file counts per area)"
+  ],
+  "github_searches": [
+    "gh repo view SoftLand-Tech/Moch",
+    "gh issue list --state all (0 results, exhaustive)",
+    "gh api /repos/SoftLand-Tech/Moch/issues?state=all (total 0)",
+    "gh api search/issues type:issue (total_count 0)",
+    "gh pr list --state all --limit 200 (61 PRs, complete)",
+    "gh pr view 46, 61 + git log -60 reconciliation",
+    "gh release list (v1.0.0)"
+  ],
+  "areas_skipped": [
+    "app/hermes-src vendored upstream internals (1711 files, upstream-authored, synced wholesale by embedded/vendor-hermes.sh) — EXCEPT entry-point seams: model_tools cache key (BUG-132), tool_search hint, browser_tool/browser_supervisor loci cited by tracker entries, web_routers sessions rows, web_server token shim (BUG-120)",
+    "app/hermes-src toolset-selection chain (_get_platform_tools/_select_tool_names) — BUG-132's suspected root cause per tracker round 34; static trace exceeded agent budget, needs the tracker's prescribed PC reproduction",
+    "Vendored-tree frame-parser DoS tracing (agent C, time-boxed)",
+    "VPS deployment reality (nginx/pm2/firewall) — not in repo; relay findings are code-as-deployed assumptions",
+    "Android device/emulator runs — existing TEST-REPORT-1.0.15-device.md treated as evidence, not re-executed",
+    "Gradle builds — too heavy for the audit sandbox; Kotlin findings are statically traced",
+    "Live third-party systems (relay VPS, EAS, Firebase, Termux/Ubuntu CDNs) — never contacted"
+  ],
+  "verified_clean_contracts": [
+    "TS native bridge surface (mochiRuntime.ts, browserRelay.ts) matches Kotlin @ReactMethod sets 1:1 (agent B)",
+    "All moch.* RPC methods the TS client sends are registered in rpc_fleet.install and MOCH_FLEET=1 is set by default in gateway_server (fleet-flag BUG-109 fixed by 4a8b97a/1290c9f)",
+    "Relay server: sha256-only token handling at rest, timing-safe compares, loopback-only XFF trust, 15s pending TTL, buffer caps, atomic state saves (agents B+C)",
+    "IPv6 loopback bind bug fixed — CdpRelay.kt:92-95 literal 127.0.0.1 (BUG-106 fix verified)",
+    "R8 keep rule for CronKnockNotifier.knock present; POST_NOTIFICATIONS merged + runtime-requested",
+    "requirements-embedded.txt pins match app/wheels-android wheels and verify-apk-python.py contract",
+    "Chaquopy packaging (useLegacyPackaging true + doNotStrip libproot-loader.so) matches exec-loader design",
+    "Secrets: firebase-service-account.json never entered git (untracked, 0600, no history); relay stores tokenHash only",
+    "linux_env rootfs extraction: _safe_extract/_check_member block path traversal and symlink escapes"
+  ],
+  "known_limitations": [
+    "No Android device/emulator assumed; on-device behavior taken from existing TEST-REPORT-1.0.15-device.md evidence where cited",
+    "Live third-party systems (relay VPS, EAS, Firebase) not contacted",
+    "Gradle full builds not assumed; heavyweight builds only if cheap and non-destructive"
+  ],
+  "remaining_tasks": [
+    "Next audit round: re-run after fixes; continue BH numbering from BH-000090",
+    "Un-audited surfaces for a future round: components/media/*, MochiSurface variants, hermes-src toolset-selection chain (BUG-132 root cause), protocol frame-parser DoS tracing"
+  ],
+  "github_issue_sync": {
+    "when": "2026-10-12T01:12:00Z",
+    "authorized_by": "explicit user request",
+    "created": 56,
+    "range": "#63-#118",
+    "skipped": "1 rejected + 3 fixed + 3 informational",
+    "labels_created": [
+      "audit",
+      "severity-high",
+      "severity-medium",
+      "severity-low",
+      "security",
+      "test-infrastructure"
+    ]
+  }
+}
