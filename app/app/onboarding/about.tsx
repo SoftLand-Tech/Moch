@@ -7,7 +7,7 @@ import { Card, Field, Kicker, Pill, PrimaryBtn, Spinner, Txt } from '../../src/c
 import { C, useStyles } from '../../src/lib/theme'
 import { useDir, useT } from '../../src/lib/strings'
 import { readAbout, saveAbout, setOnboarded } from '../../src/lib/aboutMe'
-import { ensureNotificationPermission } from '../../src/lib/push'
+import { ensureNotificationPermission, hasNotificationPermission } from '../../src/lib/push'
 import { requestBatteryExemption } from '../../src/lib/mochiRuntime'
 import { thinkerAtom } from '../../src/lib/thinker'
 
@@ -34,6 +34,9 @@ export default function About() {
   // Entries are the exact lines saveAbout() writes; anything else is "extra".
   useEffect(() => {
     let alive = true
+    void hasNotificationPermission()
+      .then((ok) => { if (alive && ok) setNotif(true) })
+      .catch(() => {})
     void readAbout()
       .then((entries) => {
         if (!alive) return
@@ -68,6 +71,9 @@ export default function About() {
     }
     await setOnboarded(true)
     setBusy(false)
+    // Pop the pushed onboarding steps so Android Back from Chat exits instead
+    // of stepping back into onboarding/providers.
+    if (router.canDismiss()) router.dismissAll()
     router.replace('/(tabs)/chat')
   }
 

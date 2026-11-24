@@ -339,6 +339,19 @@ export async function setNotificationsEnabled(on: boolean) {
   }
 }
 
+/** Read current notification permission without showing a system prompt. */
+export async function hasNotificationPermission(): Promise<boolean> {
+  const n = N()
+  if (!n) return false
+  try {
+    const cur = await n.getPermissionsAsync()
+    notificationPermission.set(cur.granted ? 'granted' : 'denied')
+    return cur.granted
+  } catch {
+    return false
+  }
+}
+
 export async function ensureNotificationPermission(): Promise<boolean> {
   const n = N()
   if (!n) return false
