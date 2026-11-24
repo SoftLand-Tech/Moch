@@ -8,6 +8,7 @@ import { KeyboardAwareScrollView } from 'react-native-keyboard-controller'
 import { router } from 'expo-router'
 import { useStore } from '@nanostores/react'
 import { Card, Field, GhostBtn, Pill, PrimaryBtn, Spinner, Txt } from '../../src/components/ui'
+import { showAlert } from '../../src/components/AlertDialog'
 import { C, useStyles } from '../../src/lib/theme'
 import { useDir, useT } from '../../src/lib/strings'
 import { thinkerAtom } from '../../src/lib/thinker'
@@ -161,6 +162,10 @@ function MochProviders() {
               key={p.slug}
               style={[s.row, { flexDirection: dir.row }, on && s.rowOn]}
               onPress={() => {
+                if (p.auth_type && p.auth_type !== 'api_key') {
+                  showAlert(p.name, p.warning ?? t('agent.providers.oauthHint'))
+                  return
+                }
                 setPicked(on ? null : p.slug)
                 setKey('')
                 setSaveErr(null)

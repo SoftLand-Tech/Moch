@@ -130,7 +130,14 @@ export default function Environment() {
   }, [])
 
   useEffect(() => {
-    void linuxStatus().then(setInstalled).catch(() => {})
+    void linuxStatus()
+      .then((st) => {
+        setInstalled(st)
+        // Returning to Step 1 with an already-installed guest shouldn't keep
+        // defaults ticked and trap the primary button on "Install selected".
+        if (st?.bootstrapped) setSelected([])
+      })
+      .catch(() => {})
   }, [])
 
   const guestReady = !!installed?.bootstrapped
@@ -145,14 +152,14 @@ export default function Environment() {
    * the runner's real events (stage tokens + per-item outcomes), never a
    * fake "Installed N of M" counter over stale state.
    */
-  const installSelected = async (): Promise<void> => {
+  const installSelected = async (): Promise<PackageResult[]> => {
     const list = withRequirements(selected)
     const seen: Record<string, PackageResult> = {}
     setInstallingPackages(true)
     setResults({})
     setStage({ kind: 'generic' })
     try {
-      await installPackages(
+      const res = await installPackages(
         list,
         (res) => {
           seen[res.id] = res
@@ -160,9 +167,15 @@ export default function Environment() {
         },
         (token) => setStage(parseStage(token, list, seen)),
       )
+      const succeeded = new Set(res.filter((r) => r.ok).map((r) => r.id))
+      if (aliveRef.current && succeeded.size > 0) {
+        setSelected((cur) => cur.filter((id) => !succeeded.has(id)))
+      }
+      return res
     } catch {
       // The runner reports failures as per-item results; a throw here is a
-      // bridge-level surprise — swallow so the screen stays usable.
+      // bridge-level surprise — return empty so the caller keeps the screen usable.
+      return []
     } finally {
       if (aliveRef.current) {
         setInstallingPackages(false)
@@ -185,8 +198,15 @@ export default function Environment() {
       }
       const st = await linuxStatus().catch(() => null)
       setInstalled(st)
-      if (distro !== 'none' && selected.length) await installSelected()
+      let allOk = true
+      if (distro !== 'none' && selected.length) {
+        const res = await installSelected()
+        allOk = res.length > 0 && res.every((item) => item.ok)
+      }
       setStage(null)
+      if (allOk && aliveRef.current) {
+        router.push('/onboarding/thinker')
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -198,10 +218,12 @@ export default function Environment() {
 
   const next = async () => {
     // A live install must finish (it swallows the screen otherwise); a done
-    // guest with newly ticked packages installs just those, then advances.
+    // guest with newly ticked packages installs just those, then advances if
+    // all succeeded (failures stay on screen so the user can inspect/retry).
     if (installing) return
     if (guestReady && selected.length) {
-      await installSelected()
+      const res = await installSelected()
+      if (!res.length || res.some((item) => !item.ok)) return
     } else if (distro !== 'none' && !guestReady) {
       await runInstall()
       return

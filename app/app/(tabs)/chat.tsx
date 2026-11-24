@@ -1273,15 +1273,19 @@ export default function Chat() {
                 </Text>
               </Pressable>
             ) : null}
-            {!ocMode && curModel ? (
+            {!ocMode ? (
               <Pressable
-                style={({ pressed }) => [s.modelChip, pressed && s.btnPressed]}
+                style={({ pressed }) => [s.modelChip, !curModel && s.modelChipEmpty, pressed && s.btnPressed]}
                 onPress={() => setModelPickerOpen(true)}
                 hitSlop={6}
                 accessibilityRole="button"
-                accessibilityLabel={t('chat.model.a11y', { model: curModel })}
+                accessibilityLabel={
+                  curModel ? t('chat.model.a11y', { model: curModel }) : t('chat.model.connectA11y')
+                }
               >
-                <Text style={s.modelChipText} numberOfLines={1}>{curModel}</Text>
+                <Text style={s.modelChipText} numberOfLines={1}>
+                  {curModel || t('chat.model.connect')}
+                </Text>
               </Pressable>
             ) : null}
           </>
@@ -1422,6 +1426,20 @@ export default function Chat() {
                   <MochiMark size={68} />
                   <Txt size={16} weight="800" center style={s.emptyTitle}>{t('chat.empty.title')}</Txt>
                   <Txt size={12} color={C.textDim} center style={s.emptySubtitle}>{t('chat.empty.subtitle')}</Txt>
+                  {!ocMode && !curModel && online ? (
+                    <Pressable
+                      style={({ pressed }) => [s.connectNudge, { flexDirection: dir.row }, pressed && s.starterPressed]}
+                      onPress={() => setModelPickerOpen(true)}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('chat.empty.connectModel')}
+                    >
+                      <Icon name="key-outline" size={15} color={C.accent} />
+                      <Text style={[s.connectNudgeText, rtlText]} numberOfLines={2}>
+                        {t('chat.empty.connectModel')}
+                      </Text>
+                      <Icon name={dir.icon.forward} size={14} color={C.accent} />
+                    </Pressable>
+                  ) : null}
                   <View style={s.starterList}>
                     {STARTERS.map((st) => (
                       <Pressable
@@ -2136,6 +2154,19 @@ const makeS = () => StyleSheet.create({
   },
   emptyTitle: { marginTop: 6 },
   emptySubtitle: { marginTop: 2, marginBottom: 14 },
+  connectNudge: {
+    width: '100%',
+    backgroundColor: C.accentSoft,
+    borderWidth: 1,
+    borderColor: C.accent,
+    borderRadius: 13,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  connectNudgeText: { color: C.accent, fontSize: 12.5, fontWeight: '700', flex: 1 },
   starterList: { width: '100%', gap: 7 },
   starter: {
     backgroundColor: C.bgCard,
@@ -2246,6 +2277,9 @@ const makeS = () => StyleSheet.create({
     backgroundColor: C.accentSoft,
     borderWidth: 1,
     borderColor: C.border,
+  },
+  modelChipEmpty: {
+    borderColor: C.accent,
   },
   modelChipText: {
     color: C.accent,
