@@ -39,7 +39,16 @@ import {
   type OcPermissionInfo,
   type OcHistoryRow,
 } from './opencodeChat'
-import { ocInterrupt, ocPermissionReply, OcError, describeOcError } from './opencodeClient'
+import {
+  ocInterrupt,
+  ocPermissionReply,
+  ocListForms,
+  ocFormReply,
+  ocFormCancel,
+  OcError,
+  describeOcError,
+} from './opencodeClient'
+import { parseOcForm, type OcFormInfo, type OcFormAnswer } from './ocForm'
 import { ocCommandTurnPayload } from './ocCommands'
 import { invalidateOcSessionsCache } from './ocSessionsCache'
 
@@ -1770,6 +1779,8 @@ export async function resetSessionCaches(): Promise<void> {
   ocOneShotCancel.clear()
   ocPermissions.clear()
   ocPermissionLive.set(null)
+  ocQuestions.clear()
+  ocQuestionLive.set(null)
   ocHydrated.clear()
   // storedIdMapLoaded stays true: the map is genuinely empty now, and
   // rememberStoredId repopulates it on the next create/resume/info event.
@@ -1964,22 +1975,100 @@ export function stampChatThinker(storedId: string, thinker: Thinker): void {
 }
 /** Live sid → the OpenCode permission ask blocking that chat's turn. */
 const ocPermissions = new Map<string, OcPermissionInfo>()
+/** Live sid → the OpenCode Form.Service question prompt blocking that turn. */
+const ocQuestions = new Map<string, OcFormInfo>()
 
 /** Reactive mirror of the OpenCode permission ask — the chat screen renders
  *  its card from this; `ocActivePermission` stays the sync accessor. */
 export const ocPermissionLive = atom<{ sid: string; req: OcPermissionInfo } | null>(null)
+/** Reactive mirror of the OpenCode question prompt blocking the active chat. */
+export const ocQuestionLive = atom<{ sid: string; form: OcFormInfo } | null>(null)
 
 /** The OpenCode permission ask pending on a chat, if any. */
 export function ocActivePermission(sid: string): OcPermissionInfo | null {
   return ocPermissions.get(sid) ?? null
 }
 
-// The reactive mirror follows the screen: a permission that arrived while
-// another chat was on screen renders when that chat is opened.
+/** The OpenCode question prompt pending on a chat, if any. */
+export function ocActiveQuestion(sid: string): OcFormInfo | null {
+  return ocQuestions.get(sid) ?? null
+}
+
+// The reactive mirrors follow the screen: prompts that arrived while
+// another chat was on screen render when that chat is opened.
 activeSession.subscribe((id) => {
   const req = id ? ocPermissions.get(id) : undefined
   ocPermissionLive.set(id && req ? { sid: id, req } : null)
+  const form = id ? ocQuestions.get(id) : undefined
+  ocQuestionLive.set(id && form ? { sid: id, form } : null)
 })
+
+/** Answer the OpenCode question form pending on a chat. */
+export async function ocReplyQuestion(sid: string, answer: OcFormAnswer): Promise<void> {
+  const form = ocQuestions.get(sid)
+  if (!form) return
+  ocQuestions.delete(sid)
+  if (ocQuestionLive.get()?.sid === sid) ocQuestionLive.set(null)
+  clearAttentionLive(sid)
+  const stored = sessionsById.get()[sid]?.storedId ?? ''
+  const ocId = (stored ? await ocSessionFor(stored) : null) || form.sessionID
+  if (!ocId) return
+  try {
+    await ocFormReply(ocId, form.id, answer)
+  } catch (err) {
+    log('warn', 'opencode', `question reply failed: ${err instanceof Error ? err.message : String(err)}`)
+    ocQuestions.set(sid, form)
+    if (activeSession.get() === sid) ocQuestionLive.set({ sid, form })
+    throw err
+  }
+}
+
+/** Cancel/dismiss the OpenCode question form pending on a chat. */
+export async function ocCancelQuestion(sid: string): Promise<void> {
+  const form = ocQuestions.get(sid)
+  if (!form) return
+  ocQuestions.delete(sid)
+  if (ocQuestionLive.get()?.sid === sid) ocQuestionLive.set(null)
+  clearAttentionLive(sid)
+  const stored = sessionsById.get()[sid]?.storedId ?? ''
+  const ocId = (stored ? await ocSessionFor(stored) : null) || form.sessionID
+  if (!ocId) return
+  try {
+    await ocFormCancel(ocId, form.id)
+  } catch (err) {
+    log('warn', 'opencode', `question cancel failed: ${err instanceof Error ? err.message : String(err)}`)
+    ocQuestions.set(sid, form)
+    if (activeSession.get() === sid) ocQuestionLive.set({ sid, form })
+    throw err
+  }
+}
+
+/** Refresh pending OpenCode question forms for a live chat (focus recovery). */
+export async function syncOcQuestions(liveId: string): Promise<void> {
+  const s = sessionsById.get()[liveId]
+  const stored = s?.storedId ?? ''
+  if (!s || !stored || isPseudoStoredId(stored)) return
+  const ocId = await ocSessionFor(stored)
+  if (!ocId) return
+  try {
+    const raw = await ocListForms(ocId)
+    const forms = Array.isArray(raw)
+      ? raw.map(parseOcForm).filter((f): f is OcFormInfo => f !== null)
+      : []
+    const cur = sessionsById.get()[liveId]
+    if (!cur || cur.storedId !== stored) return
+    if (forms.length) {
+      const form = forms[0]
+      ocQuestions.set(liveId, form)
+      if (activeSession.get() === liveId) ocQuestionLive.set({ sid: liveId, form })
+    } else if (ocQuestions.has(liveId)) {
+      ocQuestions.delete(liveId)
+      if (ocQuestionLive.get()?.sid === liveId) ocQuestionLive.set(null)
+    }
+  } catch {
+    // Best-effort sync; SSE / next focus handles recovery.
+  }
+}
 
 /** Answer the OpenCode permission ask pending on a chat. */
 export async function ocReplyPermission(sid: string, reply: 'once' | 'always' | 'reject'): Promise<void> {
@@ -2034,6 +2123,19 @@ function ocHooksFor(sid: string): OcTurnHooks {
     permission: (req) => {
       ocPermissions.set(sid, req)
       if (activeSession.get() === sid) ocPermissionLive.set({ sid, req })
+    },
+    question: (form) => {
+      ocQuestions.set(sid, form)
+      if (activeSession.get() === sid) ocQuestionLive.set({ sid, form })
+      const preview = form.fields[0]?.description || form.fields[0]?.title || form.title || 'Question'
+      flagAttention(sid, 'input', { title: form.title || 'Question', body: preview })
+    },
+    questionResolved: (formId) => {
+      const existing = ocQuestions.get(sid)
+      if (!existing || (formId && existing.id !== formId)) return
+      ocQuestions.delete(sid)
+      if (ocQuestionLive.get()?.sid === sid) ocQuestionLive.set(null)
+      clearAttentionLive(sid)
     },
     // Same body as the 'message.complete' event case, minus the server-text
     // supersede (the OC final text IS the streamed text).
@@ -2123,6 +2225,7 @@ async function runOcSubmit(sid: string, text: string, title: string | undefined)
     // The ask belongs to the turn — a turn that ended (any way) leaves no
     // card behind.
     if (ocPermissions.delete(sid) && ocPermissionLive.get()?.sid === sid) ocPermissionLive.set(null)
+    if (ocQuestions.delete(sid) && ocQuestionLive.get()?.sid === sid) ocQuestionLive.set(null)
     // The turn may have created or renamed the OC session — the drawer's
     // 15s cache is now stale by definition.
     invalidateOcSessionsCache()
@@ -2657,6 +2760,7 @@ export async function stopRun() {
     // turn (its sendPrompt sets busy:true, then the cancelled runner's
     // complete flips it false under a live prompt and unlocks the composer).
     ocTurns.get(sid)?.()
+    if (ocQuestions.has(sid)) void ocCancelQuestion(sid).catch(() => {})
     const stored = sessionsById.get()[sid]?.storedId
     if (stored) {
       void ocSessionFor(stored)

@@ -12,12 +12,14 @@ import {
   ocCreateSession,
   ocEnsureServer,
   ocHistory,
+  ocListForms,
   ocPrompt,
   ocRunCommand,
   ocStream,
   describeOcError,
   type OcEvent,
 } from './opencodeClient'
+import { extractOcEventSessionId, parseOcForm, type OcFormInfo } from './ocForm'
 import { mapOcHistory, type OcHistoryRow } from './ocHistory'
 import { loadOcCommands } from './ocCommands'
 import { guestRun } from './thinker'
@@ -139,6 +141,10 @@ export interface OcTurnHooks {
   thinking(delta: string): void
   tool(id: string, name: string, phase: 'running' | 'done' | 'failed', preview?: string, durationS?: number): void
   permission(req: OcPermissionInfo): void
+  /** The `question` tool opened an interactive form prompt for the user. */
+  question?: (form: OcFormInfo) => void
+  /** A pending form prompt was answered or cancelled on the server. */
+  questionResolved?: (formId: string) => void
   /** The turn reached a terminal state. `text` is the final assistant text (may be empty). */
   complete(text: string, failed: boolean, error?: string): void
 }
@@ -226,22 +232,29 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
   // produces no frames while it generates/runs (a big file write can stream
   // its input for minutes). The 15 s wedge detector must not fire through
   // that — it killed healthy turns mid-write. Tracked by id, removed on
-  // success/failed.
+  // success/failed. Interactive prompts (permission / form question) also
+  // wait on the human rather than the model, so pause the silence watchdog
+  // while one is open.
   const activeTools = new Set<string>()
+  const awaitingUser = new Set<string>()
   let lastSilenceLimitMs = 15_000
   const armSilence = () => {
     // No frame at all means the relay is wedged — end the turn. Heartbeats
     // arrive as comment lines, which never reach onEvent, so a truly silent
     // stream trips this; an active model keeps resetting it. In-flight
     // tools get a much longer leash: silence during a running tool is normal.
-    if (silenceTimer) clearTimeout(silenceTimer)
+    if (silenceTimer) {
+      clearTimeout(silenceTimer)
+      silenceTimer = null
+    }
+    if (awaitingUser.size > 0) return
     lastSilenceLimitMs = activeTools.size > 0 ? 300_000 : 15_000
     silenceTimer = setTimeout(() => resolveSilent('silent'), lastSilenceLimitMs)
   }
 
   const onEvent = (e: OcEvent) => {
     const d = e.data || {}
-    if (String(d.sessionID ?? '') !== ocId) return
+    if (extractOcEventSessionId(d) !== ocId) return
     switch (e.type) {
       case 'session.text.delta': {
         const delta = String(d.delta ?? '')
@@ -310,6 +323,7 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
         const id = String(d.id ?? '')
         if (!id) break
         activeTools.delete(id)
+        if (toolNames.get(id) === 'question') awaitingUser.clear()
         const dur = toolStartTs.get(id)
         hooks.tool(
           id,
@@ -321,12 +335,37 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
         break
       }
       case 'permission.asked': {
+        const permId = String(d.id ?? '')
+        if (permId) awaitingUser.add(`perm:${permId}`)
         hooks.permission({
-          id: String(d.id ?? ''),
+          id: permId,
           action: String(d.action ?? ''),
           resources: Array.isArray(d.resources) ? d.resources.map(String) : [],
           message: typeof d.message === 'string' ? d.message : undefined,
         })
+        break
+      }
+      case 'permission.replied': {
+        const permId = String(d.requestID ?? d.id ?? '')
+        if (permId) awaitingUser.delete(`perm:${permId}`)
+        break
+      }
+      case 'form.created': {
+        const form = parseOcForm(d.form)
+        if (form) {
+          awaitingUser.add(`form:${form.id}`)
+          hasActivity = true
+          hooks.question?.(form)
+        }
+        break
+      }
+      case 'form.replied':
+      case 'form.cancelled': {
+        const fid = String(d.id ?? '')
+        if (fid) {
+          awaitingUser.delete(`form:${fid}`)
+          hooks.questionResolved?.(fid)
+        }
         break
       }
       case 'session.execution.succeeded':
@@ -409,6 +448,21 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
   hooks.start()
   started = true
   armSilence()
+
+  // Catch-up: if the tool asked a question before SSE finished attaching,
+  // hydrate pending forms directly from GET /api/session/:id/form.
+  void ocListForms(ocId)
+    .then((forms) => {
+      if (turnDone || !Array.isArray(forms)) return
+      for (const raw of forms) {
+        const form = parseOcForm(raw)
+        if (!form || awaitingUser.has(`form:${form.id}`)) continue
+        awaitingUser.add(`form:${form.id}`)
+        hooks.question?.(form)
+        armSilence()
+      }
+    })
+    .catch(() => {})
 
   const winner = await Promise.race([streamDropped, silent])
   finishOnce()

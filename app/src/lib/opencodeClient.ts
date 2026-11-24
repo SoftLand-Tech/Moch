@@ -19,6 +19,9 @@ import { linuxTermProbe, linuxTermStart, linuxTermWrite } from './mochiRuntime'
 import { guestRun } from './thinker'
 import { rpc } from './gateway'
 import { log } from './log'
+import type { OcFormAnswer, OcFormInfo } from './ocForm'
+
+export type { OcFormAnswer, OcFormField, OcFormInfo, OcFormOption, OcFormValue } from './ocForm'
 
 export const OC_BASE = 'http://127.0.0.1:4096'
 
@@ -209,6 +212,24 @@ export const ocPermissionReply = (id: string, requestID: string, reply: OcPermis
   ocFetch<unknown>(
     `/api/session/${encodeURIComponent(id)}/permission/${encodeURIComponent(requestID)}/reply`,
     { method: 'POST', body: { reply }, timeoutMs: 15_000 },
+  )
+
+/** Pending forms/questions for a session (opencode 2.3.0 Form.Service). */
+export const ocListForms = (sessionId: string) =>
+  ocFetch<OcFormInfo[]>(`/api/session/${encodeURIComponent(sessionId)}/form`, { timeoutMs: 15_000 })
+
+export const ocFormReply = (sessionId: string, formId: string, answer: OcFormAnswer) =>
+  ocFetch<unknown>(
+    `/api/session/${encodeURIComponent(sessionId)}/form/${encodeURIComponent(formId)}/reply`,
+    { method: 'POST', body: { answer }, timeoutMs: 15_000 },
+  )
+
+export const ocFormCancel = (sessionId: string, formId: string, message?: string) =>
+  ocFetch<unknown>(
+    `/api/session/${encodeURIComponent(sessionId)}/form/${encodeURIComponent(formId)}${
+      message ? `?message=${encodeURIComponent(message)}` : ''
+    }`,
+    { method: 'DELETE', timeoutMs: 15_000 },
   )
 
 export const ocModels = () => ocFetch<OcModel[]>('/api/model', { timeoutMs: 30_000 })
