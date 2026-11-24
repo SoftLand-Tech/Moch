@@ -1284,6 +1284,9 @@ async function runResume(storedId: string, profile?: string): Promise<ResumeResu
     applyHistory(id, res.messages ?? [], res.inflight)
   } else {
     await loadCachedTranscript(newStored)
+    if (isOcChat && !ocBusy) {
+      void hydrateOcHistory(id, { force: !!(sessionsById.get()[id]?.messages.length) }).catch(() => {})
+    }
   }
   // Extra call is safe by construction: its busy/detached/pending guards
   // return unless this chat actually has a queued message and an idle handle.
@@ -2429,40 +2432,42 @@ export async function hydrateOcHistory(liveId: string, opts?: { force?: boolean 
       return
     }
     if (!force) return // messages appeared mid-fetch — cold path stays put
-    // Forced merge. Anchor on the last local user row the server persisted;
-    // everything after it (a partial assistant row, or nothing at all when
-    // the turn landed while away) is authoritative server history now.
+    // Forced merge: reconcile server history against local messages so user
+    // prompts, unpersisted/failed local user sends, command cards, and live
+    // tails survive, while broken assistant-only caches heal from the server.
     const localUserIdx = lastIndexWhere(cur.messages, (m) => m.role === 'user' && m.text.trim().length > 0)
-    if (localUserIdx < 0) return
-    const anchor = cur.messages[localUserIdx]
-    if (anchor.status === 'failed' || anchor.status === 'unconfirmed') return // never persisted — keep the local transcript
-    const localUser = anchor.text.trim()
-    const localMatchCount = cur.messages.filter((m) => m.role === 'user' && m.text.trim() === localUser).length
-    const mappedMatchCount = mapped.filter((m) => m.role === 'user' && m.text.trim() === localUser).length
-    if (mappedMatchCount < localMatchCount) return // newest turn not persisted on server yet — keep local messages
-    const mappedUserIdx = lastIndexWhere(mapped, (m) => m.role === 'user' && m.text.trim() === localUser)
-    if (mappedUserIdx < 0) return // not persisted (failed send) — keep local
-    const tail = mapped.slice(mappedUserIdx + 1)
-    // No server rows after the anchor: the turn is not persisted yet. Keep
-    // the local tail rather than replacing it with nothing (a live answer must
-    // not be swallowed by a history read that raced the server's write).
-    if (!tail.length) return
-    const merged = [
-      ...cur.messages.slice(0, localUserIdx + 1),
-      ...tail,
-    ].slice(-MAX_MESSAGES)
-    // The live stream keys tools by the server's part id; drop those local
-    // rows for the turn being replaced so the hydrated copies (prefixed for
-    // history) don't render twice. Everything else is kept, then deduped by
-    // id against the returned tools.
+    if (localUserIdx >= 0) {
+      const anchor = cur.messages[localUserIdx]
+      const localUser = anchor.text.trim()
+      const mappedUserIdx = lastIndexWhere(mapped, (m) => m.role === 'user' && m.text.trim() === localUser)
+      if (anchor.status === 'failed' || anchor.status === 'unconfirmed') {
+        // Keep failed/unconfirmed newest send, while still healing earlier turns if needed.
+        const prevIdx = lastIndexWhere(cur.messages.slice(0, localUserIdx), (m) => m.role === 'user' && m.text.trim().length > 0)
+        if (prevIdx < 0) return
+      } else if (mappedUserIdx >= 0) {
+        const localMatchCount = cur.messages.filter((m) => m.role === 'user' && m.text.trim() === localUser).length
+        const mappedMatchCount = mapped.filter((m) => m.role === 'user' && m.text.trim() === localUser).length
+        const tail = mapped.slice(mappedUserIdx + 1)
+        const hasLocalTailAfterAnchor = cur.messages.slice(localUserIdx + 1).some((m) => m.role === 'assistant' && !m.cmd)
+        // Server knows this user prompt but hasn't persisted any assistant reply
+        // after it yet: preserve the local failed/partial tail rather than blanking it.
+        if (mappedMatchCount >= localMatchCount && !tail.length && hasLocalTailAfterAnchor) return
+      }
+    }
+
+    const reconciled = reconcileHistoryMessages(mapped, cur.messages, { makeId: nid }) as ChatMessage[]
+    const mappedUserIdx = lastIndexWhere(mapped, (m) => m.role === 'user' && m.text.trim().length > 0)
     const tailToolIds = new Set<string>()
-    for (const row of rows.slice(mappedUserIdx + 1)) {
+    for (const row of mappedUserIdx >= 0 ? rows.slice(mappedUserIdx + 1) : rows) {
       for (const t of row.tools ?? []) tailToolIds.add(t.id)
     }
     const keptTools = cur.tools.filter((t) => !tailToolIds.has(t.id))
     const seen = new Set(keptTools.map((t) => t.id))
     const added = mappedTools.filter((t) => (seen.has(t.id) ? false : (seen.add(t.id), true)))
-    patchSession(liveId, { messages: merged, tools: [...keptTools, ...added].slice(-MAX_TOOLS) })
+    patchSession(liveId, {
+      messages: reconciled.slice(-MAX_MESSAGES),
+      tools: [...keptTools, ...added].slice(-MAX_TOOLS),
+    })
     schedulePersist(liveId)
   } finally {
     ocHydrating.delete(liveId)

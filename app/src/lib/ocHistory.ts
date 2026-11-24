@@ -34,8 +34,12 @@ export interface OcHistoryRow {
  */
 export interface OcHistoryMessageLike {
   type: 'user' | 'assistant' | 'idle' | string
-  time?: { created?: number }
+  time?: { created?: number | string }
+  /** OpenCode 2.3.0 `SessionMessage.User` top-level prompt text. */
+  text?: string
+  /** Legacy/fallback prompt container. */
   payload?: { text?: string }
+  files?: Array<{ filename?: string; mime?: string }>
   content?: Array<{
     type: 'text' | 'reasoning' | 'tool' | string
     text?: string
@@ -43,6 +47,28 @@ export interface OcHistoryMessageLike {
     name?: string
     state?: { status?: string }
   }>
+}
+
+function parseOcTs(created: number | string | undefined, fallback: number): number {
+  if (typeof created === 'number' && Number.isFinite(created)) return created
+  if (typeof created === 'string' && created.trim()) {
+    const parsed = Date.parse(created)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return fallback
+}
+
+function extractOcUserText(m: OcHistoryMessageLike): string {
+  const raw = typeof m.text === 'string' ? m.text : typeof m.payload?.text === 'string' ? m.payload.text : ''
+  const trimmed = raw.trim()
+  if (trimmed) return trimmed
+  if (Array.isArray(m.files) && m.files.length) {
+    const names = m.files
+      .map((f) => (typeof f?.filename === 'string' ? f.filename.trim() : ''))
+      .filter(Boolean)
+    return names.length ? names.join(', ') : '[attachment]'
+  }
+  return ''
 }
 
 /** Map GET /api/session/:id/message (NEWEST FIRST) into chat rows, oldest
@@ -85,12 +111,13 @@ export function mapOcHistory(messages: OcHistoryMessageLike[]): OcHistoryRow[] {
   }
 
   for (const m of [...(messages ?? [])].reverse()) {
+    const createdTs = parseOcTs(m.time?.created, Date.now())
     if (m.type === 'user') {
       // A user message always starts a new turn — never merge across it,
       // even when its text is empty (it still separates persisted turns).
       flush()
-      const text = String(m.payload?.text ?? '').trim()
-      if (text) rows.push({ role: 'user', text, ts: m.time?.created ?? Date.now() })
+      const text = extractOcUserText(m)
+      if (text) rows.push({ role: 'user', text, ts: createdTs })
       continue
     }
     if (m.type !== 'assistant') continue
@@ -107,14 +134,14 @@ export function mapOcHistory(messages: OcHistoryMessageLike[]): OcHistoryRow[] {
     if (!parts.length && !tools.length) {
       // An empty assistant message is a step boundary, not content: it may
       // still OWN the turn's first timestamp, but never creates a row alone.
-      if (!turn && (m.time?.created != null)) {
-        turn = { role: 'assistant', text: '', ts: m.time.created, tools: [], segments: [] }
+      if (!turn && m.time?.created != null) {
+        turn = { role: 'assistant', text: '', ts: createdTs, tools: [], segments: [] }
       }
       continue
     }
     if (!turn) {
       // First step of the turn owns the row's timestamp.
-      turn = { role: 'assistant', text: '', ts: m.time?.created ?? Date.now(), tools: [], segments: [] }
+      turn = { role: 'assistant', text: '', ts: createdTs, tools: [], segments: [] }
     }
     turn.segments.push(...parts)
     turn.tools.push(...tools)

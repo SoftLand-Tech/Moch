@@ -164,8 +164,10 @@ export interface OcIntegration {
 
 export interface OcHistoryMessage {
   type: 'user' | 'assistant' | 'idle' | string
-  time?: { created?: number }
+  time?: { created?: number | string }
+  text?: string
   payload?: { text?: string }
+  files?: Array<{ filename?: string; mime?: string }>
   content?: Array<{
     type: 'text' | 'reasoning' | 'tool' | string
     text?: string
@@ -197,8 +199,8 @@ export const ocCreateSession = (title: string, directory?: string) =>
     { method: 'POST', body: { title } },
   )
 
-export const ocHistory = (id: string) =>
-  ocFetch<OcHistoryMessage[]>(`/api/session/${encodeURIComponent(id)}/message`, { timeoutMs: 30_000 })
+export const ocHistory = (id: string, limit = 200) =>
+  ocFetch<OcHistoryMessage[]>(`/api/session/${encodeURIComponent(id)}/message?limit=${limit}`, { timeoutMs: 30_000 })
 
 export const ocPrompt = (id: string, text: string) =>
   ocFetch<unknown>(`/api/session/${encodeURIComponent(id)}/prompt`, { method: 'POST', body: { text }, timeoutMs: 60_000 })

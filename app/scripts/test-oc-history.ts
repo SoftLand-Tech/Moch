@@ -9,6 +9,7 @@
 // Run: cd app && npx tsx scripts/test-oc-history.ts
 
 import { mapOcHistory, type OcHistoryMessageLike, type OcHistoryRow } from '../src/lib/ocHistory'
+import { reconcileHistoryMessages } from '../src/lib/historyMerge'
 
 let pass = 0
 let fail = 0
@@ -154,6 +155,68 @@ function main() {
   check(
     'idle/unknown message types are ignored',
     mapOcHistory([{ type: 'idle', time: { created: 1 } }]).length === 0,
+  )
+
+  // ── OpenCode 2.3.0 schema: top-level `text` on user messages ───────────
+  const v23User = (text: string, ts: number | string): OcHistoryMessageLike => ({
+    type: 'user',
+    time: { created: ts },
+    text,
+  })
+  const v23TwoTurns: OcHistoryMessageLike[] = [
+    assistant(500, [{ type: 'text', text: 'Second turn reply' }]),
+    v23User('Follow-up prompt', '2026-11-25T01:14:00.000Z'),
+    assistant(300, [{ type: 'reasoning', text: 't2' }, { type: 'text', text: 'Step 2' }]),
+    assistant(200, [{ type: 'reasoning', text: 't1' }, { type: 'text', text: 'Step 1' }]),
+    v23User('Build me a minigame, interview me first so you get what i want', 100),
+  ]
+  const r7 = mapOcHistory(v23TwoTurns)
+  check(
+    'OC 2.3.0 top-level user `text` preserves every user message and separates turns',
+    r7.length === 4 &&
+      r7[0].role === 'user' &&
+      r7[0].text === 'Build me a minigame, interview me first so you get what i want' &&
+      r7[1].role === 'assistant' &&
+      r7[1].text === 'Step 1\nStep 2' &&
+      r7[2].role === 'user' &&
+      r7[2].text === 'Follow-up prompt' &&
+      r7[3].role === 'assistant' &&
+      r7[3].text === 'Second turn reply',
+    JSON.stringify(r7.map((r) => [r.role, r.text])),
+  )
+  check(
+    'ISO string timestamp on user message parses into epoch ms',
+    r7[2]?.ts === Date.parse('2026-11-25T01:14:00.000Z'),
+    String(r7[2]?.ts),
+  )
+
+  // ── Attachment-only OC 2.3.0 user message survives ───────────────────────
+  const attachOnly: OcHistoryMessageLike[] = [
+    assistant(200, [{ type: 'text', text: 'Got the screenshot.' }]),
+    { type: 'user', time: { created: 100 }, text: '', files: [{ filename: 'shot.png', mime: 'image/png' }] },
+  ]
+  const r8 = mapOcHistory(attachOnly)
+  check(
+    'attachment-only user message keeps filename placeholder and blocks turn merge',
+    r8.length === 2 && r8[0].role === 'user' && r8[0].text === 'shot.png',
+    JSON.stringify(r8),
+  )
+
+  // ── Broken assistant-only cache heals cleanly when reconciled ────────────
+  let idSeq = 0
+  const healed = reconcileHistoryMessages(
+    r7.map((r) => ({ id: `srv-${++idSeq}`, role: r.role, text: r.text, ts: r.ts, segments: r.segments })),
+    [{ id: 'stale-a', role: 'assistant', text: 'Step 1\nStep 2', ts: 200 }],
+    { makeId: () => `m-${++idSeq}` },
+  )
+  check(
+    'reconcileHistoryMessages restores user messages over stale assistant-only cache',
+    healed.length === 4 &&
+      healed[0].role === 'user' &&
+      healed[0].text === 'Build me a minigame, interview me first so you get what i want' &&
+      healed[2].role === 'user' &&
+      healed[2].text === 'Follow-up prompt',
+    JSON.stringify(healed.map((m) => [m.role, m.text])),
   )
 
   console.log(`\n${pass} passed, ${fail} failed`)
