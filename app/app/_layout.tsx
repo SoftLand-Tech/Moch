@@ -4,10 +4,11 @@ import { StatusBar } from 'expo-status-bar'
 import { KeyboardProvider } from 'react-native-keyboard-controller'
 import { View, Text, Pressable, StyleSheet, AppState, Modal } from 'react-native'
 import { useStore } from '@nanostores/react'
+import * as Clipboard from 'expo-clipboard'
 import * as Linking from 'expo-linking'
 import * as SplashScreen from 'expo-splash-screen'
 import { initPush, registerPushIfGranted, dismissMochNotifications, lastNotificationResponse, onNotificationResponse, clearLastNotificationResponse, type NotificationTarget } from '../src/lib/push'
-import { log } from '../src/lib/log'
+import { log, logText } from '../src/lib/log'
 import { AnimatedSplash } from '../src/components/AnimatedSplash'
 import { AlertDialogHost, showAlert } from '../src/components/AlertDialog'
 import { SessionToasts } from '../src/components/SessionToasts'
@@ -79,6 +80,7 @@ export default function RootLayout() {
   const pendingOpen = useStore(pendingOpenStoredId)
   const sharedIn = useStore(shareInInbox)
   const [splashGone, setSplashGone] = useState(false)
+  const [copiedDiag, setCopiedDiag] = useState(false)
   // Rendered as the stable last sibling of both layout branches, so the
   // branch switch (saved config loading in) never remounts it mid-animation.
   const splash = !splashGone ? <AnimatedSplash onDone={() => setSplashGone(true)} /> : null
@@ -364,7 +366,6 @@ export default function RootLayout() {
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="bot" options={{ headerShown: false, presentation: 'modal' }} />
-        <Stack.Screen name="setup" options={{ headerShown: false, presentation: 'modal' }} />
         <Stack.Screen name="onboarding/thinker" options={{ headerShown: false }} />
         <Stack.Screen name="onboarding/environment" options={{ headerShown: false }} />
         <Stack.Screen name="onboarding/providers" options={{ headerShown: false }} />
@@ -392,6 +393,25 @@ export default function RootLayout() {
               <View style={[s.btnRow, { flexDirection: dir.row }]}>
                 <Pressable style={({ pressed }) => [s.btn, pressed && s.pressed]} onPress={() => { void retryNow().catch(() => {}) }}>
                   <Text style={s.btnText}>{t('common.retry')}</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [s.diagBtn, pressed && s.pressed]}
+                  onPress={() => {
+                    const body = [
+                      cfg ? `Server: ${redactedUrl(cfg)}` : '',
+                      `State: ${state}${attempt ? ` (attempt ${attempt})` : ''}`,
+                      err ? `Error: ${err}` : '',
+                      logText().slice(-4000),
+                    ].filter(Boolean).join('\n\n')
+                    void Clipboard.setStringAsync(body || 'No diagnostic logs captured.').then(() => {
+                      setCopiedDiag(true)
+                      setTimeout(() => setCopiedDiag(false), 3000)
+                    })
+                  }}
+                >
+                  <Text style={s.ghostText}>
+                    {copiedDiag ? t('common.copied') : t('settings.about.copyDiagnostics')}
+                  </Text>
                 </Pressable>
               </View>
             </>
@@ -432,6 +452,7 @@ export default function RootLayout() {
  */
 export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
   const t = useT()
+  const [copied, setCopied] = useState(false)
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: 30 }}>
       <StatusBar style="light" />
@@ -439,14 +460,32 @@ export function ErrorBoundary({ error, retry }: { error: Error; retry: () => voi
       <Text style={{ color: C.textDim, fontSize: 13, textAlign: 'center', marginBottom: 24, lineHeight: 19 }}>
         {error?.message ?? t('setup.error.body')}
       </Text>
-      <Pressable
-        style={({ pressed }) => [{ backgroundColor: C.accent, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 28 }, pressed && { opacity: 0.6 }]}
-        onPress={retry}
-        accessibilityRole="button"
-        accessibilityLabel={t('common.retry')}
-      >
-        <Text style={{ color: C.onAccent, fontSize: 15, fontWeight: '800' }}>{t('common.retry')}</Text>
-      </Pressable>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 12 }}>
+        <Pressable
+          style={({ pressed }) => [{ backgroundColor: C.accent, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 28 }, pressed && { opacity: 0.6 }]}
+          onPress={retry}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.retry')}
+        >
+          <Text style={{ color: C.onAccent, fontSize: 15, fontWeight: '800' }}>{t('common.retry')}</Text>
+        </Pressable>
+        <Pressable
+          style={({ pressed }) => [{ borderRadius: 12, paddingVertical: 14, paddingHorizontal: 20, borderWidth: 1, borderColor: C.border }, pressed && { opacity: 0.6 }]}
+          onPress={() => {
+            const body = [error?.stack || error?.message || '', logText().slice(-4000)].filter(Boolean).join('\n\n')
+            void Clipboard.setStringAsync(body).then(() => {
+              setCopied(true)
+              setTimeout(() => setCopied(false), 3000)
+            })
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={t('settings.about.copyDiagnostics')}
+        >
+          <Text style={{ color: C.textDim, fontSize: 15, fontWeight: '600' }}>
+            {copied ? t('common.copied') : t('settings.about.copyDiagnostics')}
+          </Text>
+        </Pressable>
+      </View>
     </View>
   )
 }
@@ -456,10 +495,11 @@ const makeS = () => StyleSheet.create({
   pressed: { opacity: 0.6 },
   errTitle: { color: C.red, fontSize: 19, fontWeight: '800', marginBottom: 12 },
   errDetail: { color: C.textDim, fontSize: 13, textAlign: 'center', marginBottom: 24, lineHeight: 19 },
-  btnRow: { gap: 12 },
+  btnRow: { gap: 12, flexWrap: 'wrap', justifyContent: 'center' },
   btn: { backgroundColor: C.accent, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 28 },
   btnText: { color: C.onAccent, fontSize: 15, fontWeight: '800' },
   ghostBtn: { borderRadius: 12, paddingVertical: 14, paddingHorizontal: 22, borderWidth: 1, borderColor: C.border, marginTop: 12 },
+  diagBtn: { borderRadius: 12, paddingVertical: 14, paddingHorizontal: 18, borderWidth: 1, borderColor: C.border },
   ghostText: { color: C.textDim, fontSize: 15, fontWeight: '600' },
   connecting: { color: C.textDim, marginTop: 2, marginBottom: 8 },
   toast: { position: 'absolute', bottom: 40, left: 20, right: 20, backgroundColor: C.bgElev, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: C.border },

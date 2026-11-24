@@ -60,6 +60,9 @@ export const settings: Catalog = {
     'settings.linux.subNone': 'Ubuntu/Debian userspace for the agent (apt, any language, browser)',
     'settings.linux.install': 'Install Linux environment',
     'settings.linux.reinstall': 'Update / reinstall environment',
+    'settings.linux.reinstall.title': 'Reinstall Linux environment?',
+    'settings.linux.reinstall.body': 'Downloads and refreshes the Linux guest rootfs (requires network, may take a few minutes).',
+    'settings.linux.reinstall.confirm': 'Reinstall',
     'settings.linux.install.sub': 'Downloads the base system (needs network, a few minutes)',
     'settings.linux.reset': 'Reset Linux environment',
     'settings.linux.reset.sub': 'Deletes the guest and everything installed inside it',
@@ -123,7 +126,6 @@ export const settings: Catalog = {
     'settings.phone.approvals.sub':
       "Files and commands run without asking — this is your own phone. 'approvals.deny' rules still apply.",
     'settings.phone.reconnect': 'Reconnect now',
-    'settings.phone.disconnect': 'Disconnect',
     'settings.phone.retryFailed': 'Retry failed',
 
     'settings.about.copyDiagnostics': 'Copy diagnostics',
@@ -198,6 +200,9 @@ export const settings: Catalog = {
     'settings.linux.subNone': 'مساحة Ubuntu/Debian للوكيل (apt، أي لغة، المتصفح)',
     'settings.linux.install': 'ثبّت بيئة لينكس',
     'settings.linux.reinstall': 'تحديث / إعادة تثبيت البيئة',
+    'settings.linux.reinstall.title': 'إعادة تثبيت بيئة لينكس؟',
+    'settings.linux.reinstall.body': 'يقوم بتنزيل وتحديث نظام الضيف الأساسي (يتطلب شبكة وقد يستغرق بضع دقائق).',
+    'settings.linux.reinstall.confirm': 'إعادة التثبيت',
     'settings.linux.install.sub': 'تنزيل النظام الأساسي (يتطلب شبكة، بضع دقائق)',
     'settings.linux.reset': 'إعادة تعيين بيئة لينكس',
     'settings.linux.reset.sub': 'يحذف الضيف وكل ما ثُبّت بداخله',
@@ -260,7 +265,6 @@ export const settings: Catalog = {
     'settings.phone.approvals.sub':
       "الملفات والأوامر تعمل دون سؤال — هذا هاتفك. قواعد 'approvals.deny' ما زالت سارية.",
     'settings.phone.reconnect': 'أعد الاتصال الآن',
-    'settings.phone.disconnect': 'افصل',
     'settings.phone.retryFailed': 'فشلت إعادة المحاولة',
 
     'settings.about.copyDiagnostics': 'انسخ التشخيص',
@@ -335,6 +339,9 @@ export const settings: Catalog = {
     'settings.linux.subNone': '为智能体准备的 Ubuntu/Debian 用户空间（apt、任意语言、浏览器）',
     'settings.linux.install': '安装 Linux 环境',
     'settings.linux.reinstall': '更新 / 重新安装环境',
+    'settings.linux.reinstall.title': '重新安装 Linux 环境？',
+    'settings.linux.reinstall.body': '将下载并刷新 Linux 根文件系统（需要网络，可能需要几分钟）。',
+    'settings.linux.reinstall.confirm': '重新安装',
     'settings.linux.install.sub': '下载基础系统（需要网络，几分钟）',
     'settings.linux.reset': '重置 Linux 环境',
     'settings.linux.reset.sub': '删除环境及其内部安装的所有内容',
@@ -395,7 +402,6 @@ export const settings: Catalog = {
     'settings.phone.approvals.sub':
       "文件与命令无需询问即可运行 —— 这是你自己的手机。'approvals.deny' 规则仍然生效。",
     'settings.phone.reconnect': '立即重新连接',
-    'settings.phone.disconnect': '断开连接',
     'settings.phone.retryFailed': '重试失败',
 
     'settings.about.copyDiagnostics': '复制诊断信息',
@@ -472,6 +478,9 @@ export const settings: Catalog = {
     'settings.linux.subNone': 'Espace utilisateur Ubuntu/Debian pour l’agent (apt, tout langage, navigateur)',
     'settings.linux.install': "Installer l'environnement Linux",
     'settings.linux.reinstall': "Mettre à jour / réinstaller l'environnement",
+    'settings.linux.reinstall.title': "Réinstaller l'environnement Linux ?",
+    'settings.linux.reinstall.body': "Télécharge et actualise le système de base de l'invité (réseau requis, peut prendre quelques minutes).",
+    'settings.linux.reinstall.confirm': 'Réinstaller',
     'settings.linux.install.sub': 'Télécharge le système de base (réseau requis, quelques minutes)',
     'settings.linux.reset': "Réinitialiser l'environnement Linux",
     'settings.linux.reset.sub': "Supprime l'invité et tout ce qui y est installé",
@@ -536,7 +545,6 @@ export const settings: Catalog = {
     'settings.phone.approvals.sub':
       "Les fichiers et commandes s'exécutent sans demander — c'est votre propre téléphone. Les règles 'approvals.deny' s'appliquent toujours.",
     'settings.phone.reconnect': 'Reconnecter maintenant',
-    'settings.phone.disconnect': 'Déconnecter',
     'settings.phone.retryFailed': 'Échec de la reconnexion',
 
     'settings.about.copyDiagnostics': 'Copier les diagnostics',

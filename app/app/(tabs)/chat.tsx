@@ -1234,7 +1234,7 @@ export default function Chat() {
         // Mockup: a brand-new chat is titled "New chat"; real sessions keep
         // their title or fall back to the app name.
         title={title || (msgs.length === 0 && !booting ? t('chat.newChat') : 'Moch')}
-        onSearch={() => router.navigate('/(tabs)/sessions')}
+        onSearch={ocMode ? undefined : () => router.navigate('/(tabs)/sessions')}
         right={
           <>
             {/* New chat — the header's "+" (same flow as the drawer's startNew
