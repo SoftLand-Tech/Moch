@@ -117,6 +117,15 @@ export const chat: Catalog = {
     'chat.ocPerm.toolFallback': 'a tool',
     'chat.ocPerm.allowOnce': 'Allow once',
     'chat.ocPerm.allowAlways': 'Always allow',
+    'chat.ocQuestion.title': 'Question',
+    'chat.ocQuestion.titleMany': 'Questions',
+    'chat.ocQuestion.multiHint': 'Select one or more',
+    'chat.ocQuestion.orTypePlaceholder': 'Type your own answer…',
+    'chat.ocQuestion.send': 'Send',
+    'chat.ocQuestion.dismiss': 'Dismiss',
+    'chat.ocQuestion.pendingOne': '1 question still needs an answer',
+    'chat.ocQuestion.pendingMany': '{n} questions still need an answer',
+    'chat.ocQuestion.failed': 'Could not send answer',
 
     // ── Composer ──────────────────────────────────────────────────────────
     'chat.composer.placeholder': 'Ask Mochi… (type /)',
@@ -390,6 +399,15 @@ export const chat: Catalog = {
     'chat.ocPerm.toolFallback': 'أداة',
     'chat.ocPerm.allowOnce': 'اسمح مرة واحدة',
     'chat.ocPerm.allowAlways': 'اسمح دائمًا',
+    'chat.ocQuestion.title': 'سؤال',
+    'chat.ocQuestion.titleMany': 'أسئلة',
+    'chat.ocQuestion.multiHint': 'اختر واحدًا أو أكثر',
+    'chat.ocQuestion.orTypePlaceholder': 'اكتب إجابتك الخاصة…',
+    'chat.ocQuestion.send': 'إرسال',
+    'chat.ocQuestion.dismiss': 'تجاهل',
+    'chat.ocQuestion.pendingOne': 'لا يزال هناك سؤال واحد يحتاج إلى إجابة',
+    'chat.ocQuestion.pendingMany': 'لا يزال هناك {n} أسئلة تحتاج إلى إجابة',
+    'chat.ocQuestion.failed': 'تعذّر إرسال الإجابة',
 
     // ── المحرّر ───────────────────────────────────────────────────────────
     'chat.composer.placeholder': 'اسأل موتشي… (اكتب /)',
@@ -663,6 +681,15 @@ export const chat: Catalog = {
     'chat.ocPerm.toolFallback': '一个工具',
     'chat.ocPerm.allowOnce': '允许一次',
     'chat.ocPerm.allowAlways': '始终允许',
+    'chat.ocQuestion.title': '问题',
+    'chat.ocQuestion.titleMany': '问题列表',
+    'chat.ocQuestion.multiHint': '可选择一项或多项',
+    'chat.ocQuestion.orTypePlaceholder': '输入自定义回答…',
+    'chat.ocQuestion.send': '发送',
+    'chat.ocQuestion.dismiss': '跳过',
+    'chat.ocQuestion.pendingOne': '还有 1 个问题需要回答',
+    'chat.ocQuestion.pendingMany': '还有 {n} 个问题需要回答',
+    'chat.ocQuestion.failed': '无法发送回答',
 
     // ── 输入框 ────────────────────────────────────────────────────────────
     'chat.composer.placeholder': '向 Mochi 提问…（输入 /）',
@@ -936,6 +963,15 @@ export const chat: Catalog = {
     'chat.ocPerm.toolFallback': 'un outil',
     'chat.ocPerm.allowOnce': 'Autoriser une fois',
     'chat.ocPerm.allowAlways': 'Toujours autoriser',
+    'chat.ocQuestion.title': 'Question',
+    'chat.ocQuestion.titleMany': 'Questions',
+    'chat.ocQuestion.multiHint': 'Sélectionnez une ou plusieurs options',
+    'chat.ocQuestion.orTypePlaceholder': 'Saisissez votre propre réponse…',
+    'chat.ocQuestion.send': 'Envoyer',
+    'chat.ocQuestion.dismiss': 'Ignorer',
+    'chat.ocQuestion.pendingOne': '1 question nécessite encore une réponse',
+    'chat.ocQuestion.pendingMany': '{n} questions nécessitent encore une réponse',
+    'chat.ocQuestion.failed': 'Impossible d’envoyer la réponse',
 
     // ── Composeur ─────────────────────────────────────────────────────────
     'chat.composer.placeholder': 'Demandez à Mochi… (tapez /)',
