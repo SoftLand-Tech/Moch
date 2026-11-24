@@ -18,6 +18,11 @@ import { processAttachments, detachImages, type PendingAttachment } from './medi
 import { isGatewayTimeout, isUnconfirmedSubmit, outboxPinFor, outboxTargetFor, shouldAutoRetry, UnconfirmedSubmitError } from './rpcRetry'
 import { migrateV1TranscriptWith } from './transcriptMigrate'
 import { isTerminalComplete } from './turnComplete'
+import {
+  HISTORY_TEXT_MAX,
+  reconcileHistoryMessages,
+  type ServerInflightTurn,
+} from './historyMerge'
 // Type-only: erased at runtime, so chat.ts stays free of slash.ts's atom graph
 // (chat.ts already cannot load in plain node — react-native/AsyncStorage at
 // import time — and this keeps it that way).
@@ -33,13 +38,23 @@ import {
   runOneShotTurn,
   ocSessionFor,
   ocRememberSession,
+  findStoredIdForOcSession,
   ocPickFor,
   loadOcHistory,
   type OcTurnHooks,
   type OcPermissionInfo,
   type OcHistoryRow,
 } from './opencodeChat'
-import { ocInterrupt, ocPermissionReply, OcError, describeOcError } from './opencodeClient'
+import {
+  ocInterrupt,
+  ocPermissionReply,
+  ocListForms,
+  ocFormReply,
+  ocFormCancel,
+  OcError,
+  describeOcError,
+} from './opencodeClient'
+import { parseOcForm, type OcFormInfo, type OcFormAnswer } from './ocForm'
 import { ocCommandTurnPayload } from './ocCommands'
 import { invalidateOcSessionsCache } from './ocSessionsCache'
 
@@ -562,13 +577,13 @@ function flushStreams() {
     if (text) {
       const last = segments[segments.length - 1]
       if (last?.kind === 'text') {
-        segments[segments.length - 1] = { ...last, text: (last.text + text).slice(0, 32000) }
+        segments[segments.length - 1] = { ...last, text: (last.text + text).slice(0, HISTORY_TEXT_MAX) }
       } else {
         // Thinking resolved into output — freeze that block's meta at its end.
         if (last?.kind === 'thinking' && !last.meta) {
           segments[segments.length - 1] = { ...last, meta: formatThinkMeta(last.startedAt ?? 0, last.chars ?? 0) }
         }
-        segments.push({ kind: 'text', text })
+        segments.push({ kind: 'text', text: text.slice(0, HISTORY_TEXT_MAX) })
       }
     }
 
@@ -576,7 +591,7 @@ function flushStreams() {
       .filter((seg) => seg.kind === 'text')
       .map((seg) => seg.text)
       .join('')
-    messages[i] = { ...m, text: fullText.slice(0, 32000), segments }
+    messages[i] = { ...m, text: fullText.slice(0, HISTORY_TEXT_MAX), segments }
     patchSession(sid, { messages })
   }
 }
@@ -1173,7 +1188,7 @@ async function runResume(storedId: string, profile?: string): Promise<ResumeResu
   // like boot paint and notification taps have no profile argument, so fall
   // back to the profile we recorded when the chat was first opened.
   const scoped = profile?.trim() || (await profileForServerOnlySession(storedId))
-  const res = await rpc<{ session_id?: string; stored_session_id?: string; messages?: Array<Record<string, unknown>>; info?: { model?: string; provider?: string; reasoning_effort?: string }; running?: boolean; status?: string }>(
+  const res = await rpc<{ session_id?: string; stored_session_id?: string; messages?: Array<Record<string, unknown>>; inflight?: ServerInflightTurn | null; info?: { model?: string; provider?: string; reasoning_effort?: string }; running?: boolean; status?: string }>(
     'session.resume',
     { session_id: storedId, cols: CREATE_COLS, ...(scoped ? { profile: scoped } : {}) },
   )
@@ -1212,6 +1227,30 @@ async function runResume(storedId: string, profile?: string): Promise<ResumeResu
   }
   // Carry messages/tools/todos/title/usage/busy over from the previous
   // entry — a rotated live id must not land on an empty 'New chat' state.
+  // For OpenCode chats the Hermes gateway's `res.running` is always false
+  // because the turn runs directly against OpenCode; preserve local OC busy
+  // and migrate live cancellers across the rotated id.
+  const isOcChat = thinkerForChat(newStored) === 'opencode'
+  let ocBusy = false
+  if (oldLive && oldLive !== id) {
+    const turnCancel = ocTurns.get(oldLive)
+    if (turnCancel) {
+      ocTurns.delete(oldLive)
+      ocTurns.set(id, turnCancel)
+      ocBusy = true
+    }
+    const oneShotCancel = ocOneShotCancel.get(oldLive)
+    if (oneShotCancel) {
+      ocOneShotCancel.delete(oldLive)
+      ocOneShotCancel.set(id, oneShotCancel)
+      ocBusy = true
+    }
+    const oldPerm = ocPermissions.get(oldLive)
+    if (oldPerm) {
+      ocPermissions.delete(oldLive)
+      ocPermissions.set(id, oldPerm)
+    }
+  }
   next[id] = {
     ...(prev ?? makeSession(id, newStored)),
     id,
@@ -1224,7 +1263,9 @@ async function runResume(storedId: string, profile?: string): Promise<ResumeResu
     // chat rendered fully idle — no stop button, no live tool footer, no
     // drawer busy dot — until the next text delta. Older gateways omit the
     // field: keep the carried-over entry's value instead of forcing idle.
-    busy: typeof res.running === 'boolean' ? res.running : (prev?.busy ?? false),
+    busy: isOcChat
+      ? (ocBusy || !!prev?.busy)
+      : (typeof res.running === 'boolean' ? res.running : (prev?.busy ?? false)),
   }
   sessionsById.set(next)
   if (pendDirty) pendingBySession.set(pend)
@@ -1234,13 +1275,13 @@ async function runResume(storedId: string, profile?: string): Promise<ResumeResu
   const cur = activeSession.get()
   if (cur === oldLive || cur === pendKey || cur === pendKey2) activeSession.set(id)
 
-  if (res.messages?.length) {
+  if (res.messages?.length || res.inflight) {
     // Restore the device-persisted tool log BEFORE applyHistory — its
     // persist would otherwise write the blob back with an empty tools list
     // and erase the log on every restart. Server history carries no tool
     // log; this line is what makes the collapsed chip survive a restart.
     await loadCachedTools(newStored)
-    applyHistory(id, res.messages)
+    applyHistory(id, res.messages ?? [], res.inflight)
   } else {
     await loadCachedTranscript(newStored)
   }
@@ -1656,6 +1697,40 @@ export function switchToSession(storedId: string): Promise<string> {
 }
 
 /**
+ * Synchronously pre-activate a known stored session on the UI before a network
+ * resume completes (used by fast bot/session switching so the screen swaps in
+ * frame 0 without awaiting RPCs). Does NOT clear `activeBot`.
+ */
+export function primeBotSession(storedId: string, profile?: string, title = 'Bot Chat'): string {
+  chatBanner.set(null)
+  if (profile?.trim()) trackServerOnlySession(storedId, profile.trim())
+  const curId = activeSession.get()
+  const cur = curId ? sessionsById.get()[curId] : undefined
+  if (cur && cur.storedId === storedId && !cur.provisional) {
+    clearAttention(storedId)
+    return curId!
+  }
+  const live = liveIdFor(storedId)
+  const hit = live ? sessionsById.get()[live] : undefined
+  if (hit) {
+    activeSession.set(live!)
+    clearAttention(storedId)
+    setSessionLoading(storedId, !hit.messages.length)
+    return live!
+  }
+  const key = seedPlaceholder(storedId)
+  const map = sessionsById.get()
+  if (map[key] && (map[key].title === 'New chat' || !map[key].title) && title) {
+    sessionsById.set({ ...map, [key]: { ...map[key], title } })
+  }
+  activeSession.set(key)
+  clearAttention(storedId)
+  setSessionLoading(storedId, true)
+  void loadCachedTranscript(storedId)
+  return key
+}
+
+/**
  * Open a session that lives on a NON-launch profile — a bot's Hermes-side task
  * session. Bot Mode rule: these are separate task sessions, never the
  * canonical Bot Chat; they open as ordinary chats on the launch identity
@@ -1670,9 +1745,24 @@ export async function openServerSession(
   void setActiveBot(null)
   const profile = opts?.profile?.trim() || undefined
   if (profile) trackServerOnlySession(storedId, profile)
+  const live = liveIdFor(storedId)
+  const hit = live ? sessionsById.get()[live] : undefined
+  if (hit) {
+    activeSession.set(live!)
+    clearAttention(storedId)
+    setSessionLoading(storedId, !hit.messages.length)
+  } else {
+    const key = seedPlaceholder(storedId)
+    activeSession.set(key)
+    clearAttention(storedId)
+    setSessionLoading(storedId, true)
+    void loadCachedTranscript(storedId)
+  }
   const r = await resumeShared(storedId, profile ? { profile } : undefined)
   trackServerOnlySession(r.storedId, profile)
-  activeSession.set(r.sessionId)
+  if (activeStoredId.get() === r.storedId || !activeSession.get()) {
+    activeSession.set(r.sessionId)
+  }
   clearAttention(r.storedId)
   void AsyncStorage.setItem(LAST_SESSION_KEY, r.storedId)
   return r.sessionId
@@ -1770,6 +1860,8 @@ export async function resetSessionCaches(): Promise<void> {
   ocOneShotCancel.clear()
   ocPermissions.clear()
   ocPermissionLive.set(null)
+  ocQuestions.clear()
+  ocQuestionLive.set(null)
   ocHydrated.clear()
   // storedIdMapLoaded stays true: the map is genuinely empty now, and
   // rememberStoredId repopulates it on the next create/resume/info event.
@@ -1805,7 +1897,11 @@ export function historyFor(sessionId: string) {
   return sessionsById.get()[sessionId]
 }
 
-export function applyHistory(sessionId: string, list?: Array<Record<string, unknown>>) {
+export function applyHistory(
+  sessionId: string,
+  list?: Array<Record<string, unknown>>,
+  inflight?: ServerInflightTurn | null,
+) {
   const mapped: ChatMessage[] = []
   for (const m of list ?? []) {
     const role = String(m.role ?? '') === 'user' ? 'user' : 'assistant'
@@ -1814,76 +1910,52 @@ export function applyHistory(sessionId: string, list?: Array<Record<string, unkn
     if (text === '[object Object]') continue
     // Media-bearing history rows (@image:/@file: directives, markdown
     // images, the gateway's inline native-vision data URLs) surface as media
-    // segments on both roles. The 8000-char cap is applied AFTER extraction:
-    // a data URL sliced mid-base64 would still match the scanner and become
-    // a corrupt, unrenderable segment. A row with nothing visible after
-    // extraction drops, exactly like the old empty-text drop.
+    // segments on both roles. The char cap is applied AFTER extraction so
+    // base64 data URLs never slice mid-token.
     const extracted = extractMedia(text ? [{ kind: 'text' as const, text }] : [])
     const hasMedia = extracted.some((seg) => seg.kind === 'media')
     // BUG-083: the gateway forwards each assistant row's durable reasoning
-    // on every resume (session_history.py forwards `reasoning` /
-    // `reasoning_content` verbatim) — map it into the same collapsible
-    // thinking block the live stream renders instead of discarding it.
-    // meta stays unset → the header reads a plain "Thought" (the true
-    // duration isn't recoverable from history). A reasoning-only row
-    // (interrupted turn) is still worth showing; only a row with nothing
-    // visible at all drops, exactly like the old empty-text drop.
+    // on every resume — map it into the collapsible thinking block instead
+    // of discarding it.
     const reasoning = role === 'assistant' ? textOf(m.reasoning ?? m.reasoning_content ?? '').trim() : ''
     if (!hasMedia && !text && !reasoning) continue
-    // BUG-077: mark truncation instead of silently clipping long rows.
     const capped = extracted.map((seg) =>
-      seg.kind === 'text' && seg.text.length > 8000 ? { ...seg, text: `${seg.text.slice(0, 8000)}…` } : seg,
+      seg.kind === 'text' && seg.text.length > HISTORY_TEXT_MAX
+        ? { ...seg, text: `${seg.text.slice(0, HISTORY_TEXT_MAX)}…` }
+        : seg,
     )
     const segs: ChatSegment[] = []
     if (reasoning) {
       segs.push({
         kind: 'thinking',
-        text: `${reasoning.slice(0, 8000)}${reasoning.length > 8000 ? '…' : ''}`,
+        text: `${reasoning.slice(0, HISTORY_TEXT_MAX)}${reasoning.length > HISTORY_TEXT_MAX ? '…' : ''}`,
         startedAt: Number(m.ts ?? m.timestamp ?? Date.now()) || undefined,
       })
     }
     if (hasMedia) {
       segs.push(...capped)
     } else if (reasoning) {
-      // REVIEW FIX (BUG-083 follow-up): Chat.tsx's `segmentsOf` renders
-      // `segments` INSTEAD of `m.text` — a reasoning row carrying only a
-      // thinking segment rendered just the collapsible and dropped the
-      // answer outright. The live stream always pushes a text segment
-      // alongside thinking for the same reason (see the queueStream append);
-      // the history mapping must honor the same contract.
-      segs.push({ kind: 'text', text: `${text.slice(0, 8000)}${text.length > 8000 ? '…' : ''}` })
+      segs.push({
+        kind: 'text',
+        text: `${text.slice(0, HISTORY_TEXT_MAX)}${text.length > HISTORY_TEXT_MAX ? '…' : ''}`,
+      })
     }
-    const rowText = (hasMedia ? joinedTextOf(capped) : text)
+    const rowText = hasMedia ? joinedTextOf(capped) : text
     mapped.push({
       id: nid(),
       role,
-      text: `${rowText.slice(0, 8000)}${rowText.length > 8000 ? '…' : ''}`,
+      text: `${rowText.slice(0, HISTORY_TEXT_MAX)}${rowText.length > HISTORY_TEXT_MAX ? '…' : ''}`,
       ts: Number(m.ts ?? m.timestamp ?? Date.now()),
       ...(segs.length ? { segments: segs } : {}),
     })
   }
-  // BUG-084: history rows never carry `streaming` — a resume/reconnect
-  // resync flattened an in-flight tail (cursor and live thinking vanished,
-  // text went static) and when the server hadn't flushed the partial yet,
-  // the mapped replacement DROPPED the live partial answer outright.
-  // Re-attach the live tail when it is still the growing end of the
-  // conversation: a history row it extends (either direction) resumes as
-  // the streaming bubble; otherwise the live partial is appended.
   const prevEntry = sessionsById.get()[sessionId]
-  const tail = prevEntry?.messages[prevEntry.messages.length - 1]
-  if (tail?.role === 'assistant' && tail.streaming) {
-    const last = mapped[mapped.length - 1]
-    const cont =
-      !!last && last.role === 'assistant' && last.text.length > 0 &&
-      (tail.text.startsWith(last.text) || last.text.startsWith(tail.text))
-    if (last && cont) {
-      mapped[mapped.length - 1] = { ...last, streaming: true, segments: last.segments?.length ? last.segments : tail.segments }
-    } else {
-      mapped.push(tail)
-    }
-  }
-  if (mapped.length) {
-    patchSession(sessionId, { messages: mapped.slice(-MAX_MESSAGES) })
+  const reconciled = reconcileHistoryMessages(mapped, prevEntry?.messages ?? [], {
+    inflight,
+    makeId: nid,
+  }) as ChatMessage[]
+  if (reconciled.length) {
+    patchSession(sessionId, { messages: reconciled.slice(-MAX_MESSAGES) })
     schedulePersist(sessionId)
   }
 }
@@ -1964,22 +2036,100 @@ export function stampChatThinker(storedId: string, thinker: Thinker): void {
 }
 /** Live sid → the OpenCode permission ask blocking that chat's turn. */
 const ocPermissions = new Map<string, OcPermissionInfo>()
+/** Live sid → the OpenCode Form.Service question prompt blocking that turn. */
+const ocQuestions = new Map<string, OcFormInfo>()
 
 /** Reactive mirror of the OpenCode permission ask — the chat screen renders
  *  its card from this; `ocActivePermission` stays the sync accessor. */
 export const ocPermissionLive = atom<{ sid: string; req: OcPermissionInfo } | null>(null)
+/** Reactive mirror of the OpenCode question prompt blocking the active chat. */
+export const ocQuestionLive = atom<{ sid: string; form: OcFormInfo } | null>(null)
 
 /** The OpenCode permission ask pending on a chat, if any. */
 export function ocActivePermission(sid: string): OcPermissionInfo | null {
   return ocPermissions.get(sid) ?? null
 }
 
-// The reactive mirror follows the screen: a permission that arrived while
-// another chat was on screen renders when that chat is opened.
+/** The OpenCode question prompt pending on a chat, if any. */
+export function ocActiveQuestion(sid: string): OcFormInfo | null {
+  return ocQuestions.get(sid) ?? null
+}
+
+// The reactive mirrors follow the screen: prompts that arrived while
+// another chat was on screen render when that chat is opened.
 activeSession.subscribe((id) => {
   const req = id ? ocPermissions.get(id) : undefined
   ocPermissionLive.set(id && req ? { sid: id, req } : null)
+  const form = id ? ocQuestions.get(id) : undefined
+  ocQuestionLive.set(id && form ? { sid: id, form } : null)
 })
+
+/** Answer the OpenCode question form pending on a chat. */
+export async function ocReplyQuestion(sid: string, answer: OcFormAnswer): Promise<void> {
+  const form = ocQuestions.get(sid)
+  if (!form) return
+  ocQuestions.delete(sid)
+  if (ocQuestionLive.get()?.sid === sid) ocQuestionLive.set(null)
+  clearAttentionLive(sid)
+  const stored = sessionsById.get()[sid]?.storedId ?? ''
+  const ocId = (stored ? await ocSessionFor(stored) : null) || form.sessionID
+  if (!ocId) return
+  try {
+    await ocFormReply(ocId, form.id, answer)
+  } catch (err) {
+    log('warn', 'opencode', `question reply failed: ${err instanceof Error ? err.message : String(err)}`)
+    ocQuestions.set(sid, form)
+    if (activeSession.get() === sid) ocQuestionLive.set({ sid, form })
+    throw err
+  }
+}
+
+/** Cancel/dismiss the OpenCode question form pending on a chat. */
+export async function ocCancelQuestion(sid: string): Promise<void> {
+  const form = ocQuestions.get(sid)
+  if (!form) return
+  ocQuestions.delete(sid)
+  if (ocQuestionLive.get()?.sid === sid) ocQuestionLive.set(null)
+  clearAttentionLive(sid)
+  const stored = sessionsById.get()[sid]?.storedId ?? ''
+  const ocId = (stored ? await ocSessionFor(stored) : null) || form.sessionID
+  if (!ocId) return
+  try {
+    await ocFormCancel(ocId, form.id)
+  } catch (err) {
+    log('warn', 'opencode', `question cancel failed: ${err instanceof Error ? err.message : String(err)}`)
+    ocQuestions.set(sid, form)
+    if (activeSession.get() === sid) ocQuestionLive.set({ sid, form })
+    throw err
+  }
+}
+
+/** Refresh pending OpenCode question forms for a live chat (focus recovery). */
+export async function syncOcQuestions(liveId: string): Promise<void> {
+  const s = sessionsById.get()[liveId]
+  const stored = s?.storedId ?? ''
+  if (!s || !stored || isPseudoStoredId(stored)) return
+  const ocId = await ocSessionFor(stored)
+  if (!ocId) return
+  try {
+    const raw = await ocListForms(ocId)
+    const forms = Array.isArray(raw)
+      ? raw.map(parseOcForm).filter((f): f is OcFormInfo => f !== null)
+      : []
+    const cur = sessionsById.get()[liveId]
+    if (!cur || cur.storedId !== stored) return
+    if (forms.length) {
+      const form = forms[0]
+      ocQuestions.set(liveId, form)
+      if (activeSession.get() === liveId) ocQuestionLive.set({ sid: liveId, form })
+    } else if (ocQuestions.has(liveId)) {
+      ocQuestions.delete(liveId)
+      if (ocQuestionLive.get()?.sid === liveId) ocQuestionLive.set(null)
+    }
+  } catch {
+    // Best-effort sync; SSE / next focus handles recovery.
+  }
+}
 
 /** Answer the OpenCode permission ask pending on a chat. */
 export async function ocReplyPermission(sid: string, reply: 'once' | 'always' | 'reject'): Promise<void> {
@@ -2035,6 +2185,19 @@ function ocHooksFor(sid: string): OcTurnHooks {
       ocPermissions.set(sid, req)
       if (activeSession.get() === sid) ocPermissionLive.set({ sid, req })
     },
+    question: (form) => {
+      ocQuestions.set(sid, form)
+      if (activeSession.get() === sid) ocQuestionLive.set({ sid, form })
+      const preview = form.fields[0]?.description || form.fields[0]?.title || form.title || 'Question'
+      flagAttention(sid, 'input', { title: form.title || 'Question', body: preview })
+    },
+    questionResolved: (formId) => {
+      const existing = ocQuestions.get(sid)
+      if (!existing || (formId && existing.id !== formId)) return
+      ocQuestions.delete(sid)
+      if (ocQuestionLive.get()?.sid === sid) ocQuestionLive.set(null)
+      clearAttentionLive(sid)
+    },
     // Same body as the 'message.complete' event case, minus the server-text
     // supersede (the OC final text IS the streamed text).
     complete: (text, failed, error) => {
@@ -2056,7 +2219,7 @@ function ocHooksFor(sid: string): OcTurnHooks {
         // Media extraction runs in place, exactly like message.complete.
         const base: ChatSegment[] = done.segments ?? (done.text ? [{ kind: 'text', text: done.text }] : [])
         const extracted = extractMedia(base)
-        finalJoined = joinedTextOf(extracted).slice(0, 32000)
+        finalJoined = joinedTextOf(extracted).slice(0, HISTORY_TEXT_MAX)
         list[i] = freezeThoughts({ ...done, segments: extracted, text: finalJoined })
         break
       }
@@ -2066,7 +2229,7 @@ function ocHooksFor(sid: string): OcTurnHooks {
         list.push({
           id: nid(),
           role: 'assistant',
-          text: stripMediaFromText(text).slice(0, 32000),
+          text: stripMediaFromText(text).slice(0, HISTORY_TEXT_MAX),
           ts: Date.now(),
           ...(failed ? { status: 'failed' as const, error: error ?? 'Turn failed' } : {}),
         })
@@ -2123,6 +2286,7 @@ async function runOcSubmit(sid: string, text: string, title: string | undefined)
     // The ask belongs to the turn — a turn that ended (any way) leaves no
     // card behind.
     if (ocPermissions.delete(sid) && ocPermissionLive.get()?.sid === sid) ocPermissionLive.set(null)
+    if (ocQuestions.delete(sid) && ocQuestionLive.get()?.sid === sid) ocQuestionLive.set(null)
     // The turn may have created or renamed the OC session — the drawer's
     // 15s cache is now stale by definition.
     invalidateOcSessionsCache()
@@ -2170,7 +2334,7 @@ function ocRowsToMessages(rows: OcHistoryRow[]): { messages: ChatMessage[]; tool
   const tools: ToolItem[] = []
   for (const r of rows) {
     if (r.role === 'user') {
-      msgs.push({ id: nid(), role: 'user', text: r.text.slice(0, 8000), ts: r.ts })
+      msgs.push({ id: nid(), role: 'user', text: r.text.slice(0, HISTORY_TEXT_MAX), ts: r.ts })
       continue
     }
     // Grouped rows carry the turn's blocks in stream order (thinking/text
@@ -2180,19 +2344,19 @@ function ocRowsToMessages(rows: OcHistoryRow[]): { messages: ChatMessage[]; tool
     if (r.segments?.length) {
       segments = r.segments.map((seg) =>
         seg.kind === 'thinking'
-          ? { kind: 'thinking' as const, text: seg.text.slice(0, 8000), startedAt: r.ts }
-          : { kind: 'text' as const, text: seg.text.slice(0, 8000) },
+          ? { kind: 'thinking' as const, text: seg.text.slice(0, HISTORY_TEXT_MAX), startedAt: r.ts }
+          : { kind: 'text' as const, text: seg.text.slice(0, HISTORY_TEXT_MAX) },
       )
     } else {
       segments = []
-      if (r.thinking) segments.push({ kind: 'thinking', text: r.thinking.slice(0, 8000), startedAt: r.ts })
-      if (r.text) segments.push({ kind: 'text', text: r.text.slice(0, 8000) })
+      if (r.thinking) segments.push({ kind: 'thinking', text: r.thinking.slice(0, HISTORY_TEXT_MAX), startedAt: r.ts })
+      if (r.text) segments.push({ kind: 'text', text: r.text.slice(0, HISTORY_TEXT_MAX) })
     }
     const text = segments.filter((x) => x.kind === 'text').map((x) => x.text).join('\n')
     msgs.push({
       id: nid(),
       role: 'assistant',
-      text: text.slice(0, 8000),
+      text: text.slice(0, HISTORY_TEXT_MAX),
       ts: r.ts,
       ...(segments.length ? { segments } : {}),
     })
@@ -2271,8 +2435,11 @@ export async function hydrateOcHistory(liveId: string, opts?: { force?: boolean 
     const localUserIdx = lastIndexWhere(cur.messages, (m) => m.role === 'user' && m.text.trim().length > 0)
     if (localUserIdx < 0) return
     const anchor = cur.messages[localUserIdx]
-    if (anchor.status === 'failed') return // never persisted — keep the local transcript
+    if (anchor.status === 'failed' || anchor.status === 'unconfirmed') return // never persisted — keep the local transcript
     const localUser = anchor.text.trim()
+    const localMatchCount = cur.messages.filter((m) => m.role === 'user' && m.text.trim() === localUser).length
+    const mappedMatchCount = mapped.filter((m) => m.role === 'user' && m.text.trim() === localUser).length
+    if (mappedMatchCount < localMatchCount) return // newest turn not persisted on server yet — keep local messages
     const mappedUserIdx = lastIndexWhere(mapped, (m) => m.role === 'user' && m.text.trim() === localUser)
     if (mappedUserIdx < 0) return // not persisted (failed send) — keep local
     const tail = mapped.slice(mappedUserIdx + 1)
@@ -2310,6 +2477,28 @@ export async function hydrateOcHistory(liveId: string, opts?: { force?: boolean 
  * the target when this resolves.
  */
 export async function openOcChat(ocId: string): Promise<void> {
+  // Reuse the local session already bound to `ocId` so returning to an active
+  // or previously opened OpenCode conversation keeps its in-flight user
+  // messages, busy stream state, and cached transcript intact.
+  const knownStored = Object.values(sessionsById.get()).map((s) => s.storedId).filter(Boolean)
+  const existingStored = await findStoredIdForOcSession(ocId, knownStored)
+  if (existingStored) {
+    const live = liveIdFor(existingStored)
+    const hit = live ? sessionsById.get()[live] : undefined
+    if (hit && !hit.detached) {
+      activeSession.set(live!)
+      clearAttention(existingStored)
+      void AsyncStorage.setItem(LAST_SESSION_KEY, existingStored)
+      if (!hit.busy) void hydrateOcHistory(live!, { force: true }).catch(() => {})
+      return
+    }
+    const targetLive = await switchToSession(existingStored)
+    if (!sessionsById.get()[targetLive]?.busy) {
+      void hydrateOcHistory(targetLive, { force: !!(sessionsById.get()[targetLive]?.messages.length) }).catch(() => {})
+    }
+    return
+  }
+
   const cur = activeSession.get()
   const curState = cur ? sessionsById.get()[cur] : undefined
   let sid: string
@@ -2323,6 +2512,7 @@ export async function openOcChat(ocId: string): Promise<void> {
   if (sessionsById.get()[sid]?.provisional) sid = await ensureSession()
   const stored = sessionsById.get()[sid]?.storedId ?? ''
   if (!stored) return
+  stampChatThinker(stored, 'opencode')
   await ocRememberSession(stored, ocId)
   ocHydrated.delete(stored)
   await hydrateOcHistory(sid)
@@ -2657,6 +2847,7 @@ export async function stopRun() {
     // turn (its sendPrompt sets busy:true, then the cancelled runner's
     // complete flips it false under a live prompt and unlocks the composer).
     ocTurns.get(sid)?.()
+    if (ocQuestions.has(sid)) void ocCancelQuestion(sid).catch(() => {})
     const stored = sessionsById.get()[sid]?.storedId
     if (stored) {
       void ocSessionFor(stored)
@@ -3238,6 +3429,7 @@ export function hookChatEvents() {
         // start event was missed (reconnect/replay gap).
         const doneStored = sessionsById.get()[eSid]?.storedId
         if (doneStored) bumpSessionActivity(doneStored)
+        const terminal = isTerminalComplete(p)
         const text = typeof p.text === 'string' ? p.text : ''
         const cur = sessionsById.get()[eSid]
         if (!cur) break
@@ -3248,17 +3440,30 @@ export function hookChatEvents() {
           const failed = p.status === 'error' || !!p.error
           let done: ChatMessage = {
             ...list[i],
-            streaming: false,
-            status: failed ? 'failed' : 'ok',
-            error: failed ? String(p.error ?? p.failure_reason ?? 'Turn failed') : undefined,
+            streaming: !terminal,
+            ...(terminal ? { status: failed ? 'failed' : 'ok' } : {}),
+            ...(terminal && failed ? { error: String(p.error ?? p.failure_reason ?? 'Turn failed') } : {}),
           }
           if (text) {
-            // Server-sent final text supersedes the streamed segments' text.
-            const segs = (done.segments ?? []).map((seg) => ({ ...seg }))
-            const lastTextIdx = segs.map((seg) => seg.kind).lastIndexOf('text')
-            if (lastTextIdx >= 0) segs[lastTextIdx] = { ...segs[lastTextIdx], text: text.slice(0, 32000) }
-            else segs.push({ kind: 'text', text: text.slice(0, 32000) })
-            done = { ...done, segments: segs }
+            if (terminal) {
+              // Server-sent final text supersedes the streamed segments' text.
+              const segs = (done.segments ?? []).map((seg) => ({ ...seg }))
+              const lastTextIdx = segs.map((seg) => seg.kind).lastIndexOf('text')
+              if (lastTextIdx >= 0) segs[lastTextIdx] = { ...segs[lastTextIdx], text: text.slice(0, HISTORY_TEXT_MAX) }
+              else segs.push({ kind: 'text', text: text.slice(0, HISTORY_TEXT_MAX) })
+              done = { ...done, segments: segs }
+            } else {
+              // Non-terminal mirror: append inside the still-streaming bubble
+              // instead of closing `streaming` and spawning a second message.
+              const segs = (done.segments ?? []).map((seg) => ({ ...seg }))
+              const lastSeg = segs[segs.length - 1]
+              if (lastSeg?.kind === 'text') {
+                segs[segs.length - 1] = { ...lastSeg, text: `${lastSeg.text}\n${text}`.slice(0, HISTORY_TEXT_MAX) }
+              } else {
+                segs.push({ kind: 'text', text: text.slice(0, HISTORY_TEXT_MAX) })
+              }
+              done = { ...done, segments: segs }
+            }
           }
           // Media extraction runs AFTER the supersede, in place: @image:/
           // @file: directives and markdown images in the final text become
@@ -3266,9 +3471,9 @@ export function hookChatEvents() {
           // markers are stripped, so a later pass (history reload) is a no-op.
           const base: ChatSegment[] = done.segments ?? (done.text ? [{ kind: 'text', text: done.text }] : [])
           const extracted = extractMedia(base)
-          finalJoined = joinedTextOf(extracted).slice(0, 32000)
+          finalJoined = joinedTextOf(extracted).slice(0, HISTORY_TEXT_MAX)
           done = { ...done, segments: extracted, text: finalJoined }
-          list[i] = freezeThoughts(done)
+          list[i] = terminal ? freezeThoughts(done) : done
           break
         }
         // BUG-061: the finalize loop only updates an EXISTING streaming row —
@@ -3280,23 +3485,14 @@ export function hookChatEvents() {
           list.push({
             id: nid(),
             role: 'assistant',
-            text: stripMediaFromText(text).slice(0, 32000),
+            text: stripMediaFromText(text).slice(0, HISTORY_TEXT_MAX),
+            streaming: !terminal,
             ts: Date.now(),
-            ...(failed ? { status: 'failed' as const, error: String(p.error ?? p.failure_reason ?? 'Turn failed') } : {}),
+            ...(terminal && failed ? { status: 'failed' as const, error: String(p.error ?? p.failure_reason ?? 'Turn failed') } : {}),
           })
         }
         if (list.length) patchSession(eSid, { messages: list })
-        // BUG-130: ONLY a genuinely terminal payload may end the turn. The
-        // gateway emits `message.complete` from four sites (see
-        // turnComplete.ts) — the subagent mirror sends `text` only and can
-        // land mid-turn; the finalize above still updates the transcript, but
-        // the turn-end side effects below must not run or the composer goes
-        // idle while the parent turn is still running (Stop/Steer disappear).
-        // Known tradeoff: a future genuinely-text-only completion would leave
-        // a stuck Stop button — mitigated by resume's `res.running` trust
-        // (runResume, ~chat.ts:1205) and the existing terminal-event paths
-        // (request.cancel / reconnect resync).
-        if (!isTerminalComplete(p)) break
+        if (!terminal) break
         patchSession(eSid, {
           tools: cur.tools.map((t) => (t.status === 'running' ? { ...t, status: 'done' as const } : t)),
           busy: false,

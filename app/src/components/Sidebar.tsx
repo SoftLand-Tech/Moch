@@ -256,10 +256,10 @@ export const EDGE_CLAIM = 10
 export const DOMINANCE = 1.5
 // px/ms — the unit of gestureState.vx (dt is in ms timestamps).
 export const FLICK = 0.25
-export const OPEN_MS = 190
-export const CLOSE_MS = 150
+export const OPEN_MS = 160
+export const CLOSE_MS = 100
 // Release below threshold while still closed → spring back.
-export const CANCEL_MS = 150
+export const CANCEL_MS = 120
 // Release above threshold while still open → snap back open.
 const SNAP_MS = 180
 
@@ -1373,12 +1373,12 @@ export function Sidebar({
             <BotsRoster
               profiles={profiles ?? []}
               onOpenBot={(key) => {
-                onOpenBot?.(key)
                 onClose()
+                onOpenBot?.(key)
               }}
               onNewBot={() => {
-                onNewBot?.()
                 onClose()
+                onNewBot?.()
               }}
               onCloseDrawer={onClose}
               active={open}
@@ -1611,8 +1611,8 @@ const RecentRow = React.memo(function RecentRow({
   return (
     <Pressable
       onPress={() => {
-        onOpenChat(c.id)
         onCloseDrawer()
+        onOpenChat(c.id)
       }}
       onLongPress={(e) => onMenu(c, e)}
       delayLongPress={350}

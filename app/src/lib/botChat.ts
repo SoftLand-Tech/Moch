@@ -195,6 +195,18 @@ export interface BotChatDeps {
    *  (`ui_meta['hermes-bots']`) before its first chat opens — legacy bots
    *  become managed when Moch actually opens them, never by a roster sweep. */
   ensureIdentity?: (profile: string) => Promise<void> | void
+  /** Synchronous lookup of a cached canonical Bot Chat storedId for `profile`. */
+  peekCanonicalId?: (profile: string) => string | undefined
+  /** Synchronous frame-0 UI activation before lookup/resume RPCs complete. */
+  prewarmBotChat?: (profile: string, hintStoredId?: string) => void
+}
+
+/** Local cache of resolved `profile -> canonical storedId` within this app run. */
+const canonicalIdCache = new Map<string, string>()
+
+/** Test helper: clear the in-memory canonical-id cache between test cases. */
+export function _clearCanonicalCacheForTests() {
+  canonicalIdCache.clear()
 }
 
 let depsOverride: BotChatDeps | null = null
@@ -203,12 +215,27 @@ export function _useBotChatDepsForTests(d: BotChatDeps | null) {
   depsOverride = d
 }
 
+// Kick off module imports early so the first tap doesn't wait on dynamic require.
+let preloadedRealDeps: Promise<readonly [typeof import('./fleet'), typeof import('./chat')]> | null = null
+function loadRealDeps() {
+  return (preloadedRealDeps ??= Promise.all([import('./fleet'), import('./chat')]))
+}
+
 async function botChatDeps(): Promise<BotChatDeps> {
   if (depsOverride) return depsOverride
-  const [fleet, chat] = await Promise.all([import('./fleet'), import('./chat')])
+  const [fleet, chat] = await loadRealDeps()
   return {
     setActiveBot: (profile) => fleet.setActiveBot(profile),
     ensureIdentity: (profile) => fleet.ensureBotModeIdentity(profile),
+    peekCanonicalId: (profile) =>
+      canonicalIdCache.get(profile) ??
+      fleet.fleetProfiles.get().find((p) => p.name === profile)?.canonicalSession?.id,
+    prewarmBotChat: (profile, hintStoredId) => {
+      fleet.activeBotAtom.set(profile)
+      if (hintStoredId) {
+        chat.primeBotSession(hintStoredId, profile, BOT_CHAT_TITLE)
+      }
+    },
     openChat: async (storedId, profile) => {
       // Register the row's owning profile FIRST: later resumes of this stored
       // id (boot paint, a notification tap, attention hop) carry no profile
@@ -402,34 +429,59 @@ export function ensureBotChat(profile: string): Promise<BotChatRef> {
 async function openBotChatOnce(profile: string): Promise<string> {
   botChatError.set('')
   const deps = await botChatDeps()
-  // Native Bot Mode identity first (best-effort): a legacy Moch bot whose
-  // profile predates the marker becomes managed the moment Moch opens it —
-  // never by a roster-wide sweep that would relabel profiles Moch never made.
-  try {
-    await deps.ensureIdentity?.(profile)
-  } catch {
-    /* identity is best-effort; the chat below is the load-bearing part */
+  const hintId = canonicalIdCache.get(profile) ?? deps.peekCanonicalId?.(profile)
+  // Optimistically switch the chat screen on frame 0 before awaiting RPCs.
+  deps.prewarmBotChat?.(profile, hintId)
+
+  // Native Bot Mode identity upgrade runs in parallel rather than stalling
+  // the chat open behind a sequential `moch.profiles.configure` round-trip.
+  const identityTask = Promise.resolve()
+    .then(() => deps.ensureIdentity?.(profile))
+    .catch(() => {
+      /* identity is best-effort; the chat below is the load-bearing part */
+    })
+
+  let openedId = ''
+  if (hintId) {
+    try {
+      await deps.openChat(hintId, profile)
+      openedId = hintId
+    } catch (err) {
+      if (!isDefinitiveStaleSession(err)) {
+        await identityTask
+        throw err
+      }
+      log('warn', 'botchat', `${profile}: cached ${BOT_CHAT_TITLE} row ${hintId} was stale — resolving via lookup`)
+      canonicalIdCache.delete(profile)
+    }
   }
 
-  const ref = await ensureBotChat(profile)
-  let openedId: string
-  try {
-    await deps.openChat(ref.storedId, profile)
-    openedId = ref.storedId
-  } catch (err) {
-    if (!isDefinitiveStaleSession(err)) throw err
-    // The registry row outlived its live session. Retire the stale row
-    // (best-effort) and give the bot a fresh CANONICAL chat instead of
-    // throwing the confusing "session not found" at the user.
-    log('warn', 'botchat', `${profile}: stale ${BOT_CHAT_TITLE} row ${ref.storedId} — recovering`)
-    void botRpc('session.delete', { session_id: ref.storedId }).catch(() => {})
-    openedId = await recoverBotChat(profile, deps)
+  if (!openedId) {
+    const ref = await ensureBotChat(profile)
+    try {
+      await deps.openChat(ref.storedId, profile)
+      openedId = ref.storedId
+    } catch (err) {
+      if (!isDefinitiveStaleSession(err)) {
+        await identityTask
+        throw err
+      }
+      // The registry row outlived its live session. Retire the stale row
+      // (best-effort) and give the bot a fresh CANONICAL chat instead of
+      // throwing the confusing "session not found" at the user.
+      log('warn', 'botchat', `${profile}: stale ${BOT_CHAT_TITLE} row ${ref.storedId} — recovering`)
+      void botRpc('session.delete', { session_id: ref.storedId }).catch(() => {})
+      openedId = await recoverBotChat(profile, deps)
+    }
   }
+
+  canonicalIdCache.set(profile, openedId)
   // Identity view for the chat surface (banner/avatar), set only after the
   // canonical chat is the one actually on screen. NOT a session scope:
   // newChat()/switchToSession() clear it and createSession never reads it —
   // a bot is an identity, not a session folder.
   await deps.setActiveBot(profile)
+  await identityTask
   return openedId
 }
 

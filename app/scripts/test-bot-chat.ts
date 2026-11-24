@@ -530,7 +530,47 @@ async function main() {
     mod._useBotChatRosterForTests(() => false)
   }
 
+  // ── fast path: peekCanonicalId + prewarmBotChat skips session.list ─────
+  {
+    mod._clearCanonicalCacheForTests()
+    let prewarmed: Array<{ profile: string; hint?: string }> = []
+    let fastOpened: string[] = []
+    const events: string[] = []
+    const { rpc: fastRpc, calls: fastCalls } = fakeRpc({
+      'session.list': () => {
+        events.push('session.list')
+        return { sessions: [{ id: 'bot-fast-1', title: 'Bot Chat' }] }
+      },
+    })
+    mod._useBotChatRpcForTests(fastRpc)
+    mod._useBotChatRosterForTests(() => false)
+    mod._useBotChatDepsForTests({
+      peekCanonicalId: () => 'bot-fast-1',
+      prewarmBotChat: (profile, hint) => {
+        prewarmed.push({ profile, hint })
+        events.push('prewarm')
+      },
+      ensureIdentity: () => {
+        events.push('identity')
+      },
+      openChat: async (storedId) => {
+        fastOpened.push(storedId)
+        events.push('openChat')
+      },
+      setActiveBot: () => {
+        events.push('setActiveBot')
+      },
+    })
+
+    const fastId = await openBotChat('fast-bot')
+    check('fast open returns cached canonical id', fastId === 'bot-fast-1', fastId)
+    check('fast open triggers prewarmBotChat before openChat', prewarmed.length === 1 && prewarmed[0].hint === 'bot-fast-1' && events[0] === 'prewarm', JSON.stringify(events))
+    check('fast open skips redundant session.list RPC when hint succeeds', callsTo(fastCalls, 'session.list').length === 0)
+    check('fast open calls openChat with cached canonical id', fastOpened.length === 1 && fastOpened[0] === 'bot-fast-1')
+  }
+
   // Reset the injected seams so nothing leaks past this suite.
+  mod._clearCanonicalCacheForTests()
   mod._useBotChatRpcForTests(null)
   mod._useBotChatRosterForTests(null)
   mod._useBotChatDepsForTests(null)

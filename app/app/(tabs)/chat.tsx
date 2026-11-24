@@ -59,10 +59,15 @@ import {
   hydrateOcHistory,
   ocPermissionLive,
   ocReplyPermission,
+  ocQuestionLive,
+  ocReplyQuestion,
+  ocCancelQuestion,
+  syncOcQuestions,
   type ToolItem,
   type ChatMessage,
   type PendingRequest,
 } from '../../src/lib/chat'
+import { buildOcFormAnswer, countOcFormUnanswered, initOcFormDraft, type OcFormDraftState } from '../../src/lib/ocForm'
 import { enqueueSend, removeQueued } from '../../src/lib/sendQueue'
 import { setQueuedAttachments, takeQueuedAttachments } from '../../src/lib/chat'
 import { MAX_ATTACHMENTS, ATTACH_MAX_BYTES, formatBytes, mediaKindForPath } from '../../src/lib/media'
@@ -187,6 +192,20 @@ export default function Chat() {
   // The OpenCode permission ask blocking the ACTIVE chat (reactive mirror in
   // chat.ts; the sync accessor is ocActivePermission).
   const ocPerm = useStore(ocPermissionLive)
+  // The OpenCode Form.Service question prompt blocking the ACTIVE chat.
+  const ocQuestion = useStore(ocQuestionLive)
+  const [ocFormDraft, setOcFormDraft] = useState<OcFormDraftState>({ selected: {}, customText: {}, customOn: {} })
+  const ocQuestionFormRef = useRef(ocQuestion?.form)
+  ocQuestionFormRef.current = ocQuestion?.form
+  const ocQuestionFormId = ocQuestion?.form.id ?? ''
+  useEffect(() => {
+    const form = ocQuestionFormRef.current
+    if (!form) {
+      setOcFormDraft({ selected: {}, customText: {}, customOn: {} })
+      return
+    }
+    setOcFormDraft(initOcFormDraft(form))
+  }, [ocQuestionFormId])
   // Live id — only used to scope the reasoning-display config read; the
   // screen itself keys off storedId.
   const sid = useStore(activeSession)
@@ -314,24 +333,15 @@ export default function Chat() {
   // pick the default agent → a fresh default chat. The sheet stays up with
   // a spinner while the switch runs, and a failure surfaces as an alert
   // with the sheet still open (the user can retry or pick another bot).
-  const pickBot = async (name: string) => {
+  const pickBot = (name: string) => {
     if (switchingBot !== null) return
-    setSwitchingBot(name)
-    try {
-      // A bot's ONE canonical Bot Chat — `Moch` (the launch/default profile)
-      // is a bot too, so it opens ITS Bot Chat rather than minting a fresh
-      // launch-profile session. openBotChat owns the identity marker; an
-      // ordinary bot-scoped chat is never created (Bot Mode).
-      await openBotChat(name)
-      setBotSwitcherOpen(false)
-    } catch (e) {
+    setBotSwitcherOpen(false)
+    void openBotChat(name).catch((e) => {
       alertOk(
         t('chat.bot.switchFailed', { name: activeBotTitle(name) }),
         e instanceof Error ? e.message : String(e),
       )
-    } finally {
-      setSwitchingBot(null)
-    }
+    })
   }
   const closeBotSwitcher = () => { if (switchingBot === null) setBotSwitcherOpen(false) }
 
@@ -395,6 +405,7 @@ export default function Chat() {
   // re-running on that change would loop.
   useEffect(() => {
     if (!ocMode || !sid || !storedId) return
+    void syncOcQuestions(sid).catch(() => {})
     if (busy) return // never fight the streaming path
     void hydrateOcHistory(sid, { force: true }).catch(() => {})
   }, [ocMode, sid, storedId, busy])
@@ -409,7 +420,9 @@ export default function Chat() {
   useFocusEffect(
     useCallback(() => {
       const h = ocHydrateCtx.current
-      if (!h.ocMode || !h.sid || !h.storedId || h.busy) return
+      if (!h.ocMode || !h.sid || !h.storedId) return
+      void syncOcQuestions(h.sid).catch(() => {})
+      if (h.busy) return
       if (focusHydrating.current) return
       focusHydrating.current = true
       void hydrateOcHistory(h.sid, { force: true })
@@ -1683,6 +1696,124 @@ export default function Chat() {
             </View>
           ) : null}
 
+          {/* OpenCode `question` tool (Form.Service): multi-option / free-text prompt */}
+          {ocMode && ocQuestion && ocQuestion.sid === sid ? (() => {
+            const visibleFields = ocQuestion.form.fields.filter((f) => !f.hidden && f.type !== 'external')
+            const missing = countOcFormUnanswered(visibleFields, ocFormDraft)
+            return (
+              <View style={s.sheet}>
+                <View style={[s.sheetHead, { flexDirection: dir.row }]}>
+                  <Icon name="help-circle-outline" size={15} color={C.accent} />
+                  <Txt size={13} weight="800" style={s.sheetTitle}>
+                    {visibleFields.length > 1 ? t('chat.ocQuestion.titleMany') : t('chat.ocQuestion.title')}
+                  </Txt>
+                </View>
+                <ScrollView style={s.sheetScroll} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                  {visibleFields.map((f) => {
+                    const isMulti = f.type === 'multiselect'
+                    const picks = ocFormDraft.selected[f.key] ?? []
+                    const customVal = ocFormDraft.customText[f.key] ?? ''
+                    const hasCustom = f.custom !== false || !f.options?.length
+                    const toggleOption = (val: string) => {
+                      void Haptics.selectionAsync().catch(() => {})
+                      setOcFormDraft((prev) => {
+                        const cur = prev.selected[f.key] ?? []
+                        if (isMulti) {
+                          const next = cur.includes(val) ? cur.filter((x) => x !== val) : [...cur, val]
+                          return { ...prev, selected: { ...prev.selected, [f.key]: next } }
+                        }
+                        return {
+                          ...prev,
+                          selected: { ...prev.selected, [f.key]: [val] },
+                          customOn: { ...prev.customOn, [f.key]: false },
+                        }
+                      })
+                    }
+                    return (
+                      <View key={f.key} style={{ marginBottom: visibleFields.length > 1 ? 12 : 4 }}>
+                        {f.title && f.title !== f.description ? (
+                          <Txt size={10.5} weight="700" color={C.textFaint} style={s.sheetKicker}>{f.title}</Txt>
+                        ) : null}
+                        <Text style={[s.qText, rtlText]}>{f.description || f.title || ocQuestion.form.title}</Text>
+                        {isMulti ? (
+                          <Txt size={10.5} color={C.textDim} style={s.sheetDesc}>{t('chat.ocQuestion.multiHint')}</Txt>
+                        ) : null}
+                        {f.options?.map((opt) => {
+                          const on = picks.includes(opt.value) && (isMulti || !ocFormDraft.customOn[f.key])
+                          return (
+                            <Pressable
+                              key={opt.value}
+                              style={({ pressed }) => [s.ocOptBtn, on && s.clarifyOn, pressed && s.btnPressed]}
+                              onPress={() => toggleOption(opt.value)}
+                              accessibilityRole={isMulti ? 'checkbox' : 'radio'}
+                              accessibilityState={{ selected: on, checked: on }}
+                              accessibilityLabel={opt.label}
+                            >
+                              <Text style={[s.clarifyText, rtlText, on && { color: C.onAccent }]}>{opt.label}</Text>
+                              {opt.description ? (
+                                <Text style={[s.ocOptDesc, rtlText, on && { color: C.onAccent, opacity: 0.85 }]}>
+                                  {opt.description}
+                                </Text>
+                              ) : null}
+                            </Pressable>
+                          )
+                        })}
+                        {hasCustom ? (
+                          <TextInput
+                            style={[s.qInput, { textAlign: dir.textAlign, writingDirection: dir.writingDirection }]}
+                            value={customVal}
+                            onChangeText={(val) => {
+                              setOcFormDraft((prev) => ({
+                                ...prev,
+                                customText: { ...prev.customText, [f.key]: val },
+                                customOn: { ...prev.customOn, [f.key]: val.trim().length > 0 },
+                                ...(isMulti ? {} : val.trim().length > 0 ? { selected: { ...prev.selected, [f.key]: [] } } : {}),
+                              }))
+                            }}
+                            placeholder={f.placeholder || t('chat.ocQuestion.orTypePlaceholder')}
+                            placeholderTextColor={C.textFaint}
+                            accessibilityLabel={f.description || f.title || t('chat.ocQuestion.orTypePlaceholder')}
+                          />
+                        ) : null}
+                      </View>
+                    )
+                  })}
+                </ScrollView>
+                {missing > 0 ? (
+                  <Txt size={11} color={C.amber} center style={s.qHint}>
+                    {missing === 1 ? t('chat.ocQuestion.pendingOne') : t('chat.ocQuestion.pendingMany', { n: missing })}
+                  </Txt>
+                ) : null}
+                <View style={[s.sheetRow, { flexDirection: dir.row, marginTop: 10 }]}>
+                  <PrimaryBtn
+                    disabled={missing > 0}
+                    label={t('chat.ocQuestion.send')}
+                    accessibilityLabel={t('chat.ocQuestion.send')}
+                    onPress={() => {
+                      if (missing > 0) return
+                      const answer = buildOcFormAnswer(visibleFields, ocFormDraft)
+                      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+                      void ocReplyQuestion(ocQuestion.sid, answer).catch((e) => {
+                        alertOk(t('chat.ocQuestion.failed'), e instanceof Error ? e.message : String(e))
+                      })
+                    }}
+                    style={s.sheetBtn}
+                  />
+                  <GhostBtn
+                    label={t('chat.ocQuestion.dismiss')}
+                    accessibilityLabel={t('chat.ocQuestion.dismiss')}
+                    onPress={() => {
+                      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+                      void ocCancelQuestion(ocQuestion.sid).catch(() => {})
+                    }}
+                    style={[s.sheetBtn, s.denyBtn]}
+                    textStyle={s.denyText}
+                  />
+                </View>
+              </View>
+            )
+          })() : null}
+
           {/* ── Composer: the mockup's rounded pill, safe-area bottom owner ── */}
           <Animated.View style={[s.composerWrap, composerPad]}>
             {queued.length > 0 ? (
@@ -2344,6 +2475,18 @@ const makeS = () => StyleSheet.create({
   },
   clarifyOn: { backgroundColor: C.accent, borderColor: C.accent },
   clarifyText: { color: C.text, fontSize: 12.5, fontWeight: '600' },
+  ocOptBtn: {
+    backgroundColor: C.bgCard,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 11,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginTop: 6,
+    minHeight: 40,
+    justifyContent: 'center',
+  },
+  ocOptDesc: { color: C.textDim, fontSize: 11, lineHeight: 15, marginTop: 2 },
   clarifyRow: { gap: 8, marginTop: 10, alignItems: 'center' },
   miniSend: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center' },
 
