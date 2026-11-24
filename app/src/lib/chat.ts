@@ -1656,6 +1656,40 @@ export function switchToSession(storedId: string): Promise<string> {
 }
 
 /**
+ * Synchronously pre-activate a known stored session on the UI before a network
+ * resume completes (used by fast bot/session switching so the screen swaps in
+ * frame 0 without awaiting RPCs). Does NOT clear `activeBot`.
+ */
+export function primeBotSession(storedId: string, profile?: string, title = 'Bot Chat'): string {
+  chatBanner.set(null)
+  if (profile?.trim()) trackServerOnlySession(storedId, profile.trim())
+  const curId = activeSession.get()
+  const cur = curId ? sessionsById.get()[curId] : undefined
+  if (cur && cur.storedId === storedId && !cur.provisional) {
+    clearAttention(storedId)
+    return curId!
+  }
+  const live = liveIdFor(storedId)
+  const hit = live ? sessionsById.get()[live] : undefined
+  if (hit) {
+    activeSession.set(live!)
+    clearAttention(storedId)
+    setSessionLoading(storedId, !hit.messages.length)
+    return live!
+  }
+  const key = seedPlaceholder(storedId)
+  const map = sessionsById.get()
+  if (map[key] && (map[key].title === 'New chat' || !map[key].title) && title) {
+    sessionsById.set({ ...map, [key]: { ...map[key], title } })
+  }
+  activeSession.set(key)
+  clearAttention(storedId)
+  setSessionLoading(storedId, true)
+  void loadCachedTranscript(storedId)
+  return key
+}
+
+/**
  * Open a session that lives on a NON-launch profile — a bot's Hermes-side task
  * session. Bot Mode rule: these are separate task sessions, never the
  * canonical Bot Chat; they open as ordinary chats on the launch identity
@@ -1670,9 +1704,24 @@ export async function openServerSession(
   void setActiveBot(null)
   const profile = opts?.profile?.trim() || undefined
   if (profile) trackServerOnlySession(storedId, profile)
+  const live = liveIdFor(storedId)
+  const hit = live ? sessionsById.get()[live] : undefined
+  if (hit) {
+    activeSession.set(live!)
+    clearAttention(storedId)
+    setSessionLoading(storedId, !hit.messages.length)
+  } else {
+    const key = seedPlaceholder(storedId)
+    activeSession.set(key)
+    clearAttention(storedId)
+    setSessionLoading(storedId, true)
+    void loadCachedTranscript(storedId)
+  }
   const r = await resumeShared(storedId, profile ? { profile } : undefined)
   trackServerOnlySession(r.storedId, profile)
-  activeSession.set(r.sessionId)
+  if (activeStoredId.get() === r.storedId || !activeSession.get()) {
+    activeSession.set(r.sessionId)
+  }
   clearAttention(r.storedId)
   void AsyncStorage.setItem(LAST_SESSION_KEY, r.storedId)
   return r.sessionId

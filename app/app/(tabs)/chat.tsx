@@ -314,24 +314,15 @@ export default function Chat() {
   // pick the default agent → a fresh default chat. The sheet stays up with
   // a spinner while the switch runs, and a failure surfaces as an alert
   // with the sheet still open (the user can retry or pick another bot).
-  const pickBot = async (name: string) => {
+  const pickBot = (name: string) => {
     if (switchingBot !== null) return
-    setSwitchingBot(name)
-    try {
-      // A bot's ONE canonical Bot Chat — `Moch` (the launch/default profile)
-      // is a bot too, so it opens ITS Bot Chat rather than minting a fresh
-      // launch-profile session. openBotChat owns the identity marker; an
-      // ordinary bot-scoped chat is never created (Bot Mode).
-      await openBotChat(name)
-      setBotSwitcherOpen(false)
-    } catch (e) {
+    setBotSwitcherOpen(false)
+    void openBotChat(name).catch((e) => {
       alertOk(
         t('chat.bot.switchFailed', { name: activeBotTitle(name) }),
         e instanceof Error ? e.message : String(e),
       )
-    } finally {
-      setSwitchingBot(null)
-    }
+    })
   }
   const closeBotSwitcher = () => { if (switchingBot === null) setBotSwitcherOpen(false) }
 
