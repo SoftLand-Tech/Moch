@@ -236,6 +236,38 @@ function main() {
       !!recEmptyAttached[0].segments?.some((s) => s.kind === 'media'),
   )
 
+  // ── 14. Prompt-budget truncation keeps local attachment media ────────────
+  const longCaption = 'x'.repeat(8_000)
+  const longAttached = msg('user', longCaption, {
+    ts: 5_000,
+    segments: [
+      { kind: 'text', text: longCaption },
+      { kind: 'media', text: '', mediaType: 'image', path: '/cache/shot.png', name: 'shot.png' },
+    ],
+  })
+  const recLongAttached = reconcileHistoryMessages(
+    [msg('user', `${'x'.repeat(7_979)}\n@file:/relay/shot.png`, { ts: 5_000 }), msg('assistant', 'seen')],
+    [longAttached],
+    { makeId },
+  )
+  check(
+    'budget-truncated attachment caption still preserves the local tile',
+    recLongAttached.length === 2 && recLongAttached[0].id === longAttached.id &&
+      !!recLongAttached[0].segments?.some((s) => s.kind === 'media'),
+  )
+
+  // ── 15. Completed local answer survives server persistence lag ───────────
+  const recCompletedTail = reconcileHistoryMessages(
+    [msg('user', 'latest prompt')],
+    [msg('user', 'latest prompt'), msg('assistant', 'finished answer', { status: 'ok' })],
+    { makeId },
+  )
+  check(
+    'completed local assistant is kept until server history persists its answer',
+    recCompletedTail.length === 2 && recCompletedTail[1].role === 'assistant' &&
+      recCompletedTail[1].text === 'finished answer' && !recCompletedTail[1].streaming,
+  )
+
   console.log(`\n${pass}/${pass + fail} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)
 }

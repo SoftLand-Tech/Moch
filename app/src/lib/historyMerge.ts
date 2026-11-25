@@ -155,10 +155,19 @@ function userRowsMatch(local: MergeMessage, server: MergeMessage): boolean {
   // multiple such turns.
   const localEmpty = !normUserText(local.text)
   const serverEmpty = !userMatchKey(server.text)
-  return localEmpty && serverEmpty && (
+  if (localEmpty && serverEmpty && (
     !!local.segments?.some((s) => s.kind === 'media') ||
     hasTrailingFileRefs(server.text) || server.text.trim() === '[attachment]'
-  )
+  )) return true
+  // appendRefText budgets the caption to make room for refs. Only a local
+  // attachment row from the same moment may use that legitimate truncation;
+  // ordinary shared prefixes remain non-matches.
+  const localKey = normUserText(local.text)
+  const serverKey = userMatchKey(server.text)
+  return !!local.segments?.some((s) => s.kind === 'media') &&
+    hasTrailingFileRefs(server.text) &&
+    !!serverKey && localKey.startsWith(serverKey) &&
+    Math.abs(local.ts - server.ts) <= 5_000
 }
 
 function findMatchingUserIndex(list: MergeMessage[], targetText: string, occurrenceFromEnd = 1): number {
@@ -347,38 +356,39 @@ export function reconcileHistoryMessages(
         firstExtraUserInLocal >= 0 ? localAfter.slice(0, firstExtraUserInLocal) : localAfter
       ).filter((m) => !!m.cmd)
 
-      // Preserve any live/streaming assistant tail for that SAME last user turn
-      // when the server hasn't committed an assistant answer (or only partial).
-      const streamingIdx = (() => {
+      // Preserve the local assistant tail for this same user turn when the
+      // server has not committed an answer yet. A completed local answer is
+      // still authoritative during that persistence lag; once the server has
+      // an answer, only a live streaming continuation may extend it.
+      const localAnswerIdx = (() => {
         const bound = firstExtraUserInLocal >= 0 ? firstExtraUserInLocal : localAfter.length
         for (let i = bound - 1; i >= 0; i--) {
-          if (localAfter[i].role === 'assistant' && localAfter[i].streaming) return i
+          if (localAfter[i].role === 'assistant' && !localAfter[i].cmd) return i
         }
         return -1
       })()
-      if (streamingIdx >= 0) {
-        const tail = localAfter[streamingIdx]
+      if (localAnswerIdx >= 0) {
+        const tail = localAfter[localAnswerIdx]
         const last = merged[merged.length - 1]
         const serverHasAnswerForLastTurn = merged.length - 1 > serverLastUserIdx && last?.role === 'assistant'
-        const cont =
-          serverHasAnswerForLastTurn &&
-          last.text.length > 0 &&
-          (tail.text.startsWith(last.text) || last.text.startsWith(tail.text))
-        if (cont) {
-          merged[merged.length - 1] = {
-            ...last,
-            ...(tail.text.length > last.text.length ? { text: tail.text, segments: tail.segments } : { segments: last.segments?.length ? last.segments : tail.segments }),
-            streaming: true,
-          }
-        } else if (!serverHasAnswerForLastTurn || tail.text.length > last.text.length) {
-          if (serverHasAnswerForLastTurn) {
+        if (!serverHasAnswerForLastTurn) {
+          merged.push(tail)
+        } else if (tail.streaming) {
+          const cont =
+            last.text.length > 0 &&
+            (tail.text.startsWith(last.text) || last.text.startsWith(tail.text))
+          if (cont) {
+            merged[merged.length - 1] = {
+              ...last,
+              ...(tail.text.length > last.text.length ? { text: tail.text, segments: tail.segments } : { segments: last.segments?.length ? last.segments : tail.segments }),
+              streaming: true,
+            }
+          } else if (tail.text.length > last.text.length) {
             merged[merged.length - 1] = {
               ...tail,
               segments: tail.segments?.length ? tail.segments : last.segments,
               streaming: true,
             }
-          } else {
-            merged.push(tail)
           }
         }
       }
