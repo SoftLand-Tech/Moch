@@ -957,8 +957,9 @@ export async function flushOutbox(): Promise<void> {
           // Not tracked (cold boot / evicted handle): a quiet resume brings
           // the handle back; a not-found answer means the chat is gone.
           try {
-            const fresh = await resumeShared(target.storedId)
-            await sendPrompt(item.text, { session: fresh.sessionId })
+            const freshSessionId = await resumeOrRecoverOc(target.storedId)
+            await sendPrompt(item.text, { session: freshSessionId })
+            deliveredVia = freshSessionId
           } catch (resumeErr) {
             if (!isSessionNotFound(resumeErr)) throw resumeErr
             log('warn', 'chat', `outbox item dropped — chat ${target.storedId} no longer exists`)
@@ -1446,7 +1447,7 @@ export async function activeLiveId(): Promise<string> {
     return await inflight
   }
   if (state?.detached && state.storedId) {
-    return (await resumeShared(state.storedId)).sessionId
+    return await resumeOrRecoverOc(state.storedId)
   }
   if (cur) return cur
   return ensureSession()
@@ -1656,7 +1657,11 @@ async function runRecoverOcSpine(oldStoredId: string, ocId: string, preferredTit
     setDraft(r.storedId, d)
     clearDraft(oldStoredId)
   }
-  for (const q of queueFor(oldStoredId)) enqueueSend(r.storedId, q.text)
+  for (const q of queueFor(oldStoredId)) {
+    const movedAttachments = takeQueuedAttachments(q.id)
+    const nextItem = enqueueSend(r.storedId, q.text, { allowEmpty: movedAttachments.length > 0 })
+    if (nextItem && movedAttachments.length) setQueuedAttachments(nextItem.id, movedAttachments)
+  }
   clearSendQueue(oldStoredId)
 
   const oldLive = liveIdFor(oldStoredId)
@@ -2651,11 +2656,13 @@ export async function hydrateOcHistory(liveId: string, opts?: { force?: boolean 
   try {
     const rows = await loadOcHistory(stored)
     if (!rows) return // error or no mapping yet — leave unmarked so it retries
-    // Re-read after the await: a turn may have started (or the chat re-keyed)
-    // meanwhile — never fight live state or mark a dropped key hydrated.
-    const cur = sessionsById.get()[liveId]
-    if (!cur || cur.storedId !== stored || cur.busy) {
-      if (!cur && force) ocHydrateAt.delete(stored)
+    // Re-read after the await: a turn may have started (or the chat re-keyed
+    // from pending:<stored> onto a live session id) meanwhile — follow the
+    // storedId across key rotation so history still lands, never fight busy state.
+    const targetId = sessionsById.get()[liveId] ? liveId : entryKeyFor(stored)
+    const cur = targetId ? sessionsById.get()[targetId] : undefined
+    if (!targetId || !cur || cur.storedId !== stored || cur.busy) {
+      if (force) ocHydrateAt.delete(stored)
       return
     }
     ocHydrated.add(stored)
@@ -2664,11 +2671,11 @@ export async function hydrateOcHistory(liveId: string, opts?: { force?: boolean 
     const displayMapped = appendOcAttachmentNames(mapped, attachmentNames)
     if (!cur.messages.length) {
       // Cold path: nothing local to protect.
-      patchSession(liveId, {
+      patchSession(targetId, {
         messages: [...cur.messages, ...displayMapped].slice(-MAX_MESSAGES),
         tools: [...cur.tools, ...mappedTools].slice(-MAX_TOOLS),
       })
-      schedulePersist(liveId)
+      schedulePersist(targetId)
       return
     }
     if (!force) return // messages appeared mid-fetch — cold path stays put
@@ -2687,11 +2694,11 @@ export async function hydrateOcHistory(liveId: string, opts?: { force?: boolean 
     const keptTools = cur.tools.filter((t) => !tailToolIds.has(t.id))
     const seen = new Set(keptTools.map((t) => t.id))
     const added = mappedTools.filter((t) => (seen.has(t.id) ? false : (seen.add(t.id), true)))
-    patchSession(liveId, {
+    patchSession(targetId, {
       messages: reconciled.slice(-MAX_MESSAGES),
       tools: [...keptTools, ...added].slice(-MAX_TOOLS),
     })
-    schedulePersist(liveId)
+    schedulePersist(targetId)
   } finally {
     ocHydrating.delete(liveId)
   }
@@ -2737,9 +2744,7 @@ export async function openOcChat(ocId: string, title?: string): Promise<void> {
     void loadCachedTranscript(existingStored)
     const ocHydrate = sessionsById.get()[key]?.busy
       ? Promise.resolve()
-      : hydrateOcHistory(key, { force: true })
-          .catch(() => {})
-          .finally(() => { setSessionLoading(existingStored, false) })
+      : hydrateOcHistory(key, { force: true }).catch(() => {})
     try {
       const r = await resumeShared(existingStored)
       if (activeStoredId.get() === r.storedId) activeSession.set(r.sessionId)
@@ -3535,7 +3540,7 @@ export function hookChatEvents() {
     const live = activeSession.get()
     const stored = live ? sessionsById.get()[live]?.storedId : undefined
     if (stored && !isPseudoStoredId(stored)) {
-      void resumeShared(stored).catch((e) => log('warn', 'chat', `reconnect resync failed: ${String(e)}`))
+      void resumeOrRecoverOc(stored).catch((e) => log('warn', 'chat', `reconnect resync failed: ${String(e)}`))
     }
   })
 

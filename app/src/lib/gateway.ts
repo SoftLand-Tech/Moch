@@ -85,10 +85,12 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let connectGen = 0
 let manualClose = false
 let phoneConnectInFlight: Promise<void> | null = null
-let dialWaitInFlight = false
+let dialWaitDepth = 0
+let bootWakeEpoch = 0
 const bootSleepWaiters = new Set<() => void>()
 
 function wakeEmbeddedPolls(): void {
+  bootWakeEpoch++
   if (!bootSleepWaiters.size) return
   for (const wake of [...bootSleepWaiters]) wake()
 }
@@ -111,9 +113,12 @@ function sleepWakeable(ms: number): Promise<void> {
 async function waitForEmbeddedReady(opts: {
   timeoutMs: number
   pollMs: number
+  foregroundGraceMs?: number
   shouldAbort?: () => boolean
 }): Promise<{ ready: boolean; running: boolean; port: number; token: string } | null> {
-  const deadline = Date.now() + opts.timeoutMs
+  let deadline = Date.now() + opts.timeoutMs
+  let grantedForegroundGrace = false
+  const foregroundGraceMs = opts.foregroundGraceMs ?? 0
   const probe = async () => {
     const g = await getEmbeddedGateway().catch(() => null)
     if (g?.error) throw new Error(`embedded runtime failed: ${String(g.error).slice(0, 400)}`)
@@ -127,7 +132,21 @@ async function waitForEmbeddedReady(opts: {
     const hit = await probe()
     if (hit) return hit
     if (opts.shouldAbort?.()) return null
+    const epochBeforeSleep = bootWakeEpoch
     await sleepWakeable(opts.pollMs)
+    // Background suspension can expire the wall-clock deadline while the timer
+    // slept; if foregrounding just woke us while still waiting, grant one
+    // bounded foreground grace window so the runtime gets live CPU ticks.
+    if (
+      foregroundGraceMs > 0 &&
+      !grantedForegroundGrace &&
+      bootWakeEpoch !== epochBeforeSleep &&
+      Date.now() >= deadline &&
+      !opts.shouldAbort?.()
+    ) {
+      grantedForegroundGrace = true
+      deadline = Date.now() + foregroundGraceMs
+    }
   }
   // Background suspension can expire the wall-clock deadline while the timer
   // slept; always probe once more on wakeup before declaring a timeout.
@@ -623,16 +642,18 @@ async function dial(c: ConnConfig, opts?: { isRetry?: boolean; plaintextConfirme
   // re-pair after reinstall".
   if (isPrivateHost(c.host)) {
     const gw = await getEmbeddedGateway().catch(() => null)
+    if (gen !== connectGen || manualClose) return
     if (gw?.token) c = { ...c, token: gw.token }
     if (gw !== null) wantLocalBoot = true
     // Wait out the runtime boot (first launch extracts assets for tens of
     // seconds) instead of burning reconnect attempts; surface a runtime boot
     // failure as the connection error so the UI names the real cause.
-    dialWaitInFlight = true
+    dialWaitDepth++
     try {
       const readyGw = await waitForEmbeddedReady({
         timeoutMs: 75_000,
         pollMs: 1_000,
+        foregroundGraceMs: 15_000,
         shouldAbort: () => gen !== connectGen || manualClose,
       })
       if (gen !== connectGen || manualClose) return
@@ -645,7 +666,7 @@ async function dial(c: ConnConfig, opts?: { isRetry?: boolean; plaintextConfirme
         }
       }
     } finally {
-      dialWaitInFlight = false
+      dialWaitDepth = Math.max(0, dialWaitDepth - 1)
     }
   }
   const v = validateConfig(c)
@@ -803,6 +824,7 @@ export function connectThisPhone(opts?: { timeoutMs?: number; pollMs?: number })
     const gw = await waitForEmbeddedReady({
       timeoutMs,
       pollMs,
+      foregroundGraceMs: 15_000,
       shouldAbort: () => manualClose,
     })
     if (manualClose) return
@@ -824,6 +846,7 @@ export function disconnect() {
   manualClose = true
   wantConnection = false
   wantLocalBoot = false
+  phoneConnectInFlight = null
   wakeEmbeddedPolls()
   cancelReconnect()
   // A user-initiated Cancel starts the next attempt from a clean slate: a
@@ -845,7 +868,7 @@ export function onForeground() {
     wantLocalBoot,
     connectionState: connectionState.get(),
     bootConnectInFlight: !!phoneConnectInFlight,
-    dialWaitInFlight,
+    dialWaitInFlight: dialWaitDepth > 0,
   })
   if (action === 'none') return
   if (action === 'resume-boot') {

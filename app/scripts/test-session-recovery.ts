@@ -157,7 +157,10 @@ async function main() {
   const p2 = gw.connectThisPhone({ timeoutMs: 120, pollMs: 30 })
   check('concurrent connectThisPhone calls share one in-flight promise', p1 === p2)
   gw.disconnect()
-  await Promise.allSettled([p1, p2])
+  const p3 = gw.connectThisPhone({ timeoutMs: 120, pollMs: 30 })
+  check('connectThisPhone after disconnect allocates a fresh attempt immediately', p3 !== p1)
+  gw.disconnect()
+  await Promise.allSettled([p1, p2, p3])
 
   // Verify wakeEmbeddedPolls wakes a sleeping poll immediately on onForeground()
   let probeCount = 0
@@ -169,9 +172,21 @@ async function main() {
   gw.onForeground()
   await new Promise((r) => setTimeout(r, 20))
   check('onForeground immediately wakes sleeping boot poll', probeCount > countBeforeFg, `before=${countBeforeFg} after=${probeCount}`)
+
+  // Verify backgrounded-past-deadline boot grants a foreground grace window rather than dying on the first tick
   onGatewayProbe = null
   gw.disconnect()
   await Promise.allSettled([longWait])
+  const shortDeadlineWait = gw.connectThisPhone({ timeoutMs: 25, pollMs: 150 })
+  await new Promise((r) => setTimeout(r, 40))
+  let graceProbes = 0
+  onGatewayProbe = () => { graceProbes++ }
+  gw.onForeground()
+  await new Promise((r) => setTimeout(r, 30))
+  check('onForeground grants foreground grace polling even after wall-clock deadline elapsed', graceProbes >= 1, `graceProbes=${graceProbes}`)
+  onGatewayProbe = null
+  gw.disconnect()
+  await Promise.allSettled([shortDeadlineWait])
 
   // ── 2. OpenCode old-session open must NOT fall back to newChat() ────────
   const chat = require_('../src/lib/chat') as typeof import('../src/lib/chat')
