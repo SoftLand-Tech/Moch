@@ -52,6 +52,8 @@ export interface ServerInflightTurn {
   user?: string
   assistant?: string
   streaming?: boolean
+  /** Gateway turn start time, seconds (or milliseconds for defensive clients). */
+  started_at?: number
   corrections?: string[]
   error?: string
   status?: string
@@ -123,13 +125,72 @@ function normUserText(text: string): string {
   return text.trim().replace(/\s+/g, ' ')
 }
 
+function inflightStartedMs(value: number | undefined): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined
+  return value < 1_000_000_000_000 ? value * 1000 : value
+}
+
+function stripTrailingFileRefs(text: string): string {
+  const lines = text.split('\n')
+  while (lines.length && /^\s*@file:/.test(lines[lines.length - 1])) lines.pop()
+  return lines.join('\n').trim()
+}
+
+function hasTrailingFileRefs(text: string): boolean {
+  return stripTrailingFileRefs(text) !== text.trim()
+}
+
+function userMatchKey(text: string): string {
+  const stripped = stripTrailingFileRefs(text)
+  return stripped === '[attachment]' ? '' : normUserText(stripped)
+}
+
+function userTextMatches(a: string, b: string): boolean {
+  const ak = userMatchKey(a)
+  const bk = userMatchKey(b)
+  if (ak && bk) return ak === bk
+  return !ak && !bk && (
+    hasTrailingFileRefs(a) || hasTrailingFileRefs(b) ||
+    a.trim() === '[attachment]' || b.trim() === '[attachment]'
+  )
+}
+
+const TURN_MATCH_WINDOW_MS = 120_000
+const ATTACHMENT_MATCH_WINDOW_MS = 600_000
+
+function userRowsMatch(local: MergeMessage, server: MergeMessage): boolean {
+  const age = Math.abs(local.ts - server.ts)
+  if (userTextMatches(local.text, server.text) && (
+    age <= TURN_MATCH_WINDOW_MS ||
+    (!!local.segments?.some((s) => s.kind === 'media') && age <= ATTACHMENT_MATCH_WINDOW_MS)
+  )) return true
+  // Attachment-only local rows have no caption. They may correspond to a
+  // refs-only or placeholder server row; order/turn matching disambiguates
+  // multiple such turns.
+  const localEmpty = !normUserText(local.text)
+  const serverEmpty = !userMatchKey(server.text)
+  if (localEmpty && serverEmpty && age <= ATTACHMENT_MATCH_WINDOW_MS && (
+    !!local.segments?.some((s) => s.kind === 'media') ||
+    hasTrailingFileRefs(server.text) || server.text.trim() === '[attachment]'
+  )) return true
+  // appendRefText budgets the caption to make room for refs. The local row is
+  // stamped before upload and the server row after it, so attachment turns get
+  // a wider window; ordinary shared prefixes remain non-matches.
+  const localKey = normUserText(local.text)
+  const serverKey = userMatchKey(server.text)
+  return !!local.segments?.some((s) => s.kind === 'media') &&
+    hasTrailingFileRefs(server.text) &&
+    !!serverKey && localKey.startsWith(serverKey) &&
+    age <= ATTACHMENT_MATCH_WINDOW_MS
+}
+
 function findMatchingUserIndex(list: MergeMessage[], targetText: string, occurrenceFromEnd = 1): number {
   const want = normUserText(targetText)
   if (!want) return -1
   let seen = 0
   for (let i = list.length - 1; i >= 0; i--) {
     if (list[i].role !== 'user') continue
-    if (normUserText(list[i].text) === want) {
+    if (userTextMatches(list[i].text, targetText)) {
       seen++
       if (seen === occurrenceFromEnd) return i
     }
@@ -142,9 +203,57 @@ function countOccurrences(list: MergeMessage[], targetText: string): number {
   if (!want) return 0
   let n = 0
   for (const m of list) {
-    if (m.role === 'user' && normUserText(m.text) === want) n++
+    if (m.role === 'user' && userTextMatches(m.text, targetText)) n++
   }
   return n
+}
+
+function assistantTextAfter(messages: MergeMessage[], userIndex: number): string {
+  const parts: string[] = []
+  for (let i = userIndex + 1; i < messages.length; i++) {
+    const m = messages[i]
+    if (m.role === 'user') break
+    if (m.role === 'assistant' && !m.cmd && m.text) parts.push(m.text)
+  }
+  return parts.join('\n')
+}
+
+/** Keep local user-row identity/media/status when the server has the same turn. */
+function preserveLocalUserRows(merged: MergeMessage[], prevMessages: MergeMessage[]): MergeMessage[] {
+  const used = new Set<number>()
+  return merged.map((row, rowIdx) => {
+    if (row.role !== 'user') return row
+    const serverAnswer = assistantTextAfter(merged, rowIdx)
+    let bestIdx = -1
+    let bestScore = -Infinity
+    for (let i = 0; i < prevMessages.length; i++) {
+      const candidate = prevMessages[i]
+      if (used.has(i) || candidate.role !== 'user' || !userRowsMatch(candidate, row)) continue
+      const localAnswerIdx = (() => {
+        for (let j = i + 1; j < prevMessages.length; j++) {
+          const m = prevMessages[j]
+          if (m.role === 'user') break
+          if (m.role === 'assistant' && !m.cmd) return j
+        }
+        return -1
+      })()
+      if (localAnswerIdx >= 0 && prevMessages[localAnswerIdx].ts < row.ts) continue
+      const localAnswer = assistantTextAfter(prevMessages, i)
+      let score = Math.max(0, 100 - Math.min(100, Math.abs(candidate.ts - row.ts) / 1000))
+      if (serverAnswer && localAnswer) {
+        if (serverAnswer === localAnswer) score += 1000
+        else if (serverAnswer.startsWith(localAnswer) || localAnswer.startsWith(serverAnswer)) score += 100
+      }
+      if (candidate.segments?.some((s) => s.kind === 'media')) score += 1
+      if (score > bestScore) {
+        bestScore = score
+        bestIdx = i
+      }
+    }
+    if (bestIdx < 0) return row
+    used.add(bestIdx)
+    return { ...prevMessages[bestIdx], ts: row.ts }
+  })
 }
 
 /**
@@ -175,15 +284,35 @@ export function reconcileHistoryMessages(
       }
       return -1
     })()
-    const lastServerUserText = lastServerUserIdx >= 0 ? normUserText(merged[lastServerUserIdx].text) : ''
-    const hasInfUser = !!(infUser && lastServerUserText === normUserText(infUser))
+    const lastServerUser = lastServerUserIdx >= 0 ? merged[lastServerUserIdx] : undefined
+    const lastServerUserText = lastServerUser ? normUserText(lastServerUser.text) : ''
+    const serverTail = lastServerUserIdx >= 0 ? merged.slice(lastServerUserIdx + 1) : []
+    const infStartedMs = inflightStartedMs(inf.started_at)
+    const serverTurnPending = !!lastServerUser &&
+      (infStartedMs === undefined || Math.abs(lastServerUser.ts - infStartedMs) <= 1_000) &&
+      !serverTail.some((m) => m.role === 'assistant' && !m.cmd && !m.streaming)
+    const hasInfUser = !!(infUser && serverTurnPending && lastServerUserText === normUserText(infUser))
     if (infUser && !hasInfUser) {
-      merged.push({
-        id: opts.makeId(),
-        role: 'user',
-        text: infUser.slice(0, HISTORY_TEXT_MAX),
-        ts: now,
-      })
+      const localUserIdx = findMatchingUserIndex(prevMessages, infUser)
+      const localUser = localUserIdx >= 0 ? prevMessages[localUserIdx] : undefined
+      const localPending = (() => {
+        if (!localUser || localUserIdx < 0) return false
+        if (localUser.status === 'unconfirmed') return true
+        for (let i = localUserIdx + 1; i < prevMessages.length; i++) {
+          const m = prevMessages[i]
+          if (m.role === 'user') break
+          if (m.role === 'assistant' && !m.cmd) return !!m.streaming
+        }
+        return true
+      })()
+      merged.push(localUser && localPending
+        ? { ...localUser }
+        : {
+            id: opts.makeId(),
+            role: 'user',
+            text: infUser.slice(0, HISTORY_TEXT_MAX),
+            ts: now,
+          })
     }
     for (const corr of inf.corrections ?? []) {
       const c = typeof corr === 'string' ? corr.trim() : ''
@@ -231,7 +360,10 @@ export function reconcileHistoryMessages(
   }
 
   // 2. Preserve local unpersisted turns after the last user message that
-  //    server history already reflects.
+  //    server history already reflects. First reattach local user-row media
+  //    and identity to matching server turns so hydration does not replace
+  //    attachment tiles with text-only server rows.
+  merged = preserveLocalUserRows(merged, prevMessages)
   const serverLastUserIdx = (() => {
     for (let i = merged.length - 1; i >= 0; i--) {
       if (merged[i].role === 'user') return i
@@ -244,14 +376,21 @@ export function reconcileHistoryMessages(
     // following messages if the local transcript already started a conversation.
     const firstLocalUserIdx = prevMessages.findIndex((m) => m.role === 'user')
     if (firstLocalUserIdx >= 0) {
-      return [...merged, ...prevMessages.slice(firstLocalUserIdx)]
+      // A server page with no user boundary cannot be safely aligned with a
+      // local conversation. Keep the local transcript rather than appending
+      // the whole cache after a leading assistant and duplicating turns.
+      return [...prevMessages]
     }
   } else {
     const serverLastUserText = merged[serverLastUserIdx].text
-    const serverCount = countOccurrences(merged, serverLastUserText)
-    const localCount = countOccurrences(prevMessages, serverLastUserText)
-    const occFromEnd = localCount >= serverCount ? localCount - serverCount + 1 : 1
-    const localMatchIdx = findMatchingUserIndex(prevMessages, serverLastUserText, occFromEnd)
+    const preservedId = merged[serverLastUserIdx].id
+    let localMatchIdx = prevMessages.findIndex((m) => m.id === preservedId)
+    if (localMatchIdx < 0) {
+      const serverCount = countOccurrences(merged, serverLastUserText)
+      const localCount = countOccurrences(prevMessages, serverLastUserText)
+      const occFromEnd = localCount >= serverCount ? localCount - serverCount + 1 : 1
+      localMatchIdx = findMatchingUserIndex(prevMessages, serverLastUserText, occFromEnd)
+    }
 
     if (localMatchIdx >= 0) {
       const localAfter = prevMessages.slice(localMatchIdx + 1)
@@ -260,39 +399,46 @@ export function reconcileHistoryMessages(
         firstExtraUserInLocal >= 0 ? localAfter.slice(0, firstExtraUserInLocal) : localAfter
       ).filter((m) => !!m.cmd)
 
-      // Preserve any live/streaming assistant tail for that SAME last user turn
-      // when the server hasn't committed an assistant answer (or only partial).
-      const streamingIdx = (() => {
+      // Preserve the local assistant tail for this same user turn when the
+      // server has not committed an answer yet. A completed local answer is
+      // still authoritative during that persistence lag; once the server has
+      // an answer, only a live streaming continuation may extend it.
+      const localAnswerIdx = (() => {
         const bound = firstExtraUserInLocal >= 0 ? firstExtraUserInLocal : localAfter.length
         for (let i = bound - 1; i >= 0; i--) {
-          if (localAfter[i].role === 'assistant' && localAfter[i].streaming) return i
+          if (localAfter[i].role === 'assistant' && !localAfter[i].cmd) return i
         }
         return -1
       })()
-      if (streamingIdx >= 0) {
-        const tail = localAfter[streamingIdx]
+      if (localAnswerIdx >= 0) {
+        const tail = localAfter[localAnswerIdx]
         const last = merged[merged.length - 1]
         const serverHasAnswerForLastTurn = merged.length - 1 > serverLastUserIdx && last?.role === 'assistant'
-        const cont =
-          serverHasAnswerForLastTurn &&
-          last.text.length > 0 &&
-          (tail.text.startsWith(last.text) || last.text.startsWith(tail.text))
-        if (cont) {
-          merged[merged.length - 1] = {
-            ...last,
-            ...(tail.text.length > last.text.length ? { text: tail.text, segments: tail.segments } : { segments: last.segments?.length ? last.segments : tail.segments }),
-            streaming: true,
-          }
-        } else if (!serverHasAnswerForLastTurn || tail.text.length > last.text.length) {
-          if (serverHasAnswerForLastTurn) {
+        const sameTurn = tail.ts >= merged[serverLastUserIdx].ts
+        if (!sameTurn) {
+          // A completed/streaming answer from an older identical prompt must
+          // never be attached to a newer server-side occurrence.
+        } else if (!serverHasAnswerForLastTurn) {
+          merged.push(tail)
+        } else if (tail.streaming) {
+          const cont =
+            last.text.length > 0 &&
+            (tail.text.startsWith(last.text) || last.text.startsWith(tail.text))
+          if (cont) {
+            merged[merged.length - 1] = {
+              ...last,
+              ...(tail.text.length > last.text.length ? { text: tail.text, segments: tail.segments } : { segments: last.segments?.length ? last.segments : tail.segments }),
+              streaming: true,
+            }
+          } else if (tail.text.length > last.text.length) {
             merged[merged.length - 1] = {
               ...tail,
               segments: tail.segments?.length ? tail.segments : last.segments,
               streaming: true,
             }
-          } else {
-            merged.push(tail)
           }
+        } else if (tail.text.length > last.text.length) {
+          merged[merged.length - 1] = tail
         }
       }
 
