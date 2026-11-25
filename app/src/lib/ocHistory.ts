@@ -101,16 +101,32 @@ function normPromptText(text: string): string {
 
 /** Return only the assistant row owned by the supplied user prompt. A newest
  *  assistant from an earlier turn must never be copied into an empty new turn. */
-export function findOcTurnAssistant(rows: OcHistoryRow[], prompt: string): OcHistoryRow | undefined {
+export function findOcTurnAssistant(
+  rows: OcHistoryRow[],
+  prompt: string,
+  sinceMs?: number,
+): OcHistoryRow | undefined {
   const want = normPromptText(prompt)
+  const minTs = sinceMs === undefined ? -Infinity : sinceMs - 1_000
   let userIdx = -1
   for (let i = rows.length - 1; i >= 0; i--) {
     const row = rows[i]
-    if (row.role !== 'user') continue
+    if (row.role !== 'user' || row.ts < minTs) continue
     const got = row.text === '[attachment]' ? '' : normPromptText(row.text)
     if (want === got) {
       userIdx = i
       break
+    }
+  }
+  // Command templates expand before persistence, so their durable user text
+  // differs from the raw arguments. Fall back to the user row created by this
+  // turn's time boundary, never to an older identical prompt.
+  if (userIdx < 0 && sinceMs !== undefined) {
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i].role === 'user' && rows[i].ts >= minTs) {
+        userIdx = i
+        break
+      }
     }
   }
   if (userIdx < 0) return undefined

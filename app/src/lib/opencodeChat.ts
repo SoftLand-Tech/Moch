@@ -49,6 +49,9 @@ let ocInteractiveRevision = 0
 export function noteOcInteractiveChanged(): void {
   ocInteractiveRevision++
 }
+export function ocInteractiveRevisionValue(): number {
+  return ocInteractiveRevision
+}
 
 // ── chat handle ↔ opencode session map ──────────────────────────────────────
 
@@ -252,6 +255,9 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
   let compacting = false
   let retryAtMs: number | null = null
   let rebindCount = 0
+  let turnStartedAtMs = 0
+  let needsHistorySync = false
+  let historySynced = false
   const toolNames = new Map<string, string>()
   const toolStartTs = new Map<string, number>()
   let cancelPoll: ReturnType<typeof setInterval> | null = null
@@ -489,7 +495,13 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
         const id = String(d.id ?? '')
         if (!id) break
         activeTools.delete(id)
-        if (toolNames.get(id) === 'question') awaitingUser.clear()
+        if (toolNames.get(id) === 'question') {
+          for (const key of [...awaitingUser]) {
+            if (!key.startsWith('form:')) continue
+            awaitingUser.delete(key)
+            hooks.questionResolved?.(key.slice('form:'.length))
+          }
+        }
         const dur = toolStartTs.get(id)
         hooks.tool(
           id,
@@ -626,6 +638,23 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
       resolveSilent = resolve
     })
 
+  const syncTurnHistory = async (): Promise<string | undefined> => {
+    try {
+      const hist = mapOcHistory((await ocHistory(ocId)) ?? [])
+      const last = findOcTurnAssistant(hist, opts.command?.text ?? text, turnStartedAtMs)
+      if (!last) return undefined
+      // History is authoritative after a disconnect, including ordered
+      // reasoning/text segments and tools whose terminal event was missed.
+      finalText = last.text
+      hooks.replaceAnswer(last)
+      for (const t of last.tools ?? []) hooks.tool(t.id, t.name, t.ok ? 'done' : 'failed')
+      historySynced = true
+      return undefined
+    } catch (err) {
+      return `OpenCode finished, but history sync failed: ${describeOcError(err)}`
+    }
+  }
+
   cancelPoll = setInterval(() => {
     if (isCancelled?.()) resolveSilent('silent')
   }, 500)
@@ -633,6 +662,7 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
   let firstStream = openStreamLeg()
 
   try {
+    turnStartedAtMs = Date.now()
     if (opts.command) {
       await ocRunCommand(ocId, opts.command.name, opts.command.text)
     } else {
@@ -642,8 +672,10 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
     finishOnce()
     throw e instanceof Error ? e : new Error(String(e))
   }
-  hooks.start()
-  started = true
+  if (!started) {
+    hooks.start()
+    started = true
+  }
   armSilence()
   armActivityCap()
   void syncInteractive()
@@ -655,6 +687,7 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
     const silentLeg = makeSilentLeg()
     const winner = await Promise.race([currentStream.promise, silentLeg])
     currentStream.controller.abort()
+    if (!turnDone && (winner === 'dropped' || winner === 'silent')) needsHistorySync = true
     if (turnDone || isCancelled?.() || disposed) {
       if (isCancelled?.()) failed = false
       break
@@ -693,36 +726,7 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
     }
 
     if (decision.kind === 'complete') {
-      let historySyncError: string | undefined
-      if (decision.syncHistory) {
-        try {
-          const hist = mapOcHistory((await ocHistory(ocId)) ?? [])
-          const last = findOcTurnAssistant(hist, opts.command?.text ?? text)
-          if (last) {
-            if (!finalText && last.text) {
-              finalText = last.text
-              hooks.replaceAnswer(last)
-            } else if (last.text.startsWith(finalText) && last.text.length > finalText.length) {
-              const tail = last.text.slice(finalText.length)
-              finalText += tail
-              hooks.text(tail)
-            } else if (last.text !== finalText) {
-              // A delta was missed while SSE was down. Server history is
-              // authoritative; replace the corrupted partial instead of
-              // appending a suffix that no longer lines up.
-              finalText = last.text
-              hooks.replaceAnswer(last)
-            }
-            for (const t of last.tools ?? []) {
-              // Reconcile even tools already seen streaming: a missed
-              // session.tool.failed must not be finalized as successful.
-              hooks.tool(t.id, t.name, t.ok ? 'done' : 'failed')
-            }
-          }
-        } catch (err) {
-          historySyncError = `OpenCode finished, but history sync failed: ${describeOcError(err)}`
-        }
-      }
+      const historySyncError = decision.syncHistory ? await syncTurnHistory() : undefined
       turnDone = true
       failed = decision.failed || !!historySyncError
       errorMsg = historySyncError ?? decision.errorMsg ?? errorMsg
@@ -732,6 +736,14 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
     failed = true
     errorMsg = decision.message
     break
+  }
+
+  if (turnDone && needsHistorySync && !historySynced && !isCancelled?.()) {
+    const historySyncError = await syncTurnHistory()
+    if (historySyncError) {
+      failed = true
+      errorMsg = historySyncError
+    }
   }
 
   finishOnce()
