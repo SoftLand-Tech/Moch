@@ -14,7 +14,7 @@ export { normalizeHost } from './transportGate'
 // redaction) moved to dialTransport.ts — pure, node-loadable for the same
 // reason; redactedUrl stays re-exported for gateway's existing callers.
 export { redactedUrl } from './dialTransport'
-import { buildDialUrl, buildDialHeaders, isHandshakeRefusal, redactedUrl } from './dialTransport'
+import { buildDialUrl, buildDialHeaders, decideForegroundAction, isHandshakeRefusal, redactedUrl } from './dialTransport'
 
 export interface ConnConfig {
   host: string // "127.0.0.1:9119" or "myserver.tailnet.ts.net:443"
@@ -79,10 +79,80 @@ let stopEvents: (() => void) | null = null
 let stopState: (() => void) | null = null
 let stopRequests: (() => void) | null = null
 let wantConnection = false
+let wantLocalBoot = false
 let lastConfig: ConnConfig | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let connectGen = 0
 let manualClose = false
+let phoneConnectInFlight: Promise<void> | null = null
+let dialWaitDepth = 0
+let bootWakeEpoch = 0
+const bootSleepWaiters = new Set<() => void>()
+
+function wakeEmbeddedPolls(): void {
+  bootWakeEpoch++
+  if (!bootSleepWaiters.size) return
+  for (const wake of [...bootSleepWaiters]) wake()
+}
+
+function sleepWakeable(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      bootSleepWaiters.delete(finish)
+      resolve()
+    }
+    const timer = setTimeout(finish, ms)
+    bootSleepWaiters.add(finish)
+  })
+}
+
+async function waitForEmbeddedReady(opts: {
+  timeoutMs: number
+  pollMs: number
+  foregroundGraceMs?: number
+  shouldAbort?: () => boolean
+}): Promise<{ ready: boolean; running: boolean; port: number; token: string } | null> {
+  let deadline = Date.now() + opts.timeoutMs
+  let grantedForegroundGrace = false
+  const foregroundGraceMs = opts.foregroundGraceMs ?? 0
+  const probe = async () => {
+    const g = await getEmbeddedGateway().catch(() => null)
+    if (g?.error) throw new Error(`embedded runtime failed: ${String(g.error).slice(0, 400)}`)
+    if (g?.running && g.ready && g.port && g.token) {
+      return { ready: true, running: true, port: g.port, token: g.token }
+    }
+    return null
+  }
+  while (Date.now() < deadline) {
+    if (opts.shouldAbort?.()) return null
+    const hit = await probe()
+    if (hit) return hit
+    if (opts.shouldAbort?.()) return null
+    const epochBeforeSleep = bootWakeEpoch
+    await sleepWakeable(opts.pollMs)
+    // Background suspension can expire the wall-clock deadline while the timer
+    // slept; if foregrounding just woke us while still waiting, grant one
+    // bounded foreground grace window so the runtime gets live CPU ticks.
+    if (
+      foregroundGraceMs > 0 &&
+      !grantedForegroundGrace &&
+      bootWakeEpoch !== epochBeforeSleep &&
+      Date.now() >= deadline &&
+      !opts.shouldAbort?.()
+    ) {
+      grantedForegroundGrace = true
+      deadline = Date.now() + foregroundGraceMs
+    }
+  }
+  // Background suspension can expire the wall-clock deadline while the timer
+  // slept; always probe once more on wakeup before declaring a timeout.
+  if (opts.shouldAbort?.()) return null
+  return await probe()
+}
 // Serializes the per-dial persistence writes (saveConfig + upsertServer) so
 // overlapping dials can't interleave upsertServer's server-list
 // read-modify-write. The writes OVERLAP the WebSocket handshake — they never
@@ -480,6 +550,7 @@ function ensureClient(): JsonRpcGatewayClient {
       // dial the stale machine seconds later, hijack the healthy socket and
       // re-point the active computer. Whatever config just opened is the
       // wanted one; its retry bookkeeping is reset below.
+      wantLocalBoot = false
       cancelReconnect()
       reconnectAttempt.set(0)
       gatewayError.set(null)
@@ -521,7 +592,10 @@ export async function retryNow(): Promise<void> {
   manualClose = false
   if (!lastConfig) {
     const saved = connConfig.get() ?? (await loadSavedConfig())
-    if (!saved) throw new Error('No saved connection')
+    if (!saved) {
+      await connectThisPhone()
+      return
+    }
     lastConfig = saved
   }
   await dial(lastConfig, { isRetry: true })
@@ -568,23 +642,31 @@ async function dial(c: ConnConfig, opts?: { isRetry?: boolean; plaintextConfirme
   // re-pair after reinstall".
   if (isPrivateHost(c.host)) {
     const gw = await getEmbeddedGateway().catch(() => null)
+    if (gen !== connectGen || manualClose) return
     if (gw?.token) c = { ...c, token: gw.token }
+    if (gw !== null) wantLocalBoot = true
     // Wait out the runtime boot (first launch extracts assets for tens of
     // seconds) instead of burning reconnect attempts; surface a runtime boot
     // failure as the connection error so the UI names the real cause.
-    const deadline = Date.now() + 75_000
-    while (Date.now() < deadline) {
-      const g = await getEmbeddedGateway().catch(() => null)
-      if (g?.error) throw new Error(`embedded runtime failed: ${String(g.error).slice(0, 400)}`)
-      if (g?.ready) { if (g.token) c = { ...c, token: g.token }; break }
-      if (gen !== connectGen) return // superseded by a newer dial
-      // Hand-rolled withResolvers: tsconfig.scripts.json's lib is ES2022 and
-      // Promise.withResolvers is ES2024 — that config compiles this file via
-      // the scripts' transitive imports.
-      let resolve!: () => void
-      const pause = new Promise<void>((r) => { resolve = r })
-      setTimeout(resolve, 1000)
-      await pause
+    dialWaitDepth++
+    try {
+      const readyGw = await waitForEmbeddedReady({
+        timeoutMs: 75_000,
+        pollMs: 1_000,
+        foregroundGraceMs: 15_000,
+        shouldAbort: () => gen !== connectGen || manualClose,
+      })
+      if (gen !== connectGen || manualClose) return
+      if (readyGw) {
+        c = { ...c, token: readyGw.token }
+      } else {
+        const latest = await getEmbeddedGateway().catch(() => null)
+        if (latest !== null && !latest.ready) {
+          throw new Error('The on-phone agent is still starting — try again in a moment.')
+        }
+      }
+    } finally {
+      dialWaitDepth = Math.max(0, dialWaitDepth - 1)
     }
   }
   const v = validateConfig(c)
@@ -714,6 +796,7 @@ async function dial(c: ConnConfig, opts?: { isRetry?: boolean; plaintextConfirme
 
 export async function connect(c: ConnConfig, opts?: { plaintextConfirmed?: boolean }): Promise<void> {
   cancelReconnect()
+  manualClose = false
   // C-05: the confirmation may ride the config (persisted per-server by
   // upsertServer) or the explicit opts (one-shot); dial() enforces it.
   await dial(c, opts)
@@ -726,33 +809,45 @@ export async function connect(c: ConnConfig, opts?: { plaintextConfirmed?: boole
  * assuming the gateway is up on the first frame; the caller renders a
  * "Starting your agent" surface meanwhile.
  */
-export async function connectThisPhone(opts?: { timeoutMs?: number; pollMs?: number }): Promise<void> {
+export function connectThisPhone(opts?: { timeoutMs?: number; pollMs?: number }): Promise<void> {
+  if (phoneConnectInFlight) return phoneConnectInFlight
   const timeoutMs = opts?.timeoutMs ?? 180_000
   // 250ms, not 1s: the gate is a single cheap bridge call, and this is the
   // difference between the UI going live on the first ready tick or up to a
   // second later. Return users don't see this wait anymore (index.tsx
   // routes straight to chat), so this is for the first-run wizard.
   const pollMs = opts?.pollMs ?? 250
-  const deadline = Date.now() + timeoutMs
+  manualClose = false
+  wantLocalBoot = true
   const t0 = Date.now()
-  let lastError = ''
-  while (Date.now() < deadline) {
-    const gw = await getEmbeddedGateway().catch(() => null)
-    if (gw?.running && gw.ready && gw.port && gw.token) {
-      log('info', 'gateway', `embedded runtime ready in ${Date.now() - t0}ms`)
-      await connect({ host: `127.0.0.1:${gw.port}`, token: gw.token, tls: false, name: 'This phone' })
-      return
+  const run = (async () => {
+    const gw = await waitForEmbeddedReady({
+      timeoutMs,
+      pollMs,
+      foregroundGraceMs: 15_000,
+      shouldAbort: () => manualClose,
+    })
+    if (manualClose) return
+    if (!gw) {
+      throw new Error('The on-phone agent is still starting — try again in a moment.')
     }
-    if (gw?.error) lastError = gw.error
-    await new Promise<void>((resolve) => setTimeout(resolve, pollMs))
-  }
-  throw new Error(lastError || 'The on-phone agent is still starting — try again in a moment.')
+    log('info', 'gateway', `embedded runtime ready in ${Date.now() - t0}ms`)
+    await connect({ host: `127.0.0.1:${gw.port}`, token: gw.token, tls: false, name: 'This phone' })
+  })()
+  const p = run.finally(() => {
+    if (phoneConnectInFlight === p) phoneConnectInFlight = null
+  })
+  phoneConnectInFlight = p
+  return p
 }
 
 
 export function disconnect() {
   manualClose = true
   wantConnection = false
+  wantLocalBoot = false
+  phoneConnectInFlight = null
+  wakeEmbeddedPolls()
   cancelReconnect()
   // A user-initiated Cancel starts the next attempt from a clean slate: a
   // leftover count would otherwise turn the NEXT boot's first (normal)
@@ -766,9 +861,22 @@ export function disconnect() {
 /** Foreground resume — retry immediately if we were supposed to be connected. */
 let foregroundProbeInFlight = false
 export function onForeground() {
-  if (!wantConnection || manualClose) return
-  const st = connectionState.get()
-  if (st !== 'open' && st !== 'connecting') {
+  wakeEmbeddedPolls()
+  const action = decideForegroundAction({
+    manualClose,
+    wantConnection,
+    wantLocalBoot,
+    connectionState: connectionState.get(),
+    bootConnectInFlight: !!phoneConnectInFlight,
+    dialWaitInFlight: dialWaitDepth > 0,
+  })
+  if (action === 'none') return
+  if (action === 'resume-boot') {
+    log('info', 'gateway', 'foreground resume — resuming embedded boot connect')
+    void connectThisPhone().catch(() => {})
+    return
+  }
+  if (action === 'retry-dial') {
     log('info', 'gateway', 'foreground resume — retrying')
     void retryNow().catch(() => {})
     return

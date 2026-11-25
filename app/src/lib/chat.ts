@@ -38,8 +38,10 @@ import {
   runOneShotTurn,
   ocSessionFor,
   ocRememberSession,
+  ocForgetSession,
   findStoredIdForOcSession,
   ocPickFor,
+  rememberOcPick,
   loadOcHistory,
   noteOcInteractiveChanged,
   ocInteractiveRevisionValue,
@@ -955,8 +957,9 @@ export async function flushOutbox(): Promise<void> {
           // Not tracked (cold boot / evicted handle): a quiet resume brings
           // the handle back; a not-found answer means the chat is gone.
           try {
-            const fresh = await resumeShared(target.storedId)
-            await sendPrompt(item.text, { session: fresh.sessionId })
+            const freshSessionId = await resumeOrRecoverOc(target.storedId)
+            await sendPrompt(item.text, { session: freshSessionId })
+            deliveredVia = freshSessionId
           } catch (resumeErr) {
             if (!isSessionNotFound(resumeErr)) throw resumeErr
             log('warn', 'chat', `outbox item dropped — chat ${target.storedId} no longer exists`)
@@ -1132,7 +1135,7 @@ async function createSessionRpc<T>(params: Record<string, unknown>): Promise<T> 
   }
 }
 
-export async function createSession(title?: string): Promise<ResumeResult> {
+export async function createSession(title?: string, opts?: { thinker?: Thinker }): Promise<ResumeResult> {
   // Bot Mode rule (audit: BOT-MODE.md): an ordinary chat is NEVER scoped to a
   // bot profile. A bot's only conversation is its canonical `Bot Chat`,
   // resolved/created by lib/botChat.ts through the native exact-title
@@ -1163,7 +1166,7 @@ export async function createSession(title?: string): Promise<ResumeResult> {
   // OPENCODE-MODE: a chat's brain is fixed at creation — stamp it once with
   // the thinker active right now (never re-stamped; unstamped legacy chats
   // are moch).
-  stampChatThinker(storedId, thinkerAtom.get())
+  stampChatThinker(storedId, opts?.thinker ?? thinkerAtom.get())
   // Fire-and-forget: rememberStoredId's in-memory map update runs
   // synchronously; only the AsyncStorage write is async, and the visible
   // swap must not wait on it.
@@ -1185,6 +1188,34 @@ export async function createSession(title?: string): Promise<ResumeResult> {
  *  BUG-062: the exported wrapper had zero callers (boot goes through
  *  withBootPaint, switches through switchToSession) — removed; resumeShared
  *  is the primitive every path uses. */
+function migrateOcLiveMaps(fromLiveId: string | undefined, toLiveId: string): boolean {
+  let ocBusy = false
+  if (!fromLiveId || fromLiveId === toLiveId) return ocBusy
+  const turnCancel = ocTurns.get(fromLiveId)
+  if (turnCancel) {
+    ocTurns.delete(fromLiveId)
+    ocTurns.set(toLiveId, turnCancel)
+    ocBusy = true
+  }
+  const oneShotCancel = ocOneShotCancel.get(fromLiveId)
+  if (oneShotCancel) {
+    ocOneShotCancel.delete(fromLiveId)
+    ocOneShotCancel.set(toLiveId, oneShotCancel)
+    ocBusy = true
+  }
+  const oldPerm = ocPermissions.get(fromLiveId)
+  if (oldPerm) {
+    ocPermissions.delete(fromLiveId)
+    ocPermissions.set(toLiveId, oldPerm)
+  }
+  const oldQuestion = ocQuestions.get(fromLiveId)
+  if (oldQuestion) {
+    ocQuestions.delete(fromLiveId)
+    ocQuestions.set(toLiveId, oldQuestion)
+  }
+  return ocBusy
+}
+
 async function runResume(storedId: string, profile?: string): Promise<ResumeResult> {
   // A bot chat / bot task session lives in THAT profile's state.db. Callers
   // like boot paint and notification taps have no profile argument, so fall
@@ -1233,26 +1264,7 @@ async function runResume(storedId: string, profile?: string): Promise<ResumeResu
   // because the turn runs directly against OpenCode; preserve local OC busy
   // and migrate live cancellers across the rotated id.
   const isOcChat = thinkerForChat(newStored) === 'opencode'
-  let ocBusy = false
-  if (oldLive && oldLive !== id) {
-    const turnCancel = ocTurns.get(oldLive)
-    if (turnCancel) {
-      ocTurns.delete(oldLive)
-      ocTurns.set(id, turnCancel)
-      ocBusy = true
-    }
-    const oneShotCancel = ocOneShotCancel.get(oldLive)
-    if (oneShotCancel) {
-      ocOneShotCancel.delete(oldLive)
-      ocOneShotCancel.set(id, oneShotCancel)
-      ocBusy = true
-    }
-    const oldPerm = ocPermissions.get(oldLive)
-    if (oldPerm) {
-      ocPermissions.delete(oldLive)
-      ocPermissions.set(id, oldPerm)
-    }
-  }
+  const ocBusy = migrateOcLiveMaps(oldLive, id)
   next[id] = {
     ...(prev ?? makeSession(id, newStored)),
     id,
@@ -1374,11 +1386,12 @@ export async function ensureSession(opts?: { create?: boolean }): Promise<string
     // than letting the next send fail against a dead handle.
     if (state?.detached && state.storedId) {
       try {
-        const r = await resumeShared(state.storedId)
+        const sessionId = await resumeOrRecoverOc(state.storedId)
         // Guarded: only re-point the screen if this chat is still the one on
-        // it when the resume lands (the send still targets r.sessionId).
-        if (activeStoredId.get() === r.storedId) activeSession.set(r.sessionId)
-        return r.sessionId
+        // it when the resume lands (the send still targets sessionId).
+        const resolvedStored = sessionsById.get()[sessionId]?.storedId
+        if (resolvedStored && activeStoredId.get() === resolvedStored) activeSession.set(sessionId)
+        return sessionId
       } catch (err) {
         // BUG-014: reattach failed (dead stored id after a serve reinstall,
         // or a resume-specific error). Silently minting a fresh session and
@@ -1434,7 +1447,7 @@ export async function activeLiveId(): Promise<string> {
     return await inflight
   }
   if (state?.detached && state.storedId) {
-    return (await resumeShared(state.storedId)).sessionId
+    return await resumeOrRecoverOc(state.storedId)
   }
   if (cur) return cur
   return ensureSession()
@@ -1594,21 +1607,144 @@ async function runNewChat(tempId: string, pseudo: string): Promise<string> {
 /** Deterministic placeholder key for a not-yet-resumed chat — deterministic
  *  so a double-tap (or boot + deep-link racing) reuses ONE entry, and
  *  idempotent so it never clobbers messages already hydrated into it. */
-function seedPlaceholder(storedId: string): string {
+function seedPlaceholder(storedId: string, preferredTitle?: string): string {
   const key = `pending:${storedId}`
   const map = sessionsById.get()
-  if (map[key]) return key
+  if (map[key]) {
+    if (preferredTitle && (!map[key].title || map[key].title === 'New chat')) {
+      sessionsById.set({ ...map, [key]: { ...map[key], title: preferredTitle } })
+    }
+    return key
+  }
   const row = sessionRows.get().find((r) => r.id === storedId)
   // detached: the live handle doesn't exist yet — a send during the window
   // quietly resumes through the shared core instead of firing a second RPC.
   sessionsById.set({
     ...map,
     [key]: {
-      ...makeSession(key, storedId, row?.title || 'New chat', toMs(row?.started_at) || Date.now()),
+      ...makeSession(key, storedId, row?.title || preferredTitle || 'New chat', toMs(row?.started_at) || Date.now()),
       detached: true,
     },
   })
   return key
+}
+
+const inflightOcRecovers = new Map<string, Promise<string>>()
+
+/**
+ * Re-bind an OpenCode-backed chat whose lazy Hermes spine was never persisted
+ * in state.db (so `session.resume` answers "session not found" after an app/
+ * runtime restart). Creates a fresh Hermes spine and migrates the transcript,
+ * OpenCode session mapping, model pick, draft, queue, and live UI focus
+ * without ever falling back to `newChat()`.
+ */
+async function runRecoverOcSpine(oldStoredId: string, ocId: string, preferredTitle?: string): Promise<string> {
+  const initialKey = entryKeyFor(oldStoredId)
+  const initial = sessionsById.get()[initialKey]
+  const titleHint =
+    (preferredTitle && preferredTitle !== 'New chat' ? preferredTitle : undefined) ??
+    (initial?.title && initial.title !== 'New chat' ? initial.title : undefined)
+  const r = await createSession(titleHint, { thinker: 'opencode' })
+  // Force-stamp 'opencode' even if global thinkerAtom switched in the meantime.
+  chatThinkers.set(r.storedId, 'opencode')
+  persistChatThinkers()
+  await ocRememberSession(r.storedId, ocId)
+  await ocForgetSession(oldStoredId)
+  const oldPick = await ocPickFor(oldStoredId).catch(() => null)
+  if (oldPick) await rememberOcPick(r.storedId, oldPick)
+  const d = draftFor(oldStoredId)
+  if (d) {
+    setDraft(r.storedId, d)
+    clearDraft(oldStoredId)
+  }
+  for (const q of queueFor(oldStoredId)) {
+    const movedAttachments = takeQueuedAttachments(q.id)
+    const nextItem = enqueueSend(r.storedId, q.text, { allowEmpty: movedAttachments.length > 0 })
+    if (nextItem && movedAttachments.length) setQueuedAttachments(nextItem.id, movedAttachments)
+  }
+  clearSendQueue(oldStoredId)
+
+  const oldLive = liveIdFor(oldStoredId)
+  const pendKey = `pending:${oldStoredId}`
+  const mapNow = sessionsById.get()
+  const prev =
+    (oldLive ? mapNow[oldLive] : undefined) ??
+    mapNow[pendKey] ??
+    Object.values(mapNow).find((x) => x.storedId === oldStoredId && x.id !== r.sessionId)
+  const fromIds = [oldLive, pendKey, prev?.id].filter((x): x is string => !!x && x !== r.sessionId)
+  let ocBusy = false
+  for (const fid of fromIds) {
+    if (migrateOcLiveMaps(fid, r.sessionId)) ocBusy = true
+  }
+
+  const next = { ...mapNow }
+  const pend = { ...pendingBySession.get() }
+  let pendDirty = false
+  for (const fid of fromIds) {
+    if (next[fid]) delete next[fid]
+    if (pend[fid]) {
+      delete pend[fid]
+      pendDirty = true
+    }
+  }
+  const resolvedTitle =
+    (prev?.title && prev.title !== 'New chat' ? prev.title : undefined) ??
+    titleHint ??
+    next[r.sessionId]?.title ??
+    'New chat'
+  next[r.sessionId] = {
+    ...(next[r.sessionId] ?? makeSession(r.sessionId, r.storedId, resolvedTitle)),
+    ...(prev
+      ? {
+          messages: prev.messages,
+          tools: prev.tools,
+          todos: prev.todos,
+          usage: prev.usage,
+          createdAtMs: prev.createdAtMs,
+          busy: ocBusy || prev.busy,
+        }
+      : {}),
+    id: r.sessionId,
+    storedId: r.storedId,
+    title: resolvedTitle,
+    detached: false,
+    provisional: false,
+  }
+  sessionsById.set(next)
+  if (pendDirty) pendingBySession.set(pend)
+  const curActive = activeSession.get()
+  if (curActive && fromIds.includes(curActive)) {
+    activeSession.set(r.sessionId)
+    void AsyncStorage.setItem(LAST_SESSION_KEY, r.storedId)
+  }
+  ocHydrated.delete(oldStoredId)
+  setSessionLoading(oldStoredId, false)
+  setSessionLoading(r.storedId, false)
+  void dropCachedTranscript(oldStoredId)
+  schedulePersist(r.sessionId)
+  return r.sessionId
+}
+
+function recoverOcSpine(oldStoredId: string, ocId: string, preferredTitle?: string): Promise<string> {
+  const inflight = inflightOcRecovers.get(oldStoredId)
+  if (inflight) return inflight
+  const p = runRecoverOcSpine(oldStoredId, ocId, preferredTitle).finally(() => {
+    if (inflightOcRecovers.get(oldStoredId) === p) inflightOcRecovers.delete(oldStoredId)
+  })
+  inflightOcRecovers.set(oldStoredId, p)
+  return p
+}
+
+async function resumeOrRecoverOc(storedId: string, preferredTitle?: string): Promise<string> {
+  try {
+    return (await resumeShared(storedId)).sessionId
+  } catch (err) {
+    if (isSessionNotFound(err)) {
+      const ocId = await ocSessionFor(storedId).catch(() => null)
+      if (ocId) return await recoverOcSpine(storedId, ocId, preferredTitle)
+    }
+    throw err
+  }
 }
 
 /**
@@ -1666,7 +1802,21 @@ export function switchToSession(storedId: string): Promise<string> {
     void AsyncStorage.setItem(LAST_SESSION_KEY, storedId)
     return resumeShared(storedId)
       .then(settle)
-      .catch((err: unknown) => {
+      .catch(async (err: unknown) => {
+        if (hit.detached && isSessionNotFound(err)) {
+          const ocId = await ocSessionFor(storedId).catch(() => null)
+          if (ocId) {
+            try {
+              const recovered = await recoverOcSpine(storedId, ocId)
+              if (!sessionsById.get()[recovered]?.busy) {
+                void hydrateOcHistory(recovered, { force: !!(sessionsById.get()[recovered]?.messages.length) }).catch(() => {})
+              }
+              return recovered
+            } catch {
+              // Keep the OpenCode entry usable offline / via OpenCode HTTP.
+            }
+          }
+        }
         // A detached hit that cannot re-attach leaves the user on a dead
         // transcript — banner it. A live hit only missed a refresh; the
         // offline banner already covers a dropped connection.
@@ -1687,6 +1837,24 @@ export function switchToSession(storedId: string): Promise<string> {
     .catch(async (err: unknown) => {
       setSessionLoading(storedId, false)
       if (isSessionNotFound(err)) {
+        const ocId = await ocSessionFor(storedId).catch(() => null)
+        if (ocId) {
+          // An OpenCode chat whose lazy Hermes spine was never written to
+          // state.db is NOT deleted — keep it open and rebind its spine.
+          try {
+            const recovered = await recoverOcSpine(storedId, ocId)
+            if (!sessionsById.get()[recovered]?.busy) {
+              void hydrateOcHistory(recovered, { force: !!(sessionsById.get()[recovered]?.messages.length) }).catch(() => {})
+            }
+            return recovered
+          } catch {
+            const curKey = entryKeyFor(storedId)
+            if (!sessionsById.get()[curKey]?.busy) {
+              void hydrateOcHistory(curKey, { force: true }).catch(() => {})
+            }
+            return curKey
+          }
+        }
         // BUG-029: the target doesn't exist (deleted elsewhere, stale
         // notification). The placeholder would otherwise sit under a
         // forever-failing retry banner — fall back to a local new chat
@@ -2488,21 +2656,26 @@ export async function hydrateOcHistory(liveId: string, opts?: { force?: boolean 
   try {
     const rows = await loadOcHistory(stored)
     if (!rows) return // error or no mapping yet — leave unmarked so it retries
+    // Re-read after the await: a turn may have started (or the chat re-keyed
+    // from pending:<stored> onto a live session id) meanwhile — follow the
+    // storedId across key rotation so history still lands, never fight busy state.
+    const targetId = sessionsById.get()[liveId] ? liveId : entryKeyFor(stored)
+    const cur = targetId ? sessionsById.get()[targetId] : undefined
+    if (!targetId || !cur || cur.storedId !== stored || cur.busy) {
+      if (force) ocHydrateAt.delete(stored)
+      return
+    }
     ocHydrated.add(stored)
-    // Re-read after the await: a turn may have started (or the chat re-keyed)
-    // meanwhile — never fight live state.
-    const cur = sessionsById.get()[liveId]
-    if (!cur || cur.storedId !== stored || cur.busy) return
     if (!rows.length) return
     const { messages: mapped, tools: mappedTools, attachmentNames } = ocRowsToMessages(rows)
     const displayMapped = appendOcAttachmentNames(mapped, attachmentNames)
     if (!cur.messages.length) {
       // Cold path: nothing local to protect.
-      patchSession(liveId, {
+      patchSession(targetId, {
         messages: [...cur.messages, ...displayMapped].slice(-MAX_MESSAGES),
         tools: [...cur.tools, ...mappedTools].slice(-MAX_TOOLS),
       })
-      schedulePersist(liveId)
+      schedulePersist(targetId)
       return
     }
     if (!force) return // messages appeared mid-fetch — cold path stays put
@@ -2521,11 +2694,11 @@ export async function hydrateOcHistory(liveId: string, opts?: { force?: boolean 
     const keptTools = cur.tools.filter((t) => !tailToolIds.has(t.id))
     const seen = new Set(keptTools.map((t) => t.id))
     const added = mappedTools.filter((t) => (seen.has(t.id) ? false : (seen.add(t.id), true)))
-    patchSession(liveId, {
+    patchSession(targetId, {
       messages: reconciled.slice(-MAX_MESSAGES),
       tools: [...keptTools, ...added].slice(-MAX_TOOLS),
     })
-    schedulePersist(liveId)
+    schedulePersist(targetId)
   } finally {
     ocHydrating.delete(liveId)
   }
@@ -2538,7 +2711,7 @@ export async function hydrateOcHistory(liveId: string, opts?: { force?: boolean 
  * server. Mirrors the drawer's recent-chat open: the screen is already on
  * the target when this resolves.
  */
-export async function openOcChat(ocId: string): Promise<void> {
+export async function openOcChat(ocId: string, title?: string): Promise<void> {
   // Reuse the local session already bound to `ocId` so returning to an active
   // or previously opened OpenCode conversation keeps its in-flight user
   // messages, busy stream state, and cached transcript intact.
@@ -2548,15 +2721,51 @@ export async function openOcChat(ocId: string): Promise<void> {
     const live = liveIdFor(existingStored)
     const hit = live ? sessionsById.get()[live] : undefined
     if (hit && !hit.detached) {
+      if (title && (!hit.title || hit.title === 'New chat')) patchSession(live!, { title })
       activeSession.set(live!)
       clearAttention(existingStored)
       void AsyncStorage.setItem(LAST_SESSION_KEY, existingStored)
       if (!hit.busy) void hydrateOcHistory(live!, { force: true }).catch(() => {})
       return
     }
-    const targetLive = await switchToSession(existingStored)
-    if (!sessionsById.get()[targetLive]?.busy) {
-      void hydrateOcHistory(targetLive, { force: !!(sessionsById.get()[targetLive]?.messages.length) }).catch(() => {})
+    // Cold or detached OpenCode chat: open its placeholder + cached transcript
+    // immediately and hydrate directly from OpenCode HTTP. Its Hermes spine
+    // may have been lazy (no state.db row), so a "session not found" from
+    // Hermes recovers the spine cleanly without ever falling back to newChat().
+    chatBanner.set(null)
+    void setActiveBot(null)
+    const key = hit ? live! : seedPlaceholder(existingStored, title)
+    if (hit && title && (!hit.title || hit.title === 'New chat')) patchSession(key, { title })
+    activeSession.set(key)
+    clearAttention(existingStored)
+    const hasLocal = !!(sessionsById.get()[key]?.messages.length)
+    setSessionLoading(existingStored, !hasLocal)
+    void AsyncStorage.setItem(LAST_SESSION_KEY, existingStored)
+    void loadCachedTranscript(existingStored)
+    const ocHydrate = sessionsById.get()[key]?.busy
+      ? Promise.resolve()
+      : hydrateOcHistory(key, { force: true }).catch(() => {})
+    try {
+      const r = await resumeShared(existingStored)
+      if (activeStoredId.get() === r.storedId) activeSession.set(r.sessionId)
+      void AsyncStorage.setItem(LAST_SESSION_KEY, r.storedId)
+      if (!sessionsById.get()[r.sessionId]?.busy) {
+        await hydrateOcHistory(r.sessionId, { force: !!(sessionsById.get()[r.sessionId]?.messages.length) }).catch(() => {})
+      }
+    } catch (err) {
+      if (isSessionNotFound(err)) {
+        try {
+          const recovered = await recoverOcSpine(existingStored, ocId, title)
+          if (!sessionsById.get()[recovered]?.busy) {
+            await hydrateOcHistory(recovered, { force: !!(sessionsById.get()[recovered]?.messages.length) }).catch(() => {})
+          }
+        } catch {
+          // Hermes offline: the OpenCode placeholder + HTTP history stay open.
+        }
+      }
+    } finally {
+      await ocHydrate
+      setSessionLoading(existingStored, false)
     }
     return
   }
@@ -2571,13 +2780,20 @@ export async function openOcChat(ocId: string): Promise<void> {
   } else {
     sid = await newChat()
   }
+  if (title) patchSession(sid, { title })
   if (sessionsById.get()[sid]?.provisional) sid = await ensureSession()
+  if (title) patchSession(sid, { title })
   const stored = sessionsById.get()[sid]?.storedId ?? ''
   if (!stored) return
   stampChatThinker(stored, 'opencode')
   await ocRememberSession(stored, ocId)
   ocHydrated.delete(stored)
-  await hydrateOcHistory(sid)
+  setSessionLoading(stored, true)
+  try {
+    await hydrateOcHistory(sid)
+  } finally {
+    setSessionLoading(stored, false)
+  }
 }
 
 export async function sendPrompt(
@@ -2659,7 +2875,7 @@ export async function sendPrompt(
         // The handle was released (idle evict) — bring it back quietly (this
         // may be a background flush; the shared core's re-point is guarded,
         // so it can't steal the screen), then send.
-        sid = (await resumeShared(ps.storedId)).sessionId
+        sid = await resumeOrRecoverOc(ps.storedId)
       } else {
         sid = await ensureSession()
       }
@@ -3324,7 +3540,7 @@ export function hookChatEvents() {
     const live = activeSession.get()
     const stored = live ? sessionsById.get()[live]?.storedId : undefined
     if (stored && !isPseudoStoredId(stored)) {
-      void resumeShared(stored).catch((e) => log('warn', 'chat', `reconnect resync failed: ${String(e)}`))
+      void resumeOrRecoverOc(stored).catch((e) => log('warn', 'chat', `reconnect resync failed: ${String(e)}`))
     }
   })
 
@@ -3816,7 +4032,7 @@ sessionRows.subscribe((rows) => {
   const pend = { ...pendingBySession.get() }
   for (const [liveId, s] of Object.entries(map)) {
     if (liveId === active || s.provisional || liveId.startsWith('pending:')) continue
-    if (present.has(s.storedId) || serverOnlyStoredIds.has(s.storedId)) continue
+    if (present.has(s.storedId) || serverOnlyStoredIds.has(s.storedId) || thinkerForChat(s.storedId) === 'opencode') continue
     delete next[liveId]
     changed = true
     if (pend[liveId]) {
