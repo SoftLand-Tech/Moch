@@ -141,7 +141,8 @@ export interface OcSession {
    * minted before BUG-149 (and rows from a server that omits it) stay flat.
    */
   directory?: string
-  time?: { created?: number; updated?: number }
+  outcome?: 'succeeded' | 'failed' | 'interrupted' | string
+  time?: { created?: number; updated?: number; idle?: number }
 }
 
 export interface OcModel {
@@ -188,6 +189,12 @@ export interface OcEvent {
 // ── calls ────────────────────────────────────────────────────────────────────
 
 export const ocListSessions = () => ocFetch<OcSession[]>('/api/session', { timeoutMs: 15_000 })
+
+export const ocGetSession = (id: string) =>
+  ocFetch<OcSession>(`/api/session/${encodeURIComponent(id)}`, { timeoutMs: 15_000 })
+
+export const ocActiveSessions = () =>
+  ocFetch<Record<string, { type?: string }>>('/api/session/active', { timeoutMs: 15_000 })
 
 /**
  * Create a session. `directory` (BUG-149) files the session under a project:
@@ -236,10 +243,21 @@ export const ocInterrupt = (id: string) =>
 
 export type OcPermissionReply = 'once' | 'always' | 'reject'
 
+export interface OcPermissionRequest {
+  id: string
+  sessionID: string
+  action: string
+  resources: string[]
+  message?: string
+}
+
+export const ocListPermissions = (id: string) =>
+  ocFetch<OcPermissionRequest[]>(`/api/session/${encodeURIComponent(id)}/permission`, { timeoutMs: 15_000 })
+
 export const ocPermissionReply = (id: string, requestID: string, reply: OcPermissionReply) =>
   ocFetch<unknown>(
     `/api/session/${encodeURIComponent(id)}/permission/${encodeURIComponent(requestID)}/reply`,
-    { method: 'POST', body: { reply }, timeoutMs: 15_000 },
+    { method: 'POST', body: { decision: reply }, timeoutMs: 15_000 },
   )
 
 /** Pending forms/questions for a session (opencode 2.3.0 Form.Service). */
@@ -341,6 +359,7 @@ export const ocConnectKey = (integrationID: string, key: string) =>
 export async function ocStream(
   handler: (e: OcEvent) => void,
   signal?: AbortSignal,
+  onHeartbeat?: () => void,
 ): Promise<void> {
   const auth = await authHeader()
   let res: Response
@@ -375,6 +394,10 @@ export async function ocStream(
       while ((nl = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, nl).replace(/\r$/, '')
         buf = buf.slice(nl + 1)
+        if (line.startsWith(':')) {
+          onHeartbeat?.()
+          continue
+        }
         if (!line.startsWith('data: ')) continue
         const payload = line.slice(6).trim()
         if (!payload) continue

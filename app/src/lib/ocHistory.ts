@@ -93,6 +93,33 @@ function extractOcUserText(m: OcHistoryMessageLike): string {
   return extractOcAttachmentNames(m).length ? '[attachment]' : ''
 }
 
+function normPromptText(text: string): string {
+  const lines = text.split('\n')
+  while (lines.length && /^\s*@file:/.test(lines[lines.length - 1])) lines.pop()
+  return lines.join('\n').trim().replace(/\s+/g, ' ')
+}
+
+/** Return only the assistant row owned by the supplied user prompt. A newest
+ *  assistant from an earlier turn must never be copied into an empty new turn. */
+export function findOcTurnAssistant(rows: OcHistoryRow[], prompt: string): OcHistoryRow | undefined {
+  const want = normPromptText(prompt)
+  let userIdx = -1
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i]
+    if (row.role !== 'user') continue
+    const got = row.text === '[attachment]' ? '' : normPromptText(row.text)
+    if (want === got) {
+      userIdx = i
+      break
+    }
+  }
+  if (userIdx < 0) return undefined
+  for (let i = rows.length - 1; i > userIdx; i--) {
+    if (rows[i].role === 'assistant') return rows[i]
+  }
+  return undefined
+}
+
 /** Map GET /api/session/:id/message (NEWEST FIRST) into chat rows, oldest
  *  first, with one assistant row per turn. */
 export function mapOcHistory(messages: OcHistoryMessageLike[]): OcHistoryRow[] {

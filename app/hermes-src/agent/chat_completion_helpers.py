@@ -596,9 +596,9 @@ def _check_stale_giveup(agent) -> None:
 
 
 def _configured_stale_base(agent) -> float:
-    """Per-provider ``stale_timeout_seconds`` config, else HERMES_STREAM_STALE_TIMEOUT (180s)."""
+    """Per-provider ``stale_timeout_seconds`` config, else HERMES_STREAM_STALE_TIMEOUT (300s)."""
     cfg = get_provider_stale_timeout(agent.provider, agent.model)
-    return cfg if cfg is not None else env_float("HERMES_STREAM_STALE_TIMEOUT", 180.0)
+    return cfg if cfg is not None else env_float("HERMES_STREAM_STALE_TIMEOUT", 300.0)
 
 
 def _local_stream_stale_timeout_default() -> float:
@@ -3606,7 +3606,11 @@ class _StreamingCall(StreamingWaitMonitor):
         crashed endpoint forever. Cloud values scale with context size and are
         floored for known reasoning models (else BrokenPipeError from the gateway)."""
         base = _configured_stale_base(self.agent)
-        if base == 180.0 and self.agent.base_url and is_local_endpoint(self.agent.base_url):
+        explicit_stale = (
+            get_provider_stale_timeout(self.agent.provider, self.agent.model) is not None
+            or os.getenv("HERMES_STREAM_STALE_TIMEOUT") is not None
+        )
+        if not explicit_stale and self.agent.base_url and is_local_endpoint(self.agent.base_url):
             self._stream_stale_timeout = _local_stream_stale_timeout_default()
             logger.debug("Local provider detected (%s) — stale stream timeout set to %.0fs",
                 self.agent.base_url, self._stream_stale_timeout)
