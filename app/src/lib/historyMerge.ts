@@ -123,13 +123,34 @@ function normUserText(text: string): string {
   return text.trim().replace(/\s+/g, ' ')
 }
 
+function stripTrailingFileRefs(text: string): string {
+  const lines = text.split('\n')
+  while (lines.length && /^\s*@file:/.test(lines[lines.length - 1])) lines.pop()
+  return lines.join('\n').trim()
+}
+
+function userTextMatches(a: string, b: string): boolean {
+  const an = normUserText(a)
+  const bn = normUserText(b)
+  if (!an || !bn) return false
+  if (an === bn) return true
+  // OpenCode receives the attachment refs appended by appendRefText, while
+  // the local bubble keeps the user's original caption. The prompt budget
+  // may also truncate that caption, so compare the ref-stripped server head
+  // as a prefix of the local text only when refs were actually present.
+  const as = normUserText(stripTrailingFileRefs(a))
+  const bs = normUserText(stripTrailingFileRefs(b))
+  if (as === an && bs === bn) return false
+  return as === bs || as.startsWith(bs) || bs.startsWith(as)
+}
+
 function findMatchingUserIndex(list: MergeMessage[], targetText: string, occurrenceFromEnd = 1): number {
   const want = normUserText(targetText)
   if (!want) return -1
   let seen = 0
   for (let i = list.length - 1; i >= 0; i--) {
     if (list[i].role !== 'user') continue
-    if (normUserText(list[i].text) === want) {
+    if (userTextMatches(list[i].text, targetText)) {
       seen++
       if (seen === occurrenceFromEnd) return i
     }
@@ -142,9 +163,23 @@ function countOccurrences(list: MergeMessage[], targetText: string): number {
   if (!want) return 0
   let n = 0
   for (const m of list) {
-    if (m.role === 'user' && normUserText(m.text) === want) n++
+    if (m.role === 'user' && userTextMatches(m.text, targetText)) n++
   }
   return n
+}
+
+/** Keep local user-row identity/media/status when the server has the same turn. */
+function preserveLocalUserRows(merged: MergeMessage[], prevMessages: MergeMessage[]): MergeMessage[] {
+  const used = new Set<number>()
+  return merged.map((row) => {
+    if (row.role !== 'user') return row
+    const idx = prevMessages.findIndex((m, i) =>
+      !used.has(i) && m.role === 'user' && userTextMatches(m.text, row.text),
+    )
+    if (idx < 0) return row
+    used.add(idx)
+    return { ...prevMessages[idx], ts: row.ts }
+  })
 }
 
 /**
@@ -231,7 +266,10 @@ export function reconcileHistoryMessages(
   }
 
   // 2. Preserve local unpersisted turns after the last user message that
-  //    server history already reflects.
+  //    server history already reflects. First reattach local user-row media
+  //    and identity to matching server turns so hydration does not replace
+  //    attachment tiles with text-only server rows.
+  merged = preserveLocalUserRows(merged, prevMessages)
   const serverLastUserIdx = (() => {
     for (let i = merged.length - 1; i >= 0; i--) {
       if (merged[i].role === 'user') return i
@@ -244,7 +282,10 @@ export function reconcileHistoryMessages(
     // following messages if the local transcript already started a conversation.
     const firstLocalUserIdx = prevMessages.findIndex((m) => m.role === 'user')
     if (firstLocalUserIdx >= 0) {
-      return [...merged, ...prevMessages.slice(firstLocalUserIdx)]
+      // A server page with no user boundary cannot be safely aligned with a
+      // local conversation. Keep the local transcript rather than appending
+      // the whole cache after a leading assistant and duplicating turns.
+      return [...prevMessages]
     }
   } else {
     const serverLastUserText = merged[serverLastUserIdx].text

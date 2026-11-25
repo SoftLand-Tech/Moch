@@ -80,7 +80,7 @@ async function base(): Promise<string> {
 
 export async function ocFetch<T = unknown>(
   path: string,
-  opts?: { method?: string; body?: unknown; timeoutMs?: number },
+  opts?: { method?: string; body?: unknown; timeoutMs?: number; unwrap?: boolean },
 ): Promise<T> {
   const auth = await authHeader()
   const ctrl = new AbortController()
@@ -121,7 +121,7 @@ export async function ocFetch<T = unknown>(
     throw new OcError(res.status, msg)
   }
   // Envelopes: {data: …} on most routes; raw arrays/objects elsewhere.
-  if (data && typeof data === 'object' && 'data' in (data as Record<string, unknown>)) {
+  if (opts?.unwrap !== false && data && typeof data === 'object' && 'data' in (data as Record<string, unknown>)) {
     return (data as Record<string, unknown>).data as T
   }
   return data as T
@@ -163,6 +163,7 @@ export interface OcIntegration {
 }
 
 export interface OcHistoryMessage {
+  id?: string
   type: 'user' | 'assistant' | 'idle' | string
   time?: { created?: number | string }
   text?: string
@@ -199,8 +200,34 @@ export const ocCreateSession = (title: string, directory?: string) =>
     { method: 'POST', body: { title } },
   )
 
-export const ocHistory = (id: string, limit = 200) =>
-  ocFetch<OcHistoryMessage[]>(`/api/session/${encodeURIComponent(id)}/message?limit=${limit}`, { timeoutMs: 30_000 })
+export const ocHistory = async (id: string, limit = 200): Promise<OcHistoryMessage[]> => {
+  const pageSize = Math.max(1, Math.min(200, Math.floor(limit)))
+  const messages: OcHistoryMessage[] = []
+  const seenCursors = new Set<string>()
+  const seenIds = new Set<string>()
+  let cursor: string | undefined
+  do {
+    const query = [`limit=${pageSize}`, 'order=desc']
+    if (cursor) query.push(`cursor=${encodeURIComponent(cursor)}`)
+    const page = await ocFetch<{
+      data?: OcHistoryMessage[]
+      cursor?: { previous?: string; next?: string }
+    }>(`/api/session/${encodeURIComponent(id)}/message?${query.join('&')}`, {
+      timeoutMs: 30_000,
+      unwrap: false,
+    })
+    const rows = Array.isArray(page?.data) ? page.data : []
+    for (const row of rows) {
+      if (row.id && seenIds.has(row.id)) continue
+      if (row.id) seenIds.add(row.id)
+      messages.push(row)
+    }
+    cursor = page?.cursor?.previous
+    if (cursor && seenCursors.has(cursor)) throw new Error('OpenCode history pagination repeated a cursor')
+    if (cursor) seenCursors.add(cursor)
+  } while (cursor)
+  return messages
+}
 
 export const ocPrompt = (id: string, text: string) =>
   ocFetch<unknown>(`/api/session/${encodeURIComponent(id)}/prompt`, { method: 'POST', body: { text }, timeoutMs: 60_000 })

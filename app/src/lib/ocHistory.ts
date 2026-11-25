@@ -18,6 +18,8 @@ export interface OcHistoryRow {
   role: 'user' | 'assistant'
   text: string
   ts: number
+  /** Server-side attachment names for user rows; local tiles are merged separately. */
+  attachmentNames?: string[]
   /** Tool rows the UI may render (name + one-line status). */
   tools?: Array<{ id: string; name: string; ok: boolean }>
   thinking?: string
@@ -58,17 +60,18 @@ function parseOcTs(created: number | string | undefined, fallback: number): numb
   return fallback
 }
 
+function extractOcAttachmentNames(m: OcHistoryMessageLike): string[] {
+  if (!Array.isArray(m.files)) return []
+  return m.files
+    .map((f) => (typeof f?.filename === 'string' ? f.filename.trim() : ''))
+    .filter(Boolean)
+}
+
 function extractOcUserText(m: OcHistoryMessageLike): string {
   const raw = typeof m.text === 'string' ? m.text : typeof m.payload?.text === 'string' ? m.payload.text : ''
   const trimmed = raw.trim()
   if (trimmed) return trimmed
-  if (Array.isArray(m.files) && m.files.length) {
-    const names = m.files
-      .map((f) => (typeof f?.filename === 'string' ? f.filename.trim() : ''))
-      .filter(Boolean)
-    return names.length ? names.join(', ') : '[attachment]'
-  }
-  return ''
+  return extractOcAttachmentNames(m).length ? '[attachment]' : ''
 }
 
 /** Map GET /api/session/:id/message (NEWEST FIRST) into chat rows, oldest
@@ -117,7 +120,15 @@ export function mapOcHistory(messages: OcHistoryMessageLike[]): OcHistoryRow[] {
       // even when its text is empty (it still separates persisted turns).
       flush()
       const text = extractOcUserText(m)
-      if (text) rows.push({ role: 'user', text, ts: createdTs })
+      if (text) {
+        const attachmentNames = extractOcAttachmentNames(m)
+        rows.push({
+          role: 'user',
+          text,
+          ts: createdTs,
+          ...(attachmentNames.length ? { attachmentNames } : {}),
+        })
+      }
       continue
     }
     if (m.type !== 'assistant') continue

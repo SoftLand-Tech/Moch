@@ -197,9 +197,19 @@ function main() {
   ]
   const r8 = mapOcHistory(attachOnly)
   check(
-    'attachment-only user message keeps filename placeholder and blocks turn merge',
-    r8.length === 2 && r8[0].role === 'user' && r8[0].text === 'shot.png',
+    'attachment-only user message keeps a placeholder plus filename metadata and blocks turn merge',
+    r8.length === 2 && r8[0].role === 'user' && r8[0].text === '[attachment]' &&
+      r8[0].attachmentNames?.[0] === 'shot.png',
     JSON.stringify(r8),
+  )
+
+  const captioned = mapOcHistory([
+    { type: 'user', time: { created: 100 }, text: 'What is this?', files: [{ filename: 'shot.png', mime: 'image/png' }] },
+  ])
+  check(
+    'captioned attachment keeps its caption and filename metadata',
+    captioned.length === 1 && captioned[0].text === 'What is this?' && captioned[0].attachmentNames?.[0] === 'shot.png',
+    JSON.stringify(captioned),
   )
 
   // ── Broken assistant-only cache heals cleanly when reconciled ────────────

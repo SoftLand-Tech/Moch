@@ -145,6 +145,46 @@ function main() {
     JSON.stringify(rec5.map((m) => [m.role, m.text])),
   )
 
+  // ── 8. Hydration keeps local user media and caption ───────────────────────
+  const localAttached = msg('user', 'What is this?', {
+    segments: [
+      { kind: 'text', text: 'What is this?' },
+      { kind: 'media', text: '', mediaType: 'image', path: '/cache/shot.png', name: 'shot.png' },
+    ],
+  })
+  const recAttached = reconcileHistoryMessages(
+    [msg('user', 'What is this?'), msg('assistant', 'A screenshot.')],
+    [localAttached],
+    { makeId },
+  )
+  check(
+    'matched server user row keeps local attachment segments and id',
+    recAttached.length === 2 && recAttached[0].id === localAttached.id &&
+      !!recAttached[0].segments?.some((s) => s.kind === 'media') &&
+      recAttached[0].text === 'What is this?',
+  )
+
+  // ── 9. OpenCode prompt refs do not create a duplicate turn ─────────────────
+  const recRefs = reconcileHistoryMessages(
+    [msg('user', 'Inspect this\n@file:/relay/shot.png'), msg('assistant', 'done')],
+    [msg('user', 'Inspect this'), msg('assistant', 'one')],
+    { makeId },
+  )
+  check(
+    'appended @file refs match the local caption without duplicating the assistant turn',
+    recRefs.length === 2 && recRefs[0].role === 'user' && recRefs[0].text === 'Inspect this' &&
+      recRefs[1].role === 'assistant' && recRefs[1].text === 'done',
+    JSON.stringify(recRefs.map((m) => [m.role, m.text])),
+  )
+
+  // ── 10. A userless server page cannot be aligned safely ───────────────────
+  const localHistory = [msg('user', 'old prompt'), msg('assistant', 'old answer')]
+  const recNoUser = reconcileHistoryMessages([msg('assistant', 'new answer')], localHistory, { makeId })
+  check(
+    'userless server page preserves local history instead of duplicating it',
+    recNoUser.length === localHistory.length && recNoUser[0].text === 'old prompt' && recNoUser[1].text === 'old answer',
+  )
+
   console.log(`\n${pass}/${pass + fail} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)
 }

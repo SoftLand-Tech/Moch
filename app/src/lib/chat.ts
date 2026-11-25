@@ -2332,12 +2332,19 @@ async function runOcOneShot(sid: string, text: string): Promise<void> {
 const ocHydrated = new Set<string>()
 
 /** Map OpenCode history rows into this app's ChatMessage/ToolItem shapes. */
-function ocRowsToMessages(rows: OcHistoryRow[]): { messages: ChatMessage[]; tools: ToolItem[] } {
+function ocRowsToMessages(rows: OcHistoryRow[]): {
+  messages: ChatMessage[]
+  tools: ToolItem[]
+  attachmentNames: Map<string, string[]>
+} {
   const msgs: ChatMessage[] = []
   const tools: ToolItem[] = []
+  const attachmentNames = new Map<string, string[]>()
   for (const r of rows) {
     if (r.role === 'user') {
-      msgs.push({ id: nid(), role: 'user', text: r.text.slice(0, HISTORY_TEXT_MAX), ts: r.ts })
+      const id = nid()
+      msgs.push({ id, role: 'user', text: r.text.slice(0, HISTORY_TEXT_MAX), ts: r.ts })
+      if (r.attachmentNames?.length) attachmentNames.set(id, r.attachmentNames)
       continue
     }
     // Grouped rows carry the turn's blocks in stream order (thinking/text
@@ -2367,7 +2374,25 @@ function ocRowsToMessages(rows: OcHistoryRow[]): { messages: ChatMessage[]; tool
       tools.push({ id: `${r.ts}_${t.id}`, name: t.name, status: t.ok ? 'done' : 'failed' })
     }
   }
-  return { messages: msgs, tools }
+  return { messages: msgs, tools, attachmentNames }
+}
+
+/** Cold/server-only history has filenames but no local tile paths; keep the
+ *  names visible in the user bubble. Locally reconciled rows keep their real
+ *  media segments and never take this fallback. */
+function appendOcAttachmentNames(
+  messages: ChatMessage[],
+  attachmentNames: Map<string, string[]>,
+): ChatMessage[] {
+  return messages.map((m) => {
+    const names = attachmentNames.get(m.id)
+    if (!names?.length || m.segments?.some((s) => s.kind === 'media')) return m
+    const text = [m.text === '[attachment]' ? '' : m.text, ...names]
+      .filter(Boolean)
+      .join('\n')
+      .slice(0, HISTORY_TEXT_MAX)
+    return { ...m, text, ...(text ? { segments: [{ kind: 'text' as const, text }] } : {}) }
+  })
 }
 
 /** Last index matching `pred`, or -1 (findLastIndex is ES2023; the app's
@@ -2421,11 +2446,12 @@ export async function hydrateOcHistory(liveId: string, opts?: { force?: boolean 
     const cur = sessionsById.get()[liveId]
     if (!cur || cur.storedId !== stored || cur.busy) return
     if (!rows.length) return
-    const { messages: mapped, tools: mappedTools } = ocRowsToMessages(rows)
+    const { messages: mapped, tools: mappedTools, attachmentNames } = ocRowsToMessages(rows)
+    const displayMapped = appendOcAttachmentNames(mapped, attachmentNames)
     if (!cur.messages.length) {
       // Cold path: nothing local to protect.
       patchSession(liveId, {
-        messages: [...cur.messages, ...mapped].slice(-MAX_MESSAGES),
+        messages: [...cur.messages, ...displayMapped].slice(-MAX_MESSAGES),
         tools: [...cur.tools, ...mappedTools].slice(-MAX_TOOLS),
       })
       schedulePersist(liveId)
@@ -2455,7 +2481,10 @@ export async function hydrateOcHistory(liveId: string, opts?: { force?: boolean 
       }
     }
 
-    const reconciled = reconcileHistoryMessages(mapped, cur.messages, { makeId: nid }) as ChatMessage[]
+    const reconciled = appendOcAttachmentNames(
+      reconcileHistoryMessages(mapped, cur.messages, { makeId: nid }) as ChatMessage[],
+      attachmentNames,
+    )
     const mappedUserIdx = lastIndexWhere(mapped, (m) => m.role === 'user' && m.text.trim().length > 0)
     const tailToolIds = new Set<string>()
     for (const row of mappedUserIdx >= 0 ? rows.slice(mappedUserIdx + 1) : rows) {
