@@ -246,7 +246,7 @@ function main() {
     ],
   })
   const recLongAttached = reconcileHistoryMessages(
-    [msg('user', `${'x'.repeat(7_979)}\n@file:/relay/shot.png`, { ts: 5_000 }), msg('assistant', 'seen')],
+    [msg('user', `${'x'.repeat(7_979)}\n@file:/relay/shot.png`, { ts: 15_000 }), msg('assistant', 'seen')],
     [longAttached],
     { makeId },
   )
@@ -266,6 +266,26 @@ function main() {
     'completed local assistant is kept until server history persists its answer',
     recCompletedTail.length === 2 && recCompletedTail[1].role === 'assistant' &&
       recCompletedTail[1].text === 'finished answer' && !recCompletedTail[1].streaming,
+  )
+
+  const recOldCompleted = reconcileHistoryMessages(
+    [msg('user', 'ok', { ts: 10_000 })],
+    [msg('user', 'ok', { ts: 1_000 }), msg('assistant', 'old completed answer', { ts: 2_000 })],
+    { makeId },
+  )
+  check(
+    'completed answer from an older identical prompt is not attached to a newer turn',
+    recOldCompleted.length === 1 && recOldCompleted[0].role === 'user',
+  )
+
+  const recLongerCompleted = reconcileHistoryMessages(
+    [msg('user', 'latest', { ts: 1_000 }), msg('assistant', 'partial', { ts: 1_500 })],
+    [msg('user', 'latest', { ts: 1_000 }), msg('assistant', 'complete answer', { ts: 2_000, status: 'ok' })],
+    { makeId },
+  )
+  check(
+    'longer completed local answer replaces a partial server answer for the same turn',
+    recLongerCompleted.length === 2 && recLongerCompleted[1].text === 'complete answer',
   )
 
   console.log(`\n${pass}/${pass + fail} passed, ${fail} failed`)

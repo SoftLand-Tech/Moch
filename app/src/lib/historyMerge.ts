@@ -148,26 +148,30 @@ function userTextMatches(a: string, b: string): boolean {
   )
 }
 
+const TURN_MATCH_WINDOW_MS = 120_000
+const ATTACHMENT_MATCH_WINDOW_MS = 600_000
+
 function userRowsMatch(local: MergeMessage, server: MergeMessage): boolean {
-  if (userTextMatches(local.text, server.text)) return true
+  const age = Math.abs(local.ts - server.ts)
+  if (userTextMatches(local.text, server.text) && age <= TURN_MATCH_WINDOW_MS) return true
   // Attachment-only local rows have no caption. They may correspond to a
   // refs-only or placeholder server row; order/turn matching disambiguates
   // multiple such turns.
   const localEmpty = !normUserText(local.text)
   const serverEmpty = !userMatchKey(server.text)
-  if (localEmpty && serverEmpty && (
+  if (localEmpty && serverEmpty && age <= ATTACHMENT_MATCH_WINDOW_MS && (
     !!local.segments?.some((s) => s.kind === 'media') ||
     hasTrailingFileRefs(server.text) || server.text.trim() === '[attachment]'
   )) return true
-  // appendRefText budgets the caption to make room for refs. Only a local
-  // attachment row from the same moment may use that legitimate truncation;
-  // ordinary shared prefixes remain non-matches.
+  // appendRefText budgets the caption to make room for refs. The local row is
+  // stamped before upload and the server row after it, so attachment turns get
+  // a wider window; ordinary shared prefixes remain non-matches.
   const localKey = normUserText(local.text)
   const serverKey = userMatchKey(server.text)
   return !!local.segments?.some((s) => s.kind === 'media') &&
     hasTrailingFileRefs(server.text) &&
     !!serverKey && localKey.startsWith(serverKey) &&
-    Math.abs(local.ts - server.ts) <= 5_000
+    age <= ATTACHMENT_MATCH_WINDOW_MS
 }
 
 function findMatchingUserIndex(list: MergeMessage[], targetText: string, occurrenceFromEnd = 1): number {
@@ -371,7 +375,11 @@ export function reconcileHistoryMessages(
         const tail = localAfter[localAnswerIdx]
         const last = merged[merged.length - 1]
         const serverHasAnswerForLastTurn = merged.length - 1 > serverLastUserIdx && last?.role === 'assistant'
-        if (!serverHasAnswerForLastTurn) {
+        const sameTurn = tail.ts + 1_000 >= merged[serverLastUserIdx].ts
+        if (!sameTurn) {
+          // A completed/streaming answer from an older identical prompt must
+          // never be attached to a newer server-side occurrence.
+        } else if (!serverHasAnswerForLastTurn) {
           merged.push(tail)
         } else if (tail.streaming) {
           const cont =
@@ -390,6 +398,8 @@ export function reconcileHistoryMessages(
               streaming: true,
             }
           }
+        } else if (tail.text.length > last.text.length) {
+          merged[merged.length - 1] = tail
         }
       }
 
