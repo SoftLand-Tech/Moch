@@ -277,8 +277,13 @@ export function reconcileHistoryMessages(
       }
       return -1
     })()
-    const lastServerUserText = lastServerUserIdx >= 0 ? normUserText(merged[lastServerUserIdx].text) : ''
-    const hasInfUser = !!(infUser && lastServerUserText === normUserText(infUser))
+    const lastServerUser = lastServerUserIdx >= 0 ? merged[lastServerUserIdx] : undefined
+    const lastServerUserText = lastServerUser ? normUserText(lastServerUser.text) : ''
+    const serverTail = lastServerUserIdx >= 0 ? merged.slice(lastServerUserIdx + 1) : []
+    const serverTurnPending = !!lastServerUser &&
+      lastServerUser.ts >= now - 45 * 60 * 1000 &&
+      !serverTail.some((m) => m.role === 'assistant' && !m.cmd && !m.streaming)
+    const hasInfUser = !!(infUser && serverTurnPending && lastServerUserText === normUserText(infUser))
     if (infUser && !hasInfUser) {
       const localUserIdx = findMatchingUserIndex(prevMessages, infUser)
       const localUser = localUserIdx >= 0 ? prevMessages[localUserIdx] : undefined

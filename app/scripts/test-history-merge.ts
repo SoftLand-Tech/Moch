@@ -333,6 +333,17 @@ function main() {
       recRepeatedInflight[3].text === 'new snapshot',
   )
 
+  const recRepeatedServerInflight = reconcileHistoryMessages(
+    [msg('user', 'same', { ts: 100 }), msg('assistant', 'old completed answer', { ts: 200 })],
+    [],
+    { inflight: { user: 'same', assistant: 'new snapshot', streaming: true }, now: 10_000, makeId },
+  )
+  check(
+    'repeated inflight prompt adds a new boundary instead of mutating the previous server turn',
+    recRepeatedServerInflight.length === 4 && recRepeatedServerInflight[2].role === 'user' &&
+      recRepeatedServerInflight[3].text === 'new snapshot',
+  )
+
   console.log(`\n${pass}/${pass + fail} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)
 }
