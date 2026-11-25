@@ -77,6 +77,66 @@ async function main() {
       !d.redactedUrl({ ...target, token: '' } as typeof target & { token: string }).includes('sekret'),
   )
 
+  // ── foreground recovery decision (boot backgrounded / half-open) ────────
+  check(
+    'foreground resumes local boot when connectThisPhone timed out while backgrounded',
+    d.decideForegroundAction({
+      manualClose: false,
+      wantConnection: false,
+      wantLocalBoot: true,
+      connectionState: 'idle',
+      bootConnectInFlight: false,
+    }) === 'resume-boot',
+  )
+  check(
+    'foreground does not spawn duplicate boot connect while one is already in flight',
+    d.decideForegroundAction({
+      manualClose: false,
+      wantConnection: false,
+      wantLocalBoot: true,
+      connectionState: 'idle',
+      bootConnectInFlight: true,
+    }) === 'none',
+  )
+  check(
+    'foreground retries dial if stalled inside embedded wait loop during dial()',
+    d.decideForegroundAction({
+      manualClose: false,
+      wantConnection: true,
+      wantLocalBoot: true,
+      connectionState: 'connecting',
+      bootConnectInFlight: false,
+      dialWaitInFlight: true,
+    }) === 'retry-dial',
+  )
+  check(
+    'foreground respects manualClose even when wantLocalBoot was set earlier',
+    d.decideForegroundAction({
+      manualClose: true,
+      wantConnection: false,
+      wantLocalBoot: true,
+      connectionState: 'idle',
+      bootConnectInFlight: false,
+    }) === 'none',
+  )
+  check(
+    'foreground probes open socket and retries closed/error sockets',
+    d.decideForegroundAction({
+      manualClose: false,
+      wantConnection: true,
+      wantLocalBoot: false,
+      connectionState: 'open',
+      bootConnectInFlight: false,
+    }) === 'probe-open' &&
+      d.decideForegroundAction({
+        manualClose: false,
+        wantConnection: true,
+        wantLocalBoot: false,
+        connectionState: 'closed',
+        bootConnectInFlight: false,
+      }) === 'retry-dial',
+  )
+
   console.log(`\n${pass} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)
 }

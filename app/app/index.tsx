@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react'
-import { View, StyleSheet } from 'react-native'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { View, StyleSheet, AppState } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import * as Clipboard from 'expo-clipboard'
@@ -7,9 +7,8 @@ import { MochiMark } from '../src/components/MochiMark'
 import { Card, GhostBtn, PrimaryBtn, Txt } from '../src/components/ui'
 import { C, useStyles } from '../src/lib/theme'
 import { useDir, useT } from '../src/lib/strings'
-import { connectThisPhone, connect, loadSavedConfig, type ConnConfig } from '../src/lib/gateway'
+import { connectThisPhone, loadSavedConfig, type ConnConfig } from '../src/lib/gateway'
 import { logText } from '../src/lib/log'
-import { getEmbeddedGateway } from '../src/lib/mochiRuntime'
 import { loadOnboarded, onboardedAtom } from '../src/lib/aboutMe'
 
 /**
@@ -43,25 +42,7 @@ export default function Onboarding() {
     return () => { mounted.current = false }
   }, [])
 
-  // Returning users never wait on this screen: the chat renders from local
-  // caches while the embedded runtime boots behind it (the native side
-  // starts CPython at process creation). The ONLY thing this path waits for
-  // is the persisted onboarded flag — not the agent. connectThisPhone is
-  // idempotent and the root layout's boot IIFE also dials, so a
-  // fire-and-forget here is just the fastest first attempt. First-run users
-  // keep the waiting surface — their next step is the environment wizard,
-  // which needs the runtime anyway.
-  useEffect(() => {
-    let alive = true
-    void loadOnboarded().then(() => {
-      if (!alive || !onboardedAtom.get()) return
-      router.replace('/(tabs)/chat')
-      void connectThisPhone().catch(() => {})
-    })
-    return () => { alive = false }
-  }, [])
-
-  const openAgent = async () => {
+  const openAgent = useCallback(async () => {
     setPhase('starting')
     setDetail('')
     try {
@@ -75,27 +56,41 @@ export default function Onboarding() {
       setDetail(e instanceof Error ? e.message : String(e))
       setPhase('error')
     }
-  }
+  }, [])
 
-  useEffect(() => { void openAgent() }, [])
-
-  const retry = async () => {
-    setPhase('starting')
-    setDetail('')
-    const gw = await getEmbeddedGateway().catch(() => null)
-    if (gw?.running && gw.ready && gw.port && gw.token) {
-      try {
-        await connect({ host: `127.0.0.1:${gw.port}`, token: gw.token, tls: false, name: 'This phone' })
-        if (mounted.current) {
-          if (onboardedAtom.get()) router.replace('/(tabs)/chat')
-          else router.replace('/onboarding/environment')
-        }
-        return
-      } catch (e) {
-        setDetail(e instanceof Error ? e.message : String(e))
+  // Returning users never wait on this screen: the chat renders from local
+  // caches while the embedded runtime boots behind it (the native side
+  // starts CPython at process creation). The ONLY thing this path waits for
+  // is the persisted onboarded flag — not the agent. First-run users keep
+  // the waiting surface — their next step is the environment wizard, which
+  // needs the runtime anyway.
+  useEffect(() => {
+    let alive = true
+    void loadOnboarded().then(() => {
+      if (!alive) return
+      if (onboardedAtom.get()) {
+        router.replace('/(tabs)/chat')
+        void connectThisPhone().catch(() => {})
+      } else {
+        void openAgent()
       }
-    }
-    setPhase('error')
+    })
+    return () => { alive = false }
+  }, [openAgent])
+
+  // If the first-run boot timed out while backgrounded, re-probe immediately
+  // when the user returns to the app.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'active' && phase === 'error') {
+        void openAgent()
+      }
+    })
+    return () => sub.remove()
+  }, [phase, openAgent])
+
+  const retry = () => {
+    void openAgent()
   }
 
   const legacyName = legacy ? legacy.name || legacy.host : ''
