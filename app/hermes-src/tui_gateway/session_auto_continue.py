@@ -353,6 +353,8 @@ def _inflight_snapshot(session: dict) -> dict | None:
     if not (user or assistant or streaming or error):
         return None
     snapshot = {"assistant": assistant, "streaming": streaming, "user": user}
+    if isinstance(started_at := turn.get("started_at"), (int, float)) and started_at > 0:
+        snapshot["started_at"] = float(started_at)
     if isinstance(display_kind := turn.get("display_kind"), str) and display_kind:
         snapshot["display_kind"] = display_kind
     if isinstance(display_metadata := turn.get("display_metadata"), dict):

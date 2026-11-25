@@ -325,7 +325,7 @@ function main() {
   const recRepeatedInflight = reconcileHistoryMessages(
     [msg('user', 'unrelated', { ts: 50 }), msg('assistant', 'prior', { ts: 75 })],
     [msg('user', 'same', { ts: 100 }), msg('assistant', 'old completed answer', { ts: 200 })],
-    { inflight: { user: 'same', assistant: 'new snapshot', streaming: true }, now: 10_000, makeId },
+    { inflight: { user: 'same', assistant: 'new snapshot', streaming: true, started_at: 10 }, now: 10_000, makeId },
   )
   check(
     'repeated inflight prompt does not inherit an older completed local turn',
@@ -336,7 +336,7 @@ function main() {
   const recRepeatedServerInflight = reconcileHistoryMessages(
     [msg('user', 'same', { ts: 100 }), msg('assistant', 'old completed answer', { ts: 200 })],
     [],
-    { inflight: { user: 'same', assistant: 'new snapshot', streaming: true }, now: 10_000, makeId },
+    { inflight: { user: 'same', assistant: 'new snapshot', streaming: true, started_at: 10 }, now: 10_000, makeId },
   )
   check(
     'repeated inflight prompt adds a new boundary instead of mutating the previous server turn',
@@ -347,12 +347,23 @@ function main() {
   const recLongPending = reconcileHistoryMessages(
     [msg('user', 'long pending turn', { ts: 1_000 })],
     [],
-    { inflight: { user: 'long pending turn', assistant: 'still working', streaming: true }, now: 2_760_000, makeId },
+    { inflight: { user: 'long pending turn', assistant: 'still working', streaming: true, started_at: 1 }, now: 2_760_000, makeId },
   )
   check(
     'pending server turn older than 45 minutes reuses its user boundary',
     recLongPending.length === 2 && recLongPending[0].role === 'user' &&
       recLongPending[1].text === 'still working',
+  )
+
+  const recFailedUserOnly = reconcileHistoryMessages(
+    [msg('user', 'same', { ts: 100 })],
+    [],
+    { inflight: { user: 'same', assistant: 'new snapshot', streaming: true, started_at: 10 }, now: 10_000, makeId },
+  )
+  check(
+    'failed user-only server turn does not adopt a later repeated inflight prompt',
+    recFailedUserOnly.length === 3 && recFailedUserOnly.filter((m) => m.role === 'user').length === 2 &&
+      recFailedUserOnly[2].text === 'new snapshot',
   )
 
   console.log(`\n${pass}/${pass + fail} passed, ${fail} failed`)

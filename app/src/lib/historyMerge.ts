@@ -52,6 +52,8 @@ export interface ServerInflightTurn {
   user?: string
   assistant?: string
   streaming?: boolean
+  /** Gateway turn start time, seconds (or milliseconds for defensive clients). */
+  started_at?: number
   corrections?: string[]
   error?: string
   status?: string
@@ -121,6 +123,11 @@ export function groupConsecutiveAssistantMessages(rows: MergeMessage[]): MergeMe
 
 function normUserText(text: string): string {
   return text.trim().replace(/\s+/g, ' ')
+}
+
+function inflightStartedMs(value: number | undefined): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined
+  return value < 1_000_000_000_000 ? value * 1000 : value
 }
 
 function stripTrailingFileRefs(text: string): string {
@@ -280,7 +287,9 @@ export function reconcileHistoryMessages(
     const lastServerUser = lastServerUserIdx >= 0 ? merged[lastServerUserIdx] : undefined
     const lastServerUserText = lastServerUser ? normUserText(lastServerUser.text) : ''
     const serverTail = lastServerUserIdx >= 0 ? merged.slice(lastServerUserIdx + 1) : []
+    const infStartedMs = inflightStartedMs(inf.started_at)
     const serverTurnPending = !!lastServerUser &&
+      (infStartedMs === undefined || Math.abs(lastServerUser.ts - infStartedMs) <= 1_000) &&
       !serverTail.some((m) => m.role === 'assistant' && !m.cmd && !m.streaming)
     const hasInfUser = !!(infUser && serverTurnPending && lastServerUserText === normUserText(infUser))
     if (infUser && !hasInfUser) {
