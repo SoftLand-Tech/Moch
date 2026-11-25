@@ -281,7 +281,6 @@ export function reconcileHistoryMessages(
     const lastServerUserText = lastServerUser ? normUserText(lastServerUser.text) : ''
     const serverTail = lastServerUserIdx >= 0 ? merged.slice(lastServerUserIdx + 1) : []
     const serverTurnPending = !!lastServerUser &&
-      lastServerUser.ts >= now - 45 * 60 * 1000 &&
       !serverTail.some((m) => m.role === 'assistant' && !m.cmd && !m.streaming)
     const hasInfUser = !!(infUser && serverTurnPending && lastServerUserText === normUserText(infUser))
     if (infUser && !hasInfUser) {

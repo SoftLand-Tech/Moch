@@ -344,6 +344,17 @@ function main() {
       recRepeatedServerInflight[3].text === 'new snapshot',
   )
 
+  const recLongPending = reconcileHistoryMessages(
+    [msg('user', 'long pending turn', { ts: 1_000 })],
+    [],
+    { inflight: { user: 'long pending turn', assistant: 'still working', streaming: true }, now: 2_760_000, makeId },
+  )
+  check(
+    'pending server turn older than 45 minutes reuses its user boundary',
+    recLongPending.length === 2 && recLongPending[0].role === 'user' &&
+      recLongPending[1].text === 'still working',
+  )
+
   console.log(`\n${pass}/${pass + fail} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)
 }
