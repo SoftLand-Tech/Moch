@@ -280,12 +280,16 @@ export function reconcileHistoryMessages(
     const lastServerUserText = lastServerUserIdx >= 0 ? normUserText(merged[lastServerUserIdx].text) : ''
     const hasInfUser = !!(infUser && lastServerUserText === normUserText(infUser))
     if (infUser && !hasInfUser) {
-      merged.push({
-        id: opts.makeId(),
-        role: 'user',
-        text: infUser.slice(0, HISTORY_TEXT_MAX),
-        ts: now,
-      })
+      const localUserIdx = findMatchingUserIndex(prevMessages, infUser)
+      const localUser = localUserIdx >= 0 ? prevMessages[localUserIdx] : undefined
+      merged.push(localUser
+        ? { ...localUser }
+        : {
+            id: opts.makeId(),
+            role: 'user',
+            text: infUser.slice(0, HISTORY_TEXT_MAX),
+            ts: now,
+          })
     }
     for (const corr of inf.corrections ?? []) {
       const c = typeof corr === 'string' ? corr.trim() : ''

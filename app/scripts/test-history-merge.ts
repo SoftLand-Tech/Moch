@@ -306,6 +306,22 @@ function main() {
     recLongerCompleted.length === 2 && recLongerCompleted[1].text === 'complete answer',
   )
 
+  const recInflightTail = reconcileHistoryMessages(
+    [msg('user', 'prior', { ts: 50 }), msg('assistant', 'done', { ts: 75 })],
+    [
+      msg('user', 'prior', { ts: 50 }), msg('assistant', 'done', { ts: 75 }),
+      msg('user', 'current', { ts: 100, segments: [{ kind: 'text', text: 'current' }, { kind: 'media', text: '', mediaType: 'image', path: '/cache/a.png', name: 'a.png' }] }),
+      msg('assistant', 'longer local streaming answer', { ts: 200, streaming: true }),
+    ],
+    { inflight: { user: 'current', assistant: 'short snapshot', streaming: true }, now: 1_000, makeId },
+  )
+  check(
+    'inflight snapshot keeps the matching local user media and longer streaming tail',
+    recInflightTail.length === 4 && recInflightTail[2].text === 'current' &&
+      !!recInflightTail[2].segments?.some((s) => s.kind === 'media') &&
+      recInflightTail[3].text === 'longer local streaming answer' && !!recInflightTail[3].streaming,
+  )
+
   console.log(`\n${pass}/${pass + fail} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)
 }
