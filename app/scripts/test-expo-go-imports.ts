@@ -250,6 +250,7 @@ const routes = [
   'app/onboarding/about.tsx',
   'app/(tabs)/_layout.tsx',
   'app/(tabs)/chat.tsx',
+  'app/(tabs)/crew.tsx',
   'app/(tabs)/sessions.tsx',
   'app/(tabs)/agent.tsx',
   'app/(tabs)/settings.tsx',
