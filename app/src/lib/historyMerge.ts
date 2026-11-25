@@ -282,7 +282,17 @@ export function reconcileHistoryMessages(
     if (infUser && !hasInfUser) {
       const localUserIdx = findMatchingUserIndex(prevMessages, infUser)
       const localUser = localUserIdx >= 0 ? prevMessages[localUserIdx] : undefined
-      merged.push(localUser
+      const localPending = (() => {
+        if (!localUser || localUserIdx < 0) return false
+        if (localUser.status === 'unconfirmed') return true
+        for (let i = localUserIdx + 1; i < prevMessages.length; i++) {
+          const m = prevMessages[i]
+          if (m.role === 'user') break
+          if (m.role === 'assistant' && !m.cmd) return !!m.streaming
+        }
+        return true
+      })()
+      merged.push(localUser && localPending
         ? { ...localUser }
         : {
             id: opts.makeId(),

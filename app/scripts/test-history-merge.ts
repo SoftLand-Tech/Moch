@@ -322,6 +322,17 @@ function main() {
       recInflightTail[3].text === 'longer local streaming answer' && !!recInflightTail[3].streaming,
   )
 
+  const recRepeatedInflight = reconcileHistoryMessages(
+    [msg('user', 'unrelated', { ts: 50 }), msg('assistant', 'prior', { ts: 75 })],
+    [msg('user', 'same', { ts: 100 }), msg('assistant', 'old completed answer', { ts: 200 })],
+    { inflight: { user: 'same', assistant: 'new snapshot', streaming: true }, now: 10_000, makeId },
+  )
+  check(
+    'repeated inflight prompt does not inherit an older completed local turn',
+    recRepeatedInflight.length === 4 && recRepeatedInflight[2].ts === 10_000 &&
+      recRepeatedInflight[3].text === 'new snapshot',
+  )
+
   console.log(`\n${pass}/${pass + fail} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)
 }
