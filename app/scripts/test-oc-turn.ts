@@ -235,6 +235,20 @@ function main() {
       { role: 'user', text: 'new prompt', ts: 3 },
     ], 'new prompt') === undefined,
   )
+  check(
+    'history catch-up rejects an older identical prompt outside the current turn boundary',
+    findOcTurnAssistant([
+      { role: 'user', text: 'same', ts: 1 },
+      { role: 'assistant', text: 'old answer', ts: 2 },
+    ], 'same', 5_000) === undefined,
+  )
+  check(
+    'command catch-up falls back to the expanded prompt at the turn boundary',
+    findOcTurnAssistant([
+      { role: 'user', text: 'Review src/auth.ts for bugs', ts: 5_100 },
+      { role: 'assistant', text: 'command answer', ts: 5_200 },
+    ], 'src/auth.ts', 5_000)?.text === 'command answer',
+  )
 
   console.log(`\n${pass} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)

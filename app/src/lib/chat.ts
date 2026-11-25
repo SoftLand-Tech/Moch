@@ -42,6 +42,7 @@ import {
   ocPickFor,
   loadOcHistory,
   noteOcInteractiveChanged,
+  ocInteractiveRevisionValue,
   type OcTurnHooks,
   type OcPermissionInfo,
   type OcHistoryRow,
@@ -2114,8 +2115,10 @@ export async function syncOcQuestions(liveId: string): Promise<void> {
   if (!s || !stored || isPseudoStoredId(stored)) return
   const ocId = await ocSessionFor(stored)
   if (!ocId) return
+  const revision = ocInteractiveRevisionValue()
   try {
     const raw = await ocListForms(ocId)
+    if (revision !== ocInteractiveRevisionValue()) return
     const forms = Array.isArray(raw)
       ? raw.map(parseOcForm).filter((f): f is OcFormInfo => f !== null)
       : []
