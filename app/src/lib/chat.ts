@@ -1929,12 +1929,13 @@ export function applyHistory(
         ? { ...seg, text: `${seg.text.slice(0, HISTORY_TEXT_MAX)}…` }
         : seg,
     )
+    const rowTs = toMs(Number(m.ts ?? m.timestamp)) || Date.now()
     const segs: ChatSegment[] = []
     if (reasoning) {
       segs.push({
         kind: 'thinking',
         text: `${reasoning.slice(0, HISTORY_TEXT_MAX)}${reasoning.length > HISTORY_TEXT_MAX ? '…' : ''}`,
-        startedAt: Number(m.ts ?? m.timestamp ?? Date.now()) || undefined,
+        startedAt: rowTs,
       })
     }
     if (hasMedia) {
@@ -1950,7 +1951,7 @@ export function applyHistory(
       id: nid(),
       role,
       text: `${rowText.slice(0, HISTORY_TEXT_MAX)}${rowText.length > HISTORY_TEXT_MAX ? '…' : ''}`,
-      ts: Number(m.ts ?? m.timestamp ?? Date.now()),
+      ts: rowTs,
       ...(segs.length ? { segments: segs } : {}),
     })
   }

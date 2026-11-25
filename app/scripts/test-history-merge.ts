@@ -366,6 +366,17 @@ function main() {
       recFailedUserOnly[2].text === 'new snapshot',
   )
 
+  const epochSec = 1_700_000_000
+  const recEpochPending = reconcileHistoryMessages(
+    [msg('user', 'epoch pending', { ts: epochSec * 1000 })],
+    [],
+    { inflight: { user: 'epoch pending', assistant: 'working', streaming: true, started_at: epochSec }, now: epochSec * 1000 + 60_000, makeId },
+  )
+  check(
+    'real epoch seconds normalize to the same turn marker as millisecond history',
+    recEpochPending.length === 2 && recEpochPending[0].role === 'user' && recEpochPending[1].text === 'working',
+  )
+
   console.log(`\n${pass}/${pass + fail} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)
 }
