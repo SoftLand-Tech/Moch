@@ -576,7 +576,7 @@ class AIAgent(
         reasoning_floor = get_reasoning_stale_timeout_floor(self.model)
         if reasoning_floor is not None:
             return reasoning_floor, False
-        return 90.0, True
+        return 180.0, True
 
     def _compute_non_stream_stale_timeout(self, api_payload: Any) -> float:
         """Effective non-stream stale timeout for ``api_payload`` (an ``api_kwargs`` dict or legacy ``messages``

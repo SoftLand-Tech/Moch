@@ -41,6 +41,8 @@ import {
   findStoredIdForOcSession,
   ocPickFor,
   loadOcHistory,
+  noteOcInteractiveChanged,
+  ocInteractiveRevisionValue,
   type OcTurnHooks,
   type OcPermissionInfo,
   type OcHistoryRow,
@@ -2076,6 +2078,7 @@ export async function ocReplyQuestion(sid: string, answer: OcFormAnswer): Promis
   if (!ocId) return
   try {
     await ocFormReply(ocId, form.id, answer)
+    noteOcInteractiveChanged()
   } catch (err) {
     log('warn', 'opencode', `question reply failed: ${err instanceof Error ? err.message : String(err)}`)
     ocQuestions.set(sid, form)
@@ -2096,6 +2099,7 @@ export async function ocCancelQuestion(sid: string): Promise<void> {
   if (!ocId) return
   try {
     await ocFormCancel(ocId, form.id)
+    noteOcInteractiveChanged()
   } catch (err) {
     log('warn', 'opencode', `question cancel failed: ${err instanceof Error ? err.message : String(err)}`)
     ocQuestions.set(sid, form)
@@ -2111,8 +2115,10 @@ export async function syncOcQuestions(liveId: string): Promise<void> {
   if (!s || !stored || isPseudoStoredId(stored)) return
   const ocId = await ocSessionFor(stored)
   if (!ocId) return
+  const revision = ocInteractiveRevisionValue()
   try {
     const raw = await ocListForms(ocId)
+    if (revision !== ocInteractiveRevisionValue()) return
     const forms = Array.isArray(raw)
       ? raw.map(parseOcForm).filter((f): f is OcFormInfo => f !== null)
       : []
@@ -2142,6 +2148,7 @@ export async function ocReplyPermission(sid: string, reply: 'once' | 'always' | 
   if (!ocId) return
   try {
     await ocPermissionReply(ocId, req.id, reply)
+    noteOcInteractiveChanged()
   } catch (err) {
     log('warn', 'opencode', `permission reply failed: ${err instanceof Error ? err.message : String(err)}`)
     // Put the ask back: a failed reply must not strand the server-blocked
@@ -2178,12 +2185,45 @@ function ocHooksFor(sid: string): OcTurnHooks {
       })
     },
     text: (delta) => queueStream(sid, 'text', delta),
+    replaceAnswer: (answer) => {
+      flushStreams()
+      const cur = sessionsById.get()[sid]
+      if (!cur) return
+      const text = answer.text.slice(0, HISTORY_TEXT_MAX)
+      const source = answer.segments?.length
+        ? answer.segments
+        : [
+            ...(answer.thinking ? [{ kind: 'thinking' as const, text: answer.thinking }] : []),
+            ...(answer.text ? [{ kind: 'text' as const, text: answer.text }] : []),
+          ]
+      const segments: ChatSegment[] = source.map((seg) =>
+        seg.kind === 'thinking'
+          ? { kind: 'thinking', text: seg.text.slice(0, HISTORY_TEXT_MAX), startedAt: answer.ts }
+          : { kind: 'text', text: seg.text.slice(0, HISTORY_TEXT_MAX) },
+      )
+      const list = [...cur.messages]
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (list[i].role !== 'assistant' || !list[i].streaming) continue
+        list[i] = { ...list[i], text, segments, streaming: true }
+        patchSession(sid, { messages: list })
+        return
+      }
+      list.push({ id: nid(), role: 'assistant', text, segments, streaming: true, ts: answer.ts })
+      patchSession(sid, { messages: list })
+    },
     thinking: (delta) => queueStream(sid, 'thinking', delta),
     tool: (id, name, phase, preview, durationS) =>
       upsertToolIn(sid, { id, name, preview, status: phase, durationS }),
     permission: (req) => {
       ocPermissions.set(sid, req)
       if (activeSession.get() === sid) ocPermissionLive.set({ sid, req })
+    },
+    permissionResolved: (requestId) => {
+      const existing = ocPermissions.get(sid)
+      if (!existing || (requestId && existing.id !== requestId)) return
+      ocPermissions.delete(sid)
+      if (ocPermissionLive.get()?.sid === sid) ocPermissionLive.set(null)
+      clearAttentionLive(sid)
     },
     question: (form) => {
       ocQuestions.set(sid, form)
@@ -2236,7 +2276,9 @@ function ocHooksFor(sid: string): OcTurnHooks {
       }
       if (list.length) patchSession(sid, { messages: list })
       patchSession(sid, {
-        tools: cur.tools.map((t) => (t.status === 'running' ? { ...t, status: 'done' as const } : t)),
+        tools: cur.tools.map((t) =>
+          t.status === 'running' ? { ...t, status: failed ? 'failed' as const : 'done' as const } : t,
+        ),
         busy: false,
       })
       schedulePersist(sid)
