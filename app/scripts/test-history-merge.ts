@@ -185,6 +185,57 @@ function main() {
     recNoUser.length === localHistory.length && recNoUser[0].text === 'old prompt' && recNoUser[1].text === 'old answer',
   )
 
+  // ── 11. Shared prefixes do not cross-match different prompts ─────────────
+  const newerAttached = msg('user', 'Check', {
+    ts: 2000,
+    segments: [
+      { kind: 'text', text: 'Check' },
+      { kind: 'media', text: '', mediaType: 'image', path: '/cache/shot.png', name: 'shot.png' },
+    ],
+  })
+  const recPrefix = reconcileHistoryMessages(
+    [msg('user', 'Check\n@file:/relay/shot.png', { ts: 2000 }), msg('assistant', 'new answer')],
+    [msg('user', 'Check this document', { ts: 1000 }), msg('assistant', 'old answer'), newerAttached, msg('assistant', 'new answer')],
+    { makeId },
+  )
+  check(
+    'shared prompt prefix does not attach the newer answer to the older turn',
+    recPrefix.length === 2 && recPrefix[0].id === newerAttached.id &&
+      !!recPrefix[0].segments?.some((s) => s.kind === 'media') && recPrefix[1].text === 'new answer',
+    JSON.stringify(recPrefix.map((m) => [m.role, m.text])),
+  )
+
+  // ── 12. Repeated prompts match the correct assistant turn ────────────────
+  const repeatedLocal = [
+    msg('user', 'ok', { ts: 1000 }), msg('assistant', 'done 1'),
+    msg('user', 'ok', { ts: 2000 }), msg('assistant', 'done 2'),
+  ]
+  const recRepeated = reconcileHistoryMessages(
+    [msg('user', 'ok', { ts: 2000 }), msg('assistant', 'done 2')],
+    repeatedLocal,
+    { makeId },
+  )
+  check(
+    'repeated identical prompts match the newest assistant instead of duplicating it',
+    recRepeated.length === 2 && recRepeated[0].id === repeatedLocal[2].id && recRepeated[1].text === 'done 2',
+    JSON.stringify(recRepeated.map((m) => [m.role, m.text])),
+  )
+
+  // ── 13. Empty-caption attachment rows survive forced hydration ───────────
+  const emptyAttached = msg('user', '', {
+    segments: [{ kind: 'media', text: '', mediaType: 'file', path: '/cache/a.pdf', name: 'a.pdf' }],
+  })
+  const recEmptyAttached = reconcileHistoryMessages(
+    [msg('user', '@file:/relay/a.pdf'), msg('assistant', 'read it')],
+    [emptyAttached],
+    { makeId },
+  )
+  check(
+    'empty-caption local attachment matches refs-only server prompt and keeps its tile',
+    recEmptyAttached.length === 2 && recEmptyAttached[0].id === emptyAttached.id &&
+      !!recEmptyAttached[0].segments?.some((s) => s.kind === 'media'),
+  )
+
   console.log(`\n${pass}/${pass + fail} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)
 }

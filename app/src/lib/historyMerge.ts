@@ -129,19 +129,36 @@ function stripTrailingFileRefs(text: string): string {
   return lines.join('\n').trim()
 }
 
+function hasTrailingFileRefs(text: string): boolean {
+  return stripTrailingFileRefs(text) !== text.trim()
+}
+
+function userMatchKey(text: string): string {
+  const stripped = stripTrailingFileRefs(text)
+  return stripped === '[attachment]' ? '' : normUserText(stripped)
+}
+
 function userTextMatches(a: string, b: string): boolean {
-  const an = normUserText(a)
-  const bn = normUserText(b)
-  if (!an || !bn) return false
-  if (an === bn) return true
-  // OpenCode receives the attachment refs appended by appendRefText, while
-  // the local bubble keeps the user's original caption. The prompt budget
-  // may also truncate that caption, so compare the ref-stripped server head
-  // as a prefix of the local text only when refs were actually present.
-  const as = normUserText(stripTrailingFileRefs(a))
-  const bs = normUserText(stripTrailingFileRefs(b))
-  if (as === an && bs === bn) return false
-  return as === bs || as.startsWith(bs) || bs.startsWith(as)
+  const ak = userMatchKey(a)
+  const bk = userMatchKey(b)
+  if (ak && bk) return ak === bk
+  return !ak && !bk && (
+    hasTrailingFileRefs(a) || hasTrailingFileRefs(b) ||
+    a.trim() === '[attachment]' || b.trim() === '[attachment]'
+  )
+}
+
+function userRowsMatch(local: MergeMessage, server: MergeMessage): boolean {
+  if (userTextMatches(local.text, server.text)) return true
+  // Attachment-only local rows have no caption. They may correspond to a
+  // refs-only or placeholder server row; order/turn matching disambiguates
+  // multiple such turns.
+  const localEmpty = !normUserText(local.text)
+  const serverEmpty = !userMatchKey(server.text)
+  return localEmpty && serverEmpty && (
+    !!local.segments?.some((s) => s.kind === 'media') ||
+    hasTrailingFileRefs(server.text) || server.text.trim() === '[attachment]'
+  )
 }
 
 function findMatchingUserIndex(list: MergeMessage[], targetText: string, occurrenceFromEnd = 1): number {
@@ -168,17 +185,42 @@ function countOccurrences(list: MergeMessage[], targetText: string): number {
   return n
 }
 
+function assistantTextAfter(messages: MergeMessage[], userIndex: number): string {
+  const parts: string[] = []
+  for (let i = userIndex + 1; i < messages.length; i++) {
+    const m = messages[i]
+    if (m.role === 'user') break
+    if (m.role === 'assistant' && !m.cmd && m.text) parts.push(m.text)
+  }
+  return parts.join('\n')
+}
+
 /** Keep local user-row identity/media/status when the server has the same turn. */
 function preserveLocalUserRows(merged: MergeMessage[], prevMessages: MergeMessage[]): MergeMessage[] {
   const used = new Set<number>()
-  return merged.map((row) => {
+  return merged.map((row, rowIdx) => {
     if (row.role !== 'user') return row
-    const idx = prevMessages.findIndex((m, i) =>
-      !used.has(i) && m.role === 'user' && userTextMatches(m.text, row.text),
-    )
-    if (idx < 0) return row
-    used.add(idx)
-    return { ...prevMessages[idx], ts: row.ts }
+    const serverAnswer = assistantTextAfter(merged, rowIdx)
+    let bestIdx = -1
+    let bestScore = -Infinity
+    for (let i = 0; i < prevMessages.length; i++) {
+      const candidate = prevMessages[i]
+      if (used.has(i) || candidate.role !== 'user' || !userRowsMatch(candidate, row)) continue
+      const localAnswer = assistantTextAfter(prevMessages, i)
+      let score = Math.max(0, 100 - Math.min(100, Math.abs(candidate.ts - row.ts) / 1000))
+      if (serverAnswer && localAnswer) {
+        if (serverAnswer === localAnswer) score += 1000
+        else if (serverAnswer.startsWith(localAnswer) || localAnswer.startsWith(serverAnswer)) score += 100
+      }
+      if (candidate.segments?.some((s) => s.kind === 'media')) score += 1
+      if (score > bestScore) {
+        bestScore = score
+        bestIdx = i
+      }
+    }
+    if (bestIdx < 0) return row
+    used.add(bestIdx)
+    return { ...prevMessages[bestIdx], ts: row.ts }
   })
 }
 
@@ -289,10 +331,14 @@ export function reconcileHistoryMessages(
     }
   } else {
     const serverLastUserText = merged[serverLastUserIdx].text
-    const serverCount = countOccurrences(merged, serverLastUserText)
-    const localCount = countOccurrences(prevMessages, serverLastUserText)
-    const occFromEnd = localCount >= serverCount ? localCount - serverCount + 1 : 1
-    const localMatchIdx = findMatchingUserIndex(prevMessages, serverLastUserText, occFromEnd)
+    const preservedId = merged[serverLastUserIdx].id
+    let localMatchIdx = prevMessages.findIndex((m) => m.id === preservedId)
+    if (localMatchIdx < 0) {
+      const serverCount = countOccurrences(merged, serverLastUserText)
+      const localCount = countOccurrences(prevMessages, serverLastUserText)
+      const occFromEnd = localCount >= serverCount ? localCount - serverCount + 1 : 1
+      localMatchIdx = findMatchingUserIndex(prevMessages, serverLastUserText, occFromEnd)
+    }
 
     if (localMatchIdx >= 0) {
       const localAfter = prevMessages.slice(localMatchIdx + 1)

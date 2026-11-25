@@ -19,6 +19,7 @@ import { linuxTermProbe, linuxTermStart, linuxTermWrite } from './mochiRuntime'
 import { guestRun } from './thinker'
 import { rpc } from './gateway'
 import { log } from './log'
+import { ocHistoryPageQuery, nextOcHistoryCursor } from './ocHistory'
 import type { OcFormAnswer, OcFormInfo } from './ocForm'
 
 export type { OcFormAnswer, OcFormField, OcFormInfo, OcFormOption, OcFormValue } from './ocForm'
@@ -168,7 +169,7 @@ export interface OcHistoryMessage {
   time?: { created?: number | string }
   text?: string
   payload?: { text?: string }
-  files?: Array<{ filename?: string; mime?: string }>
+  files?: Array<{ name?: string; filename?: string; mime?: string }>
   content?: Array<{
     type: 'text' | 'reasoning' | 'tool' | string
     text?: string
@@ -207,12 +208,10 @@ export const ocHistory = async (id: string, limit = 200): Promise<OcHistoryMessa
   const seenIds = new Set<string>()
   let cursor: string | undefined
   do {
-    const query = [`limit=${pageSize}`, 'order=desc']
-    if (cursor) query.push(`cursor=${encodeURIComponent(cursor)}`)
     const page = await ocFetch<{
       data?: OcHistoryMessage[]
       cursor?: { previous?: string; next?: string }
-    }>(`/api/session/${encodeURIComponent(id)}/message?${query.join('&')}`, {
+    }>(`/api/session/${encodeURIComponent(id)}/message?${ocHistoryPageQuery(cursor, pageSize)}`, {
       timeoutMs: 30_000,
       unwrap: false,
     })
@@ -222,7 +221,7 @@ export const ocHistory = async (id: string, limit = 200): Promise<OcHistoryMessa
       if (row.id) seenIds.add(row.id)
       messages.push(row)
     }
-    cursor = page?.cursor?.previous
+    cursor = nextOcHistoryCursor(page)
     if (cursor && seenCursors.has(cursor)) throw new Error('OpenCode history pagination repeated a cursor')
     if (cursor) seenCursors.add(cursor)
   } while (cursor)

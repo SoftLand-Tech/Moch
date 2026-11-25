@@ -14,6 +14,23 @@ export interface OcHistorySegment {
   text: string
 }
 
+export interface OcHistoryCursorPage {
+  cursor?: { previous?: string; next?: string }
+}
+
+/** Cursor requests must not resend `order`; OpenCode 2.3.0 rejects that. */
+export function ocHistoryPageQuery(cursor: string | undefined, pageSize: number): string {
+  const query = [`limit=${pageSize}`]
+  if (cursor) query.push(`cursor=${encodeURIComponent(cursor)}`)
+  else query.push('order=desc')
+  return query.join('&')
+}
+
+/** In newest-first order, `next` walks toward older messages. */
+export function nextOcHistoryCursor(page: OcHistoryCursorPage): string | undefined {
+  return page.cursor?.next
+}
+
 export interface OcHistoryRow {
   role: 'user' | 'assistant'
   text: string
@@ -41,7 +58,7 @@ export interface OcHistoryMessageLike {
   text?: string
   /** Legacy/fallback prompt container. */
   payload?: { text?: string }
-  files?: Array<{ filename?: string; mime?: string }>
+  files?: Array<{ name?: string; filename?: string; mime?: string }>
   content?: Array<{
     type: 'text' | 'reasoning' | 'tool' | string
     text?: string
@@ -63,7 +80,9 @@ function parseOcTs(created: number | string | undefined, fallback: number): numb
 function extractOcAttachmentNames(m: OcHistoryMessageLike): string[] {
   if (!Array.isArray(m.files)) return []
   return m.files
-    .map((f) => (typeof f?.filename === 'string' ? f.filename.trim() : ''))
+    .map((f) =>
+      typeof f?.name === 'string' ? f.name.trim() : typeof f?.filename === 'string' ? f.filename.trim() : '',
+    )
     .filter(Boolean)
 }
 

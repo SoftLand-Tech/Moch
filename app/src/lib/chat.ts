@@ -2343,7 +2343,12 @@ function ocRowsToMessages(rows: OcHistoryRow[]): {
   for (const r of rows) {
     if (r.role === 'user') {
       const id = nid()
-      msgs.push({ id, role: 'user', text: r.text.slice(0, HISTORY_TEXT_MAX), ts: r.ts })
+      msgs.push({
+        id,
+        role: 'user',
+        text: (r.text === '[attachment]' ? '' : r.text).slice(0, HISTORY_TEXT_MAX),
+        ts: r.ts,
+      })
       if (r.attachmentNames?.length) attachmentNames.set(id, r.attachmentNames)
       continue
     }
@@ -2461,26 +2466,6 @@ export async function hydrateOcHistory(liveId: string, opts?: { force?: boolean 
     // Forced merge: reconcile server history against local messages so user
     // prompts, unpersisted/failed local user sends, command cards, and live
     // tails survive, while broken assistant-only caches heal from the server.
-    const localUserIdx = lastIndexWhere(cur.messages, (m) => m.role === 'user' && m.text.trim().length > 0)
-    if (localUserIdx >= 0) {
-      const anchor = cur.messages[localUserIdx]
-      const localUser = anchor.text.trim()
-      const mappedUserIdx = lastIndexWhere(mapped, (m) => m.role === 'user' && m.text.trim() === localUser)
-      if (anchor.status === 'failed' || anchor.status === 'unconfirmed') {
-        // Keep failed/unconfirmed newest send, while still healing earlier turns if needed.
-        const prevIdx = lastIndexWhere(cur.messages.slice(0, localUserIdx), (m) => m.role === 'user' && m.text.trim().length > 0)
-        if (prevIdx < 0) return
-      } else if (mappedUserIdx >= 0) {
-        const localMatchCount = cur.messages.filter((m) => m.role === 'user' && m.text.trim() === localUser).length
-        const mappedMatchCount = mapped.filter((m) => m.role === 'user' && m.text.trim() === localUser).length
-        const tail = mapped.slice(mappedUserIdx + 1)
-        const hasLocalTailAfterAnchor = cur.messages.slice(localUserIdx + 1).some((m) => m.role === 'assistant' && !m.cmd)
-        // Server knows this user prompt but hasn't persisted any assistant reply
-        // after it yet: preserve the local failed/partial tail rather than blanking it.
-        if (mappedMatchCount >= localMatchCount && !tail.length && hasLocalTailAfterAnchor) return
-      }
-    }
-
     const reconciled = appendOcAttachmentNames(
       reconcileHistoryMessages(mapped, cur.messages, { makeId: nid }) as ChatMessage[],
       attachmentNames,

@@ -8,7 +8,13 @@
 //
 // Run: cd app && npx tsx scripts/test-oc-history.ts
 
-import { mapOcHistory, type OcHistoryMessageLike, type OcHistoryRow } from '../src/lib/ocHistory'
+import {
+  mapOcHistory,
+  nextOcHistoryCursor,
+  ocHistoryPageQuery,
+  type OcHistoryMessageLike,
+  type OcHistoryRow,
+} from '../src/lib/ocHistory'
 import { reconcileHistoryMessages } from '../src/lib/historyMerge'
 
 let pass = 0
@@ -157,6 +163,16 @@ function main() {
     mapOcHistory([{ type: 'idle', time: { created: 1 } }]).length === 0,
   )
 
+  check(
+    'history cursor requests omit order and follow next toward older pages',
+    ocHistoryPageQuery('cur/1', 200) === 'limit=200&cursor=cur%2F1' &&
+      nextOcHistoryCursor({ cursor: { previous: 'newer', next: 'older' } }) === 'older',
+  )
+  check(
+    'first history page explicitly requests newest-first order',
+    ocHistoryPageQuery(undefined, 200) === 'limit=200&order=desc',
+  )
+
   // ── OpenCode 2.3.0 schema: top-level `text` on user messages ───────────
   const v23User = (text: string, ts: number | string): OcHistoryMessageLike => ({
     type: 'user',
@@ -193,7 +209,7 @@ function main() {
   // ── Attachment-only OC 2.3.0 user message survives ───────────────────────
   const attachOnly: OcHistoryMessageLike[] = [
     assistant(200, [{ type: 'text', text: 'Got the screenshot.' }]),
-    { type: 'user', time: { created: 100 }, text: '', files: [{ filename: 'shot.png', mime: 'image/png' }] },
+    { type: 'user', time: { created: 100 }, text: '', files: [{ name: 'shot.png', mime: 'image/png' }] },
   ]
   const r8 = mapOcHistory(attachOnly)
   check(
@@ -204,7 +220,7 @@ function main() {
   )
 
   const captioned = mapOcHistory([
-    { type: 'user', time: { created: 100 }, text: 'What is this?', files: [{ filename: 'shot.png', mime: 'image/png' }] },
+    { type: 'user', time: { created: 100 }, text: 'What is this?', files: [{ name: 'shot.png', mime: 'image/png' }] },
   ])
   check(
     'captioned attachment keeps its caption and filename metadata',
