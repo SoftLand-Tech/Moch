@@ -82,3 +82,32 @@ export function isHandshakeRefusal(err: unknown): boolean {
 export function redactedUrl(c: { host: string; tls: boolean }): string {
   return `${c.tls ? 'wss' : 'ws'}://${c.host}/api/ws?token=***`
 }
+
+export type ForegroundAction = 'none' | 'resume-boot' | 'retry-dial' | 'probe-open'
+
+/**
+ * Decide what `onForeground()` should do when the app returns to `'active'`.
+ * Pure so the boot-backgrounded and half-open-socket branches stay pinned in
+ * `test-gateway-logic.ts`.
+ */
+export function decideForegroundAction(params: {
+  manualClose: boolean
+  wantConnection: boolean
+  wantLocalBoot: boolean
+  connectionState: 'idle' | 'connecting' | 'open' | 'closed' | 'error'
+  bootConnectInFlight: boolean
+  dialWaitInFlight?: boolean
+}): ForegroundAction {
+  if (params.manualClose) return 'none'
+  if (!params.wantConnection) {
+    if (params.wantLocalBoot && params.connectionState !== 'open' && !params.bootConnectInFlight) {
+      return 'resume-boot'
+    }
+    return 'none'
+  }
+  if (params.connectionState === 'connecting') {
+    return params.dialWaitInFlight ? 'retry-dial' : 'none'
+  }
+  if (params.connectionState !== 'open') return 'retry-dial'
+  return 'probe-open'
+}
