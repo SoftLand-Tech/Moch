@@ -12,8 +12,16 @@ export const OC_TOOL_SILENCE_MS = 600_000
 export const OC_RETRY_BUFFER_MS = 180_000
 /** Activity-sliding turn inactivity cap (45m without any SSE event). */
 export const OC_ACTIVITY_CAP_MS = 45 * 60 * 1000
-/** Max consecutive silent server-active reconnects before declaring a stall. */
-export const OC_MAX_SILENT_REBINDS = 20
+/** Max consecutive SSE reconnect attempts before declaring a stalled turn. */
+export const OC_MAX_RECONNECT_ATTEMPTS = 20
+/** Exponential backoff for SSE reconnects; the first retry is immediate-ish. */
+export const OC_RECONNECT_BASE_MS = 250
+export const OC_RECONNECT_MAX_MS = 5_000
+
+export function ocReconnectDelayMs(attempt: number): number {
+  const n = Math.max(0, Math.floor(attempt))
+  return Math.min(OC_RECONNECT_MAX_MS, OC_RECONNECT_BASE_MS * 2 ** Math.min(n, 16))
+}
 
 export interface OcSilenceState {
   awaitingUserCount: number
@@ -53,7 +61,7 @@ export interface OcDisconnectDecisionInput {
 }
 
 export type OcDisconnectDecision =
-  | { kind: 'reconnect'; reason: 'awaiting-form' | 'server-running'; countSilentRebind: boolean }
+  | { kind: 'reconnect'; reason: 'awaiting-form' | 'server-running' | 'server-probe-unknown'; countRebind: boolean }
   | { kind: 'complete'; failed: boolean; errorMsg?: string; syncHistory: boolean }
   | { kind: 'fail'; message: string }
 
@@ -74,21 +82,36 @@ export function decideOcDisconnectAction(input: OcDisconnectDecisionInput): OcDi
     }
   }
   if (input.pendingFormCount > 0) {
-    return { kind: 'reconnect', reason: 'awaiting-form', countSilentRebind: false }
+    if (input.rebindCount < OC_MAX_RECONNECT_ATTEMPTS) {
+      return { kind: 'reconnect', reason: 'awaiting-form', countRebind: true }
+    }
+    return {
+      kind: 'fail',
+      message: input.existingError ?? 'OpenCode is waiting for input, but the event stream could not be restored',
+    }
   }
   if (input.sessionActive === true) {
-    if (input.rebindCount < OC_MAX_SILENT_REBINDS) {
-      return {
-        kind: 'reconnect',
-        reason: 'server-running',
-        countSilentRebind: input.winner === 'silent',
-      }
+    if (input.rebindCount < OC_MAX_RECONNECT_ATTEMPTS) {
+      return { kind: 'reconnect', reason: 'server-running', countRebind: true }
     }
     return {
       kind: 'fail',
       message:
         input.existingError ??
         `The model stopped responding (no events for ${Math.round(input.lastSilenceLimitMs / 1000)}s, ${input.hasActivity ? 'mid-answer' : 'before any output'})`,
+    }
+  }
+  // An unknown probe result is NOT evidence that the session finished. The
+  // session's outcome/idle fields can describe the previous execution while a
+  // new turn is still running, so only a successful negative active probe may
+  // trust them below.
+  if (input.sessionActive === null) {
+    if (input.rebindCount < OC_MAX_RECONNECT_ATTEMPTS) {
+      return { kind: 'reconnect', reason: 'server-probe-unknown', countRebind: true }
+    }
+    return {
+      kind: 'fail',
+      message: input.existingError ?? 'Could not verify whether the OpenCode session is still running',
     }
   }
   if (input.sessionOutcome === 'succeeded') {

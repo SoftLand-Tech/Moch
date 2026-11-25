@@ -5,10 +5,12 @@
 
 import {
   OC_IDLE_SILENCE_MS,
-  OC_MAX_SILENT_REBINDS,
+  OC_MAX_RECONNECT_ATTEMPTS,
+  OC_RECONNECT_MAX_MS,
   OC_TOOL_SILENCE_MS,
   computeOcSilenceLimitMs,
   decideOcDisconnectAction,
+  ocReconnectDelayMs,
 } from '../src/lib/ocTurnWatchdog'
 
 let pass = 0
@@ -82,7 +84,7 @@ function main() {
   })
   check(
     'silent timeout while OpenCode session still running reconnects SSE',
-    dRunningSilent.kind === 'reconnect' && dRunningSilent.reason === 'server-running' && dRunningSilent.countSilentRebind,
+    dRunningSilent.kind === 'reconnect' && dRunningSilent.reason === 'server-running' && dRunningSilent.countRebind,
   )
 
   const dRunningDropped = decideOcDisconnectAction({
@@ -96,8 +98,8 @@ function main() {
     rebindCount: 2,
   })
   check(
-    'dropped SSE while OpenCode session still running reconnects without counting silent rebind',
-    dRunningDropped.kind === 'reconnect' && !dRunningDropped.countSilentRebind,
+    'dropped SSE while OpenCode session still running reconnects and counts toward the attempt cap',
+    dRunningDropped.kind === 'reconnect' && dRunningDropped.countRebind,
   )
 
   const dPendingForm = decideOcDisconnectAction({
@@ -112,7 +114,7 @@ function main() {
   })
   check(
     'pending question form forces SSE reconnect',
-    dPendingForm.kind === 'reconnect' && dPendingForm.reason === 'awaiting-form' && !dPendingForm.countSilentRebind,
+    dPendingForm.kind === 'reconnect' && dPendingForm.reason === 'awaiting-form' && dPendingForm.countRebind,
   )
 
   const dSucceededOnServer = decideOcDisconnectAction({
@@ -158,12 +160,46 @@ function main() {
     lastSilenceLimitMs: OC_IDLE_SILENCE_MS,
     pendingFormCount: 0,
     sessionActive: true,
-    rebindCount: OC_MAX_SILENT_REBINDS,
+    rebindCount: OC_MAX_RECONNECT_ATTEMPTS,
   })
   check(
-    'exceeding max silent rebinds fails honestly instead of looping forever',
+    'exceeding max reconnect attempts fails honestly instead of looping forever',
     dTooManySilentRebinds.kind === 'fail' && /stopped responding/i.test(dTooManySilentRebinds.message),
   )
+
+  const dUnknownProbeStaleOutcome = decideOcDisconnectAction({
+    cancelled: false,
+    turnDone: false,
+    winner: 'dropped',
+    hasActivity: true,
+    lastSilenceLimitMs: OC_IDLE_SILENCE_MS,
+    pendingFormCount: 0,
+    sessionActive: null,
+    sessionOutcome: 'succeeded',
+    sessionIdle: true,
+    rebindCount: 0,
+  })
+  check(
+    'failed active probe never trusts a stale succeeded outcome from the previous turn',
+    dUnknownProbeStaleOutcome.kind === 'reconnect' && dUnknownProbeStaleOutcome.reason === 'server-probe-unknown',
+  )
+
+  const dDroppedAtCap = decideOcDisconnectAction({
+    cancelled: false,
+    turnDone: false,
+    winner: 'dropped',
+    hasActivity: true,
+    lastSilenceLimitMs: OC_IDLE_SILENCE_MS,
+    pendingFormCount: 0,
+    sessionActive: true,
+    rebindCount: OC_MAX_RECONNECT_ATTEMPTS,
+  })
+  check(
+    'repeated dropped SSE legs stop at the reconnect cap',
+    dDroppedAtCap.kind === 'fail',
+  )
+
+  check('reconnect backoff grows and caps', ocReconnectDelayMs(0) === 250 && ocReconnectDelayMs(3) === 2_000 && ocReconnectDelayMs(99) === OC_RECONNECT_MAX_MS)
 
   const dCancelled = decideOcDisconnectAction({
     cancelled: true,

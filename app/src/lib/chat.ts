@@ -2178,12 +2178,46 @@ function ocHooksFor(sid: string): OcTurnHooks {
       })
     },
     text: (delta) => queueStream(sid, 'text', delta),
+    replaceText: (value) => {
+      flushStreams()
+      const cur = sessionsById.get()[sid]
+      if (!cur) return
+      const text = value.slice(0, HISTORY_TEXT_MAX)
+      const list = [...cur.messages]
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (list[i].role !== 'assistant' || !list[i].streaming) continue
+        const segments: ChatSegment[] = []
+        let inserted = false
+        for (const seg of list[i].segments ?? []) {
+          if (seg.kind !== 'text') {
+            segments.push(seg)
+          } else if (!inserted && text) {
+            segments.push({ kind: 'text', text })
+            inserted = true
+          }
+        }
+        if (!inserted && text) segments.push({ kind: 'text', text })
+        list[i] = { ...list[i], text, segments, streaming: true }
+        patchSession(sid, { messages: list })
+        return
+      }
+      const segments: ChatSegment[] = text ? [{ kind: 'text', text }] : []
+      list.push({ id: nid(), role: 'assistant', text, segments, streaming: true, ts: Date.now() })
+      patchSession(sid, { messages: list })
+    },
     thinking: (delta) => queueStream(sid, 'thinking', delta),
     tool: (id, name, phase, preview, durationS) =>
       upsertToolIn(sid, { id, name, preview, status: phase, durationS }),
     permission: (req) => {
       ocPermissions.set(sid, req)
       if (activeSession.get() === sid) ocPermissionLive.set({ sid, req })
+    },
+    permissionResolved: (requestId) => {
+      const existing = ocPermissions.get(sid)
+      if (!existing || (requestId && existing.id !== requestId)) return
+      ocPermissions.delete(sid)
+      if (ocPermissionLive.get()?.sid === sid) ocPermissionLive.set(null)
+      clearAttentionLive(sid)
     },
     question: (form) => {
       ocQuestions.set(sid, form)

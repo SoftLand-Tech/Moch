@@ -215,10 +215,21 @@ export const ocInterrupt = (id: string) =>
 
 export type OcPermissionReply = 'once' | 'always' | 'reject'
 
+export interface OcPermissionRequest {
+  id: string
+  sessionID: string
+  action: string
+  resources: string[]
+  message?: string
+}
+
+export const ocListPermissions = (id: string) =>
+  ocFetch<OcPermissionRequest[]>(`/api/session/${encodeURIComponent(id)}/permission`, { timeoutMs: 15_000 })
+
 export const ocPermissionReply = (id: string, requestID: string, reply: OcPermissionReply) =>
   ocFetch<unknown>(
     `/api/session/${encodeURIComponent(id)}/permission/${encodeURIComponent(requestID)}/reply`,
-    { method: 'POST', body: { reply }, timeoutMs: 15_000 },
+    { method: 'POST', body: { decision: reply }, timeoutMs: 15_000 },
   )
 
 /** Pending forms/questions for a session (opencode 2.3.0 Form.Service). */

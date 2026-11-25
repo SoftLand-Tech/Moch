@@ -15,11 +15,13 @@ import {
   ocGetSession,
   ocHistory,
   ocListForms,
+  ocListPermissions,
   ocPrompt,
   ocRunCommand,
   ocStream,
   describeOcError,
   type OcEvent,
+  type OcPermissionRequest,
 } from './opencodeClient'
 import { extractOcEventSessionId, parseOcForm, type OcFormInfo } from './ocForm'
 import { mapOcHistory, type OcHistoryRow } from './ocHistory'
@@ -29,6 +31,7 @@ import {
   OC_IDLE_SILENCE_MS,
   computeOcSilenceLimitMs,
   decideOcDisconnectAction,
+  ocReconnectDelayMs,
 } from './ocTurnWatchdog'
 import { guestRun } from './thinker'
 import { log } from './log'
@@ -163,9 +166,13 @@ export interface OcTurnHooks {
   /** A new assistant row should begin (streaming). */
   start(): void
   text(delta: string): void
+  /** Replace the current streaming answer after authoritative history catch-up. */
+  replaceText(text: string): void
   thinking(delta: string): void
   tool(id: string, name: string, phase: 'running' | 'done' | 'failed', preview?: string, durationS?: number): void
   permission(req: OcPermissionInfo): void
+  /** A pending permission request was answered or disappeared server-side. */
+  permissionResolved?: (requestId: string) => void
   /** The `question` tool opened an interactive form prompt for the user. */
   question?: (form: OcFormInfo) => void
   /** A pending form prompt was answered or cancelled on the server. */
@@ -200,6 +207,16 @@ function previewOf(input: unknown): string | undefined {
   if (input === null || input === undefined) return undefined
   const s = typeof input === 'string' ? input : JSON.stringify(input)
   return s ? s.slice(0, TOOL_PREVIEW_MAX) : undefined
+}
+
+function parseOcPermission(raw: OcPermissionRequest, sessionId: string): OcPermissionInfo | null {
+  if (!raw || typeof raw.id !== 'string' || !raw.id || raw.sessionID !== sessionId) return null
+  return {
+    id: raw.id,
+    action: typeof raw.action === 'string' ? raw.action : '',
+    resources: Array.isArray(raw.resources) ? raw.resources.map(String) : [],
+    ...(typeof raw.message === 'string' && raw.message ? { message: raw.message } : {}),
+  }
 }
 
 /**
@@ -298,19 +315,54 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
     cap = setTimeout(() => resolveSilent('silent'), OC_ACTIVITY_CAP_MS)
   }
 
-  const syncForms = async () => {
-    try {
-      const forms = await ocListForms(ocId)
-      if (disposed || turnDone || !Array.isArray(forms)) return
-      for (const raw of forms) {
-        const form = parseOcForm(raw)
-        if (!form || awaitingUser.has(`form:${form.id}`)) continue
-        awaitingUser.add(`form:${form.id}`)
-        hooks.question?.(form)
-        armSilence()
-        armActivityCap()
+  const syncInteractive = async () => {
+    const formKeysBefore = new Set([...awaitingUser].filter((k) => k.startsWith('form:')))
+    const permKeysBefore = new Set([...awaitingUser].filter((k) => k.startsWith('perm:')))
+    const [formsResult, permsResult] = await Promise.allSettled([
+      ocListForms(ocId),
+      ocListPermissions(ocId),
+    ])
+    if (disposed || turnDone) return
+
+    if (formsResult.status === 'fulfilled' && Array.isArray(formsResult.value)) {
+      const forms = formsResult.value
+        .map(parseOcForm)
+        .filter((f): f is OcFormInfo => f !== null)
+      const liveIds = new Set(forms.map((f) => f.id))
+      for (const key of formKeysBefore) {
+        const id = key.slice('form:'.length)
+        if (liveIds.has(id)) continue
+        awaitingUser.delete(key)
+        hooks.questionResolved?.(id)
       }
-    } catch {}
+      for (const form of forms) {
+        const key = `form:${form.id}`
+        if (awaitingUser.has(key)) continue
+        awaitingUser.add(key)
+        hooks.question?.(form)
+      }
+    }
+
+    if (permsResult.status === 'fulfilled' && Array.isArray(permsResult.value)) {
+      const perms = permsResult.value
+        .map((p) => parseOcPermission(p, ocId))
+        .filter((p): p is OcPermissionInfo => p !== null)
+      const liveIds = new Set(perms.map((p) => p.id))
+      for (const key of permKeysBefore) {
+        const id = key.slice('perm:'.length)
+        if (liveIds.has(id)) continue
+        awaitingUser.delete(key)
+        hooks.permissionResolved?.(id)
+      }
+      for (const req of perms) {
+        const key = `perm:${req.id}`
+        if (awaitingUser.has(key)) continue
+        awaitingUser.add(key)
+        hooks.permission(req)
+      }
+    }
+    armSilence()
+    armActivityCap()
   }
 
   const onEvent = (e: OcEvent) => {
@@ -434,7 +486,8 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
         hasActivity = true
         break
       }
-      case 'session.compaction.ended': {
+      case 'session.compaction.ended':
+      case 'session.compaction.failed': {
         compacting = false
         hasActivity = true
         break
@@ -452,7 +505,10 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
       }
       case 'permission.replied': {
         const permId = String(d.requestID ?? d.id ?? '')
-        if (permId) awaitingUser.delete(`perm:${permId}`)
+        if (permId) {
+          awaitingUser.delete(`perm:${permId}`)
+          hooks.permissionResolved?.(permId)
+        }
         break
       }
       case 'form.created': {
@@ -548,7 +604,7 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
   started = true
   armSilence()
   armActivityCap()
-  void syncForms()
+  void syncInteractive()
 
   // Keep re-attaching SSE whenever OpenCode confirms the session is still running
   // (long tool writes, reasoning pauses, transient mobile socket drops).
@@ -562,7 +618,7 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
       break
     }
 
-    await syncForms()
+    await syncInteractive()
     const activeMap = await ocActiveSessions().catch(() => null)
     const isActive = activeMap ? activeMap[ocId]?.type === 'running' : null
     const sessionInfo = isActive === true ? null : await ocGetSession(ocId).catch(() => null)
@@ -583,41 +639,51 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
     })
 
     if (decision.kind === 'reconnect') {
-      if (decision.countSilentRebind) rebindCount++
+      const delayMs = ocReconnectDelayMs(rebindCount)
+      if (decision.countRebind) rebindCount++
       log('info', 'opencode', `re-attaching SSE for ${ocId} (${decision.reason})`)
       armSilence()
       armActivityCap()
-      await new Promise((r) => setTimeout(r, 250))
+      await new Promise((r) => setTimeout(r, delayMs))
       if (turnDone || disposed || isCancelled?.()) break
       currentStream = openStreamLeg()
       continue
     }
 
     if (decision.kind === 'complete') {
+      let historySyncError: string | undefined
       if (decision.syncHistory) {
         try {
           const hist = mapOcHistory((await ocHistory(ocId)) ?? [])
           const last = [...hist].reverse().find((r) => r.role === 'assistant')
           if (last) {
-            if (last.text && last.text.startsWith(finalText) && last.text.length > finalText.length) {
+            if (!finalText && last.text) {
+              finalText = last.text
+              hooks.replaceText(last.text)
+            } else if (last.text.startsWith(finalText) && last.text.length > finalText.length) {
               const tail = last.text.slice(finalText.length)
               finalText += tail
               hooks.text(tail)
-            } else if (!finalText && last.text) {
+            } else if (last.text !== finalText) {
+              // A delta was missed while SSE was down. Server history is
+              // authoritative; replace the corrupted partial instead of
+              // appending a suffix that no longer lines up.
               finalText = last.text
-              hooks.text(last.text)
+              hooks.replaceText(last.text)
             }
             for (const t of last.tools ?? []) {
-              if (!toolNames.has(t.id)) {
-                hooks.tool(t.id, t.name, t.ok ? 'done' : 'failed')
-              }
+              // Reconcile even tools already seen streaming: a missed
+              // session.tool.failed must not be finalized as successful.
+              hooks.tool(t.id, t.name, t.ok ? 'done' : 'failed')
             }
           }
-        } catch {}
+        } catch (err) {
+          historySyncError = `OpenCode finished, but history sync failed: ${describeOcError(err)}`
+        }
       }
       turnDone = true
-      failed = decision.failed
-      errorMsg = decision.errorMsg ?? errorMsg
+      failed = decision.failed || !!historySyncError
+      errorMsg = historySyncError ?? decision.errorMsg ?? errorMsg
       break
     }
 
