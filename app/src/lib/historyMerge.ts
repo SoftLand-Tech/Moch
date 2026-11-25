@@ -153,7 +153,10 @@ const ATTACHMENT_MATCH_WINDOW_MS = 600_000
 
 function userRowsMatch(local: MergeMessage, server: MergeMessage): boolean {
   const age = Math.abs(local.ts - server.ts)
-  if (userTextMatches(local.text, server.text) && age <= TURN_MATCH_WINDOW_MS) return true
+  if (userTextMatches(local.text, server.text) && (
+    age <= TURN_MATCH_WINDOW_MS ||
+    (!!local.segments?.some((s) => s.kind === 'media') && age <= ATTACHMENT_MATCH_WINDOW_MS)
+  )) return true
   // Attachment-only local rows have no caption. They may correspond to a
   // refs-only or placeholder server row; order/turn matching disambiguates
   // multiple such turns.
@@ -219,6 +222,15 @@ function preserveLocalUserRows(merged: MergeMessage[], prevMessages: MergeMessag
     for (let i = 0; i < prevMessages.length; i++) {
       const candidate = prevMessages[i]
       if (used.has(i) || candidate.role !== 'user' || !userRowsMatch(candidate, row)) continue
+      const localAnswerIdx = (() => {
+        for (let j = i + 1; j < prevMessages.length; j++) {
+          const m = prevMessages[j]
+          if (m.role === 'user') break
+          if (m.role === 'assistant' && !m.cmd) return j
+        }
+        return -1
+      })()
+      if (localAnswerIdx >= 0 && prevMessages[localAnswerIdx].ts < row.ts) continue
       const localAnswer = assistantTextAfter(prevMessages, i)
       let score = Math.max(0, 100 - Math.min(100, Math.abs(candidate.ts - row.ts) / 1000))
       if (serverAnswer && localAnswer) {
@@ -375,7 +387,7 @@ export function reconcileHistoryMessages(
         const tail = localAfter[localAnswerIdx]
         const last = merged[merged.length - 1]
         const serverHasAnswerForLastTurn = merged.length - 1 > serverLastUserIdx && last?.role === 'assistant'
-        const sameTurn = tail.ts + 1_000 >= merged[serverLastUserIdx].ts
+        const sameTurn = tail.ts >= merged[serverLastUserIdx].ts
         if (!sameTurn) {
           // A completed/streaming answer from an older identical prompt must
           // never be attached to a newer server-side occurrence.

@@ -195,7 +195,7 @@ function main() {
   })
   const recPrefix = reconcileHistoryMessages(
     [msg('user', 'Check\n@file:/relay/shot.png', { ts: 2000 }), msg('assistant', 'new answer')],
-    [msg('user', 'Check this document', { ts: 1000 }), msg('assistant', 'old answer'), newerAttached, msg('assistant', 'new answer')],
+    [msg('user', 'Check this document', { ts: 1000 }), msg('assistant', 'old answer', { ts: 1500 }), newerAttached, msg('assistant', 'new answer', { ts: 3000 })],
     { makeId },
   )
   check(
@@ -207,11 +207,11 @@ function main() {
 
   // ── 12. Repeated prompts match the correct assistant turn ────────────────
   const repeatedLocal = [
-    msg('user', 'ok', { ts: 1000 }), msg('assistant', 'done 1'),
-    msg('user', 'ok', { ts: 2000 }), msg('assistant', 'done 2'),
+    msg('user', 'ok', { ts: 1000 }), msg('assistant', 'done 1', { ts: 1500 }),
+    msg('user', 'ok', { ts: 2000 }), msg('assistant', 'done 2', { ts: 2500 }),
   ]
   const recRepeated = reconcileHistoryMessages(
-    [msg('user', 'ok', { ts: 2000 }), msg('assistant', 'done 2')],
+    [msg('user', 'ok', { ts: 2000 }), msg('assistant', 'done 2', { ts: 2500 })],
     repeatedLocal,
     { makeId },
   )
@@ -256,6 +256,24 @@ function main() {
       !!recLongAttached[0].segments?.some((s) => s.kind === 'media'),
   )
 
+  const slowImage = msg('user', 'Slow image', {
+    ts: 1_000,
+    segments: [
+      { kind: 'text', text: 'Slow image' },
+      { kind: 'media', text: '', mediaType: 'image', path: '/cache/slow.png', name: 'slow.png' },
+    ],
+  })
+  const recSlowImage = reconcileHistoryMessages(
+    [msg('user', 'Slow image', { ts: 301_000 }), msg('assistant', 'seen')],
+    [slowImage],
+    { makeId },
+  )
+  check(
+    'captioned image without file refs keeps local media after a slow upload',
+    recSlowImage.length === 2 && recSlowImage[0].id === slowImage.id &&
+      !!recSlowImage[0].segments?.some((s) => s.kind === 'media'),
+  )
+
   // ── 15. Completed local answer survives server persistence lag ───────────
   const recCompletedTail = reconcileHistoryMessages(
     [msg('user', 'latest prompt')],
@@ -270,7 +288,7 @@ function main() {
 
   const recOldCompleted = reconcileHistoryMessages(
     [msg('user', 'ok', { ts: 10_000 })],
-    [msg('user', 'ok', { ts: 1_000 }), msg('assistant', 'old completed answer', { ts: 2_000 })],
+    [msg('user', 'ok', { ts: 1_000 }), msg('assistant', 'old completed answer', { ts: 9_500 })],
     { makeId },
   )
   check(
