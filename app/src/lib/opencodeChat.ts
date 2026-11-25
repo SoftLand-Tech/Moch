@@ -24,7 +24,7 @@ import {
   type OcPermissionRequest,
 } from './opencodeClient'
 import { extractOcEventSessionId, parseOcForm, type OcFormInfo } from './ocForm'
-import { mapOcHistory, type OcHistoryRow } from './ocHistory'
+import { findOcTurnAssistant, mapOcHistory, type OcHistoryRow } from './ocHistory'
 import { loadOcCommands } from './ocCommands'
 import {
   OC_ACTIVITY_CAP_MS,
@@ -42,6 +42,13 @@ import { activeProjectIdAtom, projectsAtom } from './workspace'
 import { pickProjectCwd } from './projectScope'
 
 const MAP_KEY = 'hermes.opencode.map.v1'
+
+/** Bumped when a form/permission is resolved locally or over SSE. Reconnect
+ *  snapshots use it to discard stale list responses. */
+let ocInteractiveRevision = 0
+export function noteOcInteractiveChanged(): void {
+  ocInteractiveRevision++
+}
 
 // ── chat handle ↔ opencode session map ──────────────────────────────────────
 
@@ -167,7 +174,7 @@ export interface OcTurnHooks {
   start(): void
   text(delta: string): void
   /** Replace the current streaming answer after authoritative history catch-up. */
-  replaceText(text: string): void
+  replaceAnswer(answer: OcHistoryRow): void
   thinking(delta: string): void
   tool(id: string, name: string, phase: 'running' | 'done' | 'failed', preview?: string, durationS?: number): void
   permission(req: OcPermissionInfo): void
@@ -250,6 +257,8 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
   let cancelPoll: ReturnType<typeof setInterval> | null = null
   let silenceTimer: ReturnType<typeof setTimeout> | null = null
   let cap: ReturnType<typeof setTimeout> | null = null
+  let interactiveTimer: ReturnType<typeof setTimeout> | null = null
+  let interactiveSyncInFlight = false
   let resolveSilent: (v: 'silent') => void = () => {}
   let attemptController: AbortController | null = null
   let disposed = false
@@ -275,6 +284,7 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
       if (cancelPoll) clearInterval(cancelPoll)
       if (silenceTimer) clearTimeout(silenceTimer)
       if (cap) clearTimeout(cap)
+      if (interactiveTimer) clearTimeout(interactiveTimer)
       if (signal) {
         try { signal.removeEventListener('abort', abortExternal) } catch {}
       }
@@ -288,6 +298,7 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
   // before failing.
   const activeTools = new Set<string>()
   const awaitingUser = new Set<string>()
+  const pendingPermissions = new Map<string, OcPermissionInfo>()
   let lastSilenceLimitMs = OC_IDLE_SILENCE_MS
   const armSilence = () => {
     if (silenceTimer) {
@@ -315,54 +326,69 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
     cap = setTimeout(() => resolveSilent('silent'), OC_ACTIVITY_CAP_MS)
   }
 
+  const armInteractiveSync = () => {
+    if (interactiveTimer) return
+    if (disposed || turnDone || awaitingUser.size === 0) return
+    interactiveTimer = setTimeout(() => {
+      interactiveTimer = null
+      void syncInteractive()
+    }, 5_000)
+  }
+
   const syncInteractive = async () => {
+    if (interactiveSyncInFlight || disposed || turnDone) return
+    interactiveSyncInFlight = true
+    const revision = ocInteractiveRevision
     const formKeysBefore = new Set([...awaitingUser].filter((k) => k.startsWith('form:')))
     const permKeysBefore = new Set([...awaitingUser].filter((k) => k.startsWith('perm:')))
-    const [formsResult, permsResult] = await Promise.allSettled([
-      ocListForms(ocId),
-      ocListPermissions(ocId),
-    ])
-    if (disposed || turnDone) return
+    try {
+      const [formsResult, permsResult] = await Promise.allSettled([
+        ocListForms(ocId),
+        ocListPermissions(ocId),
+      ])
+      if (disposed || turnDone || revision !== ocInteractiveRevision) return
 
-    if (formsResult.status === 'fulfilled' && Array.isArray(formsResult.value)) {
-      const forms = formsResult.value
-        .map(parseOcForm)
-        .filter((f): f is OcFormInfo => f !== null)
-      const liveIds = new Set(forms.map((f) => f.id))
-      for (const key of formKeysBefore) {
-        const id = key.slice('form:'.length)
-        if (liveIds.has(id)) continue
-        awaitingUser.delete(key)
-        hooks.questionResolved?.(id)
+      if (formsResult.status === 'fulfilled' && Array.isArray(formsResult.value)) {
+        const forms = formsResult.value
+          .map(parseOcForm)
+          .filter((f): f is OcFormInfo => f !== null)
+        const liveIds = new Set(forms.map((f) => f.id))
+        for (const key of formKeysBefore) {
+          const id = key.slice('form:'.length)
+          if (liveIds.has(id)) continue
+          awaitingUser.delete(key)
+          hooks.questionResolved?.(id)
+        }
+        for (const form of forms) {
+          const key = `form:${form.id}`
+          if (awaitingUser.has(key)) continue
+          awaitingUser.add(key)
+          hooks.question?.(form)
+        }
       }
-      for (const form of forms) {
-        const key = `form:${form.id}`
-        if (awaitingUser.has(key)) continue
-        awaitingUser.add(key)
-        hooks.question?.(form)
-      }
-    }
 
-    if (permsResult.status === 'fulfilled' && Array.isArray(permsResult.value)) {
-      const perms = permsResult.value
-        .map((p) => parseOcPermission(p, ocId))
-        .filter((p): p is OcPermissionInfo => p !== null)
-      const liveIds = new Set(perms.map((p) => p.id))
-      for (const key of permKeysBefore) {
-        const id = key.slice('perm:'.length)
-        if (liveIds.has(id)) continue
-        awaitingUser.delete(key)
-        hooks.permissionResolved?.(id)
+      if (permsResult.status === 'fulfilled' && Array.isArray(permsResult.value)) {
+        const perms = permsResult.value
+          .map((p) => parseOcPermission(p, ocId))
+          .filter((p): p is OcPermissionInfo => p !== null)
+        const liveIds = new Set(perms.map((p) => p.id))
+        for (const key of permKeysBefore) {
+          const id = key.slice('perm:'.length)
+          if (liveIds.has(id)) continue
+          awaitingUser.delete(key)
+          pendingPermissions.delete(id)
+          hooks.permissionResolved?.(id)
+        }
+        for (const req of perms) pendingPermissions.set(req.id, req)
+        const first = pendingPermissions.values().next().value as OcPermissionInfo | undefined
+        if (first) hooks.permission(first)
       }
-      for (const req of perms) {
-        const key = `perm:${req.id}`
-        if (awaitingUser.has(key)) continue
-        awaitingUser.add(key)
-        hooks.permission(req)
-      }
+    } finally {
+      interactiveSyncInFlight = false
+      armSilence()
+      armActivityCap()
+      armInteractiveSync()
     }
-    armSilence()
-    armActivityCap()
   }
 
   const onEvent = (e: OcEvent) => {
@@ -494,7 +520,16 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
       }
       case 'permission.asked': {
         const permId = String(d.id ?? '')
-        if (permId) awaitingUser.add(`perm:${permId}`)
+        if (permId) {
+          awaitingUser.add(`perm:${permId}`)
+          pendingPermissions.set(permId, {
+            id: permId,
+            action: String(d.action ?? ''),
+            resources: Array.isArray(d.resources) ? d.resources.map(String) : [],
+            ...(typeof d.message === 'string' && d.message ? { message: d.message } : {}),
+          })
+        }
+        noteOcInteractiveChanged()
         hooks.permission({
           id: permId,
           action: String(d.action ?? ''),
@@ -507,8 +542,12 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
         const permId = String(d.requestID ?? d.id ?? '')
         if (permId) {
           awaitingUser.delete(`perm:${permId}`)
+          pendingPermissions.delete(permId)
           hooks.permissionResolved?.(permId)
+          const next = pendingPermissions.values().next().value as OcPermissionInfo | undefined
+          if (next) hooks.permission(next)
         }
+        noteOcInteractiveChanged()
         break
       }
       case 'form.created': {
@@ -518,6 +557,7 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
           hasActivity = true
           hooks.question?.(form)
         }
+        noteOcInteractiveChanged()
         break
       }
       case 'form.replied':
@@ -527,6 +567,7 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
           awaitingUser.delete(`form:${fid}`)
           hooks.questionResolved?.(fid)
         }
+        noteOcInteractiveChanged()
         break
       }
       case 'session.execution.succeeded':
@@ -560,6 +601,7 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
     }
     armSilence()
     armActivityCap()
+    armInteractiveSync()
     if (turnDone) finishOnce()
   }
 
@@ -655,11 +697,11 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
       if (decision.syncHistory) {
         try {
           const hist = mapOcHistory((await ocHistory(ocId)) ?? [])
-          const last = [...hist].reverse().find((r) => r.role === 'assistant')
+          const last = findOcTurnAssistant(hist, opts.command?.text ?? text)
           if (last) {
             if (!finalText && last.text) {
               finalText = last.text
-              hooks.replaceText(last.text)
+              hooks.replaceAnswer(last)
             } else if (last.text.startsWith(finalText) && last.text.length > finalText.length) {
               const tail = last.text.slice(finalText.length)
               finalText += tail
@@ -669,7 +711,7 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
               // authoritative; replace the corrupted partial instead of
               // appending a suffix that no longer lines up.
               finalText = last.text
-              hooks.replaceText(last.text)
+              hooks.replaceAnswer(last)
             }
             for (const t of last.tools ?? []) {
               // Reconcile even tools already seen streaming: a missed

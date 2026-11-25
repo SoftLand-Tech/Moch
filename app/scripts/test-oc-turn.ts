@@ -12,6 +12,7 @@ import {
   decideOcDisconnectAction,
   ocReconnectDelayMs,
 } from '../src/lib/ocTurnWatchdog'
+import { findOcTurnAssistant } from '../src/lib/ocHistory'
 
 let pass = 0
 let fail = 0
@@ -214,6 +215,25 @@ function main() {
   check(
     'user cancel stops cleanly without failure',
     dCancelled.kind === 'complete' && !dCancelled.failed && !dCancelled.syncHistory,
+  )
+
+  const turnRows = [
+    { role: 'user' as const, text: 'old prompt', ts: 1 },
+    { role: 'assistant' as const, text: 'old answer', ts: 2 },
+    { role: 'user' as const, text: 'new prompt', ts: 3 },
+    { role: 'assistant' as const, text: 'new answer', ts: 4 },
+  ]
+  check(
+    'history catch-up selects the assistant owned by the current prompt',
+    findOcTurnAssistant(turnRows, 'new prompt')?.text === 'new answer',
+  )
+  check(
+    'history catch-up never borrows the previous turn answer for an empty new turn',
+    findOcTurnAssistant([
+      { role: 'user', text: 'old prompt', ts: 1 },
+      { role: 'assistant', text: 'old answer', ts: 2 },
+      { role: 'user', text: 'new prompt', ts: 3 },
+    ], 'new prompt') === undefined,
   )
 
   console.log(`\n${pass} passed, ${fail} failed`)

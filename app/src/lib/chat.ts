@@ -41,6 +41,7 @@ import {
   findStoredIdForOcSession,
   ocPickFor,
   loadOcHistory,
+  noteOcInteractiveChanged,
   type OcTurnHooks,
   type OcPermissionInfo,
   type OcHistoryRow,
@@ -2076,6 +2077,7 @@ export async function ocReplyQuestion(sid: string, answer: OcFormAnswer): Promis
   if (!ocId) return
   try {
     await ocFormReply(ocId, form.id, answer)
+    noteOcInteractiveChanged()
   } catch (err) {
     log('warn', 'opencode', `question reply failed: ${err instanceof Error ? err.message : String(err)}`)
     ocQuestions.set(sid, form)
@@ -2096,6 +2098,7 @@ export async function ocCancelQuestion(sid: string): Promise<void> {
   if (!ocId) return
   try {
     await ocFormCancel(ocId, form.id)
+    noteOcInteractiveChanged()
   } catch (err) {
     log('warn', 'opencode', `question cancel failed: ${err instanceof Error ? err.message : String(err)}`)
     ocQuestions.set(sid, form)
@@ -2142,6 +2145,7 @@ export async function ocReplyPermission(sid: string, reply: 'once' | 'always' | 
   if (!ocId) return
   try {
     await ocPermissionReply(ocId, req.id, reply)
+    noteOcInteractiveChanged()
   } catch (err) {
     log('warn', 'opencode', `permission reply failed: ${err instanceof Error ? err.message : String(err)}`)
     // Put the ask back: a failed reply must not strand the server-blocked
@@ -2178,31 +2182,30 @@ function ocHooksFor(sid: string): OcTurnHooks {
       })
     },
     text: (delta) => queueStream(sid, 'text', delta),
-    replaceText: (value) => {
+    replaceAnswer: (answer) => {
       flushStreams()
       const cur = sessionsById.get()[sid]
       if (!cur) return
-      const text = value.slice(0, HISTORY_TEXT_MAX)
+      const text = answer.text.slice(0, HISTORY_TEXT_MAX)
+      const source = answer.segments?.length
+        ? answer.segments
+        : [
+            ...(answer.thinking ? [{ kind: 'thinking' as const, text: answer.thinking }] : []),
+            ...(answer.text ? [{ kind: 'text' as const, text: answer.text }] : []),
+          ]
+      const segments: ChatSegment[] = source.map((seg) =>
+        seg.kind === 'thinking'
+          ? { kind: 'thinking', text: seg.text.slice(0, HISTORY_TEXT_MAX), startedAt: answer.ts }
+          : { kind: 'text', text: seg.text.slice(0, HISTORY_TEXT_MAX) },
+      )
       const list = [...cur.messages]
       for (let i = list.length - 1; i >= 0; i--) {
         if (list[i].role !== 'assistant' || !list[i].streaming) continue
-        const segments: ChatSegment[] = []
-        let inserted = false
-        for (const seg of list[i].segments ?? []) {
-          if (seg.kind !== 'text') {
-            segments.push(seg)
-          } else if (!inserted && text) {
-            segments.push({ kind: 'text', text })
-            inserted = true
-          }
-        }
-        if (!inserted && text) segments.push({ kind: 'text', text })
         list[i] = { ...list[i], text, segments, streaming: true }
         patchSession(sid, { messages: list })
         return
       }
-      const segments: ChatSegment[] = text ? [{ kind: 'text', text }] : []
-      list.push({ id: nid(), role: 'assistant', text, segments, streaming: true, ts: Date.now() })
+      list.push({ id: nid(), role: 'assistant', text, segments, streaming: true, ts: answer.ts })
       patchSession(sid, { messages: list })
     },
     thinking: (delta) => queueStream(sid, 'thinking', delta),
@@ -2270,7 +2273,9 @@ function ocHooksFor(sid: string): OcTurnHooks {
       }
       if (list.length) patchSession(sid, { messages: list })
       patchSession(sid, {
-        tools: cur.tools.map((t) => (t.status === 'running' ? { ...t, status: 'done' as const } : t)),
+        tools: cur.tools.map((t) =>
+          t.status === 'running' ? { ...t, status: failed ? 'failed' as const : 'done' as const } : t,
+        ),
         busy: false,
       })
       schedulePersist(sid)
