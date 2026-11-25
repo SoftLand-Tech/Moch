@@ -41,6 +41,8 @@ import {
   findStoredIdForOcSession,
   ocPickFor,
   loadOcHistory,
+  noteOcInteractiveChanged,
+  ocInteractiveRevisionValue,
   type OcTurnHooks,
   type OcPermissionInfo,
   type OcHistoryRow,
@@ -1284,6 +1286,9 @@ async function runResume(storedId: string, profile?: string): Promise<ResumeResu
     applyHistory(id, res.messages ?? [], res.inflight)
   } else {
     await loadCachedTranscript(newStored)
+    if (isOcChat && !ocBusy) {
+      void hydrateOcHistory(id, { force: !!(sessionsById.get()[id]?.messages.length) }).catch(() => {})
+    }
   }
   // Extra call is safe by construction: its busy/detached/pending guards
   // return unless this chat actually has a queued message and an idle handle.
@@ -1924,12 +1929,13 @@ export function applyHistory(
         ? { ...seg, text: `${seg.text.slice(0, HISTORY_TEXT_MAX)}…` }
         : seg,
     )
+    const rowTs = toMs(Number(m.ts ?? m.timestamp)) || Date.now()
     const segs: ChatSegment[] = []
     if (reasoning) {
       segs.push({
         kind: 'thinking',
         text: `${reasoning.slice(0, HISTORY_TEXT_MAX)}${reasoning.length > HISTORY_TEXT_MAX ? '…' : ''}`,
-        startedAt: Number(m.ts ?? m.timestamp ?? Date.now()) || undefined,
+        startedAt: rowTs,
       })
     }
     if (hasMedia) {
@@ -1945,7 +1951,7 @@ export function applyHistory(
       id: nid(),
       role,
       text: `${rowText.slice(0, HISTORY_TEXT_MAX)}${rowText.length > HISTORY_TEXT_MAX ? '…' : ''}`,
-      ts: Number(m.ts ?? m.timestamp ?? Date.now()),
+      ts: rowTs,
       ...(segs.length ? { segments: segs } : {}),
     })
   }
@@ -2076,6 +2082,7 @@ export async function ocReplyQuestion(sid: string, answer: OcFormAnswer): Promis
   if (!ocId) return
   try {
     await ocFormReply(ocId, form.id, answer)
+    noteOcInteractiveChanged()
   } catch (err) {
     log('warn', 'opencode', `question reply failed: ${err instanceof Error ? err.message : String(err)}`)
     ocQuestions.set(sid, form)
@@ -2096,6 +2103,7 @@ export async function ocCancelQuestion(sid: string): Promise<void> {
   if (!ocId) return
   try {
     await ocFormCancel(ocId, form.id)
+    noteOcInteractiveChanged()
   } catch (err) {
     log('warn', 'opencode', `question cancel failed: ${err instanceof Error ? err.message : String(err)}`)
     ocQuestions.set(sid, form)
@@ -2111,8 +2119,10 @@ export async function syncOcQuestions(liveId: string): Promise<void> {
   if (!s || !stored || isPseudoStoredId(stored)) return
   const ocId = await ocSessionFor(stored)
   if (!ocId) return
+  const revision = ocInteractiveRevisionValue()
   try {
     const raw = await ocListForms(ocId)
+    if (revision !== ocInteractiveRevisionValue()) return
     const forms = Array.isArray(raw)
       ? raw.map(parseOcForm).filter((f): f is OcFormInfo => f !== null)
       : []
@@ -2142,6 +2152,7 @@ export async function ocReplyPermission(sid: string, reply: 'once' | 'always' | 
   if (!ocId) return
   try {
     await ocPermissionReply(ocId, req.id, reply)
+    noteOcInteractiveChanged()
   } catch (err) {
     log('warn', 'opencode', `permission reply failed: ${err instanceof Error ? err.message : String(err)}`)
     // Put the ask back: a failed reply must not strand the server-blocked
@@ -2178,12 +2189,45 @@ function ocHooksFor(sid: string): OcTurnHooks {
       })
     },
     text: (delta) => queueStream(sid, 'text', delta),
+    replaceAnswer: (answer) => {
+      flushStreams()
+      const cur = sessionsById.get()[sid]
+      if (!cur) return
+      const text = answer.text.slice(0, HISTORY_TEXT_MAX)
+      const source = answer.segments?.length
+        ? answer.segments
+        : [
+            ...(answer.thinking ? [{ kind: 'thinking' as const, text: answer.thinking }] : []),
+            ...(answer.text ? [{ kind: 'text' as const, text: answer.text }] : []),
+          ]
+      const segments: ChatSegment[] = source.map((seg) =>
+        seg.kind === 'thinking'
+          ? { kind: 'thinking', text: seg.text.slice(0, HISTORY_TEXT_MAX), startedAt: answer.ts }
+          : { kind: 'text', text: seg.text.slice(0, HISTORY_TEXT_MAX) },
+      )
+      const list = [...cur.messages]
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (list[i].role !== 'assistant' || !list[i].streaming) continue
+        list[i] = { ...list[i], text, segments, streaming: true }
+        patchSession(sid, { messages: list })
+        return
+      }
+      list.push({ id: nid(), role: 'assistant', text, segments, streaming: true, ts: answer.ts })
+      patchSession(sid, { messages: list })
+    },
     thinking: (delta) => queueStream(sid, 'thinking', delta),
     tool: (id, name, phase, preview, durationS) =>
       upsertToolIn(sid, { id, name, preview, status: phase, durationS }),
     permission: (req) => {
       ocPermissions.set(sid, req)
       if (activeSession.get() === sid) ocPermissionLive.set({ sid, req })
+    },
+    permissionResolved: (requestId) => {
+      const existing = ocPermissions.get(sid)
+      if (!existing || (requestId && existing.id !== requestId)) return
+      ocPermissions.delete(sid)
+      if (ocPermissionLive.get()?.sid === sid) ocPermissionLive.set(null)
+      clearAttentionLive(sid)
     },
     question: (form) => {
       ocQuestions.set(sid, form)
@@ -2236,7 +2280,9 @@ function ocHooksFor(sid: string): OcTurnHooks {
       }
       if (list.length) patchSession(sid, { messages: list })
       patchSession(sid, {
-        tools: cur.tools.map((t) => (t.status === 'running' ? { ...t, status: 'done' as const } : t)),
+        tools: cur.tools.map((t) =>
+          t.status === 'running' ? { ...t, status: failed ? 'failed' as const : 'done' as const } : t,
+        ),
         busy: false,
       })
       schedulePersist(sid)
@@ -2329,12 +2375,24 @@ async function runOcOneShot(sid: string, text: string): Promise<void> {
 const ocHydrated = new Set<string>()
 
 /** Map OpenCode history rows into this app's ChatMessage/ToolItem shapes. */
-function ocRowsToMessages(rows: OcHistoryRow[]): { messages: ChatMessage[]; tools: ToolItem[] } {
+function ocRowsToMessages(rows: OcHistoryRow[]): {
+  messages: ChatMessage[]
+  tools: ToolItem[]
+  attachmentNames: Map<string, string[]>
+} {
   const msgs: ChatMessage[] = []
   const tools: ToolItem[] = []
+  const attachmentNames = new Map<string, string[]>()
   for (const r of rows) {
     if (r.role === 'user') {
-      msgs.push({ id: nid(), role: 'user', text: r.text.slice(0, HISTORY_TEXT_MAX), ts: r.ts })
+      const id = nid()
+      msgs.push({
+        id,
+        role: 'user',
+        text: (r.text === '[attachment]' ? '' : r.text).slice(0, HISTORY_TEXT_MAX),
+        ts: r.ts,
+      })
+      if (r.attachmentNames?.length) attachmentNames.set(id, r.attachmentNames)
       continue
     }
     // Grouped rows carry the turn's blocks in stream order (thinking/text
@@ -2364,7 +2422,25 @@ function ocRowsToMessages(rows: OcHistoryRow[]): { messages: ChatMessage[]; tool
       tools.push({ id: `${r.ts}_${t.id}`, name: t.name, status: t.ok ? 'done' : 'failed' })
     }
   }
-  return { messages: msgs, tools }
+  return { messages: msgs, tools, attachmentNames }
+}
+
+/** Cold/server-only history has filenames but no local tile paths; keep the
+ *  names visible in the user bubble. Locally reconciled rows keep their real
+ *  media segments and never take this fallback. */
+function appendOcAttachmentNames(
+  messages: ChatMessage[],
+  attachmentNames: Map<string, string[]>,
+): ChatMessage[] {
+  return messages.map((m) => {
+    const names = attachmentNames.get(m.id)
+    if (!names?.length || m.segments?.some((s) => s.kind === 'media')) return m
+    const text = [m.text === '[attachment]' ? '' : m.text, ...names]
+      .filter(Boolean)
+      .join('\n')
+      .slice(0, HISTORY_TEXT_MAX)
+    return { ...m, text, ...(text ? { segments: [{ kind: 'text' as const, text }] } : {}) }
+  })
 }
 
 /** Last index matching `pred`, or -1 (findLastIndex is ES2023; the app's
@@ -2418,51 +2494,37 @@ export async function hydrateOcHistory(liveId: string, opts?: { force?: boolean 
     const cur = sessionsById.get()[liveId]
     if (!cur || cur.storedId !== stored || cur.busy) return
     if (!rows.length) return
-    const { messages: mapped, tools: mappedTools } = ocRowsToMessages(rows)
+    const { messages: mapped, tools: mappedTools, attachmentNames } = ocRowsToMessages(rows)
+    const displayMapped = appendOcAttachmentNames(mapped, attachmentNames)
     if (!cur.messages.length) {
       // Cold path: nothing local to protect.
       patchSession(liveId, {
-        messages: [...cur.messages, ...mapped].slice(-MAX_MESSAGES),
+        messages: [...cur.messages, ...displayMapped].slice(-MAX_MESSAGES),
         tools: [...cur.tools, ...mappedTools].slice(-MAX_TOOLS),
       })
       schedulePersist(liveId)
       return
     }
     if (!force) return // messages appeared mid-fetch — cold path stays put
-    // Forced merge. Anchor on the last local user row the server persisted;
-    // everything after it (a partial assistant row, or nothing at all when
-    // the turn landed while away) is authoritative server history now.
-    const localUserIdx = lastIndexWhere(cur.messages, (m) => m.role === 'user' && m.text.trim().length > 0)
-    if (localUserIdx < 0) return
-    const anchor = cur.messages[localUserIdx]
-    if (anchor.status === 'failed' || anchor.status === 'unconfirmed') return // never persisted — keep the local transcript
-    const localUser = anchor.text.trim()
-    const localMatchCount = cur.messages.filter((m) => m.role === 'user' && m.text.trim() === localUser).length
-    const mappedMatchCount = mapped.filter((m) => m.role === 'user' && m.text.trim() === localUser).length
-    if (mappedMatchCount < localMatchCount) return // newest turn not persisted on server yet — keep local messages
-    const mappedUserIdx = lastIndexWhere(mapped, (m) => m.role === 'user' && m.text.trim() === localUser)
-    if (mappedUserIdx < 0) return // not persisted (failed send) — keep local
-    const tail = mapped.slice(mappedUserIdx + 1)
-    // No server rows after the anchor: the turn is not persisted yet. Keep
-    // the local tail rather than replacing it with nothing (a live answer must
-    // not be swallowed by a history read that raced the server's write).
-    if (!tail.length) return
-    const merged = [
-      ...cur.messages.slice(0, localUserIdx + 1),
-      ...tail,
-    ].slice(-MAX_MESSAGES)
-    // The live stream keys tools by the server's part id; drop those local
-    // rows for the turn being replaced so the hydrated copies (prefixed for
-    // history) don't render twice. Everything else is kept, then deduped by
-    // id against the returned tools.
+    // Forced merge: reconcile server history against local messages so user
+    // prompts, unpersisted/failed local user sends, command cards, and live
+    // tails survive, while broken assistant-only caches heal from the server.
+    const reconciled = appendOcAttachmentNames(
+      reconcileHistoryMessages(mapped, cur.messages, { makeId: nid }) as ChatMessage[],
+      attachmentNames,
+    )
+    const mappedUserIdx = lastIndexWhere(mapped, (m) => m.role === 'user' && m.text.trim().length > 0)
     const tailToolIds = new Set<string>()
-    for (const row of rows.slice(mappedUserIdx + 1)) {
+    for (const row of mappedUserIdx >= 0 ? rows.slice(mappedUserIdx + 1) : rows) {
       for (const t of row.tools ?? []) tailToolIds.add(t.id)
     }
     const keptTools = cur.tools.filter((t) => !tailToolIds.has(t.id))
     const seen = new Set(keptTools.map((t) => t.id))
     const added = mappedTools.filter((t) => (seen.has(t.id) ? false : (seen.add(t.id), true)))
-    patchSession(liveId, { messages: merged, tools: [...keptTools, ...added].slice(-MAX_TOOLS) })
+    patchSession(liveId, {
+      messages: reconciled.slice(-MAX_MESSAGES),
+      tools: [...keptTools, ...added].slice(-MAX_TOOLS),
+    })
     schedulePersist(liveId)
   } finally {
     ocHydrating.delete(liveId)

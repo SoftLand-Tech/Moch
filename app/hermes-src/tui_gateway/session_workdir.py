@@ -355,6 +355,10 @@ def _persist_submit_user_row(session: dict, text: Any, display_kind: str | None)
     from agent.context_compressor import _DB_PERSISTED_MARKER
     from agent.message_metadata import stamp_message_timestamp
     staged = stamp_message_timestamp({"role": "user", "content": text})
+    turn = session.get("inflight_turn")
+    started_at = turn.get("started_at") if isinstance(turn, dict) else None
+    if isinstance(started_at, (int, float)) and started_at > 0:
+        staged["timestamp"] = float(started_at)
     if display_kind:
         staged["display_kind"] = display_kind
     with _session_db(session) as db:

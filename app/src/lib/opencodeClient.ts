@@ -19,6 +19,7 @@ import { linuxTermProbe, linuxTermStart, linuxTermWrite } from './mochiRuntime'
 import { guestRun } from './thinker'
 import { rpc } from './gateway'
 import { log } from './log'
+import { ocHistoryPageQuery, nextOcHistoryCursor } from './ocHistory'
 import type { OcFormAnswer, OcFormInfo } from './ocForm'
 
 export type { OcFormAnswer, OcFormField, OcFormInfo, OcFormOption, OcFormValue } from './ocForm'
@@ -80,7 +81,7 @@ async function base(): Promise<string> {
 
 export async function ocFetch<T = unknown>(
   path: string,
-  opts?: { method?: string; body?: unknown; timeoutMs?: number },
+  opts?: { method?: string; body?: unknown; timeoutMs?: number; unwrap?: boolean },
 ): Promise<T> {
   const auth = await authHeader()
   const ctrl = new AbortController()
@@ -121,7 +122,7 @@ export async function ocFetch<T = unknown>(
     throw new OcError(res.status, msg)
   }
   // Envelopes: {data: …} on most routes; raw arrays/objects elsewhere.
-  if (data && typeof data === 'object' && 'data' in (data as Record<string, unknown>)) {
+  if (opts?.unwrap !== false && data && typeof data === 'object' && 'data' in (data as Record<string, unknown>)) {
     return (data as Record<string, unknown>).data as T
   }
   return data as T
@@ -140,7 +141,8 @@ export interface OcSession {
    * minted before BUG-149 (and rows from a server that omits it) stay flat.
    */
   directory?: string
-  time?: { created?: number; updated?: number }
+  outcome?: 'succeeded' | 'failed' | 'interrupted' | string
+  time?: { created?: number; updated?: number; idle?: number }
 }
 
 export interface OcModel {
@@ -163,9 +165,12 @@ export interface OcIntegration {
 }
 
 export interface OcHistoryMessage {
+  id?: string
   type: 'user' | 'assistant' | 'idle' | string
-  time?: { created?: number }
+  time?: { created?: number | string }
+  text?: string
   payload?: { text?: string }
+  files?: Array<{ name?: string; filename?: string; mime?: string }>
   content?: Array<{
     type: 'text' | 'reasoning' | 'tool' | string
     text?: string
@@ -185,6 +190,12 @@ export interface OcEvent {
 
 export const ocListSessions = () => ocFetch<OcSession[]>('/api/session', { timeoutMs: 15_000 })
 
+export const ocGetSession = (id: string) =>
+  ocFetch<OcSession>(`/api/session/${encodeURIComponent(id)}`, { timeoutMs: 15_000 })
+
+export const ocActiveSessions = () =>
+  ocFetch<Record<string, { type?: string }>>('/api/session/active', { timeoutMs: 15_000 })
+
 /**
  * Create a session. `directory` (BUG-149) files the session under a project:
  * it goes in the QUERY STRING exactly like the python twin's send_prompt
@@ -197,8 +208,32 @@ export const ocCreateSession = (title: string, directory?: string) =>
     { method: 'POST', body: { title } },
   )
 
-export const ocHistory = (id: string) =>
-  ocFetch<OcHistoryMessage[]>(`/api/session/${encodeURIComponent(id)}/message`, { timeoutMs: 30_000 })
+export const ocHistory = async (id: string, limit = 200): Promise<OcHistoryMessage[]> => {
+  const pageSize = Math.max(1, Math.min(200, Math.floor(limit)))
+  const messages: OcHistoryMessage[] = []
+  const seenCursors = new Set<string>()
+  const seenIds = new Set<string>()
+  let cursor: string | undefined
+  do {
+    const page = await ocFetch<{
+      data?: OcHistoryMessage[]
+      cursor?: { previous?: string; next?: string }
+    }>(`/api/session/${encodeURIComponent(id)}/message?${ocHistoryPageQuery(cursor, pageSize)}`, {
+      timeoutMs: 30_000,
+      unwrap: false,
+    })
+    const rows = Array.isArray(page?.data) ? page.data : []
+    for (const row of rows) {
+      if (row.id && seenIds.has(row.id)) continue
+      if (row.id) seenIds.add(row.id)
+      messages.push(row)
+    }
+    cursor = nextOcHistoryCursor(page)
+    if (cursor && seenCursors.has(cursor)) throw new Error('OpenCode history pagination repeated a cursor')
+    if (cursor) seenCursors.add(cursor)
+  } while (cursor)
+  return messages
+}
 
 export const ocPrompt = (id: string, text: string) =>
   ocFetch<unknown>(`/api/session/${encodeURIComponent(id)}/prompt`, { method: 'POST', body: { text }, timeoutMs: 60_000 })
@@ -208,10 +243,21 @@ export const ocInterrupt = (id: string) =>
 
 export type OcPermissionReply = 'once' | 'always' | 'reject'
 
+export interface OcPermissionRequest {
+  id: string
+  sessionID: string
+  action: string
+  resources: string[]
+  message?: string
+}
+
+export const ocListPermissions = (id: string) =>
+  ocFetch<OcPermissionRequest[]>(`/api/session/${encodeURIComponent(id)}/permission`, { timeoutMs: 15_000 })
+
 export const ocPermissionReply = (id: string, requestID: string, reply: OcPermissionReply) =>
   ocFetch<unknown>(
     `/api/session/${encodeURIComponent(id)}/permission/${encodeURIComponent(requestID)}/reply`,
-    { method: 'POST', body: { reply }, timeoutMs: 15_000 },
+    { method: 'POST', body: { decision: reply }, timeoutMs: 15_000 },
   )
 
 /** Pending forms/questions for a session (opencode 2.3.0 Form.Service). */
@@ -313,6 +359,7 @@ export const ocConnectKey = (integrationID: string, key: string) =>
 export async function ocStream(
   handler: (e: OcEvent) => void,
   signal?: AbortSignal,
+  onHeartbeat?: () => void,
 ): Promise<void> {
   const auth = await authHeader()
   let res: Response
@@ -347,6 +394,10 @@ export async function ocStream(
       while ((nl = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, nl).replace(/\r$/, '')
         buf = buf.slice(nl + 1)
+        if (line.startsWith(':')) {
+          onHeartbeat?.()
+          continue
+        }
         if (!line.startsWith('data: ')) continue
         const payload = line.slice(6).trim()
         if (!payload) continue
