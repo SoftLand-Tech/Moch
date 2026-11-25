@@ -791,7 +791,7 @@ export function Sidebar({
         // tab was focused silently swapped the chat underneath without
         // bringing it on screen.
         router.navigate('/(tabs)/chat')
-        void openOcChat(c.id).catch(() => {})
+        void openOcChat(c.id, c.title).catch(() => {})
       }}
       accessibilityRole="button"
       accessibilityLabel={tr('chrome.drawer.openOc', { title: c.title || tr('sidebar.untitled') })}
