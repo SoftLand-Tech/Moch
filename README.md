@@ -3,10 +3,13 @@
 **Your own hermes AI agent, in your pocket.**
 
 [![Release 1.0.0](https://img.shields.io/badge/release-1.0.0-F79236)](https://github.com/SoftLand-Tech/Moch/releases/latest)
+[![Dev build 1.0.53-beta.1](https://img.shields.io/badge/dev-1.0.53--beta.1-8250DF)](https://github.com/SoftLand-Tech/Moch/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Platform: Android](https://img.shields.io/badge/platform-Android-3DDC84)](https://github.com/SoftLand-Tech/Moch/releases/latest)
 
 Moch is an open-source React Native (Expo 57) chat app for **your own [hermes](https://github.com/NousResearch/hermes-agent) agent** — and it can run that agent two ways: **on a machine you own** (a spare mini-PC, a homelab box, a VPS), with Moch as the window onto it from your phone, or **entirely on your phone** — hermes ships inside the APK, complete with a real Ubuntu Linux it can drive. Either way it's *your* agent: your keys, your sessions, your data. No accounts.
+
+> **Where things stand (Nov 2026):** the stable GitHub release is **v1.0.0**. Active development builds are **1.0.53-beta.1 (versionCode 56)** and are published automatically as per-commit pre-releases (`ci-<sha>`) on the [Releases page](https://github.com/SoftLand-Tech/Moch/releases). The embedded runtime and features marked **beta** below ship in those builds, not the v1.0.0 APK.
 
 <p align="center">
   <img src="docs/screenshots/03-streaming.png" width="280" alt="Moch streaming a reply live, with a collapsed Thinking block showing elapsed time and tok/s" />
@@ -21,9 +24,9 @@ Moch is an open-source React Native (Expo 57) chat app for **your own [hermes](h
 
 ## Two ways to run your agent
 
-**Linked — the agent on your own machine.** The classic setup: hermes runs on hardware you control, and the phone connects through the official relay (or self-hosted). This is what the current release APK ships — follow [the one-command setup](#set-it-up-with-moch-link--one-command-recommended) below.
+**Linked — the agent on your own machine.** The classic setup: hermes runs on hardware you control, and the phone connects through the official relay (or self-hosted). This is what the stable v1.0.0 APK ships — follow [the one-command setup](#set-it-up-with-moch-link--one-command-recommended) below.
 
-**Embedded — the agent on the phone itself.** hermes runs inside the app: CPython 3.11 embedded in the APK, the agent booting at launch, and **Moch Linux** — a real Ubuntu 24.04 userspace under proot with apt, compilers and servers, so the agent can install and run whatever it needs. A foreground service keeps it alive in the background, automations fire on-device, and knocks (push notifications) tell you when a job is done. The embedded runtime is new and ships in development builds — not yet in the GitHub release APK.
+**Embedded — the agent on the phone itself.** hermes runs inside the app: CPython 3.11 embedded in the APK, the agent booting at launch, and **Moch Linux** — a real Ubuntu 24.04 userspace under proot with apt, compilers and servers, so the agent can install and run whatever it needs. A foreground service keeps it alive in the background, automations fire on-device, and knocks (push notifications) tell you when a job is done. The embedded runtime is new and ships in the `ci-*` development builds — not yet in the stable v1.0.0 APK.
 
 ## Set it up with moch-link — one command (recommended)
 
@@ -37,7 +40,7 @@ curl -fsSL https://moch.softland.tech/install.sh | bash
 
 **moch-link** doesn't install, configure or modify hermes — it links your existing install (starting `hermes serve` for you as a background service if it isn't running) to the official **Moch relay**, and prints a **QR pairing code**. The tunnel dials the relay **outbound**, so it works from any network, behind any NAT: no router changes, no VPN, no domain. The relay (`api.moch.softland.tech`) is a pass-through — it stores nothing but a **token hash**; your data never leaves your machine. (You'll need `node` and `npm` on PATH; the tunnel needs them.)
 
-**2. On your phone**, download `Moch-1.0.0.apk` from the [latest release](https://github.com/SoftLand-Tech/Moch/releases/latest) and install it.
+**2. On your phone**, download `Moch-1.0.0.apk` from the [latest stable release](https://github.com/SoftLand-Tech/Moch/releases/latest) and install it. Want the embedded runtime and newest beta features? Grab the newest `ci-*` pre-release from the [Releases page](https://github.com/SoftLand-Tech/Moch/releases) instead; CI signs it with the stable Moch key so it installs over the same app.
 
 **3. Scan the QR** the installer printed — the camera opens on Moch's first screen. That's it; you're talking to your own agent. Lost the code? `bash install.sh qr` reprints it.
 
@@ -71,14 +74,19 @@ Moch is a monorepo: the whole product — phone app, link, and website — ships
 | [`embedded/`](embedded/) | Design docs and milestone reports for the embedded runtime — the technical assessment, guest-exec under targetSdk 36, Moch Linux, knocks, and on-device verification procedures. |
 | [`moch-link/`](moch-link/) | The **moch-link** installer — the one-command link between an existing hermes install and the official relay. [`docs/install.sh`](docs/install.sh) is the published copy served at `moch.softland.tech/install.sh`; keep the two in sync. |
 | [`relay/`](relay/) | The **official relay** — the single-file Node service phones dial into. Run your own with [`relay/README.md`](relay/README.md); ours at `api.moch.softland.tech` is **free while Moch is new**. |
-| [`docs/`](docs/) | The **website source** (this page's home), published to GitHub Pages. |
+| [`docs/`](docs/) | The **website source** — live at [moch.softland.tech](https://moch.softland.tech) and mirrored to [GitHub Pages](https://softland-tech.github.io/Relay). The site's `/Moch.apk` is the newest CI beta; CI also publishes every successful APK as a `ci-<sha>` GitHub pre-release. |
 
 ## Features
 
 - **Streaming chat with thinking blocks** — answers stream token-by-token; reasoning arrives as collapsible *Thinking* blocks inline with the answer (elapsed time, ~tok/s, reasoning-effort chip), plus tool-call rows with status and duration. Markdown renders on completion, with copy and listen actions on every reply.
 - **Mochi, the mascot** — a little robot that lives in the empty states and loading moments: it greets you, thinks, celebrates, and asks for approval with matching expressions.
 - **Themes, including Mocheme** — a dark-first palette extracted from the logo, plus the Mocheme theme and friends, switchable in Settings.
+- **Redesigned, in four languages** — every screen rebuilt around the Moch design system, with complete English, Arabic, Chinese and French translations. Arabic gets full RTL layout; switch languages instantly in Settings.
 - **Multi-session with attention badges** — every conversation is an independent session with its own messages, tools and todos; a turn keeps streaming in one while you read another, and a question waiting in the background shows as a badge instead of interrupting.
+- **Project-aware sessions** *(beta)* — chats and OpenCode sessions can belong to a project directory, and the model picker can set a default for **all sessions** at once, OpenCode included.
+- **Terminal workspace with tabs** *(beta)* — keep multiple terminal sessions in tabs, each with its own working directory, in a green JetBrains Mono terminal theme.
+- **Browser with agent control and human takeover** *(beta)* — Moch drives the visible browser tab; **Ask Moch** runs a quick task in the background while you stay on the page, a status chip lets you stop it, and a **Moch needs your help** card hands control back when a page needs a human.
+- **Bots and the Mochi fleet** *(beta)* — bots follow native Hermes Bot Mode with one canonical Bot Chat each, and the fleet/drawer gives every bot its own Mochi avatar.
 - **Media and voice messages** — send images to your agent; the mic button records and transcribes through the server's STT, and *Listen* plays a reply through the server's TTS. No audio API keys ever live on the phone.
 - **Slash commands** — typing `/` drives off the gateway's own registry, so new server-side commands and skills appear without an app update.
 - **Automations** — scheduled jobs (cron, in plain language: `every 30m`, `every monday 9:00`) that run on the server, so they fire even when the app is closed.
@@ -86,7 +94,8 @@ Moch is a monorepo: the whole product — phone app, link, and website — ships
 - **"Ask Moch" share target** — share text, links, images, videos, audio or PDFs from any app straight into Moch; content lands in the composer as a draft with attachment chips, and you hit Send.
 - **Automation knocks** — when a scheduled job finishes (or needs you), Moch knocks with a push notification that lands even if the app was killed — tapping it opens the right chat.
 - **Provider API keys** — connect and disconnect model providers from the app; keys are stored and used server-side.
-- **OTA updates** — the app updates itself over the air; new features reach phones without a reinstall.
+- **Updates without a reinstall** — stable CI signing means APKs install over previous builds; JS and asset updates publish to the production OTA channel, and Settings → About has **Check for updates**.
+- **Resilient embedded boot** — stalled runtime boots resume when the app returns to the foreground, and OpenCode sessions recover instead of falling back to a fresh chat.
 
 …plus multi-computer pairing, reconnect with lossless replay, an offline outbox, and local + remote push notifications for approvals. See [`app/README.md`](app/README.md) for the deep dive.
 
@@ -102,6 +111,8 @@ npm test            # protocol suite against a fake gateway — no server needed
 ```
 
 **moch-link** (`moch-link/`) is a single self-installing bash script; the copy in [`docs/`](docs/install.sh) is the one the site serves — edit both together.
+
+**Website and CI releases.** `docs/` is static HTML/CSS with no build step; the live site is served from `/var/www/moch` on the production VPS. Every successful `main` APK build automatically publishes a `ci-<short-sha>` pre-release on GitHub with the version, run link and SHA-256 in its notes.
 
 ## Credits & license
 
