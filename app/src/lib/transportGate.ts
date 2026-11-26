@@ -29,6 +29,20 @@ export function normalizeHost(raw: string): string {
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/
 
 /**
+ * Whether a saved gateway is safe to retry in local-only mode. Unlike
+ * isPrivateHost, this deliberately excludes LAN and every other remote host.
+ */
+export function isLoopbackHost(host: string): boolean {
+  let h: string
+  try { h = normalizeHost(host).toLowerCase() } catch { return false }
+  if (h === '::1') return true
+  if (h.startsWith('[')) return /^\[::1\](?::\d+)?$/.test(h)
+  const parts = h.split(':')
+  if (parts.length > 2 || (parts.length === 2 && !/^\d+$/.test(parts[1]))) return false
+  return parts[0] === 'localhost' || parts[0] === '127.0.0.1'
+}
+
+/**
  * Loopback + RFC1918 (and IPv6 loopback). The old gateway.ts `isLocalHost`
  * logic, generalized: `::1` and bracketed IPv6 now actually match (the bare
  * `'::1'.split(':')[0] === ''` comparison never did), and the RFC1918

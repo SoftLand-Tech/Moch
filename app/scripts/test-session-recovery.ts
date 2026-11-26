@@ -124,32 +124,160 @@ load._load = function (id: string, parent: unknown, isMain: boolean): unknown {
 }
 
 const require_ = createRequire(import.meta.url)
+const WebSocketServerCtor = ((wsMod as unknown as Record<string, unknown>).WebSocketServer ??
+  (wsMod as unknown as Record<string, unknown>).Server) as typeof import('ws').WebSocketServer
+const WsClientCtor = ((wsMod as unknown as Record<string, unknown>).WebSocket ?? wsMod) as unknown as new (
+  url: string | URL,
+  protocols?: string | string[],
+  options?: Record<string, unknown>,
+) => WebSocket
+const dialUrls: string[] = []
+const originalWebSocket = globalThis.WebSocket
+
+class RecordingWebSocket extends WsClientCtor {
+  constructor(url: string | URL, protocols?: string | string[], options?: Record<string, unknown>) {
+    const address = String(url)
+    dialUrls.push(address)
+    // Keep the suite offline even if the retry guard regresses: a remote URL
+    // is recorded, then rejected before DNS or any other network access.
+    if (!/^ws:\/\/127\.0\.0\.1:\d+\/api\/ws(?:\?|$)/.test(address)) {
+      throw new Error(`offline test blocked non-embedded dial: ${address}`)
+    }
+    super(url, protocols, options)
+  }
+}
+
+globalThis.WebSocket = RecordingWebSocket as unknown as typeof WebSocket
+
+async function startReadyGateway(): Promise<{ wss: import('ws').WebSocketServer; port: number }> {
+  const wss = new WebSocketServerCtor({ host: '127.0.0.1', port: 0 })
+  await new Promise<void>((resolve) => wss.once('listening', () => resolve()))
+  wss.on('connection', (ws) => {
+    ws.send(JSON.stringify({ type: 'event', event: 'gateway.ready', payload: { heartbeat: false, replay_epoch: 'guard' } }))
+  })
+  const addr = wss.address() as { port: number }
+  return { wss, port: addr.port }
+}
+
+async function closeServer(wss: import('ws').WebSocketServer): Promise<void> {
+  await new Promise<void>((resolve) => wss.close(() => resolve()))
+}
 
 async function main() {
   // ── 1. Gateway boot backgrounding / foreground recovery ─────────────────
   const gw = require_('../src/lib/gateway') as typeof import('../src/lib/gateway')
+  const resetGateway = async () => {
+    await gw.clearConfig()
+    kv.clear()
+    gw.servers.set([])
+    gw.activeServerId.set(null)
+  }
 
   // Simulate connectThisPhone timing out while runtime wasn't ready yet
   // (e.g. backgrounded for > timeoutMs).
   mockGw = { running: true, ready: false, port: null, token: null, workspace: '/tmp/ws', error: null }
-  let timedOut = false
+  let timeoutError: unknown = null
   try {
     await gw.connectThisPhone({ timeoutMs: 20, pollMs: 10 })
-  } catch {
-    timedOut = true
+  } catch (e) {
+    timeoutError = e
   }
-  check('connectThisPhone throws when runtime does not become ready before timeout', timedOut)
+  check(
+    'connectThisPhone timeout keeps actionable retry copy',
+    timeoutError instanceof Error && /try again in a moment/i.test(timeoutError.message),
+    `error=${String(timeoutError)}`,
+  )
 
   // Now runtime finished booting in background, and user hits retry when no saved config exists.
-  mockGw = { running: true, ready: true, port: 9119, token: 'tok-abc', workspace: '/tmp/ws', error: null }
-  let threwNoSaved = false
+  const bootGateway = await startReadyGateway()
+  const embeddedUrl = `ws://127.0.0.1:${bootGateway.port}/api/ws`
+  mockGw = { running: true, ready: true, port: bootGateway.port, token: 'tok-abc', workspace: '/tmp/ws', error: null }
+  dialUrls.length = 0
+  let noSavedError: unknown = null
   try {
     await gw.retryNow()
   } catch (e) {
-    if (e instanceof Error && /No saved connection/i.test(e.message)) threwNoSaved = true
+    noSavedError = e
   }
-  check('retryNow falls back to connectThisPhone when no saved config exists', !threwNoSaved)
+  check(
+    'retryNow falls back to connectThisPhone when no saved config exists',
+    noSavedError === null && gw.connectionState.get() === 'open' && dialUrls.length === 1 && dialUrls[0] === embeddedUrl,
+    `error=${String(noSavedError)} urls=${dialUrls.join(',')}`,
+  )
   gw.disconnect()
+
+  // A saved loopback config is still retried directly, on its saved port.
+  await resetGateway()
+  kv.set('hermes.connection.host.v2', `127.0.0.1:${bootGateway.port}`)
+  kv.set('hermes.connection.tls.v2', '0')
+  kv.set('hermes.gateway.token', 'stale-local-token')
+  dialUrls.length = 0
+  let localRetryError: unknown = null
+  try {
+    await gw.retryNow()
+  } catch (e) {
+    localRetryError = e
+  }
+  check(
+    'retryNow dials a saved loopback gateway',
+    localRetryError === null && gw.connectionState.get() === 'open' && dialUrls.length === 1 && dialUrls[0] === embeddedUrl,
+    `error=${String(localRetryError)} urls=${dialUrls.join(',')}`,
+  )
+  check(
+    'local retry preserves the embedded gateway port and live runtime token',
+    gw.connConfig.get()?.host === `127.0.0.1:${bootGateway.port}` && gw.connConfig.get()?.token === 'tok-abc',
+  )
+  gw.disconnect()
+
+  // A saved remote config from the pairing era must fall back to embedded boot
+  // without ever reaching the socket factory.
+  await resetGateway()
+  kv.set('hermes.connection.host.v2', 'gateway.example.com:443')
+  kv.set('hermes.connection.tls.v2', '1')
+  kv.set('hermes.gateway.token', 'retired-remote-token')
+  dialUrls.length = 0
+  let remoteRetryError: unknown = null
+  try {
+    await gw.retryNow()
+  } catch (e) {
+    remoteRetryError = e
+  }
+  check(
+    'retryNow refuses a saved non-loopback gateway and falls back to local boot',
+    remoteRetryError === null && gw.connectionState.get() === 'open' && dialUrls.length === 1 && dialUrls[0] === embeddedUrl,
+    `error=${String(remoteRetryError)} urls=${dialUrls.join(',')}`,
+  )
+  check(
+    'non-loopback retry never dials the saved remote config or adds an error',
+    !dialUrls.some((url) => url.includes('gateway.example.com')) && gw.gatewayError.get() === null,
+  )
+  gw.disconnect()
+
+  // Normal embedded boot is unchanged: it ignores a stale saved token and
+  // dials the runtime's current loopback endpoint.
+  await resetGateway()
+  kv.set('hermes.connection.host.v2', `127.0.0.1:${bootGateway.port}`)
+  kv.set('hermes.connection.tls.v2', '0')
+  kv.set('hermes.gateway.token', 'stale-boot-token')
+  dialUrls.length = 0
+  let embeddedBootError: unknown = null
+  try {
+    await gw.connectThisPhone({ timeoutMs: 1_000, pollMs: 5 })
+  } catch (e) {
+    embeddedBootError = e
+  }
+  check(
+    'connectThisPhone still dials the embedded loopback gateway directly',
+    embeddedBootError === null && gw.connectionState.get() === 'open' && dialUrls.length === 1 && dialUrls[0] === embeddedUrl,
+    `error=${String(embeddedBootError)} urls=${dialUrls.join(',')}`,
+  )
+  check(
+    'connectThisPhone still replaces a stale saved token with the live runtime token',
+    gw.connConfig.get()?.host === `127.0.0.1:${bootGateway.port}` && gw.connConfig.get()?.token === 'tok-abc',
+  )
+  gw.disconnect()
+  await closeServer(bootGateway.wss)
+  globalThis.WebSocket = originalWebSocket
 
   // Verify single-flight deduplication on concurrent connectThisPhone calls
   mockGw = { running: true, ready: false, port: null, token: null, workspace: '/tmp/ws', error: null }
@@ -224,8 +352,6 @@ async function main() {
 
   let createCalls = 0
   let resumeCalls = 0
-  const WebSocketServerCtor = ((wsMod as unknown as Record<string, unknown>).WebSocketServer ??
-    (wsMod as unknown as Record<string, unknown>).Server) as typeof import('ws').WebSocketServer
   const wss = new WebSocketServerCtor({ host: '127.0.0.1', port: 0 })
   await new Promise<void>((resolve) => wss.once('listening', () => resolve()))
   const addr = wss.address() as { port: number }

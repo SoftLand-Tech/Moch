@@ -5,7 +5,7 @@ import { JsonRpcGatewayClient, type GatewayEvent, type ConnectionState, type Ser
 import { RnWebSocketAdapter } from '../protocol/rn-socket'
 import { log } from './log'
 import { getEmbeddedGateway } from './mochiRuntime'
-import { isPrivateHost, normalizeHost } from './transportGate'
+import { isLoopbackHost, isPrivateHost, normalizeHost } from './transportGate'
 
 // Host normalization moved to transportGate.ts (pure, node-loadable — pairing.ts
 // and the scripts suites need it); re-exported here so existing callers are untouched.
@@ -583,22 +583,22 @@ function scheduleReconnect() {
     // timer — the veil must be free to show the terminal failure.
     retryPending.set(false)
     if (!wantConnection || manualClose || !lastConfig) return
-    void dial(lastConfig, { isRetry: true }).catch(() => {})
+    void retryNow().catch(() => {})
   }, delay)
 }
 
 export async function retryNow(): Promise<void> {
   cancelReconnect()
   manualClose = false
-  if (!lastConfig) {
-    const saved = connConfig.get() ?? (await loadSavedConfig())
-    if (!saved) {
-      await connectThisPhone()
-      return
-    }
-    lastConfig = saved
+  const saved = lastConfig ?? connConfig.get() ?? (await loadSavedConfig())
+  // Remote pairing is retired. A saved LAN/public gateway must never be
+  // redialled by manual retry, foreground recovery, or the reconnect timer.
+  if (!saved || !isLoopbackHost(saved.host)) {
+    await connectThisPhone()
+    return
   }
-  await dial(lastConfig, { isRetry: true })
+  lastConfig = saved
+  await dial(saved, { isRetry: true })
 }
 
 // ---- push token re-advertisement ---------------------------------------------
