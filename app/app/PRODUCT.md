@@ -38,7 +38,7 @@ Moch integrates OpenCode as a selectable thinker. It is not the official OpenCod
 - Ubuntu 24.04 is the default guest selection; users can skip Linux, but OpenCode requires the guest.
 - OpenCode is downloaded from `opencode.ai` into Moch Linux on first selection, then runs on-device in server mode or a reduced one-shot fallback.
 - Hermes remains the default thinker and the broader feature surface. OpenCode keeps Chat, Projects/OpenCode sessions, Terminal, Browser and Settings; Hermes-specific Fleet, Crew, Automations, Skills, Connectors and Inbox are hidden in OpenCode mode.
-- Expo Go is not equivalent to the release APK because the native embedded-runtime bridge is unavailable there.
+- Expo Go is not equivalent to the current CI beta APK because the native embedded-runtime bridge is unavailable there.
 - The repository still contains legacy `moch-link` and relay code for the stable v1.0.0 era. The new site must not lead with QR pairing or remote setup.
 
 ## Capabilities and Constraints

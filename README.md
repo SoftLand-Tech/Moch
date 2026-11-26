@@ -24,7 +24,7 @@ The standard current CI path boots an embedded loopback gateway on the phone. It
 4. **Connect a provider or local model.** Hermes can use a hosted provider with your key or a compatible local endpoint. OpenCode can use its free hosted models, another hosted provider or a local model. OpenCode's free hosted models need no key or account, but they use the network.
 5. **Finish the About you steps**, then review notification and battery settings and start chatting.
 
-Expo Go is not equivalent to the release APK: its native embedded-runtime bridge is unavailable. No iOS release is currently offered.
+Expo Go is not equivalent to the current CI beta APK: its native embedded-runtime bridge is unavailable. No iOS release is currently offered.
 
 ## Choose your thinker
 
