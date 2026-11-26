@@ -61,7 +61,7 @@ REQUIRED_ALLOWLIST_ENTRIES = {
 FORBIDDEN_EXACT = {"screens-inventory.html", "SITE-SPEC.md"}
 FORBIDDEN_SEGMENTS = {"redesign", "bug-hunter", "tests"}
 
-HEADLINE = "Moch — your agent runs on your phone. Your model is your choice."
+HEADLINE = "Your agent runs on your phone. Your model is your choice."
 SUPPORTING_COPY = (
     "An open-source AI workspace with Hermes built in and OpenCode inside an "
     "optional Ubuntu Linux guest. No Moch account, relay or remote gateway required."

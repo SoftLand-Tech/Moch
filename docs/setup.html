@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Set up Moch on your phone — current Android beta</title>
+  <title>Set up Moch on your phone | current Android beta</title>
   <meta name="description" content="Set up Moch on Android: download the current beta, choose your environment, thinker and model provider, then finish About you. Legacy v1.0.0 relay instructions are isolated at the end.">
-  <meta name="theme-color" content="#0A0813">
+  <meta name="theme-color" content="#0B0C12">
   <meta name="color-scheme" content="dark">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
   <link rel="canonical" href="https://moch.softland.tech/setup.html">
@@ -18,12 +18,12 @@
   <meta property="og:image" content="https://moch.softland.tech/assets/og-image.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Moch — your agent runs on your phone. Your model is your choice.">
+  <meta property="og:image:alt" content="Moch: your agent runs on your phone. Your model is your choice.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Set up Moch on your phone">
   <meta name="twitter:description" content="The current Android beta recipe: environment, thinker, providers, About you.">
   <meta name="twitter:image" content="https://moch.softland.tech/assets/og-image.png">
-  <meta name="twitter:image:alt" content="Moch — your agent runs on your phone. Your model is your choice.">
+  <meta name="twitter:image:alt" content="Moch: your agent runs on your phone. Your model is your choice.">
   <link rel="stylesheet" href="moch.css">
   <script src="site.js" defer></script>
 </head>
@@ -37,9 +37,6 @@
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
     <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
-    <symbol id="i-linux" viewBox="0 0 24 24"><path d="M8 8c0-3 2-5 4-5s4 2 4 5c0 3-1 4-1 7 0 3-1 5-3 5s-3-2-3-5c0-3-1-4-1-7Z"/><path d="m9 4-3-2m9 2 3-2M6 11l-3 2m15-2 3 2M7 17l-3 3m13-3 3 3"/></symbol>
-    <symbol id="i-brain" viewBox="0 0 24 24"><path d="M12 5a3 3 0 0 0-5-2A4 4 0 0 0 4 9a4 4 0 0 0 1 7 3 3 0 0 0 5 2V6a2 2 0 0 1 2-1Z"/><path d="M12 5a3 3 0 0 1 5-2 4 4 0 0 1 3 6 4 4 0 0 1-1 7 3 3 0 0 1-5 2V6a2 2 0 0 0-2-1Z"/></symbol>
-    <symbol id="i-model" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/></symbol>
     <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9m-4 4 3 3m-6 0 3 3"/></symbol>
     <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18a5 5 0 1 1 1-9 6 6 0 0 1 11 2 3.5 3.5 0 0 1-1 7H7Z"/></symbol>
     <symbol id="i-drive" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 14h18M16 17h.01M6 9h6"/></symbol>
@@ -48,7 +45,6 @@
     <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4"/></symbol>
     <symbol id="i-phone" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 5h4m-3 14h2"/></symbol>
     <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14 6a5 5 0 0 0-6 6L3 17a3 3 0 0 0 4 4l5-5a5 5 0 0 0 6-6l-4 3-3-3 3-4Z"/></symbol>
-    <symbol id="i-link" viewBox="0 0 24 24"><path d="m10 13 4-4m-6 7-2 2a4 4 0 0 1-6-6l5-5a4 4 0 0 1 6 0m2 1 2-2a4 4 0 0 1 6 6l-5 5a4 4 0 0 1-6 0"/></symbol>
   </svg>
 
   <header class="site-header">
@@ -66,8 +62,7 @@
         <a href="index.html">Overview</a>
       </nav>
       <div class="header-cta">
-        <a class="btn btn-ghost" href="index.html">Overview</a>
-        <a class="btn btn-primary" href="/Moch.apk">Download beta</a>
+        <a class="btn btn-sm btn-surface" href="/Moch.apk">Download beta</a>
         <button class="menu-toggle" type="button" hidden aria-label="Open menu" aria-expanded="false" aria-controls="primary-navigation" data-nav-toggle>
           <svg class="icon-menu" aria-hidden="true"><use href="#i-menu"></use></svg>
           <svg class="icon-close" aria-hidden="true"><use href="#i-close"></use></svg>
@@ -79,26 +74,21 @@
   <main id="main-content" tabindex="-1">
     <div class="wrap">
       <section class="hero setup-hero" aria-labelledby="setup-title">
-        <div>
-          <span class="badge"><span class="dot"></span> First-run guide</span>
-          <h1 id="setup-title">Set up Moch on your phone.</h1>
+        <div class="hero-copy">
+          <h1 id="setup-title">Set up Moch on your phone</h1>
           <p class="lede">The real first-run flow: download the beta, choose an environment, choose a thinker, connect a provider, then finish the final questions.</p>
           <div class="hero-actions">
             <a class="btn btn-primary" href="/Moch.apk">
               <svg aria-hidden="true"><use href="#i-download"></use></svg>
               Download the current beta
             </a>
-            <a class="btn btn-ghost" href="index.html">Back to the overview</a>
-          </div>
-          <div class="hero-meta">
-            <span class="pill"><span class="dot"></span> On-device</span>
-            <span class="mono">Android beta · <span data-version>1.0.53-beta.3</span> · build <span data-version-code>58</span></span>
+            <a class="btn btn-ghost" href="index.html">Back to overview</a>
           </div>
           <p class="note">Local-first means the agent and your workspace live on the phone. Hosted models, OpenCode’s free hosted models, downloads, OTA updates, web browsing and optional services can still use the internet. Connect a local model for on-device inference.</p>
         </div>
 
         <div class="flow-card">
-          <div class="flow-head"><span>The first run</span><span class="flow-count mono">5 steps</span></div>
+          <div class="flow-head"><span>First-run sequence</span><span class="flow-count mono">5 steps</span></div>
           <ol>
             <li><span class="mono">01</span> Download the beta</li>
             <li><span class="mono">02</span> Choose an environment</li>
@@ -122,75 +112,74 @@
         </nav>
 
         <div class="setup-content">
-        <section class="setup-step" id="download" aria-labelledby="download-title">
-          <header class="step-heading">
-            <span class="step-num mono">1</span>
-            <div><h2 id="download-title">Download the current beta.</h2><p>Use the current CI beta APK for the embedded runtime. This is the build the rest of this guide describes.</p></div>
-          </header>
-          <div class="download-panel">
-            <div>
-              <p><strong>Android beta <span data-version>1.0.53-beta.3</span></strong><br>Build <span data-version-code>58</span> · served at <span class="mono">/Moch.apk</span></p>
-              <p>Official main CI builds use the stable Moch signing key when repository secrets are configured, so they install over previous official builds. A fork or unconfigured run may use a different key and require uninstalling first. Android may warn because the APK does not come from an app store.</p>
+          <section class="setup-step" id="download" aria-labelledby="download-title">
+            <header class="step-heading">
+              <span class="step-num mono">01</span>
+              <div><h2 id="download-title">Download the current beta</h2><p>Use the current CI beta APK for the embedded runtime. This is the build the rest of this guide describes.</p></div>
+            </header>
+            <div class="download-panel">
+              <div>
+                <p><strong>Android beta <span class="mono" data-version>1.0.53-beta.3</span></strong><br>Build <span class="mono" data-version-code>58</span> · served at <span class="mono">/Moch.apk</span></p>
+                <p>Official main CI builds use the stable Moch signing key when repository secrets are configured, so they install over previous official builds. A fork or unconfigured run may use a different key and require uninstalling first. Android may warn because the APK does not come from an app store.</p>
+              </div>
+              <div class="download-actions">
+                <a class="btn btn-primary" href="/Moch.apk"><svg aria-hidden="true"><use href="#i-download"></use></svg>Download APK</a>
+                <button class="copy-button" type="button" disabled data-copy="https://moch.softland.tech/Moch.apk" data-copy-label="Copy APK link"><svg aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy APK link</span></button>
+              </div>
             </div>
-            <div class="download-actions">
-              <a class="btn btn-primary" href="/Moch.apk"><svg aria-hidden="true"><use href="#i-download"></use></svg>Download APK</a>
-              <button class="copy-button" type="button" disabled data-copy="https://moch.softland.tech/Moch.apk" data-copy-label="Copy APK link"><svg aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy APK link</span></button>
+            <ul class="check-list">
+              <li><svg aria-hidden="true"><use href="#i-check"></use></svg><span>Open the downloaded <strong>.apk</strong> and allow Android to install it when asked.</span></li>
+              <li><svg aria-hidden="true"><use href="#i-check"></use></svg><span>Open <strong>Moch</strong>. Do not use Expo Go for this flow; it does not include the native embedded-runtime bridge.</span></li>
+              <li><svg aria-hidden="true"><use href="#i-check"></use></svg><span>For build history and checksums, open <a href="https://github.com/SoftLand-Tech/Moch/releases">GitHub Releases</a>.</span></li>
+            </ul>
+            <p class="note"><strong>There is no iOS release.</strong> Stable <strong>v1.0.0</strong> is a legacy linked/relay-only build. It does not contain the embedded runtime or OpenCode and is not the download for this guide.</p>
+          </section>
+
+          <section class="setup-step" id="environment" aria-labelledby="environment-title">
+            <header class="step-heading">
+              <span class="step-num mono">02</span>
+              <div><h2 id="environment-title">Choose the environment</h2><p>A Linux guest is a little Ubuntu computer inside Moch. It is optional for Hermes and required for OpenCode.</p></div>
+            </header>
+            <div class="option-grid">
+              <article class="option">
+                <span class="option-label mono">Hermes route</span>
+                <h3>Skip Linux</h3>
+                <p>Choose <strong>Skip</strong> when you only need Hermes. The embedded Hermes runtime does not need the Ubuntu guest. Terminal and Linux tools will not be available without it.</p>
+              </article>
+              <article class="option">
+                <span class="option-label mono">OpenCode + Linux tools</span>
+                <h3>Install Ubuntu 24.04</h3>
+                <p>Keep the default guest selection and let Moch download and prepare it. OpenCode runs inside this guest, alongside terminal tabs and project working directories.</p>
+              </article>
             </div>
-          </div>
-          <ul class="check-list">
-            <li><svg aria-hidden="true"><use href="#i-check"></use></svg><span>Open the downloaded <strong>.apk</strong> and allow Android to install it when asked.</span></li>
-            <li><svg aria-hidden="true"><use href="#i-check"></use></svg><span>Open <strong>Moch</strong>. Do not use Expo Go for this flow; it does not include the native embedded-runtime bridge.</span></li>
-            <li><svg aria-hidden="true"><use href="#i-check"></use></svg><span>For build history and checksums, open <a href="https://github.com/SoftLand-Tech/Moch/releases">GitHub Releases</a>.</span></li>
-          </ul>
-          <p class="note"><strong>There is no iOS release.</strong> Stable <strong>v1.0.0</strong> is a legacy linked/relay-only build. It does not contain the embedded runtime or OpenCode and is not the download for this guide.</p>
-        </section>
+            <p class="note"><strong>This step uses the internet.</strong> Linux, OpenCode and package downloads are part of the setup. A local model later can run on-device, but Moch does not bundle local model weights.</p>
+          </section>
 
-        <section class="setup-step" id="environment" aria-labelledby="environment-title">
-          <header class="step-heading">
-            <span class="step-num mono">2</span>
-            <div><h2 id="environment-title">Choose the environment.</h2><p>A Linux guest is a little Ubuntu computer inside Moch. It is optional for Hermes and required for OpenCode.</p></div>
-          </header>
-          <div class="option-grid">
-            <article class="option">
-              <span class="option-label">Hermes route</span>
-              <h3>Skip Linux</h3>
-              <p>Choose <strong>Skip</strong> when you only need Hermes. The embedded Hermes runtime does not need the Ubuntu guest. Terminal and Linux tools will not be available without it.</p>
-            </article>
-            <article class="option">
-              <span class="option-label">OpenCode + Linux tools</span>
-              <h3>Install Ubuntu 24.04</h3>
-              <p>Keep the default guest selection and let Moch download and prepare it. OpenCode runs inside this guest, alongside terminal tabs and project working directories.</p>
-            </article>
-          </div>
-          <p class="note"><strong>This step uses the internet.</strong> Linux, OpenCode and package downloads are part of the setup. A local model later can run on-device, but Moch does not bundle local model weights.</p>
-        </section>
+          <section class="setup-step" id="thinker" aria-labelledby="thinker-title">
+            <header class="step-heading">
+              <span class="step-num mono">03</span>
+              <div><h2 id="thinker-title">Choose the thinker</h2><p>The thinker is the brain that answers. Moch (Hermes) is the default; OpenCode is an optional coding-agent thinker.</p></div>
+            </header>
+            <div class="option-grid">
+              <article class="option">
+                <span class="option-label mono">Default · no Linux required</span>
+                <h3>Moch (Hermes)</h3>
+                <p>Runs embedded. Choose it for the full Moch feature surface: Chat, Projects, Fleet, Crew, Automations, Skills, Connectors, Terminal, Browser and Inbox.</p>
+              </article>
+              <article class="option">
+                <span class="option-label mono">Optional · Linux required</span>
+                <h3>OpenCode</h3>
+                <p>Downloads from <a href="https://opencode.ai">opencode.ai</a> into Moch Linux on first selection. Keeps Chat, Projects/OpenCode sessions, Terminal, Browser and Settings; Hermes-only surfaces are hidden.</p>
+              </article>
+            </div>
+            <p class="note"><strong>OpenCode is not bundled, default or official.</strong> Moch integrates it as a selectable thinker; Moch is not the official OpenCode app. Existing chats keep the thinker they were created with, and switching affects new chats.</p>
+          </section>
 
-        <section class="setup-step" id="thinker" aria-labelledby="thinker-title">
-          <header class="step-heading">
-            <span class="step-num mono">3</span>
-            <div><h2 id="thinker-title">Choose the thinker.</h2><p>The thinker is the brain that answers. Moch (Hermes) is the default; OpenCode is an optional coding-agent thinker.</p></div>
-          </header>
-          <div class="option-grid">
-            <article class="option">
-              <span class="option-label">Default · no Linux required</span>
-              <h3>Moch (Hermes)</h3>
-              <p>Runs embedded. Choose it for the full Moch feature surface: Chat, Projects, Fleet, Crew, Automations, Skills, Connectors, Terminal, Browser and Inbox.</p>
-            </article>
-            <article class="option">
-              <span class="option-label">Optional · Linux required</span>
-              <h3>OpenCode</h3>
-              <p>Downloads from <a href="https://opencode.ai">opencode.ai</a> into Moch Linux on first selection. Keeps Chat, Projects/OpenCode sessions, Terminal, Browser and Settings; Hermes-only surfaces are hidden.</p>
-            </article>
-          </div>
-          <p class="note"><strong>OpenCode is not bundled, default or official.</strong> Moch integrates it as a selectable thinker; Moch is not the official OpenCode app. Existing chats keep the thinker they were created with, and switching affects new chats.</p>
-        </section>
-
-        <section class="setup-step" id="providers" aria-labelledby="providers-title">
-          <header class="step-heading">
-            <span class="step-num mono">4</span>
-            <div><h2 id="providers-title">Connect a model provider.</h2><p>A provider is the service that runs the model. Choose a hosted provider or point Moch at a local model endpoint.</p></div>
-          </header>
-          <div class="provider-list">
+          <section class="setup-step" id="providers" aria-labelledby="providers-title">
+            <header class="step-heading">
+              <span class="step-num mono">04</span>
+              <div><h2 id="providers-title">Connect a model provider</h2><p>A provider is the service that runs the model. Choose a hosted provider or point Moch at a local model endpoint.</p></div>
+            </header>
             <div class="setup-panel">
               <ul class="provider-list">
                 <li><svg aria-hidden="true"><use href="#i-key"></use></svg><div><h3>Hermes + a hosted provider</h3><p>Choose a provider in Moch and paste its API key when requested. The provider may require an account and charge for usage. Model inference travels over the internet.</p></div></li>
@@ -198,96 +187,95 @@
                 <li><svg aria-hidden="true"><use href="#i-drive"></use></svg><div><h3>A local model endpoint</h3><p>Connect a compatible model server for on-device inference. You bring the model and endpoint; Moch does not bundle local model weights. Downloads, OTA, browsing and optional tools may still use the internet.</p></div></li>
               </ul>
             </div>
-          </div>
-          <p class="note"><strong>Pick the model after the provider.</strong> Model catalogs may use the internet. If a hosted request fails, check the provider key, account and usage limits before changing the thinker.</p>
-        </section>
+            <p class="note"><strong>Pick the model after the provider.</strong> Model catalogs may use the internet. If a hosted request fails, check the provider key, account and usage limits before changing the thinker.</p>
+          </section>
 
-        <section class="setup-step" id="about-you" aria-labelledby="about-title">
-          <header class="step-heading">
-            <span class="step-num mono">5</span>
-            <div><h2 id="about-title">Finish “About you”.</h2><p>Give Moch enough context to be useful, choose your language, then review notification and battery permissions.</p></div>
-          </header>
-          <ul class="check-list info">
-            <li><svg aria-hidden="true"><use href="#i-user"></use></svg><span><strong>About you:</strong> add your name and a short note about what you want help with. Keep it minimal if you prefer.</span></li>
-            <li><svg aria-hidden="true"><use href="#i-chat"></use></svg><span><strong>Language:</strong> Moch ships English, Arabic with RTL, Chinese and French.</span></li>
-            <li><svg aria-hidden="true"><use href="#i-bell"></use></svg><span><strong>Notifications:</strong> allow local notifications if you want questions and finished work to reach you. Push registration can use the internet.</span></li>
-            <li><svg aria-hidden="true"><use href="#i-phone"></use></svg><span><strong>Battery:</strong> review Android’s battery restrictions if the runtime stops in the background. Local work still depends on the app process and runtime surviving.</span></li>
-          </ul>
-          <div class="setup-finish">
-            <h3>You are ready for the first chat.</h3>
-            <p>Start with a small task. Moch keeps the control plane and workspace on the phone; the model and tools decide what uses the network.</p>
-            <a class="btn btn-dark" href="index.html#start">See how it works <svg aria-hidden="true"><use href="#i-arrow-right"></use></svg></a>
-          </div>
-        </section>
+          <section class="setup-step" id="about-you" aria-labelledby="about-title">
+            <header class="step-heading">
+              <span class="step-num mono">05</span>
+              <div><h2 id="about-title">Finish “About you”</h2><p>Give Moch enough context to be useful, choose your language, then review notification and battery permissions.</p></div>
+            </header>
+            <ul class="check-list info">
+              <li><svg aria-hidden="true"><use href="#i-user"></use></svg><span><strong>About you:</strong> add your name and a short note about what you want help with. Keep it minimal if you prefer.</span></li>
+              <li><svg aria-hidden="true"><use href="#i-chat"></use></svg><span><strong>Language:</strong> Moch ships English, Arabic with RTL, Chinese and French.</span></li>
+              <li><svg aria-hidden="true"><use href="#i-bell"></use></svg><span><strong>Notifications:</strong> allow local notifications if you want questions and finished work to reach you. Push registration can use the internet.</span></li>
+              <li><svg aria-hidden="true"><use href="#i-phone"></use></svg><span><strong>Battery:</strong> review Android’s battery restrictions if the runtime stops in the background. Local work still depends on the app process and runtime surviving.</span></li>
+            </ul>
+            <div class="setup-finish">
+              <h3>You are ready for the first chat</h3>
+              <p>Start with a small task. Moch keeps the control plane and workspace on the phone; the model and tools decide what uses the network.</p>
+              <a class="btn btn-dark" href="index.html#start">See how it works <svg aria-hidden="true"><use href="#i-arrow-right"></use></svg></a>
+            </div>
+          </section>
 
-        <section class="setup-step" id="troubleshooting" aria-labelledby="troubleshooting-title">
-          <header class="step-heading">
-            <span class="step-num"><svg aria-hidden="true"><use href="#i-wrench"></use></svg></span>
-            <div><h2 id="troubleshooting-title">If something does not work.</h2><p>Start with the step where the problem appeared. Most setup failures are a blocked download, a missing provider or an Android permission.</p></div>
-          </header>
-          <div class="trouble">
-            <details>
-              <summary>Android blocks the APK install</summary>
-              <p>Allow installs from your browser or file manager when Android asks, then reopen the APK. If the package will not replace an older build, compare the signing and version on GitHub Releases rather than installing stable v1.0.0 over the beta workflow.</p>
-            </details>
-            <details>
-              <summary>Ubuntu or OpenCode will not download</summary>
-              <p>Check the internet connection and available storage, then retry the environment step. OpenCode is downloaded from opencode.ai into Moch Linux; it is not inside the APK.</p>
-            </details>
-            <details>
-              <summary>Moch opens but the model does not answer</summary>
-              <p>Return to Providers. Confirm the provider key or local endpoint, then choose a model. Hosted providers can reject an expired key, an unpaid account or a rate limit.</p>
-            </details>
-            <details>
-              <summary>The runtime stops in the background</summary>
-              <p>Review Android battery restrictions for Moch and keep the runtime process alive. Do not rely on a claim that local work continues after the app process is killed.</p>
-            </details>
-            <details>
-              <summary>I am looking for a QR pairing screen</summary>
-              <p>QR pairing belongs to the legacy v1.0.0 linked/relay flow. The current beta starts with Environment, Thinker, Providers and About you instead.</p>
-            </details>
-          </div>
-        </section>
+          <section class="setup-step" id="troubleshooting" aria-labelledby="troubleshooting-title">
+            <header class="step-heading">
+              <span class="step-num"><svg aria-hidden="true"><use href="#i-wrench"></use></svg></span>
+              <div><h2 id="troubleshooting-title">If something does not work</h2><p>Start with the step where the problem appeared. Most setup failures are a blocked download, a missing provider or an Android permission.</p></div>
+            </header>
+            <div class="trouble">
+              <details>
+                <summary>Android blocks the APK install</summary>
+                <p>Allow installs from your browser or file manager when Android asks, then reopen the APK. If the package will not replace an older build, compare the signing and version on GitHub Releases rather than installing stable v1.0.0 over the beta workflow.</p>
+              </details>
+              <details>
+                <summary>Ubuntu or OpenCode will not download</summary>
+                <p>Check the internet connection and available storage, then retry the environment step. OpenCode is downloaded from opencode.ai into Moch Linux; it is not inside the APK.</p>
+              </details>
+              <details>
+                <summary>Moch opens but the model does not answer</summary>
+                <p>Return to Providers. Confirm the provider key or local endpoint, then choose a model. Hosted providers can reject an expired key, an unpaid account or a rate limit.</p>
+              </details>
+              <details>
+                <summary>The runtime stops in the background</summary>
+                <p>Review Android battery restrictions for Moch and keep the runtime process alive. Do not rely on a claim that local work continues after the app process is killed.</p>
+              </details>
+              <details>
+                <summary>I am looking for a QR pairing screen</summary>
+                <p>QR pairing belongs to the legacy v1.0.0 linked/relay flow. The current beta starts with Environment, Thinker, Providers and About you instead.</p>
+              </details>
+            </div>
+          </section>
 
-        <section class="setup-step" id="legacy" aria-labelledby="legacy-title">
-          <div class="legacy">
-            <p class="eyebrow">Existing stable users only</p>
-            <h2 id="legacy-title">Legacy v1.0.0 / moch-link relay setup</h2>
-            <p class="legacy-warning">Stable v1.0.0 is a linked/relay-only build. It does not include the embedded runtime or OpenCode, and the current beta does not need this remote pairing path.</p>
-            <p>The repository still contains the older connector for migration and existing installs. Keep this section separate from the current on-phone flow.</p>
-            <details class="legacy-details">
-              <summary>Show the old linked/relay instructions</summary>
-              <h3>1. Link an existing Hermes install</h3>
-              <p>On the Linux machine that already runs Hermes, run the legacy installer. It links the existing install to the relay and prints the pairing code; it does not replace the current beta setup.</p>
-              <div class="code-block">
-                <pre><code>curl -fsSL https://moch.softland.tech/install.sh | bash</code></pre>
-                <button class="copy-button" type="button" disabled data-copy-label="Copy"><svg aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy</span></button>
-              </div>
-              <h3>2. Reprint or check the legacy link</h3>
-              <div class="code-block">
-                <pre><code>bash install.sh qr
+          <section class="setup-step" id="legacy" aria-labelledby="legacy-title">
+            <div class="legacy">
+              <p class="eyebrow">Existing stable users only</p>
+              <h2 id="legacy-title">Legacy v1.0.0 / moch-link relay setup</h2>
+              <p class="legacy-warning">Stable v1.0.0 is a linked/relay-only build. It does not include the embedded runtime or OpenCode, and the current beta does not need this remote pairing path.</p>
+              <p>The repository still contains the older connector for migration and existing installs. Keep this section separate from the current on-phone flow.</p>
+              <details class="legacy-details">
+                <summary>Show the old linked/relay instructions</summary>
+                <h3>1. Link an existing Hermes install</h3>
+                <p>On the Linux machine that already runs Hermes, run the legacy installer. It links the existing install to the relay and prints the pairing code; it does not replace the current beta setup.</p>
+                <div class="code-block">
+                  <pre><code>curl -fsSL https://moch.softland.tech/install.sh | bash</code></pre>
+                  <button class="copy-button" type="button" disabled data-copy-label="Copy"><svg aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy</span></button>
+                </div>
+                <h3>2. Reprint or check the legacy link</h3>
+                <div class="code-block">
+                  <pre><code>bash install.sh qr
 bash install.sh status</code></pre>
-                <button class="copy-button" type="button" disabled data-copy-label="Copy"><svg aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy</span></button>
-              </div>
-              <h3>3. Pair in stable v1.0.0</h3>
-              <p>Open the stable app, scan the QR code, or use <strong>More options</strong> to paste the printed <span class="build-data">hermes://connect…</span> line. Leave the linked machine on and reachable by the legacy relay.</p>
-              <h3>4. Configure the machine-side provider</h3>
-              <div class="code-block">
-                <pre><code>hermes setup</code></pre>
-                <button class="copy-button" type="button" disabled data-copy-label="Copy"><svg aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy</span></button>
-              </div>
-              <h3>Manual same-network gateway, advanced</h3>
-              <p>For the older no-relay path, start the Hermes gateway on the machine, then pair from the repository with the machine’s LAN address and gateway port.</p>
-              <div class="code-block">
-                <pre><code>hermes gateway setup
+                  <button class="copy-button" type="button" disabled data-copy-label="Copy"><svg aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy</span></button>
+                </div>
+                <h3>3. Pair in stable v1.0.0</h3>
+                <p>Open the stable app, scan the QR code, or use <strong>More options</strong> to paste the printed <span class="build-data">hermes://connect…</span> line. Leave the linked machine on and reachable by the legacy relay.</p>
+                <h3>4. Configure the machine-side provider</h3>
+                <div class="code-block">
+                  <pre><code>hermes setup</code></pre>
+                  <button class="copy-button" type="button" disabled data-copy-label="Copy"><svg aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy</span></button>
+                </div>
+                <h3>Manual same-network gateway, advanced</h3>
+                <p>For the older no-relay path, start the Hermes gateway on the machine, then pair from the repository with the machine’s LAN address and gateway port.</p>
+                <div class="code-block">
+                  <pre><code>hermes gateway setup
 hermes gateway start
 ./scripts/hermes-pair.sh --host 192.168.1.20 --port 8080</code></pre>
-                <button class="copy-button" type="button" disabled data-copy-label="Copy"><svg aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy</span></button>
-              </div>
-              <p>If the script asks for a token, use the dashboard session token printed by <span class="build-data">hermes gateway setup</span>. A saved non-loopback remote gateway from this era is not the current beta runtime path.</p>
-            </details>
-          </div>
-        </section>
+                  <button class="copy-button" type="button" disabled data-copy-label="Copy"><svg aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy</span></button>
+                </div>
+                <p>If the script asks for a token, use the dashboard session token printed by <span class="build-data">hermes gateway setup</span>. A saved non-loopback remote gateway from this era is not the current beta runtime path.</p>
+              </details>
+            </div>
+          </section>
         </div>
       </div>
     </div>
@@ -302,7 +290,7 @@ hermes gateway start
         <a href="https://github.com/SoftLand-Tech/Moch/releases">Releases</a>
         <a href="https://github.com/SoftLand-Tech/Moch/blob/main/LICENSE">MIT license</a>
       </nav>
-      <span class="copy">MIT © <span data-year>2026</span> Mamoun Hisham · Android beta <span data-version>1.0.53-beta.3</span> · build <span data-version-code>58</span><br>Stable v1.0.0 is legacy linked/relay-only; it does not include the embedded runtime or OpenCode.</span>
+      <span class="copy">MIT © <span data-year>2026</span> Mamoun Hisham · Android beta <span class="mono" data-version>1.0.53-beta.3</span> · build <span class="mono" data-version-code>58</span><br>Stable v1.0.0 is legacy linked/relay-only; it does not include the embedded runtime or OpenCode.</span>
     </div>
   </footer>
 </body>

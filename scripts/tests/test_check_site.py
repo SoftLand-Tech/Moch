@@ -34,7 +34,7 @@ def png_header(width: int, height: int) -> bytes:
 
 def html_page(page: str) -> str:
     canonical = "https://moch.softland.tech/" if page == "index.html" else "https://moch.softland.tech/setup.html"
-    title = "Moch — your agent runs on your phone" if page == "index.html" else "Set up Moch on Android"
+    title = "Moch: your agent runs on your phone" if page == "index.html" else "Set up Moch on Android"
     description = (
         "Moch is a local-first Android AI workspace with embedded Hermes and optional OpenCode inside Moch Linux."
         if page == "index.html"
@@ -68,7 +68,7 @@ def html_page(page: str) -> str:
   <main id="main">
 """
     if page == "index.html":
-        body = f"""    <h1>Moch — your agent runs on your phone. <span>Your model is your choice.</span></h1>
+        body = f"""    <h1>Your agent runs on your phone. <span>Your model is your choice.</span></h1>
     <p class="build"><span data-version>1.0.53-beta.3</span> · build <span data-version-code>58</span></p>
     <img src="assets/logo.png" alt="Moch logo" width="120" height="40">
     <p>{check_site.SUPPORTING_COPY}</p>
