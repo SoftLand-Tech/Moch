@@ -40,8 +40,7 @@ import { log } from './log'
 // BUG-149: session mints carry the active project's cwd, exactly like
 // createSession does for hermes chats (chat.ts is mode-agnostic here —
 // workspace's atoms are the same source the hermes create reads).
-import { activeProjectIdAtom, projectsAtom } from './workspace'
-import { pickProjectCwd } from './projectScope'
+import { ensureActiveProjectCwd } from './workspace'
 import { getEmbeddedGateway } from './mochiRuntime'
 import { connConfig } from './gateway'
 
@@ -196,14 +195,10 @@ export async function ocOneShotModelFor(storedId: string): Promise<string | null
 export { ocDefaultPickModelRef, ocOneShotModelRef, parseOcDefaultPick }
 export type { OcDefaultPick }
 
-/** The drawer's selected project's folder, or undefined (Personal bucket /
- *  folderless project — minting in an arbitrary cwd would file the session
- *  under the wrong project, the same rule pickProjectCwd encodes). */
-export function ocSelectedProjectCwd(): string | undefined {
-  return pickProjectCwd(
-    projectsAtom.get().map((p) => ({ id: p.id, path: p.primaryPath, isNoProject: p.isNoProject })),
-    activeProjectIdAtom.get(),
-  )
+/** The drawer's selected project's folder (re-reading projects.tree once if
+ *  the cached row has no path), or undefined for Personal. */
+export function ocSelectedProjectCwd(): Promise<string | undefined> {
+  return ensureActiveProjectCwd()
 }
 
 /**
@@ -218,7 +213,7 @@ export function ocSelectedProjectCwd(): string | undefined {
  * `projectIdForCwd` then groups the chat under the same folders the app shows.
  */
 export async function ocSessionDirectory(): Promise<string | undefined> {
-  const selected = ocSelectedProjectCwd()
+  const selected = await ocSelectedProjectCwd()
   if (selected) return selected
   try {
     const gw = await getEmbeddedGateway()

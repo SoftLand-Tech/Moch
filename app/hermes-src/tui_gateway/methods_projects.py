@@ -138,28 +138,68 @@ def _project_dir_slug(project) -> str:
     return ""
 
 
-def _adopt_embedded_project_folder(pdb, conn, project) -> bool:
-    """Best-effort: give ONE folder-less project a real primary folder + directory under the
-    embedded workspace. No-op unless embedded (``MOCH_WORKSPACE`` set) and the project has neither
-    folders nor a primary path — so it fires at most once per project, and never touches projects
-    the caller pointed at their own paths.
+def _usable_embedded_folder(raw: object, ws: str) -> str | None:
+    """The folder's HOST path when the guest can actually use it, else None.
 
-    WHY this exists: without it a project is a sidebar-only phantom — a sqlite row with no
-    directory. New chats then get the workspace root as cwd (never grouping), and a typed
-    ``/workspace/foo`` fails the host-side ``os.path.isdir`` check in session.create, silently
-    falling back to the gateway process cwd (``session_workdir._completion_cwd`` drops
-    non-existent dirs). The mkdir runs BEFORE the folder row is written — a folder pointing at a
-    missing dir is exactly the phantom this heals — and a failure leaves the project untouched
-    (folder-less, retried on the next tree read) instead of half-adopted.
+    Embedded Moch only binds ``MOCH_WORKSPACE`` (plus scratch/dev/proc), so a
+    project path outside it — or the workspace root itself — cannot be a
+    per-project workspace. Guest-spelled ``/workspace/...`` paths are mapped to
+    the host first. Symlinked escapes are rejected via realpath.
+    """
+    from .embedded_paths import guest_workspace_host_path
+
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    mapped = guest_workspace_host_path(raw) or raw
+    host = os.path.abspath(os.path.expanduser(str(mapped)))
+    try:
+        ws_real = os.path.realpath(os.path.abspath(ws))
+        host_real = os.path.realpath(host)
+        if host_real != ws_real and not host_real.startswith(ws_real + os.sep):
+            return None
+        if host_real == ws_real or not os.path.isdir(host_real):
+            return None
+    except OSError:
+        return None
+    return host
+
+
+def _adopt_embedded_project_folder(pdb, conn, project) -> bool:
+    """Give a project a usable primary folder inside the embedded workspace.
+
+    Heals three real cases from the field: no folder at all (pre-fix phantom),
+    a stale/nonexistent path, and a path the guest cannot see
+    (outside ``MOCH_WORKSPACE`` or the workspace root itself). The last case is
+    why a selected project could still answer ``/workspace``: its DB path was
+    accepted but the session fell back to the runtime default.
+
+    Existing usable folders are never replaced. Otherwise this adds
+    ``<workspace>/<slug>`` as the primary folder and mkdirs it host-side; the
+    host directory is the guest's ``/workspace/<slug>`` through the bind.
+    Best-effort and idempotent.
     """
     ws = _embedded_workspace()
-    if not ws or project.folders or project.primary_path:
+    if not ws:
         return False
+
+    # Already pointing somewhere the guest can use: nothing to heal.
+    if _usable_embedded_folder(project.primary_path, ws):
+        return False
+
+    # Another folder row may already be a usable workspace path (e.g. a
+    # guest-spelled /workspace/... row from an older build). Promote it.
+    for folder in project.folders or []:
+        path = _usable_embedded_folder(getattr(folder, "path", None), ws)
+        if path:
+            try:
+                pdb.add_folder(conn, project.id, path, is_primary=True)
+                return True
+            except Exception:
+                logger.debug("embedded project folder promotion failed for %s", project.id, exc_info=True)
+                return False
+
     slug = _project_dir_slug(project)
     if not slug:
-        # Corrupt slug row: skip (never adopt under a colliding name-slug)
-        # and say so once per attempt — the project stays folder-less and
-        # heals if the row is ever fixed.
         logger.warning("project %s has a non-conforming slug %r — skipping embedded folder adoption",
                        project.id, project.slug)
         return False

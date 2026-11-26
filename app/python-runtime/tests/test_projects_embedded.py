@@ -88,15 +88,19 @@ class TestEmbeddedProjectFolders(unittest.TestCase):
 
     def test_create_with_caller_folders_never_mkdirs(self):
         self._set_ws(str(self.ws))
-        # Caller-supplied free text: stored verbatim, never created (the gateway's fs is
-        # the Android host — arbitrary paths must not be mkdir'd).
+        # Arbitrary caller paths are never mkdir'd. An unusable external path
+        # no longer becomes the primary in embedded mode: a real workspace
+        # folder is added as primary so new sessions cannot silently fall back
+        # to /workspace.
         phantom = str(self.home / "nonexistent-phantom" / "xyz")
         res = self._call("projects.create", name="WithFolders", folders=[phantom])
         self.assertNotIn("error", res, res)
         proj = res["result"]["project"]
-        self.assertEqual([f["path"] for f in proj["folders"]], [phantom])
+        workspace_folder = str(self.ws / "withfolders")
+        self.assertEqual([f["path"] for f in proj["folders"]], [workspace_folder, phantom])
+        self.assertEqual(proj["primary_path"], workspace_folder)
         self.assertFalse(os.path.exists(phantom))
-        self.assertFalse((self.ws / "withfolders").exists())
+        self.assertTrue(os.path.isdir(workspace_folder))
 
     def test_create_guest_workspace_folder_maps_and_mkdirs(self):
         self._set_ws(str(self.ws))
@@ -122,7 +126,9 @@ class TestEmbeddedProjectFolders(unittest.TestCase):
         res = self._call("projects.create", name="Root", folders=["/workspace"])
         self.assertNotIn("error", res, res)
         proj = res["result"]["project"]
-        self.assertEqual(proj["primary_path"], str(self.ws))
+        # The workspace root is not a per-project workspace; adoption moves
+        # the primary to <workspace>/<slug>.
+        self.assertEqual(proj["primary_path"], str(self.ws / "root"))
 
     def test_create_guest_primary_path_maps(self):
         self._set_ws(str(self.ws))
@@ -144,6 +150,48 @@ class TestEmbeddedProjectFolders(unittest.TestCase):
         # but nothing under (or beside) the workspace was created by this path.
         self.assertFalse((self.ws.parent / "escaped-outside").exists())
         self.assertFalse((self.ws / "escaped-outside").exists())
+
+    def test_tree_heals_external_primary_into_workspace(self):
+        self._set_ws(str(self.ws))
+        external = Path(self._tmp.name) / "external-project"
+        external.mkdir()
+        project = self._call(
+            "projects.create", name="External Project", folders=[str(external)]
+        )["result"]["project"]
+        expected = str(self.ws / "external-project")
+        self.assertEqual(project["primary_path"], expected)
+        tree = self._call("projects.tree")
+        self.assertNotIn("error", tree, tree)
+        node = next(p for p in tree["result"]["projects"] if p["id"] == project["id"])
+        self.assertEqual(node["path"], expected)
+        self.assertTrue(os.path.isdir(expected))
+        # The external folder is kept, but the embedded primary is visible.
+        from hermes_cli import projects_db as pdb
+        with pdb.connect_closing() as conn:
+            healed = pdb.get_project(conn, project["id"])
+        self.assertIn(str(external), [f.path for f in healed.folders])
+
+    def test_tree_heals_workspace_root_primary_to_project_dir(self):
+        self._set_ws(str(self.ws))
+        project = self._call(
+            "projects.create", name="Rootly", primary_path="/workspace"
+        )["result"]["project"]
+        expected = str(self.ws / "rootly")
+        # Create already heals; the next tree read is idempotent.
+        self.assertEqual(project["primary_path"], expected)
+        tree = self._call("projects.tree")
+        node = next(p for p in tree["result"]["projects"] if p["id"] == project["id"])
+        self.assertEqual(node["path"], expected)
+        self.assertTrue(os.path.isdir(expected))
+
+    def test_tree_keeps_a_valid_workspace_primary(self):
+        self._set_ws(str(self.ws))
+        project = self._call("projects.create", name="Already Good")["result"]["project"]
+        first = project["primary_path"]
+        tree = self._call("projects.tree")
+        node = next(p for p in tree["result"]["projects"] if p["id"] == project["id"])
+        self.assertEqual(node["path"], first)
+        self.assertEqual(node["path"], str(self.ws / "already-good"))
 
     def test_create_guest_workspace_symlink_escape_is_not_created(self):
         self._set_ws(str(self.ws))
