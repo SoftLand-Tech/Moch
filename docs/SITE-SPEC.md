@@ -88,7 +88,7 @@ Do not publish any of these without qualification:
 - Required ergonomics: 44px minimum targets, safe-area insets, no horizontal overflow, sticky anchors clear the header, landscape reflow, 200% zoom, `prefers-reduced-motion`.
 - Required metadata: canonical URL, Open Graph and Twitter card, theme color, descriptive title/description, favicon and a 1200×630 social image.
 - Preserve working `/Moch.apk`, `setup.html`, `install.sh` and asset URLs or update every reference atomically.
-- Replace the current visual composition rather than polishing the old hero/card grid. The approved comp is the spatial authority.
+- Replace the current visual composition rather than polishing the old hero/card grid. The approved Counter Recipe wireframe in `.impeccable/surfaces/docs-index-html.md` is the spatial authority for this code-first build.
 
 ## 5. Asset contract
 
@@ -168,9 +168,10 @@ Do not run `npm run verify` as the docs/site gate; it includes live-gateway test
 ## 10. Commit order for the combined PR
 
 1. `docs: capture local-first product and site contract`
-2. `fix: block legacy remote gateway retries`
-3. `feat: redesign mobile-first local-first website`
-4. `docs: align GitHub and product identity`
-5. `ci: verify and deploy the website safely`
+2. `docs: lock code-first Counter Recipe direction`
+3. `fix: block legacy remote gateway retries`
+4. `feat: redesign mobile-first local-first website`
+5. `docs: align GitHub and product identity`
+6. `ci: verify and deploy the website safely`
 
-Each commit must be independently reviewable. The final PR body links the approved comp and lists the verification evidence.
+Each commit must be independently reviewable. The final PR body links the approved wireframe/surface brief and lists the verification evidence.

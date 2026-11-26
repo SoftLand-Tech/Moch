@@ -1,0 +1,89 @@
+{
+  "title": "Choose the Moch mobile-first composition",
+  "question": "Three full-page structures for the same friendly Moch brand. Pick the one the build should commit to; the selected wireframe becomes the spatial contract.",
+  "options": [
+    {
+      "id": "counter-recipe",
+      "label": "The Counter Recipe",
+      "kicker": "THE ROLL",
+      "lineage": "a friendly countertop recipe card",
+      "thesis": "Getting an agent on your phone feels like following a short, reassuring recipe.",
+      "palette": ["#0A0813", "#F79236", "#F6ECE1", "#B4B1C4"],
+      "materials": ["soft card stock", "rounded ceramic tiles", "matte paper"],
+      "wireframe": {
+        "cols": 12,
+        "rows": 12,
+        "regions": [
+          {"label": "Moch nav + menu", "x": 0, "y": 0, "w": 12, "h": 1},
+          {"label": "Recipe hero: headline + Mochi", "x": 1, "y": 1, "w": 10, "h": 3, "accent": true},
+          {"label": "Download beta / How it works", "x": 2, "y": 4, "w": 8, "h": 1, "accent": true},
+          {"label": "Ingredients: Linux · Thinker · Model", "x": 1, "y": 5, "w": 10, "h": 1},
+          {"label": "Five-step method", "x": 1, "y": 6, "w": 7, "h": 4},
+          {"label": "Local runtime phone proof", "x": 8, "y": 6, "w": 4, "h": 4},
+          {"label": "Honest network caveat", "x": 1, "y": 10, "w": 10, "h": 1},
+          {"label": "Setup CTA + footer", "x": 1, "y": 11, "w": 10, "h": 1}
+        ]
+      },
+      "viewport": "Mobile: a large recipe-style hero card with the headline, Mochi, and two clear actions; below, a five-step vertical method and an ingredient strip for Linux, thinker and model. Desktop opens into a two-column counter with steps on the left and a live phone/runtime illustration on the right.",
+      "risk": "Could feel too cute or domestic; the agent proof must stay concrete and the food metaphor must never become literal decoration."
+    },
+    {
+      "id": "pocket-field-guide",
+      "label": "The Pocket Field Guide",
+      "kicker": "ALTERNATE 1",
+      "lineage": "a pocket notebook and tabbed field guide",
+      "thesis": "The site is a calm, trustworthy guide you keep in your pocket.",
+      "palette": ["#0A0813", "#F79236", "#F6ECE1", "#B4B1C4"],
+      "materials": ["pocket notebook", "tabbed dividers", "soft ink"],
+      "wireframe": {
+        "cols": 12,
+        "rows": 12,
+        "regions": [
+          {"label": "Moch nav + menu", "x": 0, "y": 0, "w": 12, "h": 1},
+          {"label": "Pocket-guide cover + headline", "x": 1, "y": 1, "w": 10, "h": 3, "accent": true},
+          {"label": "Download tab / Setup guide", "x": 2, "y": 4, "w": 8, "h": 1, "accent": true},
+          {"label": "Mochi peeks from pocket", "x": 8, "y": 5, "w": 3, "h": 2},
+          {"label": "Vertical guide tabs", "x": 1, "y": 5, "w": 3, "h": 5},
+          {"label": "Choose your brain spread", "x": 4, "y": 5, "w": 7, "h": 3},
+          {"label": "Hermes / OpenCode cards", "x": 4, "y": 8, "w": 7, "h": 2},
+          {"label": "Network caveat", "x": 1, "y": 10, "w": 10, "h": 1},
+          {"label": "Footer", "x": 1, "y": 11, "w": 10, "h": 1}
+        ]
+      },
+      "viewport": "Mobile: a pocket-guide cover hero with Mochi peeking out, a bold headline and a download tab; a vertical tab rail leads through How it works, Choose your brain, What you can do and Local-first. Desktop becomes an open spread with guide notes on the left and real product UI on the right.",
+      "risk": "Could become text-heavy or print-like on a phone; each tab needs a large product moment and very short notes."
+    },
+    {
+      "id": "playset",
+      "label": "The Playset",
+      "kicker": "ALTERNATE 2",
+      "lineage": "a soft-touch modular tray",
+      "thesis": "You build your own agent by snapping together a thinker, Linux and a model.",
+      "palette": ["#0A0813", "#F79236", "#F6ECE1", "#B4B1C4"],
+      "materials": ["matte plastic trays", "snap-fit modules", "soft-touch buttons"],
+      "wireframe": {
+        "cols": 12,
+        "rows": 12,
+        "regions": [
+          {"label": "Moch nav + menu", "x": 0, "y": 0, "w": 12, "h": 1},
+          {"label": "Headline", "x": 1, "y": 1, "w": 10, "h": 2, "accent": true},
+          {"label": "Phone-centered modular tray", "x": 2, "y": 3, "w": 8, "h": 4, "accent": true},
+          {"label": "Hermes/OpenCode · Linux · Model", "x": 1, "y": 7, "w": 10, "h": 1},
+          {"label": "Download beta / How it works", "x": 2, "y": 8, "w": 8, "h": 1, "accent": true},
+          {"label": "Chat · Terminal · Browser trays", "x": 1, "y": 9, "w": 10, "h": 2},
+          {"label": "Network caveat + footer", "x": 1, "y": 11, "w": 10, "h": 1}
+        ]
+      },
+      "viewport": "Mobile: the hero shows a phone-centered modular tray with Hermes/OpenCode, Linux and Model pieces; the headline and actions sit above and below. Scroll snaps through trays for Chat, Terminal and Browser. Desktop becomes a workbench with modules arranged around the phone.",
+      "risk": "Could feel toy-like and weaken trust; the modules must contain realistic current UI, not abstract icons alone."
+    }
+  ],
+  "reroll": {
+    "registers": ["safer", "bolder"]
+  },
+  "buildPath": {
+    "value": "code",
+    "toggle": false
+  },
+  "steer": true
+}
