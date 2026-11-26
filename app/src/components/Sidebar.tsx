@@ -7,6 +7,7 @@ import {
   BackHandler,
   Easing,
   Image,
+  Keyboard,
   PanResponder,
   Platform,
   ScrollView,
@@ -20,7 +21,10 @@ import { Icon } from './Icon'
 import { MochiMark } from './MochiMark'
 import { Field, HeaderButton, Kicker, Txt } from './ui'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
+import {
+  useKeyboardState,
+  useReanimatedKeyboardAnimation,
+} from 'react-native-keyboard-controller'
 import RAnimated, { useAnimatedStyle } from 'react-native-reanimated'
 import { router, usePathname } from 'expo-router'
 import { useStore } from '@nanostores/react'
@@ -32,6 +36,12 @@ import { ocListSessions, describeOcError, type OcSession } from '../lib/opencode
 import { ocSessionsCached, ocSessionsStore } from '../lib/ocSessionsCache'
 import { openOcChat } from '../lib/chat'
 import { projectIdForCwd } from '../lib/projectScope'
+import {
+  shouldClaimPanelClose,
+  shouldDismissImeOnPanelDrag,
+  type PanelDragState,
+  type PanelDragVector,
+} from '../lib/sidebarKeyboard'
 import { C, useStyles } from '../lib/theme'
 import { useReduceMotion } from './useReduceMotion'
 import { IdentitySwitch } from './IdentitySwitch'
@@ -548,11 +558,25 @@ export function Sidebar({
   // over the centered card (input, error and Cancel/Save under the IME). The
   // wrapper pads by the live IME height (chat-pad pattern), so the card stays
   // centered in the area ABOVE the keys — input and buttons always visible.
+  // RNKC's height is NEGATIVE while the IME is up (0 closed → −imeHeight
+  // open), so the proven positive form is `24 − height`; `24 + height`
+  // subtracted the keyboard and never lifted.
   const kb = useReanimatedKeyboardAnimation()
+  // IME visibility for gesture arbitration (selector form — the object form
+  // re-renders on every per-frame keyboard field). Animation stays on the
+  // native thread through the reanimated height below.
+  const keyboardVisible = useKeyboardState((k) => k.isVisible)
   const renameKbPad = useAnimatedStyle(() => ({
-    paddingBottom: Math.max(24 + kb.height.value, 24),
+    paddingBottom: Math.max(24 - kb.height.value, 24),
   }))
-  const drawerListKbPad = useAnimatedStyle(() => ({ paddingBottom: -kb.height.value }))
+  // The panel body (results + footer + bottom nav) is the SINGLE bottom-inset
+  // owner: at rest it keeps the panel's gutter above the nav bar, and while
+  // the IME is up the (negative) height wins so the footer/bottom bar land
+  // flush on the keys — no stacked safe-area inset, no dead band. Clamping
+  // against the resting gutter keeps the ramp continuous (no hop).
+  const drawerBodyKbPad = useAnimatedStyle(() => ({
+    paddingBottom: Math.max(-kb.height.value, Math.max(insets.bottom, 10) + 12),
+  }))
   const renameRef = useRef<RecentChat | null>(null)
   useEffect(() => {
     if (renaming) renameRef.current = renaming
@@ -592,6 +616,16 @@ export function Sidebar({
   onOpenChatRef.current = onOpenChat
   const searchInputRef = useRef<TextInput>(null)
   const searchFocusRef = useRef(false)
+  // Live IME visibility for the PanResponder, whose identity must stay stable
+  // across keyboard renders. `keyboardVisible` is the RNKC selector value.
+  const keyboardVisibleRef = useRef(keyboardVisible)
+  keyboardVisibleRef.current = keyboardVisible
+  // True for the duration of a panel gesture that dismissed the IME: that
+  // gesture may hide the keyboard but must settle back open, never close.
+  const imeDismissGestureRef = useRef(false)
+  // The claim-time decision for the gesture being negotiated (the keyboard
+  // can hide between claim and grant; the same gesture must stay a dismiss).
+  const panelDismissClaimRef = useRef(false)
   const progressRef = useRef(0)
   const moveSeenRef = useRef(false)
   const firstRun = useRef(true)
@@ -919,6 +953,9 @@ export function Sidebar({
       onPanResponderGrant: () => {
         // Wake the display:none'd subtree (web) so the drag is visible.
         if (Platform.OS === 'web') setDormant(false)
+        // The drawer is opening: abandon any IME on the composer behind it
+        // immediately, so focus leaves the chat as the panel starts moving.
+        Keyboard.dismiss()
         captureProgress(anim, progressRef, moveSeenRef)
       },
       onPanResponderMove: (_e, g) => {
@@ -939,22 +976,79 @@ export function Sidebar({
   // drags while open, with no dialog up and the search field not focused
   // (text-selection drags must keep selecting). Dialogs render as later
   // siblings above the panel, so they never even reach these handlers.
+  //
+  // While the IME is up, a horizontal panel drag is a ONE-GESTURE dismissal:
+  // the panel claims it, hides the keyboard on grant, freezes progress at 1
+  // for that gesture and settles back open on release. The same gesture can
+  // never also close the drawer. Search-focused drags stay unclaimed (native
+  // selection), and a search-opened keyboard is therefore never dismissed by
+  // a panel drag either.
   const panelPan = useMemo(() => {
+    const dragState = (): PanelDragState => ({
+      open: openRef.current,
+      keyboardVisible: keyboardVisibleRef.current,
+      searchFocused: searchFocusRef.current,
+      dialogActive: dialogActiveRef.current,
+    })
+    const dragVector = (g: PanResponderGestureState): PanelDragVector => ({
+      dx: g.dx,
+      dy: g.dy,
+      rtl: dir.rtl,
+      edgeClaim: EDGE_CLAIM,
+      dominance: DOMINANCE,
+    })
     const settle = (_e: GestureResponderEvent, g: PanResponderGestureState) => {
+      const dismissedIme = imeDismissGestureRef.current
+      imeDismissGestureRef.current = false
+      // An external close (hardware back, tap) can land mid-gesture; never
+      // let this release fight it by settling the panel back open.
+      if (!openRef.current) return
+      // The keyboard-dismiss gesture always settles back open, even though
+      // `keyboardVisible` has flipped false by release time. Never close.
+      if (dismissedIme) {
+        progressRef.current = 1
+        settleTo(anim, 1, SNAP_MS)
+        return
+      }
       const closing = dir.rtl ? g.vx > FLICK : g.vx < -FLICK
       if (closing || progressRef.current < 0.5) onCloseRef.current?.()
       else settleTo(anim, 1, SNAP_MS)
     }
     return PanResponder.create({
       onStartShouldSetPanResponderCapture: () => false,
-      onMoveShouldSetPanResponderCapture: (_e, g) =>
-        openRef.current &&
-        !dialogActiveRef.current &&
-        !searchFocusRef.current &&
-        (dir.rtl ? g.dx > EDGE_CLAIM : g.dx < -EDGE_CLAIM) &&
-        Math.abs(g.dx) > Math.abs(g.dy) * DOMINANCE,
-      onPanResponderGrant: () => captureProgress(anim, progressRef, moveSeenRef),
+      onMoveShouldSetPanResponderCapture: (_e, g) => {
+        // A granted dismiss gesture never re-claims as a panel close.
+        if (imeDismissGestureRef.current) return false
+        const state = dragState()
+        const drag = dragVector(g)
+        // Latch the mode at CLAIM time: the keyboard can hide between claim
+        // and grant, but the same gesture must still never close the panel.
+        const dismissIme = shouldDismissImeOnPanelDrag(state, drag)
+        panelDismissClaimRef.current = dismissIme
+        return dismissIme || shouldClaimPanelClose(state, drag)
+      },
+      onPanResponderGrant: (_e, g) => {
+        // `panelDismissClaimRef` covers a keyboard that hid between claim and
+        // grant (the same gesture must stay a dismissal); the live check
+        // covers one that appeared in that window (never close with an IME).
+        if (
+          panelDismissClaimRef.current ||
+          shouldDismissImeOnPanelDrag(dragState(), dragVector(g))
+        ) {
+          imeDismissGestureRef.current = true
+          progressRef.current = 1
+          // Focus must leave the drawer's search / the composer behind the
+          // scrim; Keyboard.dismiss() is the repo's proven blur path.
+          Keyboard.dismiss()
+          return
+        }
+        imeDismissGestureRef.current = false
+        captureProgress(anim, progressRef, moveSeenRef)
+      },
       onPanResponderMove: (_e, g) => {
+        // Suppressed for the whole dismissal gesture: the drawer must not
+        // follow the finger (and must not look half-closed mid-dismiss).
+        if (imeDismissGestureRef.current) return
         const p = clamp01(1 + (dir.rtl ? -g.dx : g.dx) / panelWidthRef.current)
         progressRef.current = p
         moveSeenRef.current = true
@@ -1193,7 +1287,8 @@ export function Sidebar({
           {
             width: panelWidth,
             paddingTop: insets.top + 8,
-            paddingBottom: Math.max(insets.bottom, 10) + 12,
+            // The body wrapper owns the bottom inset + IME lift (see
+            // drawerBodyKbPad); adding a safe-area pad here would stack.
             transform: [{ translateX }],
           },
           dormantStyle,
@@ -1276,12 +1371,16 @@ export function Sidebar({
           hideBots={ocMode}
         />
 
-        {/* BUG-133: chat-pad pattern on the LIST only — the drawer's search
-            field stays at the panel top while chat results render above the
-            keys instead of behind them. */}
-        {showChatList ? (
-          <RAnimated.View style={[{ flex: 1 }, drawerListKbPad]}>
-            {ocMode ? (
+        {/* BUG-133: the body wrapper (scrollable results + amber footer +
+            bottom bar) is the SINGLE keyboard-avoidance/bottom-inset owner.
+            RNKC's height is negative while the IME is up, so the pad keeps
+            the panel's resting gutter at 0 and follows the keyboard when
+            open: the footer and bottom nav rise with the results instead of
+            leaving a dead band behind the keys. Header/search/identity stay
+            top-anchored, and the panel itself adds no bottom inset. */}
+        <RAnimated.View style={[s.panelBody, drawerBodyKbPad]}>
+          {showChatList ? (
+            ocMode ? (
               // OpenCode sessions: rows come from the OpenCode server, keyed
               // by oc id. Tapping opens a fresh chat window bound to that
               // session and hydrates its transcript. Deliberately NOT
@@ -1364,56 +1463,56 @@ export function Sidebar({
                 }
                 ListEmptyComponent={listEmpty}
               />
-            )}
-          </RAnimated.View>
-        ) : null}
+            )
+          ) : null}
 
-        {showBots ? (
-          <View style={s.botsBody}>
-            <BotsRoster
-              profiles={profiles ?? []}
-              onOpenBot={(key) => {
+          {showBots ? (
+            <View style={s.botsBody}>
+              <BotsRoster
+                profiles={profiles ?? []}
+                onOpenBot={(key) => {
+                  onClose()
+                  onOpenBot?.(key)
+                }}
+                onNewBot={() => {
+                  onClose()
+                  onNewBot?.()
+                }}
+                onCloseDrawer={onClose}
+                active={open}
+              />
+            </View>
+          ) : null}
+
+          {/* The pending-questions note counts CHATS waiting on you, so it is
+              Sessions-only (mockup: the amber bottom card). Hermes-only:
+              OpenCode questions render in the chat itself. */}
+          {showFooter ? (
+            <Pressable
+              style={({ pressed }) => [
+                s.pendingCard,
+                { flexDirection: dir.row },
+                pressed && s.rowPressed,
+              ]}
+              onPress={() => {
+                onNav('inbox')
                 onClose()
-                onOpenBot?.(key)
               }}
-              onNewBot={() => {
-                onClose()
-                onNewBot?.()
-              }}
-              onCloseDrawer={onClose}
-              active={open}
-            />
-          </View>
-        ) : null}
+              accessibilityRole="button"
+              accessibilityLabel={tr('chrome.drawer.pendingView')}
+            >
+              <View style={s.pendingBody}>{footer}</View>
+              <Txt size={11} color={C.amber}>
+                {tr('chrome.drawer.view')} {dir.rtl ? '←' : '→'}
+              </Txt>
+            </Pressable>
+          ) : null}
 
-        {/* The pending-questions note counts CHATS waiting on you, so it is
-            Sessions-only (mockup: the amber bottom card). Hermes-only:
-            OpenCode questions render in the chat itself. */}
-        {showFooter ? (
-          <Pressable
-            style={({ pressed }) => [
-              s.pendingCard,
-              { flexDirection: dir.row },
-              pressed && s.rowPressed,
-            ]}
-            onPress={() => {
-              onNav('inbox')
-              onClose()
-            }}
-            accessibilityRole="button"
-            accessibilityLabel={tr('chrome.drawer.pendingView')}
-          >
-            <View style={s.pendingBody}>{footer}</View>
-            <Txt size={11} color={C.amber}>
-              {tr('chrome.drawer.view')} {dir.rtl ? '←' : '→'}
-            </Txt>
-          </Pressable>
-        ) : null}
-
-        {/* Bottom bar (Settings), pinned at the panel's bottom edge and
-            reachable from every drawer mode — Sessions, Bots and OpenCode
-            alike. Labelled, full-width, ≥48dp (see renderBottomBar). */}
-        {shownBottomNav?.length ? renderBottomBar(shownBottomNav) : null}
+          {/* Bottom bar (Settings), pinned at the panel's bottom edge and
+              reachable from every drawer mode — Sessions, Bots and OpenCode
+              alike. Labelled, full-width, ≥48dp (see renderBottomBar). */}
+          {shownBottomNav?.length ? renderBottomBar(shownBottomNav) : null}
+        </RAnimated.View>
       </Animated.View>
 
       {/* ── Per-chat popover, anchored where the row was pressed ──────────── */}
@@ -1810,6 +1909,10 @@ const makeS = () => StyleSheet.create({
   chatsHead: { alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 12, marginBottom: 6 },
   chatsKicker: { flex: 1, marginTop: 0, marginBottom: 0 },
   botsBody: { flex: 1 },
+  // Body + docked footer/bottom bar: one keyboard-avoidance owner (see
+  // drawerBodyKbPad). Stays flex:1 so the scrollable results absorb the
+  // height the IME pad takes away.
+  panelBody: { flex: 1 },
   sectionLabelRow: {
     alignItems: 'center',
     justifyContent: 'space-between',
