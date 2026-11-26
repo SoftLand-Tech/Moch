@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="mochi-char-1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" width="100%" height="100%">
+  <defs>
+    <linearGradient id="sproutGrad-1" x1="550" y1="380" x2="880" y2="220" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#2D6A4F"/><stop offset="55%" stop-color="#52B788"/><stop offset="100%" stop-color="#95D5B2"/></linearGradient>
+    <linearGradient id="bodyGrad-1" x1="627" y1="300" x2="627" y2="990" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#FFF5F8"/><stop offset="55%" stop-color="#FFD6E4"/><stop offset="78%" stop-color="#F8A5C2"/><stop offset="92%" stop-color="#E67E9F"/><stop offset="100%" stop-color="#C95B7E"/></linearGradient>
+    <linearGradient id="visorGrad-1" x1="627" y1="400" x2="627" y2="860" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#362138"/><stop offset="100%" stop-color="#221324"/></linearGradient>
+    
+    <style>
+      #mochi-char-1 .body-part {
+        transform-origin: 627px 985px;
+        animation: breathe-1 4.2s cubic-bezier(0.45, 0.05, 0.55, 0.95) -0.37s infinite;
+      }
+      @keyframes breathe-1 {
+        0%, 100% { transform: scale(1, 1) translateY(0px); }
+        22% { transform: scale(1.018, 0.982) translateY(3px); }
+        52% { transform: scale(0.982, 1.028) translateY(-10px); }
+        70% { transform: scale(0.988, 1.020) translateY(-7px); }
+        86% { transform: scale(1.010, 0.990) translateY(1.5px); }
+      }
+      #mochi-char-1 .sprout-part {
+        transform-origin: 627px 330px;
+        animation: sprout-1 4.2s ease-in-out -0.37s infinite;
+      }
+      @keyframes sprout-1 {
+        0%, 100% { transform: rotate(0deg) translateY(0px); }
+        25% { transform: rotate(-3.5deg) translateY(2px); }
+        55% { transform: rotate(4.5deg) translateY(-9px); }
+        80% { transform: rotate(-2deg) translateY(1px); }
+      }
+      #mochi-char-1 .visor-part {
+        transform-origin: 627px 615px;
+        animation: visor-1 4.2s cubic-bezier(0.45, 0.05, 0.55, 0.95) -0.37s infinite;
+      }
+      @keyframes visor-1 {
+        0%, 100% { transform: translateY(0px) scale(1); }
+        22% { transform: translateY(2px) scale(1.004, 0.996); }
+        52% { transform: translateY(-8px) scale(0.996, 1.006); }
+        86% { transform: translateY(1px); }
+      }
+      #mochi-char-1 .face-part {
+        transform-origin: 627px 615px;
+        animation: glance-1 10.5s ease-in-out -0.37s infinite;
+      }
+      @keyframes glance-1 {
+        0%, 25%, 100% { transform: translate(0px, 0px); }
+        30%, 44% { transform: translate(-5px, -3px); }
+        48%, 68% { transform: translate(0px, 0px); }
+        73%, 86% { transform: translate(5px, -3px); }
+      }
+      #mochi-char-1 .eye {
+        transform-box: fill-box;
+        transform-origin: center 65%;
+        animation: blink-1 5.8s -0.37s infinite;
+      }
+      @keyframes blink-1 {
+        0%, 68%, 74%, 100% { transform: scaleY(1); }
+        71% { transform: scaleY(0.08) translateY(6px); }
+      }
+    </style>
+  
+  </defs>
+  <g>
+    
+      <g class="sprout-part">
+        <path d="M 627 330 C 600 280, 520 235, 475 260 C 450 275, 480 325, 540 340 C 580 350, 610 345, 627 330 Z" fill="url(#sproutGrad-1)"/>
+        <path d="M 627 330 C 654 280, 734 235, 779 260 C 804 275, 774 325, 714 340 C 674 350, 644 345, 627 330 Z" fill="url(#sproutGrad-1)"/>
+        <path d="M 627 335 C 615 270, 627 215, 645 215 C 663 215, 650 275, 627 335 Z" fill="#74C69D"/>
+      </g>
+    
+    
+    <g class="body-part">
+      <path d="M 627 315 C 700 315, 765 365, 835 455 C 915 560, 1005 660, 1005 765 C 1005 895, 910 985, 765 990 C 690 992, 564 992, 489 990 C 344 985, 249 895, 249 765 C 249 660, 339 560, 419 455 C 489 365, 554 315, 627 315 Z" fill="url(#bodyGrad-1)"/>
+      
+    </g>
+    <path class="visor-part" d="M 627 475 C 715 475, 795 495, 838 535 C 875 570, 885 620, 885 675 C 885 735, 865 785, 825 815 C 780 848, 705 860, 627 860 C 549 860, 474 848, 429 815 C 389 785, 369 735, 369 675 C 369 620, 379 570, 416 535 C 459 495, 539 475, 627 475 Z" fill="url(#visorGrad-1)"/>
+    <g class="face-part">
+      <g fill="#FAF1E7">
+        <g transform="translate(0, 45)">
+      <path class="eye" d="M 457 655 C 446 655, 439 646, 439 634 C 439 598, 468 572, 505 572 C 542 572, 571 598, 571 634 C 571 646, 564 655, 553 655 C 543 655, 537 646, 536 635 C 533 618, 521 608, 505 608 C 489 608, 477 618, 474 635 C 473 646, 467 655, 457 655 Z"/>
+      <path class="eye" d="M 797 655 C 808 655, 815 646, 815 634 C 815 598, 786 572, 749 572 C 712 572, 683 598, 683 634 C 683 646, 690 655, 701 655 C 711 655, 717 646, 718 635 C 721 618, 733 608, 749 608 C 765 608, 777 618, 780 635 C 781 646, 787 655, 797 655 Z"/>
+    </g>
+      </g>
+      <g fill="#FF5D8F">
+        
+      <ellipse cx="445" cy="740" rx="26" ry="13" transform="rotate(30 445 740)"/>
+      <ellipse cx="485" cy="750" rx="22" ry="12" transform="rotate(18 485 750)"/>
+      <ellipse cx="809" cy="740" rx="26" ry="13" transform="rotate(-30 809 740)"/>
+      <ellipse cx="769" cy="750" rx="22" ry="12" transform="rotate(-18 769 750)"/>
+    
+      </g>
+    </g>
+  </g>
+</svg>

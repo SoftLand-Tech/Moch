@@ -273,18 +273,6 @@
     });
   }
 
-  document.querySelectorAll('[data-faq-group]').forEach((group) => {
-    const items = Array.from(group.querySelectorAll('details'));
-    items.forEach((item) => {
-      item.addEventListener('toggle', () => {
-        if (!item.open) return;
-        items.forEach((other) => {
-          if (other !== item) other.open = false;
-        });
-      });
-    });
-  });
-
   const reveal = () => root.classList.add('motion-ready');
   if (window.requestAnimationFrame) {
     window.requestAnimationFrame(() => window.requestAnimationFrame(reveal));
