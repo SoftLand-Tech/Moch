@@ -19,7 +19,7 @@ cat > ~/.local/share/applications/moch-desktop.desktop <<EOF
 [Desktop Entry]
 Type=Application
 Name=Moch
-Comment=Your own hermes agents, on your desktop — fully local
+Comment=Hermes agents on your desktop, with a local control plane
 Exec=$HOME/.local/bin/moch-desktop
 Icon=moch
 Terminal=false
