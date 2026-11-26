@@ -796,10 +796,28 @@ function TerminalInner() {
         </ScrollView>
       ) : null}
 
+      {/* Persistent typing context: the active shell's folder + focus state.
+          xterm's own cursor is easy to miss on a phone, so the screen always
+          answers "where am I typing?" without relying on the canvas. */}
+      {activeTab ? (
+        <View
+          style={[s.focusBar, keyboardVisible && s.focusBarActive]}
+          accessibilityLabel={`${activeTab.label}, ${keyboardVisible ? t('terminal.typingHint') : t('terminal.tapHint')}`}
+        >
+          <View style={[s.focusDot, keyboardVisible && s.focusDotActive]} />
+          <Txt mono ltr size={10.5} color={keyboardVisible ? C.greenSoft : C.textDim} numberOfLines={1} style={s.focusPath}>
+            ~/{folderName(activeTab.cwd) ?? 'workspace'}
+          </Txt>
+          <Txt size={10} weight="600" color={keyboardVisible ? C.greenSoft : C.textFaint} numberOfLines={1}>
+            {keyboardVisible ? t('terminal.typingHint') : t('terminal.tapHint')}
+          </Txt>
+        </View>
+      ) : null}
+
       {/* xterm.js frame (mockup screen 5): flex 1, 2/10/6 margins, near-black
           green-tinted surface, 14 radius, 10 padding; the font-size bar sits
           inside on a hairline, the sticky key pad just below the frame. */}
-      <View style={s.termFrame}>
+      <View style={[s.termFrame, keyboardVisible && s.termFrameFocused]}>
         {/* Tapping the output re-raises the IME when it's down (blur + refocus
             — see focusInput). BUG-100: Android enforces pointerEvents only on
             ReactViewGroup containers — on the WebView itself it's a no-op, so
@@ -901,17 +919,6 @@ function TerminalInner() {
       />
 
       <KeyRow onKey={onPadKey} armed={armed} onArm={(m) => { armedRef.current = m; setArmed(m) }} />
-
-      {dead ? null : (
-        <Txt
-          size={11.5}
-          color={keyboardVisible ? C.greenSoft : C.textDim}
-          center
-          style={s.hint}
-        >
-          {keyboardVisible ? t('terminal.typingHint') : t('terminal.tapHint')}
-        </Txt>
-      )}
     </Animated.View>
   )
 }
@@ -1037,6 +1044,28 @@ const makeS = () => StyleSheet.create({
     borderColor: C.border,
   },
 
+  // ── Typing context bar ───────────────────────────────────────────────────
+  focusBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginHorizontal: 10,
+    marginBottom: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 9,
+    backgroundColor: C.bgCard,
+  },
+  focusBarActive: {
+    borderColor: 'rgba(127,199,154,0.42)',
+    backgroundColor: C.greenTint,
+  },
+  focusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.textFaint, flexShrink: 0 },
+  focusDotActive: { backgroundColor: C.greenSoft },
+  focusPath: { flex: 1, minWidth: 0 },
+
   // ── xterm frame + font bar ────────────────────────────────────────────────
   termFrame: {
     flex: 1,
@@ -1049,6 +1078,7 @@ const makeS = () => StyleSheet.create({
     borderRadius: 14,
     padding: 10,
   },
+  termFrameFocused: { borderColor: 'rgba(127,199,154,0.55)' },
   outputWrap: { flex: 1 },
   outputHit: { flex: 1 },
   output: { flex: 1, backgroundColor: '#050807' },

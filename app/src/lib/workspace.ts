@@ -22,6 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { log } from './log'
 import { rpc } from './gateway'
 import { tr } from './strings'
+import { pickProjectCwd } from './projectScope'
 
 // ── Identity ────────────────────────────────────────────────────────────────
 
@@ -193,6 +194,26 @@ export async function setActiveProject(id: string | null): Promise<void> {
 /** The effective project for a new chat: selected, else null (= Personal). */
 export function newChatProjectId(): string | null {
   return activeProjectIdAtom.get()
+}
+
+/**
+ * The selected project's folder, re-reading the tree once when the cached row
+ * has no path. The embedded gateway heals folderless/invalid projects on
+ * `projects.tree`; doing that here means a session can never silently fall
+ * back to the workspace just because the drawer cached a pre-heal row.
+ */
+export async function ensureActiveProjectCwd(): Promise<string | undefined> {
+  const id = activeProjectIdAtom.get()
+  if (!id) return undefined
+  const current = () =>
+    pickProjectCwd(
+      projectsAtom.get().map((p) => ({ id: p.id, path: p.primaryPath, isNoProject: p.isNoProject })),
+      activeProjectIdAtom.get(),
+    )
+  const cached = current()
+  if (cached) return cached
+  await refreshProjects()
+  return current()
 }
 
 /** Longest folder prefix wins; no path metadata means "no project". */
