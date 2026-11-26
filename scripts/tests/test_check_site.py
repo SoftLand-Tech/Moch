@@ -276,6 +276,26 @@ class CheckSiteTests(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
         self.assertTrue(any("JS-only control" in error for error in self.errors()))
 
+    def test_hidden_step_control_is_not_an_accepted_fallback(self) -> None:
+        self.fixture.build_strict_site()
+        path = self.fixture.docs / "index.html"
+        text = path.read_text(encoding="utf-8").replace(
+            "<h2>On-device proof</h2>",
+            '<button class="step-button" type="button" hidden data-step-button="1">Step</button><h2>On-device proof</h2>',
+        )
+        path.write_text(text, encoding="utf-8")
+        self.assertTrue(any("JS-only control" in error for error in self.errors()))
+
+    def test_copy_label_control_must_start_disabled(self) -> None:
+        self.fixture.build_strict_site()
+        path = self.fixture.docs / "setup.html"
+        text = path.read_text(encoding="utf-8").replace(
+            "<h2>1. Environment</h2>",
+            '<button class="copy-button" type="button" data-copy-label="Copy"><span>Copy</span></button><h2>1. Environment</h2>',
+        )
+        path.write_text(text, encoding="utf-8")
+        self.assertTrue(any("JS-only control" in error for error in self.errors()))
+
     def test_missing_csp_fails_strict_mode(self) -> None:
         self.fixture.build_strict_site()
         path = self.fixture.docs / "index.html"

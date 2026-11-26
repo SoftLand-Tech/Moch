@@ -134,7 +134,7 @@ Server-side metadata to apply after merge:
 - Never publish `docs/redesign/**`, `docs/bug-hunter/**`, `docs/screens-inventory.html`, `docs/SITE-SPEC.md`, tests, provenance sidecars or source maps.
 - The verifier checks HTML structure, internal links/assets, required copy/caveats, CSP, no-JS defaults, build-version sync, installer sync, symlink containment and forbidden deployment paths.
 - The deploy workflow runs its regression tests and JS syntax check, waits for the current commit’s `ci-<sha>` release manifest, verifies package/version/commit/size/SHA-256, then deploys the static site and APK together. Missing SSH secrets skip deployment with a clear log.
-- Rsync removes stale public files from the dedicated web root while preserving `/test/` and `/.well-known/`; the deployed APK checksum is verified remotely.
+- Deployment uploads to a unique versioned release directory, verifies the staged APK checksum, then atomically switches the `/var/www/moch` symlink. Shared `/test/` and `/.well-known/` paths are linked into each release; previous releases remain available for rollback.
 - Update Android CI release notes to name the local-first identity and link the site/setup guide; attach `release-manifest.json` to every CI pre-release.
 - Preserve `moch-link/install.sh` and `docs/install.sh` byte identity unless both are deliberately changed together.
 

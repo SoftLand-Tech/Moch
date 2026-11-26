@@ -660,9 +660,11 @@ def validate_structure(page: ParsedPage) -> list[str]:
     for values, line in page.buttons:
         if values.get("type", "").lower() not in {"button", "submit", "reset"}:
             errors.append(f"{prefix}: button at line {line} needs an explicit type")
-        js_only = any(key in values for key in ("data-step-button", "data-model-button", "data-copy", "data-nav-toggle"))
-        if js_only and "disabled" not in values and "hidden" not in values:
-            errors.append(f"{prefix}: JS-only control at line {line} must start disabled or hidden")
+        enhanced_control = any(key in values for key in ("data-step-button", "data-model-button", "data-copy", "data-copy-label"))
+        if enhanced_control and "disabled" not in values:
+            errors.append(f"{prefix}: JS-only control at line {line} must start disabled")
+        if "data-nav-toggle" in values and "hidden" not in values and "disabled" not in values:
+            errors.append(f"{prefix}: menu toggle at line {line} must start hidden or disabled")
         control_hint = re.search(r"(?:menu|nav|disclosure|toggle)", values.get("class", "") + " " + values.get("id", ""), re.I)
         if control_hint and "aria-expanded" not in values:
             errors.append(f"{prefix}: menu/disclosure button at line {line} needs aria-expanded")

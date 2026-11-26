@@ -179,47 +179,71 @@ jobs:
             -o ConnectTimeout=15
 
           if ! ssh -p "$port" -i "$key_file" \
-            -o IdentitiesOnly=yes \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$known_hosts_file" \
-            -o ConnectTimeout=15 \
-            "$MOCH_SITE_USER@$MOCH_SITE_HOST" \
-            'test -d /var/www/moch && test -w /var/www/moch' 2>"$error_file"; then
-            echo "::error::SSH preflight failed. Check the configured host, user, private key, known_hosts, port, and writable /var/www/moch directory."
-            exit 1
-          fi
-
-          remote_entries=$(ssh -p "$port" -i "$key_file" \
             -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$known_hosts_file" -o ConnectTimeout=15 \
             "$MOCH_SITE_USER@$MOCH_SITE_HOST" \
-            'find /var/www/moch -mindepth 1 -maxdepth 1 -printf "%f\n"' 2>"$error_file")
-          for entry in $remote_entries; do
-            case "$entry" in
-              assets|index.html|install.sh|moch.css|setup.html|site.js|Moch.apk|release-manifest.json|screenshots|test|.well-known) ;;
-              *) echo "::error::Refusing to deploy: unknown top-level entry in /var/www/moch."; exit 1 ;;
-            esac
-          done
-
-          # The web root is dedicated to the public site. Remove stale public
-          # files while preserving the legacy test area and TLS challenge files.
-          if ! rsync -az --delete --no-owner --no-group --chmod=D755,F644 \
-            --exclude='/test/***' --exclude='/.well-known/***' \
-            -e "$ssh_command" \
-            -- "$RUNNER_TEMP/site-publish/" "$MOCH_SITE_USER@$MOCH_SITE_HOST:/var/www/moch/" 2>"$error_file"; then
-            echo "::error::rsync deployment failed. Check SSH access and write permission for /var/www/moch."
+            'test -L /var/www/moch && test -d /var/www/moch-releases && test -d /var/www/moch-shared && test -w /var/www/moch-releases && test -w /var/www' 2>"$error_file"; then
+            echo "::error::SSH preflight failed. Expected a /var/www/moch symlink plus writable release/shared directories."
             exit 1
           fi
 
           expected=$(jq -r '.sha256' "$RUNNER_TEMP/site-publish/release-manifest.json")
-          remote=$(ssh -p "$port" -i "$key_file" \
+          release_id="site-${GITHUB_SHA}-${GITHUB_RUN_ID}"
+          remote_release="/var/www/moch-releases/$release_id"
+          remote_new="${remote_release}.new"
+
+          if ! rsync -az --delete --no-owner --no-group --chmod=D755,F644 \
+            -e "$ssh_command" \
+            -- "$RUNNER_TEMP/site-publish/" "$MOCH_SITE_USER@$MOCH_SITE_HOST:$remote_new/" 2>"$error_file"; then
+            echo "::error::rsync staging failed. Check SSH access and write permission for /var/www/moch-releases."
+            exit 1
+          fi
+
+          ssh -p "$port" -i "$key_file" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$known_hosts_file" -o ConnectTimeout=15 \
+            "$MOCH_SITE_USER@$MOCH_SITE_HOST" "sh -s -- '$remote_new'" 2>"$error_file" <<'REMOTE'
+          set -e
+          new_release=$1
+          for shared in test .well-known; do
+            if [ -e "/var/www/moch-shared/$shared" ]; then
+              ln -sfn "/var/www/moch-shared/$shared" "$new_release/$shared"
+            fi
+          done
+          REMOTE
+
+          staged_checksum=$(ssh -p "$port" -i "$key_file" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$known_hosts_file" -o ConnectTimeout=15 \
+            "$MOCH_SITE_USER@$MOCH_SITE_HOST" \
+            "sha256sum '$remote_new/Moch.apk' | cut -d' ' -f1" 2>"$error_file")
+          if [ "$staged_checksum" != "$expected" ]; then
+            echo "::error::Staged APK checksum does not match the verified release manifest."
+            exit 1
+          fi
+
+          ssh -p "$port" -i "$key_file" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$known_hosts_file" -o ConnectTimeout=15 \
+            "$MOCH_SITE_USER@$MOCH_SITE_HOST" "sh -s -- '$remote_release'" 2>"$error_file" <<'REMOTE'
+          set -e
+          release=$1
+          mv "$release.new" "$release"
+          ln -sfn "$release" /var/www/moch.next
+          mv -Tf /var/www/moch.next /var/www/moch
+          REMOTE
+
+          remote_link=$(ssh -p "$port" -i "$key_file" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$known_hosts_file" -o ConnectTimeout=15 \
+            "$MOCH_SITE_USER@$MOCH_SITE_HOST" 'readlink -f /var/www/moch' 2>"$error_file")
+          remote_checksum=$(ssh -p "$port" -i "$key_file" \
             -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$known_hosts_file" -o ConnectTimeout=15 \
             "$MOCH_SITE_USER@$MOCH_SITE_HOST" \
             'sha256sum /var/www/moch/Moch.apk | cut -d" " -f1' 2>"$error_file")
-          if [ "$remote" != "$expected" ]; then
-            echo "::error::Deployed APK checksum does not match the verified release manifest."
+          if [ "$remote_link" != "$remote_release" ] || [ "$remote_checksum" != "$expected" ]; then
+            echo "::error::Atomic release switch or deployed APK verification failed."
             exit 1
           fi
           echo "Site deployment completed."

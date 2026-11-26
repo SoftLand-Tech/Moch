@@ -6,6 +6,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "verify_apk_release.py"
@@ -20,9 +21,21 @@ class VerifyApkReleaseTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="moch-apk-release-")
         self.root = Path(self.temp.name)
         self.apk = self.root / "Moch-build58-abcdef0.apk"
-        self.apk.write_bytes(b"fake apk bytes")
+        with zipfile.ZipFile(self.apk, "w") as archive:
+            archive.writestr("AndroidManifest.xml", b"manifest")
+            archive.writestr("classes.dex", b"dex")
+            archive.writestr("META-INF/CERT.RSA", b"signature")
+        self.aapt2 = self.root / "aapt2"
+        self.aapt2.write_text(
+            "#!/bin/sh\n"
+            "echo \"package: name='com.hermes.pocket' versionCode='58' versionName='1.0.53-beta.3'\"\n",
+            encoding="utf-8",
+        )
+        self.aapt2.chmod(0o755)
         self.gradle = self.root / "build.gradle"
-        self.gradle.write_text('defaultConfig {\n versionCode 58\n versionName "1.0.53-beta.3"\n}\n')
+        self.gradle.write_text(
+            'defaultConfig {\n applicationId "com.hermes.pocket"\n versionCode 58\n versionName "1.0.53-beta.3"\n}\n'
+        )
         self.manifest = self.root / "release-manifest.json"
         self.data = {
             "package": "com.hermes.pocket",
@@ -39,7 +52,7 @@ class VerifyApkReleaseTests(unittest.TestCase):
         self.temp.cleanup()
 
     def errors(self) -> list[str]:
-        return module.verify(self.manifest, self.apk, self.gradle, self.data["commit"])
+        return module.verify(self.manifest, self.apk, self.gradle, self.data["commit"], aapt2_path=self.aapt2)
 
     def test_matching_release_passes(self) -> None:
         self.assertEqual(self.errors(), [])
@@ -58,6 +71,20 @@ class VerifyApkReleaseTests(unittest.TestCase):
         self.data["asset"] = "../outside.apk"
         self.manifest.write_text(json.dumps(self.data), encoding="utf-8")
         self.assertTrue(any("plain file name" in error for error in self.errors()))
+
+    def test_gradle_application_id_drift_fails(self) -> None:
+        self.gradle.write_text(
+            'defaultConfig {\n applicationId "com.example.wrong"\n versionCode 58\n versionName "1.0.53-beta.3"\n}\n'
+        )
+        self.assertTrue(any("manifest package must be com.example.wrong" in error for error in self.errors()))
+
+    def test_apk_metadata_mismatch_fails(self) -> None:
+        self.aapt2.write_text(
+            "#!/bin/sh\n"
+            "echo \"package: name='com.example.wrong' versionCode='58' versionName='1.0.53-beta.3'\"\n",
+            encoding="utf-8",
+        )
+        self.assertTrue(any("APK applicationId must be com.hermes.pocket" in error for error in self.errors()))
 
 
 if __name__ == "__main__":
