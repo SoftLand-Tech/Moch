@@ -144,8 +144,30 @@ jobs:
           asset="Moch-build${version_code}-${sha_short}.apk"
           checksum=$(sha256sum "$apk" | awk '{print $1}')
           cp "$apk" "dist/$asset"
+          size=$(stat -c '%s' "dist/$asset")
+          jq -n \
+            --arg package "com.hermes.pocket" \
+            --arg versionName "$version_name" \
+            --argjson versionCode "$version_code" \
+            --arg commit "$GITHUB_SHA" \
+            --arg shortSha "$sha_short" \
+            --arg asset "$asset" \
+            --argjson size "$size" \
+            --arg sha256 "$checksum" \
+            --arg workflowRun "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            '{package:$package,versionName:$versionName,versionCode:$versionCode,commit:$commit,shortSha:$shortSha,asset:$asset,size:$size,sha256:$sha256,workflowRun:$workflowRun}' \
+            > dist/release-manifest.json
           notes=$(cat <<EOF
           Test build from \`main@${sha_short}\`.
+
+          Moch — your agent runs on your phone. Your model is your choice.
+
+          This CI beta is the current local-first Android AI workspace: Hermes runs embedded by default, and OpenCode is an optional coding-agent thinker inside the on-device Ubuntu Linux guest. The standard path requires no Moch account, relay or remote gateway. Stable v1.0.0 is the legacy linked/relay build.
+
+          Local-first does not mean zero network traffic: hosted models, OpenCode's free hosted models, downloads, OTA updates, web browsing and optional services can still use the internet.
+
+          - Website: https://moch.softland.tech
+          - Setup guide: https://moch.softland.tech/setup.html
 
           ## Build
           - Package: \`com.hermes.pocket\`
@@ -159,9 +181,9 @@ jobs:
           )
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release edit "$tag" --title "Moch CI build (${sha_short})" --notes "$notes" --prerelease
-            gh release upload "$tag" "dist/$asset" --clobber
+            gh release upload "$tag" "dist/$asset" dist/release-manifest.json --clobber
           else
-            gh release create "$tag" "dist/$asset" --title "Moch CI build (${sha_short})" --notes "$notes" --prerelease --target "$GITHUB_SHA"
+            gh release create "$tag" "dist/$asset" dist/release-manifest.json --title "Moch CI build (${sha_short})" --notes "$notes" --prerelease --target "$GITHUB_SHA"
           fi
 
   # OTA (expo-updates): publish the JS bundle to the production channel so

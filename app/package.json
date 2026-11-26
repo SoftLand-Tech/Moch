@@ -92,6 +92,7 @@
     "test:botchat": "tsx scripts/test-bot-chat.ts",
     "test:botmode": "tsx scripts/test-bot-mode.ts",
     "test:projectscope": "tsx scripts/test-project-scope.ts",
+    "test:session-recovery": "tsx scripts/test-session-recovery.ts",
     "test:oc-defaults": "tsx scripts/test-oc-defaults.ts",
     "test:i18n": "tsx scripts/test-i18n.ts"
   },

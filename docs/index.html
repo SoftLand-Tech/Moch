@@ -1,436 +1,416 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Moch — your own AI agent, in your pocket</title>
-  <meta name="description" content="Moch is a free, open-source phone app for your own hermes AI agent. Link it to a machine you own or run the agent on your phone with Ubuntu inside. Four languages, browser control, terminal tabs and no accounts." />
-  <link rel="icon" href="assets/favicon.png" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;600;700&display=swap" />
-  <link rel="stylesheet" href="moch.css?v=3" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Moch — your agent runs on your phone. Your model is your choice.</title>
+  <meta name="description" content="Moch is an open-source Android AI workspace with Hermes built in and OpenCode inside an optional Ubuntu Linux guest. Your agent and workspace live on the phone; you choose the model.">
+  <meta name="theme-color" content="#0A0813">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
+  <link rel="canonical" href="https://moch.softland.tech/">
+  <link rel="icon" href="assets/favicon.png" type="image/png" sizes="48x48">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Moch">
+  <meta property="og:url" content="https://moch.softland.tech/">
+  <meta property="og:title" content="Moch — your agent runs on your phone. Your model is your choice.">
+  <meta property="og:description" content="Hermes built in. OpenCode inside an optional Ubuntu Linux guest. Download the current Android beta and choose your model.">
+  <meta property="og:image" content="https://moch.softland.tech/assets/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Moch — your agent runs on your phone. Your model is your choice. Mochi beside the words Hermes built in and OpenCode in an optional Ubuntu guest.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Moch — your agent runs on your phone. Your model is your choice.">
+  <meta name="twitter:description" content="Hermes built in. OpenCode inside an optional Ubuntu Linux guest. Your model is your choice.">
+  <meta name="twitter:image" content="https://moch.softland.tech/assets/og-image.png">
+  <meta name="twitter:image:alt" content="Moch — your agent runs on your phone. Your model is your choice.">
+  <link rel="stylesheet" href="moch.css">
+  <script src="site.js" defer></script>
 </head>
 <body>
 <!--
-  THESIS: a self-hosted agent deserves a phone app that talks straight to it —
-  this landing refuses the SaaS-landing habit of stock hero + feature card grid,
-  and proves the product with miniature copies of its own UI.
-  OWN-WORLD: the Mocheme theme the app ships today — near-black indigo
-  (#0A0813), the single saturated accent is Moch's antenna orange #F79236,
-  cream #F6ECE1 carries the user's own words (the app's user bubble), and Moch
-  the mascot is the friendly face at five moments: riding the hero phone,
-  avataring the agent, thinking, asking permission, waving goodbye (the hero
-  phone needs no overlay — the capture's own mascot is Moch). Bricolage
-  Grotesque display voice; authored 1.6px-stroke SVG icons; CSS miniatures of
-  the real chat UI (cream bubbles, dashed thinking pill, gradient send) as
-  illustrations.
-  STORY: the visitor gets what Moch is in one line (your own hermes agent, in
-  your pocket), sees the one-command moch-link install right in the hero,
-  believes the direct-connection story (the relay just passes the call and
-  stores nothing but a token hash), meets the two ways in — moch-link if
-  hermes is already running, the full backend if it isn't — and lands on a
-  setup guide that walks either door to a QR code.
-  FIRST VIEWPORT: left column carries a six-word headline with one orange word,
-  a two-sentence plain-language lede, two pills (Get started, GitHub); right
-  column a floating phone showing the real streaming screen with Moch sitting
-  on top of it. Primary action is the gradient Get started pill.
-  FORM: user-pinned direction (warm consumer voice inside the app's brand
-  world; no emojis, no terminal aesthetic, no screenshot gallery) — pinned by
-  the owner's brief, no seed roll.
-  FINISH: unreviewed and undocumented is unfinished; every shipping raster
-  carries its provenance.
+  THESIS: Getting an agent on your phone feels like following a short, reassuring recipe; refuse the stock hero-plus-feature-card grid and the retired relay/QR story.
+  OWN-WORLD: Mocheme near-black indigo, antenna orange reserved for action, cream for the user's own words, soft rounded card stock, real Mochi artwork, plain consumer typography, no emojis and no terminal/editor aesthetic.
+  STORY: The visitor learns that the agent runs on the phone, chooses Hermes or OpenCode, understands hosted-vs-local models, downloads the current beta, and follows the real four-step onboarding.
+  FIRST VIEWPORT: Minimal sticky Moch nav; one large recipe-style hero card with the exact approved headline, one-sentence explanation, Mochi at the upper-right, primary beta download and secondary setup CTA; directly below, the Linux/Thinker/Model ingredient strip.
+  FORM: The Counter Recipe, selected from the dealt surface structures; code-first wireframe `.impeccable/mocks/decision/surface-options.json`, seed key `998348e1`.
+  FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance.
 -->
 
-<header class="topbar">
-  <div class="topbar-inner">
-    <a class="brand" href="./">
-      <img src="assets/logo.png" alt="" />
-      <span class="word">Moch</span>
-    </a>
-    <nav class="topnav">
-      <a class="link" href="#latest">What's new</a>
-      <a class="link" href="setup.html">How to set it up</a>
-      <a class="link" href="https://github.com/SoftLand-Tech/Moch#readme">README</a>
-      <a class="btn" href="https://github.com/SoftLand-Tech/Moch">
-        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-        GitHub
+  <a class="skip-link" href="#main-content">Skip to content</a>
+
+  <svg class="svg-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M4 12h16m0 0-6-6m6 6-6 6"/></symbol>
+    <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 4v16m0 0 6-6m-6 6-6-6"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 20V4m0 0 6 6m-6-6-6 6"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-linux" viewBox="0 0 24 24"><path d="M8 8c0-3 2-5 4-5s4 2 4 5c0 3-1 4-1 7 0 3-1 5-3 5s-3-2-3-5c0-3-1-4-1-7Z"/><path d="m9 4-3-2m9 2 3-2M6 11l-3 2m15-2 3 2M7 17l-3 3m13-3 3 3"/><circle cx="10.5" cy="8.5" r=".7" fill="currentColor" stroke="none"/><circle cx="13.5" cy="8.5" r=".7" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-brain" viewBox="0 0 24 24"><path d="M12 5a3 3 0 0 0-5-2A4 4 0 0 0 4 9a4 4 0 0 0 1 7 3 3 0 0 0 5 2V6a2 2 0 0 1 2-1Z"/><path d="M12 5a3 3 0 0 1 5-2 4 4 0 0 1 3 6 4 4 0 0 1-1 7 3 3 0 0 1-5 2V6a2 2 0 0 0-2-1Z"/><path d="M7 9c2 0 3 1 3 3m7-3c-2 0-3 1-3 3M8 16c1-1 2-1 4 0m4 0c-1-1-2-1-4 0"/></symbol>
+    <symbol id="i-model" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 5h4m-3 14h2"/></symbol>
+    <symbol id="i-runtime" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="m7 7 3 3m4 0 3-3M7 17l3-3m4 0 3 3"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v5c0 5 3 8 8 10 5-2 8-5 8-10V6l-8-3Z"/><path d="m8 12 3 3 5-6"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 14a4 4 0 0 1-4 4H8l-5 3V6a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z"/><path d="M7 8h10M7 12h6"/></symbol>
+    <symbol id="i-projects" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/></symbol>
+    <symbol id="i-browser" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10h.01"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9m-4 4 3 3m-6 0 3 3"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18a5 5 0 1 1 1-9 6 6 0 0 1 11 2 3.5 3.5 0 0 1-1 7H7Z"/></symbol>
+    <symbol id="i-drive" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 14h18M16 17h.01M6 9h6"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+    <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14 6a5 5 0 0 0-6 6L3 17a3 3 0 0 0 4 4l5-5a5 5 0 0 0 6-6l-4 3-3-3 3-4Z"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="m10 13 4-4m-6 7-2 2a4 4 0 0 1-6-6l5-5a4 4 0 0 1 6 0m2 1 2-2a4 4 0 0 1 6 6l-5 5a4 4 0 0 1-6 0"/></symbol>
+  </svg>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="./" aria-label="Moch home">
+        <img src="assets/logo.png" alt="" width="800" height="608">
+        <span class="brand-word">Moch</span>
       </a>
-    </nav>
-  </div>
-</header>
-
-<main>
-
-<section class="hero">
-  <div class="wrap hero-grid">
-    <div>
-      <h1>Your own AI. <em>In your pocket.</em></h1>
-      <p class="lede">
-        Moch is a free, open-source phone app for your <a href="https://github.com/NousResearch/hermes-agent">hermes</a>
-        agent. Keep it on a computer you own and link with one command — or
-        run the whole agent on the phone, Ubuntu and all. No accounts, no monthly fee.
-      </p>
-      <div class="hero-cta">
-        <a class="btn" href="setup.html">Set it up tonight</a>
-        <a class="btn ghost" href="/Moch.apk" download>Download beta for Android</a>
-      </div>
-      <div class="term">
-        <button class="copy" type="button">Copy</button>
-        <pre><code>curl -fsSL https://<wbr>moch.softland.tech/<wbr>install.sh | bash</code></pre>
-      </div>
-      <p class="cap">Already running hermes on your Linux machine? That's the whole setup.</p>
-      <div class="hero-foot">
-        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Open source, MIT — even the relay</span>
-        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Works from any network</span>
-        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Your data stays on your machine</span>
-        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Official relay free while Moch is new</span>
+      <nav class="site-nav" id="primary-navigation" aria-label="Primary navigation">
+        <a href="#method">Method</a>
+        <a href="#thinkers">Thinkers</a>
+        <a href="#capabilities">Tools</a>
+        <a href="#local-first">Local-first</a>
+        <a href="#faq">FAQ</a>
+        <a href="setup.html">Setup</a>
+        <a class="nav-download" href="/Moch.apk" download>Download beta</a>
+      </nav>
+      <div class="header-actions">
+        <a class="button button-primary button-small header-download" href="/Moch.apk" download>Download beta</a>
+        <button class="menu-toggle" type="button" hidden aria-label="Open menu" aria-expanded="false" aria-controls="primary-navigation" data-nav-toggle>
+          <svg class="icon icon-menu" aria-hidden="true"><use href="#i-menu"></use></svg>
+          <svg class="icon icon-close" aria-hidden="true"><use href="#i-close"></use></svg>
+        </button>
       </div>
     </div>
-    <div class="phone">
-      <img src="screenshots/03-streaming.png" alt="Moch streaming an answer with its thinking visible" width="286" />
-    </div>
-  </div>
-</section>
+  </header>
 
-<section class="section">
-  <div class="wrap">
-    <div class="section-head">
-      <h2>Two ways in</h2>
-      <p>Pick the line that matches your machine — both end with a QR on your screen.</p>
-    </div>
-    <div class="paths">
-      <article class="path primary">
-        <span class="chip">Recommended</span>
-        <div class="path-head">
-          <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
-          <h3>Already running hermes</h3>
-        </div>
-        <p class="lead">One command on your Linux machine. <strong>moch-link</strong> never installs, configures or modifies hermes — it connects your install to the official relay and prints the QR.</p>
-        <div class="term">
-          <button class="copy" type="button">Copy</button>
-          <pre><code>curl -fsSL https://<wbr>moch.softland.tech/<wbr>install.sh | bash</code></pre>
-        </div>
-        <ul class="ticks">
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Sessions, providers and skills are already there</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Works from any network — outbound-only, the relay stores token hashes</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Your data never leaves your machine</li>
-        </ul>
-      </article>
-
-      <article class="path">
-        <div class="path-head">
-          <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/></svg></span>
-          <h3>Starting fresh</h3>
-        </div>
-        <p class="lead">No hermes yet? Install the agent itself (one command, from the hermes project) — then link it with the same line as above.</p>
-        <div class="term">
-          <button class="copy" type="button">Copy</button>
-          <pre><code>curl -fsSL https://<wbr>hermes-agent.nousresearch.com/<wbr>install.sh | bash</code></pre>
-        </div>
-        <ul class="ticks">
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Then: <code>curl -fsSL https://moch.softland.tech/install.sh | bash</code></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>The real hermes — the same agent upstream, nothing forked or wrapped</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Works on Linux, macOS, WSL2 and Termux</li>
-        </ul>
-      </article>
-
-      <p class="paths-foot">Both end the same way: <b>a QR on your screen, a scan, and your agent in your pocket.</b></p>
-    </div>
-  </div>
-</section>
-
-<section class="section" id="run">
-  <div class="wrap">
-    <div class="section-head">
-      <h2>Two ways to run your agent</h2>
-      <p>Same Moch, same hermes. Keep the agent on hardware you own — or bring the whole Ubuntu runtime onto the phone.</p>
-    </div>
-    <div class="paths">
-      <article class="path primary">
-        <span class="chip">Stable v1.0.0</span>
-        <div class="path-head">
-          <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></span>
-          <h3>Linked — on your machine</h3>
-        </div>
-        <p class="lead">hermes stays on your mini-PC, laptop, homelab box or VPS. Moch is the window onto it: the official relay only passes the connection and stores a token hash.</p>
-        <ul class="ticks">
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>One command links an existing install; one QR pairs the phone</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Works from any network — no router changes, VPN or domain</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Your sessions, providers, keys and files stay on your hardware</li>
-        </ul>
-      </article>
-
-      <article class="path">
-        <span class="chip">Beta / dev builds</span>
-        <div class="path-head">
-          <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 5h4M11 19h2"/></svg></span>
-          <h3>Embedded — on your phone</h3>
-        </div>
-        <p class="lead">CPython 3.11 and <strong>Moch Linux</strong> — a real Ubuntu 24.04 userspace under proot — ship inside the APK. The agent boots at launch and can install, compile and run servers on-device.</p>
-        <ul class="ticks">
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>A foreground service keeps the runtime alive in the background</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Automations fire on-device; knocks tell you when a job is done</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Your keys, your sessions, your data — still no account</li>
-        </ul>
-      </article>
-
-      <p class="paths-foot"><b>The embedded runtime is in the <code>ci-*</code> beta builds, not the stable v1.0.0 APK.</b></p>
-    </div>
-  </div>
-</section>
-
-<section class="section" id="opensource">
-  <div class="wrap">
-    <div class="section-head">
-      <h2>Open source, end to end</h2>
-      <p>Moch is three MIT pieces — the app, the link, and the relay that connects them. Every one of them can run on hardware you own.</p>
-    </div>
-    <div class="paths">
-      <article class="path">
-        <div class="path-head">
-          <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 4v10l-7 4-7-4V7z"/><path d="M12 12l7-4M12 12v8M12 12L5 8"/></svg></span>
-          <h3>Run the whole stack yourself</h3>
-        </div>
-        <p class="lead">The app is open source, moch-link is one script, and the relay is a single Node file you can host anywhere. Self-host the relay and there is no third party in the loop at all — not even us.</p>
-        <ul class="ticks">
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><a href="https://github.com/SoftLand-Tech/Moch/tree/main/relay">The relay's source and deploy guide</a> — same code ours runs</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Point moch-link at it with <code>MOCH_LINK_RELAY=wss://your-relay …</code></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Your machines, your keys, your rules — MIT, forever</li>
-        </ul>
-      </article>
-
-      <article class="path">
-        <div class="path-head">
-          <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></span>
-          <h3>Or use ours — free while Moch is new</h3>
-        </div>
-        <p class="lead">Don't want to host anything? The official relay at <code>api.moch.softland.tech</code> is the default, and it's <strong>free for everyone right now</strong>, so you can just try Moch.</p>
-        <ul class="ticks">
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>No account, no signup, nothing to configure — it's already in the QR</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>It routes by token hash and stores no traffic</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Self-hosting stays free forever — that's the point of open source</li>
-        </ul>
-      </article>
-    </div>
-  </div>
-</section>
-
-<section class="section">
-  <div class="wrap">
-    <div class="section-head">
-      <h2>Why not just message a bot on Telegram?</h2>
-      <p>Honest question. The Hermes gateway even ships a Telegram bot, and it's a fine way to start. Here's what changes when the phone gets an app of its own.</p>
-    </div>
-    <div class="diff">
-      <div class="diff-col them">
-        <p class="who">A bot inside a chat app</p>
-        <p class="who-sub">Your messages ride a platform on the way home.</p>
-        <div class="diff-row"><span class="q">WHERE MESSAGES GO</span>Phone, then the chat platform's servers, then your agent.</div>
-        <div class="diff-row"><span class="q">WHAT AN ANSWER LOOKS LIKE</span>Plain text in a bubble.</div>
-        <div class="diff-row"><span class="q">WHEN IT NEEDS PERMISSION</span>You answer in a plain text reply.</div>
-        <div class="diff-row"><span class="q">CHANGING A SCHEDULED JOB</span>Type the right slash command, syntax and all.</div>
-        <div class="diff-row"><span class="q">WHAT IT COSTS YOU</span>An account and a bot token on someone else's platform.</div>
-      </div>
-      <div class="diff-col us">
-        <p class="who">Moch</p>
-        <p class="who-sub">A direct line to your own machine.</p>
-        <div class="diff-row"><span class="q">WHERE MESSAGES GO</span>From your phone to your computer. The relay, if you use one, just passes the call along — it stores nothing but a token hash.</div>
-        <div class="diff-row"><span class="q">WHAT AN ANSWER LOOKS LIKE</span>Thinking you can open, code that's formatted, lists that are lists.</div>
-        <div class="diff-row"><span class="q">WHEN IT NEEDS PERMISSION</span>A card arrives. Tap Allow or Deny.</div>
-        <div class="diff-row"><span class="q">CHANGING A SCHEDULED JOB</span>An Automations screen with switches, not syntax.</div>
-        <div class="diff-row"><span class="q">WHAT IT COSTS YOU</span>Nothing. Your device, your server, that's the whole relationship.</div>
-      </div>
-    </div>
-    <p class="diff-note">Both are front doors to the same agent, and you can happily run them side by side. Moch is for when your phone deserves better than a text box.</p>
-  </div>
-</section>
-
-<section class="section" id="latest">
-  <div class="wrap">
-    <div class="section-head">
-      <h2>What's new in the beta</h2>
-      <p>Development builds are at <strong>1.0.53-beta.3 (versionCode 58)</strong>; the stable public release is <strong>v1.0.0</strong>. Every successful main CI run publishes a <code>ci-&lt;sha&gt;</code> pre-release on <a href="https://github.com/SoftLand-Tech/Moch/releases">GitHub Releases</a>.</p>
-    </div>
-    <div class="paths">
-      <article class="path">
-        <div class="path-head">
-          <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2Z"/><path d="m19 17 .7 1.8L21.5 19l-1.8.7L19 21.5l-.7-1.8-1.8-.7 1.8-.7Z"/></svg></span>
-          <h3>Redesigned, four languages</h3>
-        </div>
-        <p class="lead">Every screen now follows one Moch design system, with complete English, Arabic, Chinese and French catalogs. Arabic mirrors the whole layout; the fleet and drawer give each bot a Mochi avatar.</p>
-        <ul class="ticks">
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Instant language switch in Settings, with full Arabic RTL</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Live Mocheme and Relay theme cards</li>
-        </ul>
-      </article>
-
-      <article class="path">
-        <div class="path-head">
-          <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14 0 18M12 3c-3 3.5-3 14 0 18"/></svg></span>
-          <h3>Browser: ask, watch, take over</h3>
-        </div>
-        <p class="lead">The agent drives the visible browser tab. <strong>Ask Moch</strong> starts a quick task in the background while you stay on the page; a status chip shows progress and lets you stop it.</p>
-        <ul class="ticks">
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Leave the browser screen — the task keeps going</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>A “Moch needs your help” card hands control back when you're needed</li>
-        </ul>
-      </article>
-
-      <article class="path">
-        <div class="path-head">
-          <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></span>
-          <h3>Terminal tabs and project sessions</h3>
-        </div>
-        <p class="lead">Keep multiple terminal sessions in tabs, each opening in its project directory, with a green JetBrains Mono theme. Chats and OpenCode sessions are project-aware too.</p>
-        <ul class="ticks">
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Per-tab working directories and tab completion</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Set the model default for <b>All sessions</b>, OpenCode included</li>
-        </ul>
-      </article>
-
-      <article class="path">
-        <div class="path-head">
-          <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></span>
-          <h3>Stable installs and OTA updates</h3>
-        </div>
-        <p class="lead">CI signs with the stable Moch release key, so beta APKs install over previous builds. JS and asset changes reach the production OTA channel without a download; native changes still ship as APKs.</p>
-        <ul class="ticks">
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Settings → About → <b>Check for updates</b></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Embedded runtime boots resume after foregrounding; OpenCode chats recover in place</li>
-        </ul>
-      </article>
-    </div>
-  </div>
-</section>
-
-<section class="section">
-  <div class="wrap">
-    <div class="section-head">
-      <h2>What it feels like to use</h2>
-      <p>Not promises: the actual things the app puts on your screen.</p>
-    </div>
-
-    <div class="feature">
-      <div class="feature-copy">
-        <h3>You watch it think</h3>
-        <p>Answers stream in word by word. When the agent reasons first, the thinking sits in a little chip you can open, with how long it took and how fast it read. Nothing is hidden, nothing is noisy.</p>
-      </div>
-      <div class="feature-fig">
-        <div class="fig">
-          <img class="moch-mini" src="assets/moch/mochi-deep-thinking.svg" alt="Moch deep in thought" />
-          <span class="chip-live"><span class="pulse"></span>Thinking <b>· 14s · 23 tok/s</b></span>
-          <p class="cap">A live reply, mid-thought</p>
-        </div>
-      </div>
-    </div>
-
-    <div class="feature">
-      <div class="feature-copy">
-        <h3>Permission is a tap, not a reply</h3>
-        <p>When your agent wants to install something, spend something, or touch something sensitive, a card comes to your phone. Approve it from the kitchen. The question waits politely if you're in another chat.</p>
-      </div>
-      <div class="feature-fig">
-        <div class="fig">
-          <img class="moch-mini" src="assets/moch/mochi-approval.svg" alt="Moch asking for your approval" />
-          <div class="ask-card">
-            <div class="t">Install 2 packages?</div>
-            <div class="d">Your agent wants to add requests and rich to its Python environment.</div>
-            <div class="row"><span class="mini-btn go">Allow</span><span class="mini-btn no">Deny</span></div>
+  <main id="main-content" tabindex="-1">
+    <div class="page-shell recipe-flow">
+      <section class="hero-section" aria-labelledby="hero-title">
+        <div class="hero-card">
+          <div class="hero-copy">
+            <h1 class="hero-title" id="hero-title"><span>Moch — your agent runs on your phone.</span> <span>Your model is your choice.</span></h1>
+            <p class="hero-build"><span class="beta-mark">Android beta</span><span class="build-data" data-version>1.0.53-beta.3</span><span aria-hidden="true">·</span><span>build <span class="build-data" data-version-code>58</span></span></p>
+            <p class="hero-lede">An open-source AI workspace with Hermes built in and OpenCode inside an optional Ubuntu Linux guest. No Moch account, relay or remote gateway required.</p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="/Moch.apk" download>
+                <svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg>
+                Download the current beta
+              </a>
+              <a class="button button-secondary" href="setup.html">See how it works</a>
+            </div>
+            <p class="hero-proof"><svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg><span>On-device control plane + workspace.</span></p>
+            <p class="network-note">Local-first means the agent and your workspace live on the phone. Hosted models, OpenCode’s free hosted models, downloads, OTA updates, web browsing and optional services can still use the internet. Connect a local model for on-device inference.</p>
           </div>
-          <p class="cap">An approval, as it actually arrives</p>
+          <figure class="hero-mascot">
+            <img src="assets/moch/mochi-greeting.svg" alt="Mochi, the Moch mascot, waving" width="734" height="800">
+            <figcaption class="runtime-stamp">
+              <span>Running on this phone</span>
+              <strong>Control plane + workspace</strong>
+              <small>Model inference can be hosted or local.</small>
+            </figcaption>
+          </figure>
         </div>
-      </div>
-    </div>
+      </section>
 
-    <div class="feature">
-      <div class="feature-copy">
-        <h3>Chores it runs while you sleep</h3>
-        <p>Set a job once ("every evening at six, summarize what changed in my repo") and the agent runs it on your computer even with the app closed. Pause it, edit it, run it now: switches, not commands.</p>
-      </div>
-      <div class="feature-fig">
-        <div class="fig">
-          <div class="cron-row">
-            <div class="meta"><b>Evening repo digest</b><span>every day · 18:00</span></div>
-            <div class="toggle" role="img" aria-label="enabled"></div>
+      <section class="ingredients-section" aria-label="Three ingredients">
+        <ul class="ingredient-strip">
+          <li>
+            <span class="ingredient-icon"><svg class="icon" aria-hidden="true"><use href="#i-linux"></use></svg></span>
+            <strong class="ingredient-name">Linux</strong>
+            <span class="ingredient-copy">Optional Ubuntu guest for OpenCode.</span>
+          </li>
+          <li>
+            <span class="ingredient-icon"><svg class="icon" aria-hidden="true"><use href="#i-brain"></use></svg></span>
+            <strong class="ingredient-name">Thinker</strong>
+            <span class="ingredient-copy">Hermes by default, or OpenCode.</span>
+          </li>
+          <li>
+            <span class="ingredient-icon"><svg class="icon" aria-hidden="true"><use href="#i-model"></use></svg></span>
+            <strong class="ingredient-name">Model</strong>
+            <span class="ingredient-copy">Hosted provider or local endpoint.</span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="method-section" id="method" aria-labelledby="method-title">
+        <header class="section-heading">
+          <h2 id="method-title">A five-step recipe.</h2>
+          <p>No remote server to babysit. Choose a step to see where each part of the recipe runs.</p>
+        </header>
+        <div class="method-panel">
+          <h3>Method</h3>
+          <p class="method-hint">Select a step, or use the arrow keys.</p>
+          <ol class="method-list">
+            <li><button class="step-button is-active" type="button" disabled data-step-button="1" aria-pressed="true" aria-controls="proof-detail"><span class="step-number">1</span><span class="step-copy"><strong>Download the beta</strong><span>Install the current Android APK.</span></span><svg class="icon step-arrow" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button></li>
+            <li><button class="step-button" type="button" disabled data-step-button="2" aria-pressed="false" aria-controls="proof-detail"><span class="step-number">2</span><span class="step-copy"><strong>Choose the environment</strong><span>Install Ubuntu, or skip it for Hermes.</span></span><svg class="icon step-arrow" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button></li>
+            <li><button class="step-button" type="button" disabled data-step-button="3" aria-pressed="false" aria-controls="proof-detail"><span class="step-number">3</span><span class="step-copy"><strong>Choose the thinker</strong><span>Hermes is built in; OpenCode is optional.</span></span><svg class="icon step-arrow" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button></li>
+            <li><button class="step-button" type="button" disabled data-step-button="4" aria-pressed="false" aria-controls="proof-detail"><span class="step-number">4</span><span class="step-copy"><strong>Connect a model</strong><span>Use a hosted provider or local endpoint.</span></span><svg class="icon step-arrow" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button></li>
+            <li><button class="step-button" type="button" disabled data-step-button="5" aria-pressed="false" aria-controls="proof-detail"><span class="step-number">5</span><span class="step-copy"><strong>Chat and get to work</strong><span>Your agent works from the phone.</span></span><svg class="icon step-arrow" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button></li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="proof-section" id="runtime" aria-labelledby="proof-title">
+        <article class="proof-card" id="proof-card" data-proof data-step="1" data-model="hosted">
+          <h2 id="proof-title">The runtime stays on the phone.</h2>
+          <p class="proof-intro">Moch boots an on-device control plane. The thinker runs here too; the model is the part you place on either side of the network boundary.</p>
+          <p class="ondevice-label"><svg class="icon" aria-hidden="true"><use href="#i-shield"></use></svg>On-device control plane + workspace</p>
+          <div class="runtime-track" aria-label="Phone to Moch runtime to thinker to chosen model">
+            <div class="runtime-node" data-node="phone">
+              <span class="node-icon"><svg class="icon" aria-hidden="true"><use href="#i-phone"></use></svg></span>
+              <span class="node-copy"><strong>Phone</strong><span>Android app</span></span>
+            </div>
+            <svg class="icon flow-arrow" aria-hidden="true"><use href="#i-arrow-right"></use></svg>
+            <div class="runtime-node" data-node="runtime">
+              <span class="node-icon"><svg class="icon" aria-hidden="true"><use href="#i-runtime"></use></svg></span>
+              <span class="node-copy"><strong>Moch runtime</strong><span>Loopback control plane</span></span>
+            </div>
+            <svg class="icon flow-arrow" aria-hidden="true"><use href="#i-arrow-right"></use></svg>
+            <div class="runtime-node" data-node="thinker">
+              <span class="node-icon"><svg class="icon" aria-hidden="true"><use href="#i-brain"></use></svg></span>
+              <span class="node-copy"><strong>Hermes / OpenCode</strong><span>Embedded / Ubuntu guest</span></span>
+            </div>
+            <div class="model-boundary">
+              <span>Model boundary</span>
+              <svg class="icon" aria-hidden="true"><use href="#i-arrow-right"></use></svg>
+              <strong id="model-boundary-label">Hosted · internet</strong>
+            </div>
+            <div class="runtime-node" data-node="model">
+              <span class="node-icon"><svg class="icon" aria-hidden="true"><use href="#i-model"></use></svg></span>
+              <span class="node-copy"><strong>Chosen model</strong><span id="model-node-copy">Hosted provider</span></span>
+            </div>
           </div>
-          <p class="cap">One automation, on duty</p>
-        </div>
-      </div>
-    </div>
-
-    <div class="feature">
-      <div class="feature-copy">
-        <h3>Two computers, one app</h3>
-        <p>Pair your desk and your laptop, even the same machine twice, once for home and once for the road. Moch remembers them all and reconnects to the last one on its own.</p>
-      </div>
-      <div class="feature-fig">
-        <div class="fig">
-          <div class="pair-fig">
-            <div class="pair-line"><span>Desk</span><span class="ok">CONNECTED</span></div>
-            <div class="pair-line"><span>Laptop</span><span class="ok">PAIRED</span></div>
-            <div class="pair-line"><span>Desk (relay)</span><span class="ok">PAIRED</span></div>
+          <div class="proof-detail" id="proof-detail" aria-live="polite">
+            <div class="proof-detail-copy">
+              <h3 id="proof-step-title">The APK lands on your phone.</h3>
+              <p id="proof-step-copy">Download the current beta, allow Android to install it, and open Moch. Use the current CI beta APK: Expo Go does not include the native embedded-runtime bridge.</p>
+              <div class="model-switch">
+                <span class="switch-label" id="model-switch-label">Preview the model boundary</span>
+                <div class="switch-buttons" role="group" aria-labelledby="model-switch-label">
+                  <button type="button" disabled data-model-button="hosted" aria-pressed="true">Hosted model</button>
+                  <button type="button" disabled data-model-button="local" aria-pressed="false">Local model</button>
+                </div>
+              </div>
+            </div>
+            <figure class="phone-figure">
+              <div class="phone-shell" role="img" aria-label="Illustrative Moch chat with a local runtime badge and a model label">
+                <div class="phone-screen" aria-hidden="true">
+                  <div class="phone-status"><span>9:41</span><span>Android</span></div>
+                  <div class="phone-appbar"><img src="assets/logo.png" alt="" width="800" height="608"><span>Moch</span><span class="phone-local">On this phone</span></div>
+                  <div class="phone-chat">
+                    <div class="phone-user">Make a plan for my project.</div>
+                    <div class="phone-assistant">
+                      <img src="assets/moch/mochi-greeting.svg" alt="" width="734" height="800">
+                      <div><strong>Mochi</strong><p>I’ll draft the steps. You approve before I use tools.</p><span class="phone-model" id="phone-model-label">Hosted model</span></div>
+                    </div>
+                  </div>
+                  <div class="phone-composer"><span>Ask Mochi…</span><span class="phone-send"><svg class="icon"><use href="#i-arrow-up"></use></svg></span></div>
+                </div>
+              </div>
+              <figcaption>Illustrative interface, not a screenshot.</figcaption>
+            </figure>
           </div>
-          <p class="cap">Settings, your computers list</p>
+        </article>
+      </section>
+
+      <section class="thinker-section" id="thinkers" aria-labelledby="thinkers-title">
+        <header class="section-heading">
+          <h2 id="thinkers-title">Choose the thinker.</h2>
+          <p>A thinker is the brain that answers. Pick the one that fits the work; existing chats keep the thinker they were created with.</p>
+        </header>
+        <div class="thinker-grid">
+          <article class="thinker-card hermes">
+            <span class="thinker-badge">Default · full workspace</span>
+            <h3>Moch (Hermes)</h3>
+            <p>Hermes runs embedded in the app. It is the broadest Moch experience and does not require the Linux guest.</p>
+            <dl class="thinker-facts">
+              <div><dt>Linux</dt><dd>Optional</dd></div>
+              <div><dt>Core</dt><dd>Chat, Projects, Terminal, Browser</dd></div>
+              <div><dt>Also</dt><dd>Fleet, Crew, Automations, Skills, Connectors, Inbox</dd></div>
+            </dl>
+          </article>
+          <article class="thinker-card">
+            <span class="thinker-badge">Optional · coding agent</span>
+            <h3>OpenCode</h3>
+            <p>OpenCode runs inside Moch Linux. It keeps Chat, Projects/OpenCode sessions, Terminal, Browser and Settings.</p>
+            <dl class="thinker-facts">
+              <div><dt>Linux</dt><dd>Ubuntu guest required</dd></div>
+              <div><dt>Install</dt><dd>Downloaded from opencode.ai on first selection</dd></div>
+              <div><dt>Hidden</dt><dd>Hermes-only surfaces</dd></div>
+            </dl>
+          </article>
         </div>
-      </div>
+        <p class="thinker-note"><strong>OpenCode is integrated, not the official OpenCode app.</strong> It is not bundled in the APK and is not the default thinker. Switching thinker affects new chats.</p>
+      </section>
     </div>
 
-    <div class="feature">
-      <div class="feature-copy">
-        <h3>Every skill your agent has</h3>
-        <p>Type a slash and Moch asks your agent what it can do (commands, skills, models), straight from the source. Your agent learns a new trick tonight, your phone knows it tonight. No app update needed.</p>
-      </div>
-      <div class="feature-fig">
-        <div class="fig">
-          <div class="slash-fig">
-            <div class="c"><b>/model</b> glm-5.3-flash</div>
-            <div class="c"><b>/reasoning</b> low · medium · high</div>
-            <div class="c"><b>/cron</b> add · list · pause</div>
+    <section class="section capabilities-section" id="capabilities" aria-labelledby="capabilities-title">
+      <div class="page-shell">
+        <header class="section-heading">
+          <h2 id="capabilities-title">One phone. A real workspace.</h2>
+          <p>Move from a question to a project without moving your agent to a remote machine. Tool details vary a little by thinker.</p>
+        </header>
+        <div class="capability-ledger">
+          <article class="capability-row">
+            <span class="capability-icon"><svg class="icon" aria-hidden="true"><use href="#i-chat"></use></svg></span>
+            <h3>Chat</h3>
+            <p>Streaming replies, visible thinking and tool activity, approvals, projects and session history. OpenCode’s reduced one-shot fallback has no token streaming or interactive permission cards.</p>
+          </article>
+          <article class="capability-row">
+            <span class="capability-icon"><svg class="icon" aria-hidden="true"><use href="#i-projects"></use></svg></span>
+            <h3>Projects</h3>
+            <p>Keep conversations and working files together. Hermes projects and OpenCode sessions stay on the phone with the workspace.</p>
+          </article>
+          <article class="capability-row">
+            <span class="capability-icon"><svg class="icon" aria-hidden="true"><use href="#i-terminal"></use></svg></span>
+            <h3>Terminal</h3>
+            <p>Use terminal tabs and project working directories inside Moch Linux. Commands can install packages or reach the internet, so the terminal is a tool you direct.</p>
+          </article>
+          <article class="capability-row">
+            <span class="capability-icon"><svg class="icon" aria-hidden="true"><use href="#i-browser"></use></svg></span>
+            <h3>Browser</h3>
+            <p>Let the agent work in a visible browser tab, ask about the page, or take over when you are needed. Browsing and web search use the internet.</p>
+          </article>
+        </div>
+        <aside class="hermes-only" aria-labelledby="hermes-only-title">
+          <div>
+            <h3 id="hermes-only-title">Hermes goes further.</h3>
+            <p>These surfaces belong to the default Hermes thinker. They are hidden when you switch to OpenCode.</p>
           </div>
-          <p class="cap">The catalog, served by your agent</p>
+          <ul class="hermes-feature-list">
+            <li><strong>Fleet</strong><span>Bots, roster and work queues.</span></li>
+            <li><strong>Crew</strong><span>Multi-agent task coordination.</span></li>
+            <li><strong>Automations</strong><span>Scheduled on-device agent jobs.</span></li>
+            <li><strong>Skills</strong><span>Commands and reusable agent skills.</span></li>
+            <li><strong>Connectors</strong><span>MCP tools and optional remote services.</span></li>
+            <li><strong>Inbox</strong><span>Questions, finished work and failures.</span></li>
+          </ul>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section honest-section" id="local-first" aria-labelledby="honest-title">
+      <div class="page-shell honest-grid">
+        <header class="honest-heading">
+          <h2 id="honest-title">Local-first, honestly.</h2>
+          <p>The phone owns the workspace. That is different from promising that every request stays offline.</p>
+        </header>
+        <div>
+          <p class="caveat-lead">Local-first means the agent and your workspace live on the phone. Hosted models, OpenCode’s free hosted models, downloads, OTA updates, web browsing and optional services can still use the internet. Connect a local model for on-device inference.</p>
+          <div class="truth-columns">
+            <div>
+              <h3>On the phone</h3>
+              <ul>
+                <li>The Moch control plane and loopback gateway.</li>
+                <li>Sessions and workspace files.</li>
+                <li>Embedded Hermes, or OpenCode inside the Ubuntu guest.</li>
+              </ul>
+            </div>
+            <div>
+              <h3>May use the internet</h3>
+              <ul>
+                <li>Hosted model inference, including free hosted models.</li>
+                <li>Linux, OpenCode and package downloads; model catalogs.</li>
+                <li>OTA, push registration, browsing, search, remote MCP and terminal commands.</li>
+              </ul>
+            </div>
+          </div>
+          <aside class="release-note">
+            <h3>The beta is the local-first build.</h3>
+            <p>Download <span class="build-data" data-version>1.0.53-beta.3</span> (build <span class="build-data" data-version-code>58</span>) for the embedded runtime and OpenCode support. Stable <strong>v1.0.0</strong> is a legacy linked/relay-only release; it does not include this experience. No local model weights are bundled.</p>
+            <a class="text-link" href="https://github.com/SoftLand-Tech/Moch/releases">Compare builds on GitHub Releases <svg class="icon" aria-hidden="true"><use href="#i-arrow-right"></use></svg></a>
+          </aside>
         </div>
       </div>
+    </section>
+
+    <section class="section" id="faq" aria-labelledby="faq-title">
+      <div class="page-shell faq-grid">
+        <header class="section-heading">
+          <h2 id="faq-title">A few useful answers.</h2>
+          <p>If you are switching from the older linked setup, start with the beta guide rather than a QR code.</p>
+        </header>
+        <div class="faq-list" data-faq-group>
+          <details>
+            <summary>Which phones can run Moch?<span class="faq-plus" aria-hidden="true"></span></summary>
+            <p>The current local-first experience is an Android beta APK. There is no iOS release. Expo Go is not equivalent to the current CI beta APK because the native embedded-runtime bridge is unavailable there.</p>
+          </details>
+          <details>
+            <summary>Do I need to install Linux?<span class="faq-plus" aria-hidden="true"></span></summary>
+            <p>No, not for Hermes. Ubuntu 24.04 is the default guest selection, but you can skip it. OpenCode, the terminal and Linux tools need the guest; installing it downloads files and uses the internet.</p>
+          </details>
+          <details>
+            <summary>Is everything offline?<span class="faq-plus" aria-hidden="true"></span></summary>
+            <p>No. The agent control plane and workspace are on the phone, but hosted models, free hosted models, downloads, OTA, browsing and optional services can use the internet. Connect a local model endpoint for on-device inference. Moch does not bundle local model weights.</p>
+          </details>
+          <details>
+            <summary>What is a thinker?<span class="faq-plus" aria-hidden="true"></span></summary>
+            <p>The thinker is the brain that answers: Hermes or OpenCode. Hermes is the default and has the broader feature set. OpenCode is an optional coding-agent thinker inside Moch Linux. Existing chats keep their original thinker.</p>
+          </details>
+          <details>
+            <summary>Is OpenCode bundled, default or official?<span class="faq-plus" aria-hidden="true"></span></summary>
+            <p>No. Moch integrates OpenCode as an optional thinker. On first selection, Moch downloads it from opencode.ai into the Linux guest. It is not bundled in the APK, not the default, and Moch is not the official OpenCode app.</p>
+          </details>
+          <details>
+            <summary>Are OpenCode’s free models on-device?<span class="faq-plus" aria-hidden="true"></span></summary>
+            <p>No. OpenCode’s free hosted models need no key or account, but they still use the network. Other hosted providers may require an account and charge for usage. A local endpoint is the option for on-device inference.</p>
+          </details>
+          <details>
+            <summary>Which build should I download?<span class="faq-plus" aria-hidden="true"></span></summary>
+            <p>Use the current beta, <span class="build-data" data-version>1.0.53-beta.3</span> (build <span class="build-data" data-version-code>58</span>), for the local-first runtime and OpenCode. Stable v1.0.0 is the older linked/relay-only build and should not be treated as the current local-first release.</p>
+          </details>
+          <details>
+            <summary>I already used moch-link or a relay QR code. What now?<span class="faq-plus" aria-hidden="true"></span></summary>
+            <p>That flow belongs to stable v1.0.0. The current beta uses the on-phone setup instead. The legacy instructions are isolated at the end of the <a href="setup.html#legacy">setup guide</a> for existing users only.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section class="final-section" aria-labelledby="final-title">
+      <div class="page-shell">
+        <div class="final-card">
+          <div class="final-copy">
+            <h2 id="final-title">Start with the beta.</h2>
+            <p>Put the workspace on your phone, choose your thinker, then choose the model that fits your day.</p>
+            <div class="final-actions">
+              <a class="button button-primary" href="/Moch.apk" download><svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg>Download the current beta</a>
+              <a class="button button-dark" href="setup.html">Follow the setup recipe</a>
+            </div>
+            <p class="final-build">Android beta <span class="build-data" data-version>1.0.53-beta.3</span> · build <span class="build-data" data-version-code>58</span> · MIT licensed</p>
+          </div>
+          <figure class="final-mascot"><img src="assets/moch/mochi-celebration.svg" alt="Mochi celebrating" width="734" height="770"></figure>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="page-shell footer-grid">
+      <a class="footer-brand" href="./"><img src="assets/logo.png" alt="" width="800" height="608">Moch</a>
+      <nav class="footer-links" aria-label="Footer navigation">
+        <a href="setup.html">Setup guide</a>
+        <a href="https://github.com/SoftLand-Tech/Moch">GitHub</a>
+        <a href="https://github.com/SoftLand-Tech/Moch/releases">Releases</a>
+        <a href="https://github.com/SoftLand-Tech/Moch/blob/main/LICENSE">MIT license</a>
+      </nav>
+      <div class="footer-meta">
+        <span>© <span data-year>2026</span> Moch contributors</span>
+        <span>Current beta <span class="build-data" data-version>1.0.53-beta.3</span> · build <span class="build-data" data-version-code>58</span></span>
+        <span><strong>Stable v1.0.0 is legacy linked/relay-only.</strong> It does not include the embedded runtime or OpenCode.</span>
+      </div>
     </div>
-  </div>
-</section>
-
-<section class="close">
-  <div class="wrap">
-    <img class="moch-sendoff" src="assets/moch/mochi-celebration.svg" alt="Moch celebrating" />
-    <h2>An evening project. Yours forever.</h2>
-    <p>Already running hermes? moch-link is one command. Starting fresh? The full backend installs everything. The setup guide walks either door: put Moch on your phone, scan one code.</p>
-    <a class="btn" href="setup.html">Start the setup guide</a>
-  </div>
-</section>
-
-</main>
-
-<footer>
-  <div class="wrap">
-    <span>Moch</span>
-    <span class="sep">·</span>
-    <a href="setup.html">Setup guide</a>
-    <span class="sep">·</span>
-    <a href="https://github.com/SoftLand-Tech/Moch">GitHub</a>
-    <span class="sep">·</span>
-    <span>A companion for the open-source <a href="https://github.com/NousResearch/hermes-agent">Hermes agent</a> · MIT</span>
-    <span class="sep">·</span>
-    <span>Beta <a href="https://github.com/SoftLand-Tech/Moch/releases">1.0.53-beta.3</a> · Stable v1.0.0</span>
-  </div>
-</footer>
-
-<script>
-  document.querySelectorAll(".term .copy").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      var code = btn.parentElement.querySelector("code").innerText;
-      navigator.clipboard.writeText(code).then(function () {
-        btn.textContent = "Copied";
-        setTimeout(function () { btn.textContent = "Copy"; }, 1600);
-      });
-    });
-  });
-</script>
-
+  </footer>
 </body>
 </html>

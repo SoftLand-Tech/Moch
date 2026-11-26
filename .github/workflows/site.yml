@@ -1,0 +1,249 @@
+name: site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/site.yml
+      - .github/workflows/android-apk.yml
+      - app/android/app/build.gradle
+      - docs/index.html
+      - docs/setup.html
+      - docs/moch.css
+      - docs/site.js
+      - docs/install.sh
+      - docs/assets/**
+      - docs/screenshots/**
+      - moch-link/install.sh
+      - scripts/check_site.py
+      - scripts/verify_apk_release.py
+      - scripts/site-publish-allowlist.txt
+      - scripts/tests/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify and stage public site
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify public site
+        run: python3 scripts/check_site.py
+
+      - name: Run site verifier tests
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+
+      - name: Check site JavaScript
+        run: node --check docs/site.js
+
+      - name: Stage only allowlisted files
+        run: python3 scripts/check_site.py --stage "$RUNNER_TEMP/site-publish"
+
+      - name: Upload staged site
+        uses: actions/upload-artifact@v4
+        with:
+          name: moch-site
+          path: ${{ runner.temp }}/site-publish/
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    name: Deploy to VPS
+    needs: verify
+    # Manual runs verify any selected ref, but only main is allowed to publish.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check deployment secrets
+        id: deployment
+        env:
+          MOCH_SITE_HOST: ${{ secrets.MOCH_SITE_HOST }}
+          MOCH_SITE_USER: ${{ secrets.MOCH_SITE_USER }}
+          MOCH_SITE_SSH_KEY: ${{ secrets.MOCH_SITE_SSH_KEY }}
+          MOCH_SITE_KNOWN_HOSTS: ${{ secrets.MOCH_SITE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in MOCH_SITE_HOST MOCH_SITE_USER MOCH_SITE_SSH_KEY MOCH_SITE_KNOWN_HOSTS; do
+            if [ -z "${!name}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Site verification passed, but deployment is skipped: missing required repository secrets: ${missing[*]}."
+            exit 0
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+          echo "Deployment secrets are configured; publishing the verified allowlist."
+
+      - name: Download verified site
+        if: steps.deployment.outputs.configured == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: moch-site
+          path: ${{ runner.temp }}/site-publish
+
+      - name: Download and verify matching CI APK
+        if: steps.deployment.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha_short="${GITHUB_SHA::7}"
+          tag="ci-${sha_short}"
+          release_dir="$RUNNER_TEMP/moch-release"
+          mkdir -p "$release_dir"
+          ready=false
+          for attempt in $(seq 1 40); do
+            if gh release download "$tag" --pattern release-manifest.json --dir "$release_dir" >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            if [ "$attempt" -eq 40 ]; then
+              echo "::error::No verified CI release manifest appeared for $tag within 20 minutes."
+              exit 1
+            fi
+            sleep 30
+          done
+          [ "$ready" = true ]
+          asset=$(jq -r '.asset' "$release_dir/release-manifest.json")
+          gh release download "$tag" --pattern "$asset" --dir "$release_dir"
+          python3 scripts/verify_apk_release.py \
+            --manifest "$release_dir/release-manifest.json" \
+            --apk "$release_dir/$asset" \
+            --gradle app/android/app/build.gradle \
+            --commit "$GITHUB_SHA"
+          cp "$release_dir/$asset" "$RUNNER_TEMP/site-publish/Moch.apk"
+          cp "$release_dir/release-manifest.json" "$RUNNER_TEMP/site-publish/release-manifest.json"
+
+      - name: Publish with rsync over SSH
+        if: steps.deployment.outputs.configured == 'true'
+        env:
+          MOCH_SITE_HOST: ${{ secrets.MOCH_SITE_HOST }}
+          MOCH_SITE_USER: ${{ secrets.MOCH_SITE_USER }}
+          MOCH_SITE_SSH_KEY: ${{ secrets.MOCH_SITE_SSH_KEY }}
+          MOCH_SITE_KNOWN_HOSTS: ${{ secrets.MOCH_SITE_KNOWN_HOSTS }}
+          MOCH_SITE_PORT: ${{ secrets.MOCH_SITE_PORT }}
+        run: |
+          set -euo pipefail
+          port="${MOCH_SITE_PORT:-22}"
+          if [[ ! "$MOCH_SITE_HOST" =~ ^[A-Za-z0-9._:\[\]-]+$ ]]; then
+            echo "::error::MOCH_SITE_HOST must be a hostname or IP address, without SSH options."
+            exit 1
+          fi
+          if [[ ! "$MOCH_SITE_USER" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::MOCH_SITE_USER must be a plain SSH user name."
+            exit 1
+          fi
+          if [[ ! "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
+            echo "::error::MOCH_SITE_PORT must be an integer from 1 to 65535."
+            exit 1
+          fi
+
+          umask 077
+          key_file="$RUNNER_TEMP/moch-site-deploy-key"
+          known_hosts_file="$RUNNER_TEMP/moch-site-known-hosts"
+          error_file="$RUNNER_TEMP/moch-site-ssh-error"
+          printf '%s\n' "$MOCH_SITE_SSH_KEY" > "$key_file"
+          printf '%s\n' "$MOCH_SITE_KNOWN_HOSTS" > "$known_hosts_file"
+          chmod 600 "$key_file" "$known_hosts_file"
+          trap 'rm -f "$key_file" "$known_hosts_file" "$error_file"' EXIT
+          if ! ssh-keygen -y -P '' -f "$key_file" >/dev/null 2>"$error_file"; then
+            echo "::error::MOCH_SITE_SSH_KEY must be a valid unencrypted private key."
+            exit 1
+          fi
+
+          printf -v ssh_command '%q ' \
+            ssh -p "$port" -i "$key_file" \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$known_hosts_file" \
+            -o ConnectTimeout=15
+
+          if ! ssh -p "$port" -i "$key_file" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$known_hosts_file" -o ConnectTimeout=15 \
+            "$MOCH_SITE_USER@$MOCH_SITE_HOST" \
+            'test -L /var/www/moch && test -d /var/www/moch-releases && test -d /var/www/moch-shared && test -w /var/www/moch-releases && test -w /var/www' 2>"$error_file"; then
+            echo "::error::SSH preflight failed. Expected a /var/www/moch symlink plus writable release/shared directories."
+            exit 1
+          fi
+
+          expected=$(jq -r '.sha256' "$RUNNER_TEMP/site-publish/release-manifest.json")
+          release_id="site-${GITHUB_SHA}-${GITHUB_RUN_ID}"
+          remote_release="/var/www/moch-releases/$release_id"
+          remote_new="${remote_release}.new"
+
+          if ! rsync -az --delete --no-owner --no-group --chmod=D755,F644 \
+            -e "$ssh_command" \
+            -- "$RUNNER_TEMP/site-publish/" "$MOCH_SITE_USER@$MOCH_SITE_HOST:$remote_new/" 2>"$error_file"; then
+            echo "::error::rsync staging failed. Check SSH access and write permission for /var/www/moch-releases."
+            exit 1
+          fi
+
+          ssh -p "$port" -i "$key_file" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$known_hosts_file" -o ConnectTimeout=15 \
+            "$MOCH_SITE_USER@$MOCH_SITE_HOST" "sh -s -- '$remote_new'" 2>"$error_file" <<'REMOTE'
+          set -e
+          new_release=$1
+          for shared in test .well-known; do
+            if [ -e "/var/www/moch-shared/$shared" ]; then
+              ln -sfn "/var/www/moch-shared/$shared" "$new_release/$shared"
+            fi
+          done
+          REMOTE
+
+          staged_checksum=$(ssh -p "$port" -i "$key_file" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$known_hosts_file" -o ConnectTimeout=15 \
+            "$MOCH_SITE_USER@$MOCH_SITE_HOST" \
+            "sha256sum '$remote_new/Moch.apk' | cut -d' ' -f1" 2>"$error_file")
+          if [ "$staged_checksum" != "$expected" ]; then
+            echo "::error::Staged APK checksum does not match the verified release manifest."
+            exit 1
+          fi
+
+          ssh -p "$port" -i "$key_file" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$known_hosts_file" -o ConnectTimeout=15 \
+            "$MOCH_SITE_USER@$MOCH_SITE_HOST" "sh -s -- '$remote_release'" 2>"$error_file" <<'REMOTE'
+          set -e
+          release=$1
+          mv "$release.new" "$release"
+          ln -sfn "$release" /var/www/moch.next
+          mv -Tf /var/www/moch.next /var/www/moch
+          REMOTE
+
+          remote_link=$(ssh -p "$port" -i "$key_file" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$known_hosts_file" -o ConnectTimeout=15 \
+            "$MOCH_SITE_USER@$MOCH_SITE_HOST" 'readlink -f /var/www/moch' 2>"$error_file")
+          remote_checksum=$(ssh -p "$port" -i "$key_file" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$known_hosts_file" -o ConnectTimeout=15 \
+            "$MOCH_SITE_USER@$MOCH_SITE_HOST" \
+            'sha256sum /var/www/moch/Moch.apk | cut -d" " -f1' 2>"$error_file")
+          if [ "$remote_link" != "$remote_release" ] || [ "$remote_checksum" != "$expected" ]; then
+            echo "::error::Atomic release switch or deployed APK verification failed."
+            exit 1
+          fi
+          echo "Site deployment completed."

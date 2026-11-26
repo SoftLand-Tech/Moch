@@ -1,7 +1,7 @@
 [package]
 name = "moch-desktop"
 version = "0.1.0"
-description = "Moch Desktop — your own hermes agents, on your desktop"
+description = "Moch Desktop — a Hermes-only agent workspace with a local control plane"
 authors = ["Mamoun Hisham"]
 edition = "2021"
 license = "MIT"

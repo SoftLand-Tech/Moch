@@ -1,0 +1,16 @@
+# Public Moch site files, relative to docs/ (the VPS web root).
+# The verifier and deploy workflow both use this file. /Moch.apk is added by
+# the deploy workflow only after it verifies the matching CI release manifest.
+# Deployment stages a versioned release and atomically switches /var/www/moch;
+# shared /test and /.well-known paths are linked into each release.
+#
+# Wildcards are intentionally limited to assets/**. Add a current screenshot
+# only by exact path after it has been reviewed; legacy docs/screenshots files
+# are not approved. Never add redesign/, bug-hunter/, tests/, source maps,
+# screens-inventory.html, or SITE-SPEC.md.
+index.html
+setup.html
+moch.css
+site.js
+install.sh
+assets/**
