@@ -44,9 +44,11 @@ import {
   OcError, describeOcError, type OcModel,
 } from '../lib/opencodeClient'
 import { invalidateOcSessionsCache } from '../lib/ocSessionsCache'
-import { ocSessionFor, ocRememberSession } from '../lib/opencodeChat'
-import { activeProjectIdAtom, projectsAtom } from '../lib/workspace'
-import { pickProjectCwd } from '../lib/projectScope'
+import {
+  ocSessionFor, ocRememberSession, ocSessionDirectory, readOcDefaultPick,
+  saveOcDefaultPick, applyOcDefaultPick,
+} from '../lib/opencodeChat'
+import type { OcDefaultPick } from '../lib/ocDefaultPick'
 import { slashLabel } from '../lib/slash'
 import { log } from '../lib/log'
 import { C, useStyles } from '../lib/theme'
@@ -101,8 +103,9 @@ export function ModelPickerSheet({
    * default fetch.
    */
   ocCurrent?: string | null
-  /** Fired after a session-scoped pick lands — the chip keeps this model. */
-  onPicked?: (modelID: string) => void
+  /** Fired after a pick lands — the chip keeps this model. `All sessions`
+   *  also updates the app default and is not a per-chat pin. */
+  onPicked?: (modelID: string, scope?: 'chat' | 'all') => void
 }) {
   const s = useStyles(makeS)
   const dir = useDir()
@@ -128,6 +131,9 @@ export function ModelPickerSheet({
   const [ocLoading, setOcLoading] = useState(false)
   const [ocErr, setOcErr] = useState('')
   const [ocDefault, setOcDefault] = useState<OcModel | null>(null)
+  /** Explicit OpenCode scope: per-chat pick (default) or the app-wide default. */
+  const [ocScope, setOcScope] = useState<'chat' | 'all'>('chat')
+  const [ocSavedDefault, setOcSavedDefault] = useState<OcDefaultPick | null>(null)
 
   // OpenCode open-path: inventory + current default in one go. Loading and
   // errors render in-sheet with honest copy. One-shot has no server: the
@@ -138,7 +144,12 @@ export function ModelPickerSheet({
     setOcErr('')
     setOcList(null)
     setOcDefault(null)
+    setOcScope('chat')
+    setOcSavedDefault(null)
     setOcLoading(true)
+    void readOcDefaultPick()
+      .then((pick) => { if (pick) setOcSavedDefault(pick) })
+      .catch(() => {})
     void (async () => {
       try {
         if (ocOneShot) {
@@ -150,9 +161,10 @@ export function ModelPickerSheet({
           // without this the picker showed an empty list until a message
           // had started the server.
           try { await ocEnsureServer() } catch {}
-          const [list, def] = await Promise.all([ocModels(), ocDefaultModel()])
+          const [list, def, saved] = await Promise.all([ocModels(), ocDefaultModel(), readOcDefaultPick()])
           setOcList(list ?? [])
           setOcDefault(def ?? null)
+          setOcSavedDefault(saved)
         }
       } catch (err) {
         setOcList([])
@@ -266,19 +278,42 @@ export function ModelPickerSheet({
     return order.map((p) => ({ provider: p, models: byProvider.get(p) ?? [] }))
   }, [ocList, q])
 
-  /** Apply a model to this chat's OpenCode session, minting the session on
-   * demand — a pick in a brand-new chat is a "first real action" (same
-   * contract as the hermes apply path's ensureSession below). One-shot has
-   * no session to apply to — the pick is recorded as `provider/model`
-   * (SAFE_MODEL_RE in opencodeChat requires the slash; a bare modelID was
-   * silently dropped from `-m` and the pick never applied). */
+  /** Apply an OpenCode model. `This chat` keeps the pre-existing per-chat
+   *  semantics (mint on demand for a brand-new chat). `All sessions` stores
+   *  the app default for NEW chats, applies it to the current OC session when
+   *  one already exists, and never mints a session just to change a default. */
   const pickOcModel = async (m: OcModel) => {
     if (applying) return
     setApplying(true)
     setOcErr('')
+    const scopeNow = ocScope
     try {
+      if (scopeNow === 'all') {
+        const pick: OcDefaultPick = { providerID: m.providerID, modelID: m.modelID, id: m.id }
+        await saveOcDefaultPick(pick)
+        setOcSavedDefault(pick)
+        // A current OC session (server mode only) switches now; a chat with
+        // no OC session mints nothing — the default lands on its first mint.
+        // When a real session was switched, record it as that chat's current
+        // pick too so the chip survives the next launch.
+        let switchedCurrent = false
+        if (!ocOneShot && ocSessionId) {
+          const ocId = await ocSessionFor(ocSessionId)
+          if (ocId) {
+            await ocSetModel(ocId, m.providerID, m.id)
+            switchedCurrent = true
+          }
+        }
+        onPicked?.(
+          ocOneShot ? `${m.providerID}/${m.modelID}` : m.modelID,
+          switchedCurrent ? 'chat' : 'all',
+        )
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+        onClose()
+        return
+      }
       if (ocOneShot) {
-        onPicked?.(`${m.providerID}/${m.modelID}`)
+        onPicked?.(`${m.providerID}/${m.modelID}`, 'chat')
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
         setOcDefault(m)
         onClose()
@@ -305,22 +340,22 @@ export function ModelPickerSheet({
           t && !NEW_CHAT_TITLES.has(t)
             ? t.slice(0, 80)
             : tr('chrome.model.ocDefaultTitle')
-        // BUG-149: file the minted session under the selected project (same
-        // resolution rule as createSession / the turn mint in opencodeChat).
-        const projectCwd = pickProjectCwd(
-          projectsAtom.get().map((p) => ({ id: p.id, path: p.primaryPath, isNoProject: p.isNoProject })),
-          activeProjectIdAtom.get(),
-        )
-        const created = await ocCreateSession(sessionTitle, projectCwd)
+        // BUG-149: file the minted session under the selected project (or the
+        // embedded workspace) — the SAME helper the turn mint uses, so the two
+        // paths can never disagree on directory.
+        const created = await ocCreateSession(sessionTitle, await ocSessionDirectory())
         if (!created?.id) throw new Error(tr('chrome.model.ocNoSession'))
         await ocRememberSession(mapKey, created.id)
+        // Every newly minted OC session gets the app default first (best-effort),
+        // then this chat's explicit pick below wins.
+        await applyOcDefaultPick(created.id)
         // The drawer's oc list caches for 15s — a minted session must be
         // visible immediately (runOcSubmit invalidates for the same reason).
         invalidateOcSessionsCache()
         ocId = created.id
       }
       await ocSetModel(ocId, m.providerID, m.id)
-      onPicked?.(m.modelID)
+      onPicked?.(m.modelID, 'chat')
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
       setOcDefault(m)
       onClose()
@@ -689,6 +724,15 @@ export function ModelPickerSheet({
             <Txt size={10.5} color={C.textFaint} numberOfLines={1} style={s.nowLine}>{nowLine}</Txt>
           ) : null}
 
+          {ocMode && ocSavedDefault ? (
+            <Txt size={10.5} color={C.textFaint} numberOfLines={1} style={s.nowLine}>
+              {tr('chrome.model.ocDefault', {
+                model: ocSavedDefault.modelID,
+                provider: ocSavedDefault.providerID,
+              })}
+            </Txt>
+          ) : null}
+
           {!ocMode && loadError ? (
             <Txt size={11.5} color={C.amber} style={s.warning}>
               {tr('chrome.model.loadWarning', { why: loadError })}
@@ -740,6 +784,32 @@ export function ModelPickerSheet({
                     <Txt size={11.5} color={C.textDim}>{tr('chrome.model.switching')}</Txt>
                   </View>
                 ) : null}
+                <Kicker style={s.scopeKicker}>{tr('chrome.model.applyScope')}</Kicker>
+                <View style={[s.scopeRow, { flexDirection: dir.row }]}>
+                  {(['chat', 'all'] as const).map((sc) => {
+                    const on = ocScope === sc
+                    return (
+                      <Pressable
+                        key={sc}
+                        style={({ pressed }) => [s.scopePill, on && s.scopePillOn, pressed && s.pressed]}
+                        onPress={() => {
+                          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                          setOcScope(sc)
+                        }}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: on }}
+                        accessibilityLabel={tr(sc === 'chat' ? 'chrome.model.scopeSession' : 'chrome.model.scopeGlobal')}
+                      >
+                        <Txt size={10.5} weight="700" color={on ? C.onAccent : C.textDim} center numberOfLines={1}>
+                          {tr(sc === 'chat' ? 'chrome.model.scopeSession' : 'chrome.model.scopeGlobal')}
+                        </Txt>
+                      </Pressable>
+                    )
+                  })}
+                </View>
+                <Txt size={11} color={C.textFaint} style={s.scopeHint}>
+                  {tr(ocScope === 'all' ? 'chrome.model.ocScopeAllHint' : 'chrome.model.scopeSessionHint')}
+                </Txt>
                 {ocGroups.map((g) => (
                   <View key={g.provider}>
                     <Kicker>{g.provider}</Kicker>

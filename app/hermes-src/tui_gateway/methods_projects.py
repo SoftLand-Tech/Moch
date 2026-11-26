@@ -102,6 +102,27 @@ def _embedded_workspace() -> str | None:
     return ws or None
 
 
+def _embedded_folder_arg(raw: object) -> object:
+    """Translate a guest-style folder path to the bound workspace; mkdir inside it only.
+
+    ``/workspace`` and ``/workspace/...`` are how the Linux guest spells the app workspace.
+    The gateway's own filesystem is the Android host, so those spellings must become the host
+    path before ``projects_db`` normalizes/stores them — otherwise the project points at a
+    directory that only exists in the guest. A path outside the workspace (or an escape such
+    as ``/workspace/../etc``) is returned verbatim and never created.
+    """
+    from .embedded_paths import guest_workspace_host_path
+
+    host = guest_workspace_host_path(raw)
+    if host is None:
+        return raw
+    try:
+        os.makedirs(host, exist_ok=True)  # host mkdir == guest /workspace/<dir> (the bind)
+    except OSError:
+        logger.debug("embedded project folder mkdir failed", exc_info=True)
+    return host
+
+
 def _project_dir_slug(project) -> str:
     """Dir name for a project's embedded workspace folder: the stored DB slug when slug-shaped.
     The shape check keeps a corrupt ``../``-style slug from ever reaching ``os.makedirs``. A
@@ -154,9 +175,16 @@ def _adopt_embedded_project_folder(pdb, conn, project) -> bool:
 
 @_projects_method("projects.create")
 def _(rid, params, pdb, conn) -> dict:
+    # Guest spelling (`/workspace/...`) is translated to the host workspace before storage and
+    # mkdir'd there (inside the bind only); every other caller path stays verbatim and untouched.
+    folders = [_embedded_folder_arg(path) for path in (params.get("folders") or [])]
+    create_kwargs = _pick(
+        params, "slug", "primary_path", "description", "icon", "color", "board_slug")
+    create_kwargs["folders"] = folders
+    if params.get("primary_path"):
+        create_kwargs["primary_path"] = _embedded_folder_arg(params.get("primary_path"))
     pid = pdb.create_project(
-        conn, name=str(params.get("name") or ""), folders=params.get("folders") or [],
-        **_pick(params, "slug", "primary_path", "description", "icon", "color", "board_slug"))
+        conn, name=str(params.get("name") or ""), **create_kwargs)
     if params.get("use"):
         pdb.set_active(conn, pid)
     proj = pdb.get_project(conn, pid)

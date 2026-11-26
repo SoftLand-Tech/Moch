@@ -98,6 +98,78 @@ class TestEmbeddedProjectFolders(unittest.TestCase):
         self.assertFalse(os.path.exists(phantom))
         self.assertFalse((self.ws / "withfolders").exists())
 
+    def test_create_guest_workspace_folder_maps_and_mkdirs(self):
+        self._set_ws(str(self.ws))
+        res = self._call("projects.create", name="Guest App", folders=["/workspace/guest-app"])
+        self.assertNotIn("error", res, res)
+        proj = res["result"]["project"]
+        expected = str(self.ws / "guest-app")
+        self.assertEqual([f["path"] for f in proj["folders"]], [expected])
+        self.assertEqual(proj["primary_path"], expected)
+        self.assertTrue(os.path.isdir(expected), expected)
+
+    def test_create_guest_workspace_nested_folder_maps(self):
+        self._set_ws(str(self.ws))
+        res = self._call("projects.create", name="Nested", folders=["/workspace/a/b"])
+        self.assertNotIn("error", res, res)
+        proj = res["result"]["project"]
+        expected = str(self.ws / "a" / "b")
+        self.assertEqual(proj["primary_path"], expected)
+        self.assertTrue(os.path.isdir(expected), expected)
+
+    def test_create_guest_workspace_root_maps(self):
+        self._set_ws(str(self.ws))
+        res = self._call("projects.create", name="Root", folders=["/workspace"])
+        self.assertNotIn("error", res, res)
+        proj = res["result"]["project"]
+        self.assertEqual(proj["primary_path"], str(self.ws))
+
+    def test_create_guest_primary_path_maps(self):
+        self._set_ws(str(self.ws))
+        res = self._call("projects.create", name="Primary", primary_path="/workspace/primary")
+        self.assertNotIn("error", res, res)
+        proj = res["result"]["project"]
+        expected = str(self.ws / "primary")
+        self.assertEqual(proj["primary_path"], expected)
+        self.assertEqual([f["path"] for f in proj["folders"]], [expected])
+        self.assertTrue(os.path.isdir(expected), expected)
+
+    def test_create_guest_escape_stays_verbatim_and_is_not_created(self):
+        self._set_ws(str(self.ws))
+        escape = "/workspace/../escaped-outside"
+        res = self._call("projects.create", name="Escape", folders=[escape])
+        self.assertNotIn("error", res, res)
+        proj = res["result"]["project"]
+        # Never translated/mkdir'd: projects_db's own normalization stores an absolute spelling,
+        # but nothing under (or beside) the workspace was created by this path.
+        self.assertFalse((self.ws.parent / "escaped-outside").exists())
+        self.assertFalse((self.ws / "escaped-outside").exists())
+
+    def test_create_guest_workspace_symlink_escape_is_not_created(self):
+        self._set_ws(str(self.ws))
+        outside = Path(self._tmp.name) / "outside"
+        outside.mkdir()
+        (self.ws / "escape").symlink_to(outside, target_is_directory=True)
+        res = self._call("projects.create", name="Symlink Escape",
+                         folders=["/workspace/escape/new"])
+        self.assertNotIn("error", res, res)
+        # The link is inside the workspace, its target is not: refuse to mkdir.
+        self.assertFalse((outside / "new").exists())
+
+    def test_session_cwd_accepts_guest_workspace_path(self):
+        self._set_ws(str(self.ws))
+        target = self.ws / "session-project"
+        target.mkdir()
+        cwd = self.tg._completion_cwd({"cwd": "/workspace/session-project"})
+        self.assertEqual(cwd, str(target))
+
+    def test_create_without_moch_workspace_leaves_guest_path_verbatim(self):
+        res = self._call("projects.create", name="NoBind", folders=["/workspace/no-bind"])
+        self.assertNotIn("error", res, res)
+        proj = res["result"]["project"]
+        self.assertEqual(proj["primary_path"], "/workspace/no-bind")
+        self.assertFalse((self.ws / "no-bind").exists())
+
     def test_create_duplicate_names_get_distinct_dirs(self):
         self._set_ws(str(self.ws))
         p1 = self._call("projects.create", name="Test")["result"]["project"]
