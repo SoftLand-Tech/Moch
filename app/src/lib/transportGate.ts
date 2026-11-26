@@ -35,7 +35,6 @@ const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/
 export function isLoopbackHost(host: string): boolean {
   let h: string
   try { h = normalizeHost(host).toLowerCase() } catch { return false }
-  if (h === '::1') return true
   if (h.startsWith('[')) return /^\[::1\](?::\d+)?$/.test(h)
   const parts = h.split(':')
   if (parts.length > 2 || (parts.length === 2 && !/^\d+$/.test(parts[1]))) return false

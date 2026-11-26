@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import struct
 import sys
 import tempfile
@@ -57,6 +58,7 @@ def html_page(page: str) -> str:
   <meta name="twitter:description" content="{description}">
   <meta name="twitter:image" content="/assets/og-image.png">
   <meta name="theme-color" content="#0a0813">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'">
   <link rel="icon" href="assets/favicon.png">
   <link rel="stylesheet" href="moch.css">
 </head>
@@ -166,6 +168,16 @@ class CheckSiteTests(unittest.TestCase):
         (assets / "site.js.map").write_text("{}\n", encoding="utf-8")
         self.assertTrue(any("forbidden path would be published" in error for error in self.errors(bootstrap=True)))
 
+    def test_intermediate_symlink_cannot_escape_docs(self) -> None:
+        outside = self.base / "outside-docs"
+        outside.mkdir()
+        (outside / "secret.txt").write_text("not public\n", encoding="utf-8")
+        (self.fixture.docs / "linked").symlink_to(outside, target_is_directory=True)
+        allowlist = self.fixture.scripts / "site-publish-allowlist.txt"
+        allowlist.write_text(ALLOWLIST + "linked/secret.txt\n", encoding="utf-8")
+        errors = self.errors(bootstrap=True)
+        self.assertTrue(any("escapes docs/" in error for error in errors))
+
     def test_strict_site_passes_and_staging_excludes_repo_only_files(self) -> None:
         self.fixture.build_strict_site()
         for relative in ("redesign/design.html", "bug-hunter/report.html", "tests/example.html", "SITE-SPEC.md", "screens-inventory.html"):
@@ -238,6 +250,39 @@ class CheckSiteTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.assertTrue(any("third-party resource request" in error for error in self.errors()))
+
+    def test_css_image_set_string_url_fails_strict_mode(self) -> None:
+        self.fixture.build_strict_site()
+        (self.fixture.docs / "moch.css").write_text(
+            '.hero { background-image: image-set("https://example.com/tracker.png" 1x); }\n',
+            encoding="utf-8",
+        )
+        self.assertTrue(any("third-party resource request" in error for error in self.errors()))
+
+    def test_computed_fetch_access_fails_strict_mode(self) -> None:
+        self.fixture.build_strict_site()
+        path = self.fixture.docs / "site.js"
+        text = path.read_text(encoding="utf-8")
+        path.write_text(text + "globalThis['fetch']('https://example.com/track');\n", encoding="utf-8")
+        self.assertTrue(any("computed network API access" in error for error in self.errors()))
+
+    def test_js_only_control_must_start_disabled(self) -> None:
+        self.fixture.build_strict_site()
+        path = self.fixture.docs / "index.html"
+        text = path.read_text(encoding="utf-8").replace(
+            "<h2>On-device proof</h2>",
+            '<button class="step-button" type="button" data-step-button="1">Step</button><h2>On-device proof</h2>',
+        )
+        path.write_text(text, encoding="utf-8")
+        self.assertTrue(any("JS-only control" in error for error in self.errors()))
+
+    def test_missing_csp_fails_strict_mode(self) -> None:
+        self.fixture.build_strict_site()
+        path = self.fixture.docs / "index.html"
+        text = path.read_text(encoding="utf-8")
+        text = re.sub(r'\s*<meta http-equiv="Content-Security-Policy"[^>]*>', '', text)
+        path.write_text(text, encoding="utf-8")
+        self.assertTrue(any("CSP must restrict" in error for error in self.errors()))
 
     def test_missing_fragment_target_fails_strict_mode(self) -> None:
         self.fixture.build_strict_site()

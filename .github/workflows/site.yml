@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - .github/workflows/site.yml
+      - .github/workflows/android-apk.yml
+      - app/android/app/build.gradle
       - docs/index.html
       - docs/setup.html
       - docs/moch.css
@@ -14,6 +16,7 @@ on:
       - docs/screenshots/**
       - moch-link/install.sh
       - scripts/check_site.py
+      - scripts/verify_apk_release.py
       - scripts/site-publish-allowlist.txt
       - scripts/tests/**
   workflow_dispatch:
@@ -38,6 +41,12 @@ jobs:
       - name: Verify public site
         run: python3 scripts/check_site.py
 
+      - name: Run site verifier tests
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+
+      - name: Check site JavaScript
+        run: node --check docs/site.js
+
       - name: Stage only allowlisted files
         run: python3 scripts/check_site.py --stage "$RUNNER_TEMP/site-publish"
 
@@ -55,8 +64,12 @@ jobs:
     # Manual runs verify any selected ref, but only main is allowed to publish.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Check deployment secrets
         id: deployment
         env:
@@ -86,6 +99,39 @@ jobs:
         with:
           name: moch-site
           path: ${{ runner.temp }}/site-publish
+
+      - name: Download and verify matching CI APK
+        if: steps.deployment.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha_short="${GITHUB_SHA::7}"
+          tag="ci-${sha_short}"
+          release_dir="$RUNNER_TEMP/moch-release"
+          mkdir -p "$release_dir"
+          ready=false
+          for attempt in $(seq 1 40); do
+            if gh release download "$tag" --pattern release-manifest.json --dir "$release_dir" >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            if [ "$attempt" -eq 40 ]; then
+              echo "::error::No verified CI release manifest appeared for $tag within 20 minutes."
+              exit 1
+            fi
+            sleep 30
+          done
+          [ "$ready" = true ]
+          asset=$(jq -r '.asset' "$release_dir/release-manifest.json")
+          gh release download "$tag" --pattern "$asset" --dir "$release_dir"
+          python3 scripts/verify_apk_release.py \
+            --manifest "$release_dir/release-manifest.json" \
+            --apk "$release_dir/$asset" \
+            --gradle app/android/app/build.gradle \
+            --commit "$GITHUB_SHA"
+          cp "$release_dir/$asset" "$RUNNER_TEMP/site-publish/Moch.apk"
+          cp "$release_dir/release-manifest.json" "$RUNNER_TEMP/site-publish/release-manifest.json"
 
       - name: Publish with rsync over SSH
         if: steps.deployment.outputs.configured == 'true'
@@ -144,11 +190,36 @@ jobs:
             exit 1
           fi
 
-          # Deliberately no remote deletion: /Moch.apk and unrelated VPS files survive.
-          if ! rsync -az --no-owner --no-group --chmod=D755,F644 \
+          remote_entries=$(ssh -p "$port" -i "$key_file" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$known_hosts_file" -o ConnectTimeout=15 \
+            "$MOCH_SITE_USER@$MOCH_SITE_HOST" \
+            'find /var/www/moch -mindepth 1 -maxdepth 1 -printf "%f\n"' 2>"$error_file")
+          for entry in $remote_entries; do
+            case "$entry" in
+              assets|index.html|install.sh|moch.css|setup.html|site.js|Moch.apk|release-manifest.json|screenshots|test|.well-known) ;;
+              *) echo "::error::Refusing to deploy: unknown top-level entry in /var/www/moch."; exit 1 ;;
+            esac
+          done
+
+          # The web root is dedicated to the public site. Remove stale public
+          # files while preserving the legacy test area and TLS challenge files.
+          if ! rsync -az --delete --no-owner --no-group --chmod=D755,F644 \
+            --exclude='/test/***' --exclude='/.well-known/***' \
             -e "$ssh_command" \
             -- "$RUNNER_TEMP/site-publish/" "$MOCH_SITE_USER@$MOCH_SITE_HOST:/var/www/moch/" 2>"$error_file"; then
             echo "::error::rsync deployment failed. Check SSH access and write permission for /var/www/moch."
+            exit 1
+          fi
+
+          expected=$(jq -r '.sha256' "$RUNNER_TEMP/site-publish/release-manifest.json")
+          remote=$(ssh -p "$port" -i "$key_file" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$known_hosts_file" -o ConnectTimeout=15 \
+            "$MOCH_SITE_USER@$MOCH_SITE_HOST" \
+            'sha256sum /var/www/moch/Moch.apk | cut -d" " -f1' 2>"$error_file")
+          if [ "$remote" != "$expected" ]; then
+            echo "::error::Deployed APK checksum does not match the verified release manifest."
             exit 1
           fi
           echo "Site deployment completed."

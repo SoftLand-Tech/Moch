@@ -106,6 +106,12 @@ CSS_URL_PATTERN = re.compile(
 CSS_IMPORT_PATTERN = re.compile(
     r"@import\s+(?:url\(\s*)?(['\"])(.*?)\1", re.IGNORECASE | re.DOTALL
 )
+CSS_IMAGE_SET_PATTERN = re.compile(r"image-set\((.*?)\)", re.IGNORECASE | re.DOTALL)
+CSS_QUOTED_VALUE_PATTERN = re.compile(r"(['\"])(.*?)\1", re.DOTALL)
+JS_COMPUTED_NETWORK_PATTERN = re.compile(
+    r"\b(?:globalThis|window)\s*\[\s*['\"](fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon)['\"]\s*\]",
+    re.IGNORECASE,
+)
 
 
 def normalize(value: str) -> str:
@@ -521,9 +527,23 @@ def load_allowlist(path: Path) -> tuple[list[str], list[str]]:
     return patterns, errors
 
 
+def has_symlink_component(path: Path, root: Path) -> bool:
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return True
+    current = root
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
+
+
 def expand_allowlist(docs_dir: Path, patterns: Iterable[str]) -> tuple[list[str], list[str]]:
     files: set[str] = set()
     errors: list[str] = []
+    docs_root = docs_dir.resolve()
     for pattern in patterns:
         if pattern == "assets/**":
             asset_root = docs_dir / "assets"
@@ -537,14 +557,20 @@ def expand_allowlist(docs_dir: Path, patterns: Iterable[str]) -> tuple[list[str]
                     relative = path.relative_to(docs_dir).as_posix()
                     if is_nonpublic_asset_metadata(relative):
                         continue
-                    if path.is_symlink():
-                        errors.append(f"publish asset must not be a symlink: {relative}")
+                    resolved = path.resolve()
+                    if docs_root not in resolved.parents and resolved != docs_root:
+                        errors.append(f"publish asset escapes docs/ through a symlink: {relative}")
+                    elif has_symlink_component(path, docs_root):
+                        errors.append(f"publish asset path contains a symlink: {relative}")
                     elif name in names:
                         files.add(relative)
         else:
             path = docs_dir / pattern
-            if path.is_symlink():
-                errors.append(f"publish file must not be a symlink: {pattern}")
+            resolved = path.resolve()
+            if docs_root not in resolved.parents and resolved != docs_root:
+                errors.append(f"publish file escapes docs/ through a symlink: {pattern}")
+            elif has_symlink_component(path, docs_root):
+                errors.append(f"publish file path contains a symlink: {pattern}")
             elif path.is_file():
                 files.add(pattern)
             elif path.exists():
@@ -634,6 +660,9 @@ def validate_structure(page: ParsedPage) -> list[str]:
     for values, line in page.buttons:
         if values.get("type", "").lower() not in {"button", "submit", "reset"}:
             errors.append(f"{prefix}: button at line {line} needs an explicit type")
+        js_only = any(key in values for key in ("data-step-button", "data-model-button", "data-copy", "data-nav-toggle"))
+        if js_only and "disabled" not in values and "hidden" not in values:
+            errors.append(f"{prefix}: JS-only control at line {line} must start disabled or hidden")
         control_hint = re.search(r"(?:menu|nav|disclosure|toggle)", values.get("class", "") + " " + values.get("id", ""), re.I)
         if control_hint and "aria-expanded" not in values:
             errors.append(f"{prefix}: menu/disclosure button at line {line} needs aria-expanded")
@@ -671,6 +700,9 @@ def validate_metadata(page: ParsedPage, canonical: str) -> list[str]:
     theme_color = one_meta(page, "theme-color")
     if not re.fullmatch(r"#[0-9a-fA-F]{6}", theme_color):
         errors.append(f"{prefix}: theme-color must be a #RRGGBB value")
+    csp = one_meta(page, "content-security-policy")
+    if "default-src 'self'" not in csp or "connect-src 'self'" not in csp:
+        errors.append(f"{prefix}: CSP must restrict default-src and connect-src to 'self'")
     if not page.favicons:
         errors.append(f"{prefix}: missing favicon link")
     expected_image = "/assets/og-image.png"
@@ -799,6 +831,9 @@ def css_references(css: str) -> list[str]:
         refs.append((match.group(2) if match.group(2) is not None else match.group(3)).strip())
     for match in CSS_IMPORT_PATTERN.finditer(css):
         refs.append(match.group(2).strip())
+    for match in CSS_IMAGE_SET_PATTERN.finditer(css):
+        for quoted in CSS_QUOTED_VALUE_PATTERN.finditer(match.group(1)):
+            refs.append(quoted.group(2).strip())
     return [ref for ref in refs if ref]
 
 
@@ -839,6 +874,8 @@ def validate_no_network_code(source: str, text: str) -> list[str]:
     for match in JS_EXTERNAL_SRC_PATTERN.finditer(text):
         if not is_local_script_url(match.group(2)):
             errors.append(f"{source}: third-party script/resource assignment is forbidden: {match.group(2)}")
+    if JS_COMPUTED_NETWORK_PATTERN.search(text):
+        errors.append(f"{source}: computed network API access is forbidden")
     if re.search(r"createElement\s*\(\s*['\"]script['\"]", text, re.IGNORECASE):
         errors.append(f"{source}: dynamically created scripts are forbidden; use the shared site.js tag")
     if re.search(r"\bnew\s+FontFace\b", text, re.IGNORECASE):
@@ -1081,6 +1118,7 @@ def verify_site(repo_root: Path = REPO_ROOT, *, bootstrap: bool = False) -> tupl
 def stage_site(repo_root: Path, publish: Iterable[str], destination: Path) -> list[str]:
     destination = destination.expanduser().resolve()
     repo_root = repo_root.resolve()
+    docs_root = (repo_root / "docs").resolve()
     if destination == repo_root or repo_root in destination.parents:
         raise ValueError("staging destination must be outside the repository")
     if destination.exists():
@@ -1090,6 +1128,11 @@ def stage_site(repo_root: Path, publish: Iterable[str], destination: Path) -> li
     try:
         for relative in sorted(publish):
             source = repo_root / "docs" / relative
+            resolved = source.resolve()
+            if docs_root not in resolved.parents and resolved != docs_root:
+                raise ValueError(f"publish source escapes docs/: {relative}")
+            if has_symlink_component(source, docs_root):
+                raise ValueError(f"publish source path contains a symlink: {relative}")
             target = temporary / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)

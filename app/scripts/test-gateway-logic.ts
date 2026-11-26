@@ -82,11 +82,11 @@ async function main() {
   // ── local-only retry host gate ───────────────────────────────────────────
   const loopback = [
     '127.0.0.1', '127.0.0.1:9119', 'localhost', 'LOCALHOST:9119',
-    '[::1]', '[::1]:9119', '::1', 'http://127.0.0.1:9119/api/ws',
+    '[::1]', '[::1]:9119', 'http://127.0.0.1:9119/api/ws',
   ]
   const nonLoopback = [
     '192.168.1.10:9119', '10.0.0.5:9119', '172.16.0.1', '8.8.8.8:443',
-    'gateway.example.com:443', 'myserver.tailnet.ts.net', '[2606:4700::6810]:443',
+    'gateway.example.com:443', 'myserver.tailnet.ts.net', '::1', '[2606:4700::6810]:443',
     '127.0.0.1.example.com', 'localhost.example.com',
   ]
   for (const h of loopback) check(`isLoopbackHost(${h})`, gate.isLoopbackHost(h) === true)

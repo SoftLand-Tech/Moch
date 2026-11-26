@@ -144,6 +144,19 @@ jobs:
           asset="Moch-build${version_code}-${sha_short}.apk"
           checksum=$(sha256sum "$apk" | awk '{print $1}')
           cp "$apk" "dist/$asset"
+          size=$(stat -c '%s' "dist/$asset")
+          jq -n \
+            --arg package "com.hermes.pocket" \
+            --arg versionName "$version_name" \
+            --argjson versionCode "$version_code" \
+            --arg commit "$GITHUB_SHA" \
+            --arg shortSha "$sha_short" \
+            --arg asset "$asset" \
+            --argjson size "$size" \
+            --arg sha256 "$checksum" \
+            --arg workflowRun "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            '{package:$package,versionName:$versionName,versionCode:$versionCode,commit:$commit,shortSha:$shortSha,asset:$asset,size:$size,sha256:$sha256,workflowRun:$workflowRun}' \
+            > dist/release-manifest.json
           notes=$(cat <<EOF
           Test build from \`main@${sha_short}\`.
 
@@ -168,9 +181,9 @@ jobs:
           )
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release edit "$tag" --title "Moch CI build (${sha_short})" --notes "$notes" --prerelease
-            gh release upload "$tag" "dist/$asset" --clobber
+            gh release upload "$tag" "dist/$asset" dist/release-manifest.json --clobber
           else
-            gh release create "$tag" "dist/$asset" --title "Moch CI build (${sha_short})" --notes "$notes" --prerelease --target "$GITHUB_SHA"
+            gh release create "$tag" "dist/$asset" dist/release-manifest.json --title "Moch CI build (${sha_short})" --notes "$notes" --prerelease --target "$GITHUB_SHA"
           fi
 
   # OTA (expo-updates): publish the JS bundle to the production channel so

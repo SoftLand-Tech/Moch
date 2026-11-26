@@ -7,6 +7,7 @@
   <meta name="description" content="Set up Moch on Android: download the current beta, choose your environment, thinker and model provider, then finish About you. Legacy v1.0.0 relay instructions are isolated at the end.">
   <meta name="theme-color" content="#0A0813">
   <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
   <link rel="canonical" href="https://moch.softland.tech/setup.html">
   <link rel="icon" href="assets/favicon.png" type="image/png" sizes="48x48">
   <meta property="og:type" content="website">
@@ -74,7 +75,7 @@
       </nav>
       <div class="header-actions">
         <a class="button button-primary button-small header-download" href="/Moch.apk" download>Download beta</a>
-        <button class="menu-toggle" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="primary-navigation" data-nav-toggle>
+        <button class="menu-toggle" type="button" hidden aria-label="Open menu" aria-expanded="false" aria-controls="primary-navigation" data-nav-toggle>
           <svg class="icon icon-menu" aria-hidden="true"><use href="#i-menu"></use></svg>
           <svg class="icon icon-close" aria-hidden="true"><use href="#i-close"></use></svg>
         </button>
@@ -134,11 +135,11 @@
             <div class="download-panel">
               <div>
                 <p><strong>Android beta <span class="build-data" data-version>1.0.53-beta.3</span></strong><br>Build <span class="build-data" data-version-code>58</span> · served at <span class="build-data">/Moch.apk</span></p>
-                <p>CI betas install over the same app with the stable signing key. Android may warn because the APK does not come from an app store.</p>
+                <p>Official main CI builds use the stable Moch signing key when repository secrets are configured, so they install over previous official builds. A fork or unconfigured run may use a different key and require uninstalling first. Android may warn because the APK does not come from an app store.</p>
               </div>
               <div class="download-actions">
                 <a class="button button-primary" href="/Moch.apk" download><svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg>Download APK</a>
-                <button class="copy-button" type="button" data-copy="https://moch.softland.tech/Moch.apk" data-copy-label="Copy APK link"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy APK link</span></button>
+                <button class="copy-button" type="button" disabled data-copy="https://moch.softland.tech/Moch.apk" data-copy-label="Copy APK link"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy APK link</span></button>
               </div>
             </div>
             <ol class="check-list">
@@ -268,20 +269,20 @@
             <p>On the Linux machine that already runs Hermes, run the legacy installer. It links the existing install to the relay and prints the pairing code; it does not replace the current beta setup.</p>
             <div class="code-block">
               <pre><code>curl -fsSL https://moch.softland.tech/install.sh | bash</code></pre>
-              <button class="copy-button" type="button" data-copy-label="Copy"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy</span></button>
+              <button class="copy-button" type="button" disabled data-copy-label="Copy"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy</span></button>
             </div>
             <h3>2. Reprint or check the legacy link</h3>
             <div class="code-block">
               <pre><code>bash install.sh qr
 bash install.sh status</code></pre>
-              <button class="copy-button" type="button" data-copy-label="Copy"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy</span></button>
+              <button class="copy-button" type="button" disabled data-copy-label="Copy"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy</span></button>
             </div>
             <h3>3. Pair in stable v1.0.0</h3>
             <p>Open the stable app, scan the QR code, or use <strong>More options</strong> to paste the printed <span class="build-data">hermes://connect…</span> line. Leave the linked machine on and reachable by the legacy relay.</p>
             <h3>4. Configure the machine-side provider</h3>
             <div class="code-block">
               <pre><code>hermes setup</code></pre>
-              <button class="copy-button" type="button" data-copy-label="Copy"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy</span></button>
+              <button class="copy-button" type="button" disabled data-copy-label="Copy"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy</span></button>
             </div>
             <h3>Manual same-network gateway, advanced</h3>
             <p>For the older no-relay path, start the Hermes gateway on the machine, then pair from the repository with the machine’s LAN address and gateway port.</p>
@@ -289,7 +290,7 @@ bash install.sh status</code></pre>
               <pre><code>hermes gateway setup
 hermes gateway start
 ./scripts/hermes-pair.sh --host 192.168.1.20 --port 8080</code></pre>
-              <button class="copy-button" type="button" data-copy-label="Copy"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy</span></button>
+              <button class="copy-button" type="button" disabled data-copy-label="Copy"><svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg><span>Copy</span></button>
             </div>
             <p>If the script asks for a token, use the dashboard session token printed by <span class="build-data">hermes gateway setup</span>. A saved non-loopback remote gateway from this era is not the current beta runtime path.</p>
           </details>

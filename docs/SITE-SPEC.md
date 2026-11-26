@@ -130,11 +130,12 @@ Server-side metadata to apply after merge:
 
 ## 8. Release/deploy/QA contract
 
-- Public publish allowlist: `index.html`, `setup.html`, `moch.css`, `site.js`, `install.sh`, `assets/**`, and only approved current screenshots/illustrations. Keep `/Moch.apk` in place.
-- Never publish `docs/redesign/**`, `docs/bug-hunter/**`, `docs/screens-inventory.html`, `docs/SITE-SPEC.md`, tests or source maps.
-- Add a site verification script under `docs/tests/` or `scripts/` that checks HTML structure, internal links/assets, required copy/caveats, metadata, installer sync and forbidden deployment paths.
-- Add a deploy workflow that runs on changes to the allowlist, verifies first, then deploys only if the repository’s SSH secrets are configured. If secrets are absent, skip deployment with a clear log; never fail the APK/OTA workflow because site deploy is unconfigured.
-- Update Android CI release notes to name the local-first identity and link the site/setup guide.
+- Public publish allowlist: `index.html`, `setup.html`, `moch.css`, `site.js`, `install.sh`, `assets/**`, and only approved current screenshots/illustrations. The deploy workflow adds `/Moch.apk` and `release-manifest.json` only after verifying the matching CI release.
+- Never publish `docs/redesign/**`, `docs/bug-hunter/**`, `docs/screens-inventory.html`, `docs/SITE-SPEC.md`, tests, provenance sidecars or source maps.
+- The verifier checks HTML structure, internal links/assets, required copy/caveats, CSP, no-JS defaults, build-version sync, installer sync, symlink containment and forbidden deployment paths.
+- The deploy workflow runs its regression tests and JS syntax check, waits for the current commit’s `ci-<sha>` release manifest, verifies package/version/commit/size/SHA-256, then deploys the static site and APK together. Missing SSH secrets skip deployment with a clear log.
+- Rsync removes stale public files from the dedicated web root while preserving `/test/` and `/.well-known/`; the deployed APK checksum is verified remotely.
+- Update Android CI release notes to name the local-first identity and link the site/setup guide; attach `release-manifest.json` to every CI pre-release.
 - Preserve `moch-link/install.sh` and `docs/install.sh` byte identity unless both are deliberately changed together.
 
 ## 9. Verification gates
@@ -143,10 +144,12 @@ Run before review:
 
 ```bash
 git diff --check
+python3 scripts/check_site.py
+python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+node --check docs/site.js
 python3 app/python-runtime/tests/test_docs_sync.py
 bash -n moch-link/install.sh
 bash -n docs/install.sh
-node <site-verification-script>
 ```
 
 Site screenshots/checks: 320, 360, 390, 768, 1024 and 1440px; landscape; 200% zoom; keyboard focus order; 44px targets; no horizontal overflow; clipboard fallback; reduced motion; no third-party requests.

@@ -155,6 +155,11 @@ button {
   color: inherit;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 ::selection {
   background: var(--cream);
   color: var(--user-text);
@@ -296,7 +301,11 @@ button {
   color: var(--text);
 }
 
-.js .menu-toggle {
+.js .menu-toggle[hidden] {
+  display: none !important;
+}
+
+.menu-toggle {
   display: inline-flex;
 }
 
@@ -337,6 +346,7 @@ button {
 }
 
 .site-nav a {
+  min-width: 44px;
   min-height: 44px;
   display: inline-flex;
   align-items: center;
@@ -1494,6 +1504,7 @@ button {
 }
 
 .footer-brand {
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   gap: 9px;
@@ -1702,6 +1713,18 @@ button {
 .copy-button .icon {
   width: 15px;
   height: 15px;
+}
+
+.copy-fallback {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
 }
 
 .option-split {

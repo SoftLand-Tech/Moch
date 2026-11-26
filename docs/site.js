@@ -25,6 +25,7 @@
 
   const navToggle = document.querySelector('[data-nav-toggle]');
   if (navToggle) {
+    navToggle.hidden = false;
     const header = navToggle.closest('.site-header');
     const nav = document.getElementById(navToggle.getAttribute('aria-controls'));
     let menuOpen = false;
@@ -102,17 +103,19 @@
     return copied;
   };
 
-  const selectCopyValue = (button) => {
-    const targetId = button.dataset.copyTarget;
-    const target = targetId
-      ? document.getElementById(targetId)
-      : button.parentElement.querySelector('code, .copy-value');
-    if (!target) return false;
-    const range = document.createRange();
-    range.selectNodeContents(target);
-    const selection = window.getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
+  const showCopyFallback = (button, text) => {
+    let field = button.parentElement.querySelector('.copy-fallback');
+    if (!field) {
+      field = document.createElement('input');
+      field.type = 'text';
+      field.readOnly = true;
+      field.className = 'copy-fallback';
+      field.setAttribute('aria-label', 'Copy value');
+      button.after(field);
+    }
+    field.value = text;
+    field.focus();
+    field.select();
     return true;
   };
 
@@ -129,30 +132,36 @@
   };
 
   const copyTimers = new WeakMap();
-  document.querySelectorAll('[data-copy]').forEach((button) => {
-    const originalLabel = button.dataset.copyLabel || button.textContent.trim();
+  document.querySelectorAll('[data-copy], [data-copy-label]').forEach((button) => {
+    button.disabled = false;
+    const labelNode = button.querySelector('span') || button;
+    const originalLabel = button.dataset.copyLabel || labelNode.textContent.trim();
     button.addEventListener('click', async () => {
       const targetId = button.dataset.copyTarget;
       const target = targetId ? document.getElementById(targetId) : null;
       const localCode = button.parentElement.querySelector('code, .copy-value');
       const text = button.dataset.copy || (target && target.textContent) || (localCode && localCode.textContent) || '';
       if (!text) {
-        button.textContent = 'Nothing to copy';
+        labelNode.textContent = 'Nothing to copy';
         copyStatus.textContent = 'Nothing to copy.';
         return;
       }
 
       const copied = await writeClipboard(text.trim());
-      const selected = copied ? false : selectCopyValue(button);
+      if (copied) {
+        const previous = button.parentElement.querySelector('.copy-fallback');
+        if (previous) previous.remove();
+      }
+      const selected = copied ? false : showCopyFallback(button, text.trim());
       window.clearTimeout(copyTimers.get(button));
-      button.textContent = copied ? 'Copied' : selected ? 'Select & copy' : 'Copy failed';
+      labelNode.textContent = copied ? 'Copied' : selected ? 'Select & copy' : 'Copy failed';
       copyStatus.textContent = copied
         ? 'Copied to clipboard.'
         : selected
-          ? 'Clipboard blocked. The text is selected for manual copying.'
-          : 'Clipboard blocked. Select the link text and copy it manually.';
+          ? 'Clipboard blocked. A copy field is ready for manual copying.'
+          : 'Clipboard blocked. Select the value and copy it manually.';
       copyTimers.set(button, window.setTimeout(() => {
-        button.textContent = originalLabel;
+        labelNode.textContent = originalLabel;
       }, 2400));
     });
   });
@@ -183,6 +192,7 @@
   };
 
   if (proof && stepButtons.length) {
+    stepButtons.forEach((button) => { button.disabled = false; });
     const title = document.getElementById('proof-step-title');
     const copy = document.getElementById('proof-step-copy');
 
@@ -219,6 +229,7 @@
 
   const modelButtons = Array.from(document.querySelectorAll('[data-model-button]'));
   if (proof && modelButtons.length) {
+    modelButtons.forEach((button) => { button.disabled = false; });
     const modelModes = {
       hosted: {
         boundary: 'Hosted · internet',

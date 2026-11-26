@@ -7,6 +7,7 @@
   <meta name="description" content="Moch is an open-source Android AI workspace with Hermes built in and OpenCode inside an optional Ubuntu Linux guest. Your agent and workspace live on the phone; you choose the model.">
   <meta name="theme-color" content="#0A0813">
   <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
   <link rel="canonical" href="https://moch.softland.tech/">
   <link rel="icon" href="assets/favicon.png" type="image/png" sizes="48x48">
   <meta property="og:type" content="website">
@@ -85,7 +86,7 @@
       </nav>
       <div class="header-actions">
         <a class="button button-primary button-small header-download" href="/Moch.apk" download>Download beta</a>
-        <button class="menu-toggle" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="primary-navigation" data-nav-toggle>
+        <button class="menu-toggle" type="button" hidden aria-label="Open menu" aria-expanded="false" aria-controls="primary-navigation" data-nav-toggle>
           <svg class="icon icon-menu" aria-hidden="true"><use href="#i-menu"></use></svg>
           <svg class="icon icon-close" aria-hidden="true"><use href="#i-close"></use></svg>
         </button>
@@ -151,11 +152,11 @@
           <h3>Method</h3>
           <p class="method-hint">Select a step, or use the arrow keys.</p>
           <ol class="method-list">
-            <li><button class="step-button is-active" type="button" data-step-button="1" aria-pressed="true" aria-controls="proof-detail"><span class="step-number">1</span><span class="step-copy"><strong>Download the beta</strong><span>Install the current Android APK.</span></span><svg class="icon step-arrow" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button></li>
-            <li><button class="step-button" type="button" data-step-button="2" aria-pressed="false" aria-controls="proof-detail"><span class="step-number">2</span><span class="step-copy"><strong>Choose the environment</strong><span>Install Ubuntu, or skip it for Hermes.</span></span><svg class="icon step-arrow" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button></li>
-            <li><button class="step-button" type="button" data-step-button="3" aria-pressed="false" aria-controls="proof-detail"><span class="step-number">3</span><span class="step-copy"><strong>Choose the thinker</strong><span>Hermes is built in; OpenCode is optional.</span></span><svg class="icon step-arrow" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button></li>
-            <li><button class="step-button" type="button" data-step-button="4" aria-pressed="false" aria-controls="proof-detail"><span class="step-number">4</span><span class="step-copy"><strong>Connect a model</strong><span>Use a hosted provider or local endpoint.</span></span><svg class="icon step-arrow" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button></li>
-            <li><button class="step-button" type="button" data-step-button="5" aria-pressed="false" aria-controls="proof-detail"><span class="step-number">5</span><span class="step-copy"><strong>Chat and get to work</strong><span>Your agent works from the phone.</span></span><svg class="icon step-arrow" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button></li>
+            <li><button class="step-button is-active" type="button" disabled data-step-button="1" aria-pressed="true" aria-controls="proof-detail"><span class="step-number">1</span><span class="step-copy"><strong>Download the beta</strong><span>Install the current Android APK.</span></span><svg class="icon step-arrow" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button></li>
+            <li><button class="step-button" type="button" disabled data-step-button="2" aria-pressed="false" aria-controls="proof-detail"><span class="step-number">2</span><span class="step-copy"><strong>Choose the environment</strong><span>Install Ubuntu, or skip it for Hermes.</span></span><svg class="icon step-arrow" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button></li>
+            <li><button class="step-button" type="button" disabled data-step-button="3" aria-pressed="false" aria-controls="proof-detail"><span class="step-number">3</span><span class="step-copy"><strong>Choose the thinker</strong><span>Hermes is built in; OpenCode is optional.</span></span><svg class="icon step-arrow" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button></li>
+            <li><button class="step-button" type="button" disabled data-step-button="4" aria-pressed="false" aria-controls="proof-detail"><span class="step-number">4</span><span class="step-copy"><strong>Connect a model</strong><span>Use a hosted provider or local endpoint.</span></span><svg class="icon step-arrow" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button></li>
+            <li><button class="step-button" type="button" disabled data-step-button="5" aria-pressed="false" aria-controls="proof-detail"><span class="step-number">5</span><span class="step-copy"><strong>Chat and get to work</strong><span>Your agent works from the phone.</span></span><svg class="icon step-arrow" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button></li>
           </ol>
         </div>
       </section>
@@ -197,8 +198,8 @@
               <div class="model-switch">
                 <span class="switch-label" id="model-switch-label">Preview the model boundary</span>
                 <div class="switch-buttons" role="group" aria-labelledby="model-switch-label">
-                  <button type="button" data-model-button="hosted" aria-pressed="true">Hosted model</button>
-                  <button type="button" data-model-button="local" aria-pressed="false">Local model</button>
+                  <button type="button" disabled data-model-button="hosted" aria-pressed="true">Hosted model</button>
+                  <button type="button" disabled data-model-button="local" aria-pressed="false">Local model</button>
                 </div>
               </div>
             </div>
