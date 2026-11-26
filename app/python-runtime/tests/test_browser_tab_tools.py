@@ -728,5 +728,103 @@ class WebViewEvalRoutingTests(unittest.TestCase):
         self.assertNotIn("browser_eval", js)
 
 
+class HandoffRegistrationTests(unittest.TestCase):
+    """browser_request_handoff must be advertised AND reachable in both stacks."""
+
+    NAME = "browser_request_handoff"
+
+    def test_schema_table_and_core_toolset(self):
+        from tools import browser_tool
+        from toolsets import TOOLSETS, _HERMES_CORE_TOOLS
+
+        schemas = {s["name"]: s for s in browser_tool.BROWSER_TOOL_SCHEMAS}
+        table = {row[0]: row for row in browser_tool._BROWSER_TOOL_TABLE}
+        self.assertIn(self.NAME, schemas)
+        self.assertIn(self.NAME, table)
+        self.assertEqual(set(table[self.NAME][3]), {"reason"})
+        self.assertEqual(set(schemas[self.NAME]["parameters"]["properties"]), {"reason"})
+        self.assertIn(self.NAME, _HERMES_CORE_TOOLS)
+        self.assertIn(self.NAME, TOOLSETS["browser"]["tools"])
+
+    def test_webview_wrapper_routes_to_the_relay_backend(self):
+        from tools import browser_tool
+
+        with mock.patch.object(browser_tool, "_is_webview_mode", return_value=True), \
+                mock.patch.object(browser_tool, "_webview") as webview:
+            webview.webview_request_handoff.return_value = '{"success": true, "accepted": true}'
+            out = browser_tool.browser_request_handoff("Sign in", task_id="t")
+        self.assertEqual(out, '{"success": true, "accepted": true}')
+        webview.webview_request_handoff.assert_called_once_with("Sign in", "t")
+
+    def test_non_webview_backend_is_honest(self):
+        from tools import browser_tool
+
+        with mock.patch.object(browser_tool, "_is_webview_mode", return_value=False):
+            result = json.loads(browser_tool.browser_request_handoff("Login", task_id="t"))
+        self.assertFalse(result["success"])
+        self.assertIn("only available in the Moch embedded browser", result["error"])
+
+
+class _FakeResponse:
+    def __init__(self, status, payload):
+        self.status_code = status
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+    @property
+    def text(self):
+        return json.dumps(self._payload)
+
+
+class HandoffWebviewTests(unittest.TestCase):
+    """The Hermes-side relay call: accepted/declined/timeout are distinct."""
+
+    def _call(self, status, payload):
+        with mock.patch.object(wv, "_relay_http_root", return_value="http://127.0.0.1:9/tok"), \
+                mock.patch.object(wv, "_active_tab_url", return_value="https://bank.example/login"), \
+                mock.patch.object(wv, "_relay_http",
+                                  return_value=_FakeResponse(status, payload)) as http:
+            out = json.loads(wv.webview_request_handoff("Sign in to continue"))
+        return out, http
+
+    def test_accepted(self):
+        out, http = self._call(200, {"accepted": True, "requestId": "req-1"})
+        self.assertTrue(out["success"])
+        self.assertTrue(out["accepted"])
+        self.assertIn("human took over", out["message"].lower())
+        path = http.call_args[0][0]
+        self.assertIn("/moch/handoff?", path)
+        self.assertIn("reason=Sign+in+to+continue", path)
+        self.assertIn("url=https%3A%2F%2Fbank.example%2Flogin", path)
+
+    def test_declined(self):
+        out, _ = self._call(409, {"accepted": False, "requestId": "req-2",
+                                  "error": "declined"})
+        self.assertTrue(out["success"])
+        self.assertFalse(out["accepted"])
+        self.assertEqual(out["status"], "declined")
+        self.assertIn("NOT handed over", out["message"])
+
+    def test_concurrent_request_is_reported_honestly(self):
+        out, _ = self._call(409, {"accepted": False, "requestId": "req-3",
+                                  "error": "another browser handoff request is already pending"})
+        self.assertFalse(out["accepted"])
+        self.assertIn("already pending", out["message"])
+
+    def test_timeout(self):
+        out, _ = self._call(504, {"accepted": False, "error": "timeout"})
+        self.assertFalse(out["success"])
+        self.assertEqual(out["status"], "timeout")
+        self.assertIn("NOT handed over", out["error"])
+
+    def test_no_ui(self):
+        out, _ = self._call(503, {"accepted": False, "error": "not loaded"})
+        self.assertFalse(out["success"])
+        self.assertEqual(out["status"], "unavailable")
+        self.assertIn("NOT handed over", out["error"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

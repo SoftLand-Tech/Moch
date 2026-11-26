@@ -10,12 +10,15 @@ loopback. This adapter splits exactly along that line:
 
 It is a minimal MCP server (streamable-HTTP shape: JSON-RPC over POST,
 plain application/json responses — the spec's "server MAY reply without
-SSE" mode; stdlib http.server only, no new deps) exposing five browser
+SSE" mode; stdlib http.server only, no new deps) exposing six browser
 tools that map onto the same relay calls hermes' own
 ``tools/browser_webview.py`` makes: ``/json/list`` (active-tab filtered),
 ``/json/moch-tabs`` semantics via ``/json/list``, the PUT-then-GET
 lifecycle dance on ``/json/new``, and CDP ``Runtime.evaluate`` /
-``Page.navigate`` over a per-call ``/devtools/page/<id>`` WebSocket.
+``Page.navigate`` over a per-call ``/devtools/page/<id>`` WebSocket. The
+sixth, ``browser_request_handoff``, calls the relay's
+``/moch/handoff`` endpoint so the human can take over for a login wall,
+CAPTCHA or destructive confirmation.
 
 The token is read HOST-side (env override ``BROWSER_CDP_URL``, else the
 pid-gated relay.json — the same gate hermes_boot.py uses, so a stale
@@ -53,6 +56,9 @@ MCP_SERVER_VERSION = "1.0.0"
 _DEFAULT_PROTOCOL_VERSION = "2025-03-26"
 _SNAPSHOT_CHARS = 4000
 _NAV_WAIT_S = 8.0
+# The relay clamps handoff waits to 120 s; ask for less and leave transport
+# headroom so this tool always answers before its HTTP client gives up.
+_HANDOFF_WAIT_S = 90.0
 # Preferred loopback port for the adapter. A surviving guest `opencode serve`
 # keeps the URL from the config seeded on an earlier app run; an ephemeral
 # port would leave that URL dead until the guest restarts (BUG-148 P2). 9336
@@ -131,6 +137,11 @@ def _relay_http(root: str, path: str, *, verb: str = "GET",
             body = e.read().decode("utf-8", errors="replace")
         except Exception:  # noqa: BLE001 — body is best-effort
             body = ""
+        finally:
+            try:
+                e.close()
+            except Exception:  # noqa: BLE001 — close is best-effort
+                pass
         return e.code, body
     except Exception as e:  # noqa: BLE001
         raise RelayError(f"{type(e).__name__}: {e}") from e
@@ -379,7 +390,7 @@ class CdpWebSocket:
         return False
 
 
-# ── the five tools ───────────────────────────────────────────────────────────
+# ── the six tools ───────────────────────────────────────────────────────────
 
 
 def _js_literal(value: Any) -> str:
@@ -405,6 +416,56 @@ def _settle_page(ws: CdpWebSocket) -> None:
         if state == "complete":
             return
         time.sleep(0.4)
+
+
+def tool_request_handoff(reason: str = "") -> tuple[str, bool]:
+    """Ask the human to take the Moch browser; waits (bounded) for their answer.
+
+    Accepted → the human owns the browser and the model must stop driving.
+    Declined/timeout/unavailable → control was NOT handed over, said honestly.
+    """
+    text = (reason or "").strip() or "Moch needs your help in the browser."
+    root = _RELAY_ENDPOINT_FN()
+    if not root:
+        return _RELAY_DOWN_TEXT, True
+    page_url = ""
+    try:
+        page = _active_page(root)
+        page_url = str((page or {}).get("url") or "")
+    except RelayError:
+        page_url = ""  # the site line is a nicety; the handoff can still run
+    query = urllib.parse.urlencode({
+        "reason": text[:400],
+        "url": page_url[:2000],
+        "timeout_ms": str(int(_HANDOFF_WAIT_S * 1000)),
+    })
+    try:
+        status, body = _relay_http(
+            root, f"/moch/handoff?{query}", timeout=_HANDOFF_WAIT_S + 5.0)
+    except RelayError as e:
+        return (f"handoff request failed: {e} — control was NOT handed over.", True)
+    try:
+        payload = json.loads(body) if body else {}
+    except json.JSONDecodeError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    error = str(payload.get("error") or "").strip()
+    if status == 200 and payload.get("accepted") is True:
+        return ("The human took over the browser. They now own it: stop driving the page "
+                "and wait until they ask you to continue.", False)
+    if status == 409:
+        if "already pending" in error:
+            return ("Control was NOT handed over — another handoff request is already pending; "
+                    "wait for its outcome.", False)
+        return ("The user declined the handoff. Control was NOT handed over — continue only "
+                "if it is safe, otherwise say what is blocked.", False)
+    if status == 504:
+        return ("The handoff request timed out; control was NOT handed over.", True)
+    if status == 503:
+        return ("The Moch Browser UI is not available right now; control was NOT handed over.", True)
+    return (f"handoff failed (HTTP {status}): {(body or '').strip()[:160]} — "
+            "control was NOT handed over.", True)
 
 
 def tool_navigate(url: str) -> tuple[str, bool]:
@@ -654,7 +715,7 @@ def seed_opencode_config(port: int) -> dict:
 
 
 def _tool_defs() -> list[dict]:
-    """The five tools. Descriptions say what the tool HONESTLY does (text
+    """The six tools. Descriptions say what the tool HONESTLY does (text
     snapshot, tap-installed console) — no overpromising."""
     return [
         {
@@ -712,6 +773,23 @@ def _tool_defs() -> list[dict]:
                 "since the tap was installed — the tap begins at this tool's first call."),
             "inputSchema": {"type": "object", "properties": {}},
         },
+        {
+            "name": "browser_request_handoff",
+            "description": (
+                "Ask the human to take over the Moch in-app browser for a login wall, "
+                "CAPTCHA, payment step, or destructive/irreversible confirmation. Shows "
+                "a Take over prompt and waits (bounded) for the answer. If accepted, the "
+                "human owns the browser — stop driving it. Declined/timeout means control "
+                "was not handed over."),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "reason": {"type": "string",
+                               "description": "Short reason the human is needed"},
+                },
+                "required": ["reason"],
+            },
+        },
     ]
 
 
@@ -724,6 +802,8 @@ _TOOLS: dict[str, Callable[..., tuple[str, bool]]] = {
         bool(a.get("submit"))),
     "browser_snapshot": lambda **a: tool_snapshot(),
     "browser_console": lambda **a: tool_console(),
+    "browser_request_handoff": lambda **a: tool_request_handoff(
+        a.get("reason") if isinstance(a.get("reason"), str) else ""),
 }
 
 

@@ -31,6 +31,7 @@ import {
   browserTabs,
   activeTabId,
   relayStatus,
+  handoffRequestAtom,
   addTab,
   closeTab,
   switchTab,
@@ -38,7 +39,14 @@ import {
   syncActiveUrl,
   refreshTabTargetIds,
 } from '../../src/lib/browserRelay'
-import { shareInInbox, normalizeSharedPayload } from '../../src/lib/shareIn'
+import {
+  browserTaskAtom,
+  dismissBrowserTask,
+  startBrowserTask,
+  stopBrowserTask,
+  takeoverBrowserTask,
+  type BrowserTaskState,
+} from '../../src/lib/browserTask'
 
 /**
  * Moch Browser (BUILD-PLAN.md B1) — the visible, multi-tab WebView pool the
@@ -53,9 +61,10 @@ import { shareInInbox, normalizeSharedPayload } from '../../src/lib/shareIn'
  *    /json/list filter makes the agent's "first page target" THIS tab.
  *  - Tab lifecycle is RN-owned: CDP cannot create or focus WebView targets,
  *    and the relay 405s /json/new|close|activate to keep that single owner.
- *  - Ask Moch routes the page into the agent's composer through the same
- *    shareIn inbox the OS share target uses — text lands in the draft,
- *    nothing auto-sends.
+ *  - Ask Moch starts a background quick task pinned to this tab (see
+ *    lib/browserTask.ts) — the screen never navigates away and the active chat
+ *    stays untouched. The compact strip under the Ask row owns Stop / Take
+ *    over; the global BrowserHandoffPrompt owns tool-triggered handoffs.
  *
  * Redesign pass: the chrome is the mockup's screen 6 — tab-chip strip with a
  * round "+", 26px history/reload controls over a mono URL field, an
@@ -92,6 +101,8 @@ export default function Browser() {
   const tabs = useStore(browserTabs)
   const activeId = useStore(activeTabId)
   const status = useStore(relayStatus)
+  const task = useStore(browserTaskAtom)
+  const handoff = useStore(handoffRequestAtom)
   // Speed pass: hydrate from the store AgentBrowserHost already wrote — when
   // the relay is up (the common case, it boots at app launch), the chrome and
   // the first tab paint on frame 1 instead of behind a spinner. The ensure
@@ -150,6 +161,16 @@ export default function Browser() {
   }, [booting, retryBoot])
 
   const active = tabs.find((t) => t.id === activeId) ?? null
+
+  // The quick task's prompt names ONE tab, while the relay's browser tools
+  // follow the ACTIVE tab. If the user switches/closes that tab, stop instead
+  // of letting the agent edit a different page than the task asked about.
+  useEffect(() => {
+    if (!task || !activeId || task.tabId === activeId) return
+    if (task.status === 'starting' || task.status === 'running') {
+      void stopBrowserTask()
+    }
+  }, [activeId, task])
 
   // ── Load progress (Chrome-style 2dp bar under the URL row) ───────────────
   const loadProgress = useSharedValue(0)
@@ -297,16 +318,11 @@ export default function Browser() {
       if (!active || !task) return
       const url = liveUrls.current[active.id] ?? active.url
       const title = active.title || url
-      const payload = normalizeSharedPayload({
-        text: `Open in my browser: ${title}\n${url}\n\n${task}`,
-        subject: title,
-        files: [],
-        skipped: 0,
-        at: Date.now(),
-      })
-      if (!payload) return
       setAskOpen(false)
-      shareInInbox.set(payload)
+      // Background quick task: createSession + a pinned sendPrompt. This never
+      // touches the active chat, the share inbox, or navigation — the user
+      // stays on THIS page while the agent drives the same tab.
+      void startBrowserTask(task, { id: active.id, url, title }).catch(() => {})
     },
     [active],
   )
@@ -418,6 +434,7 @@ export default function Browser() {
           </View>
 
           {askOpen && <AskRow onAsk={askMoch} />}
+          {task ? <BrowserTaskStrip task={task} handoff={handoff} /> : null}
 
           {/* Viewport — boot/error card states OR the real WebView pool.
               Every tab stays mounted; inactive tabs render 1px, opaque and
@@ -668,6 +685,92 @@ const AskRow = memo(function AskRow({ onAsk }: { onAsk: (task: string) => void }
   )
 })
 
+// ── BrowserTaskStrip — background quick-task status (Ask Moch) ──────────────
+
+const BrowserTaskStrip = memo(function BrowserTaskStrip({
+  task,
+  handoff,
+}: {
+  task: BrowserTaskState
+  handoff: { reason: string } | null
+}) {
+  const s = useStyles(makeTaskS)
+  const t = useT()
+  const dir = useDir()
+  const busy = task.status === 'starting' || task.status === 'running'
+  const pending = !!handoff
+  const label =
+    pending && busy
+      ? t('browser.task.handoff')
+      : t(`browser.task.${task.status}`)
+  const localError = task.errorKey ? t(task.errorKey) : task.error
+  const detail =
+    pending && busy && handoff?.reason
+      ? handoff.reason
+      : localError
+        ? localError
+        : task.task
+  const dot =
+    task.status === 'running'
+      ? C.accent
+      : task.status === 'done'
+        ? C.green
+        : task.status === 'failed'
+          ? C.red
+          : task.status === 'user'
+            ? C.accent
+            : C.textFaint
+  return (
+    <View
+      style={[s.strip, { flexDirection: dir.row }, pending && busy && s.stripAlert]}
+      accessibilityLabel={t('browser.task.status')}
+    >
+      <View style={[s.dot, { backgroundColor: dot }]} />
+      <View style={s.textWrap}>
+        <Txt size={10.5} weight="700" color={task.status === 'failed' ? C.red : C.text} numberOfLines={1}>
+          {label}
+        </Txt>
+        <Txt size={9.5} color={C.textFaint} numberOfLines={1}>
+          {detail}
+        </Txt>
+      </View>
+      {busy ? (
+        <View style={[s.actions, { flexDirection: dir.row }]}>
+          <Pressable
+            hitSlop={8}
+            onPress={() => void stopBrowserTask()}
+            accessibilityRole="button"
+            accessibilityLabel={t('browser.task.stop')}
+          >
+            <Txt size={10} weight="700" color={C.textDim}>
+              {t('browser.task.stop')}
+            </Txt>
+          </Pressable>
+          <Pressable
+            onPress={() => void takeoverBrowserTask()}
+            style={[s.takeOver, pending && s.takeOverPrimary]}
+            accessibilityRole="button"
+            accessibilityLabel={t('browser.task.takeOver')}
+          >
+            <Txt size={10} weight="800" color={pending ? C.onAccent : C.accent}>
+              {t('browser.task.takeOver')}
+            </Txt>
+          </Pressable>
+        </View>
+      ) : (
+        <Pressable
+          hitSlop={8}
+          onPress={dismissBrowserTask}
+          accessibilityRole="button"
+          accessibilityLabel={t('browser.task.dismiss')}
+        >
+          <Icon name="close" size={11} color={C.textFaint} />
+        </Pressable>
+      )}
+    </View>
+  )
+})
+
 // ── TabPage — one mounted WebView (C1 mechanics byte-identical) ─────────────
 
 interface TabPageHandlers {
@@ -861,6 +964,35 @@ const makeAskS = () =>
     },
     askSend: { minHeight: 28, paddingVertical: 5, paddingHorizontal: 10, borderRadius: 11 },
     askSendText: { fontSize: 11 },
+  })
+
+const makeTaskS = () =>
+  StyleSheet.create({
+    strip: {
+      marginHorizontal: 12,
+      marginBottom: 8,
+      paddingVertical: 6,
+      paddingHorizontal: 9,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: C.border,
+      backgroundColor: C.bgCard,
+      alignItems: 'center',
+      gap: 7,
+    },
+    stripAlert: { borderColor: C.accent, backgroundColor: C.accentSoft },
+    dot: { width: 6, height: 6, borderRadius: 3, flexShrink: 0 },
+    textWrap: { flex: 1, minWidth: 0 },
+    actions: { alignItems: 'center', gap: 8, flexShrink: 0 },
+    takeOver: {
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: C.accent,
+      backgroundColor: C.accentSoft,
+      paddingVertical: 4,
+      paddingHorizontal: 8,
+    },
+    takeOverPrimary: { backgroundColor: C.accent, borderColor: C.accent },
   })
 
 const makePoolS = () =>
