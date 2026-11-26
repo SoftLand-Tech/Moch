@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { View, Pressable, StyleSheet, TextInput, type GestureResponderEvent } from 'react-native'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { View, Pressable, ScrollView, StyleSheet, TextInput, type GestureResponderEvent } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { useKeyboardState, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
 import Animated, { useAnimatedStyle } from 'react-native-reanimated'
 import { WebView } from 'react-native-webview'
+import { useStore } from '@nanostores/react'
 import { ScreenShell } from '../../src/components/ScreenShell'
 import { showAlert } from '../../src/components/AlertDialog'
 import { Icon } from '../../src/components/Icon'
@@ -14,12 +15,13 @@ import { tr, useT } from '../../src/lib/strings'
 import {
   linuxStatus,
   linuxTermProbe,
-  linuxTermStart,
-  linuxTermWrite,
-  linuxTermDrain,
-  linuxTermReplay,
-  linuxTermResize,
-  linuxTermKill,
+  linuxTermStartSession,
+  linuxTermWriteSession,
+  linuxTermDrainSession,
+  linuxTermReplaySession,
+  linuxTermClearSession,
+  linuxTermResizeSession,
+  linuxTermKillSession,
 } from '../../src/lib/mochiRuntime'
 import {
   FIELD_SENTINEL,
@@ -28,9 +30,14 @@ import {
   TERM_CTRL_KEYS,
   TerminalController,
   applyFieldChange,
+  createSessionTermNative,
+  newTermSessionId,
   type FieldState,
+  type TermSessionTransport,
   type TermState,
 } from '../../src/lib/terminal'
+import { activeProjectIdAtom, projectsAtom } from '../../src/lib/workspace'
+import { pickProjectCwd } from '../../src/lib/projectScope'
 import { openInAppBrowserTab } from '../../src/lib/openInBrowser'
 
 type Gate = 'checking' | 'noprobe' | 'noguest' | 'nopty' | 'ready' | 'failed'
@@ -46,6 +53,50 @@ const REFOCUS_DELAY_MS = 140
 /** xterm font bounds — 13 is the renderer's default, 9/20 keep it legible. */
 const FONT_MIN = 9
 const FONT_MAX = 20
+
+/** Native session transport — one bound adapter per tab (no global controller). */
+const TERM_TRANSPORT: TermSessionTransport = {
+  startSession: linuxTermStartSession,
+  writeSession: linuxTermWriteSession,
+  drainSession: linuxTermDrainSession,
+  replaySession: linuxTermReplaySession,
+  clearSession: linuxTermClearSession,
+  resizeSession: linuxTermResizeSession,
+  killSession: linuxTermKillSession,
+}
+
+interface TerminalTab {
+  id: string
+  cwd: string | null
+  label: string
+  ctl: TerminalController
+}
+
+/**
+ * Tab metadata survives a screen unmount (navigating to Chat and back) so
+ * the Python PTYs — which live in the runtime process — are reattached by
+ * their existing session ids instead of leaking behind fresh shells. The
+ * controllers themselves are per-mount; nothing here is a global controller.
+ */
+interface PersistedTermTab {
+  id: string
+  cwd: string | null
+  label: string
+}
+
+const persistedTabs: {
+  tabs: PersistedTermTab[]
+  activeId: string | null
+  seq: number
+} = { tabs: [], activeId: null, seq: 0 }
+
+/** Project folder basename for a compact tab label. */
+function folderName(cwd: string | null): string | null {
+  if (!cwd) return null
+  const parts = cwd.replace(/\\/g, '/').replace(/\/+$/, '').split('/')
+  const last = parts[parts.length - 1]
+  return last || null
+}
 
 export default function Terminal() {
   const s = useStyles(makeS)
@@ -98,6 +149,8 @@ function TerminalInner() {
   const s = useStyles(makeS)
   const t = useT()
   const router = useRouter()
+  const projects = useStore(projectsAtom)
+  const activeProjectId = useStore(activeProjectIdAtom)
   // IME visibility truth (RN focus lies on Android — see focusInput).
   // BUG-133: selector form — the object form re-rendered on every per-frame
   // keyboard animation field; only isVisible is consumed here.
@@ -120,12 +173,13 @@ function TerminalInner() {
   // awaiting their change event. The field value is FIELD_SENTINEL + logical.
   const fieldRef = useRef<FieldState>({ logical: '', pendingKeys: 0 })
   const inputRef = useRef<TextInput>(null)
-  const dead = snap.state === 'dead'
   // BUG-097 renderer: xterm.js lives in a local-asset WebView. Raw PTY
   // bytes flow controller → injectJavaScript → window.__tq → xterm.write;
   // the WebView answers with {ready|fit} JSON on postMessage.
   const wvRef = useRef<WebView>(null)
   const out = useRef({ ready: false, buf: [] as string[], bytes: 0 })
+  /** Which tab the mounted WebView belongs to (stale postMessage guard). */
+  const webTabRef = useRef('')
   // BUG-135 tap arbitration: the box-only wrapper (BUG-100) owns every tap.
   // A tap is EITHER a link open (WebView answers the __linkAt hit-test with
   // {type:'link'}) OR the legacy IME re-focus — never both. The refocus is
@@ -161,32 +215,114 @@ function TerminalInner() {
     [inject],
   )
 
-  const ctl = useMemo(
-    () =>
-      new TerminalController(
-        {
-          start: (c, r) => linuxTermStart(c, r),
-          write: (b) => linuxTermWrite(b),
-          drain: () => linuxTermDrain(),
-          replay: () => linuxTermReplay(),
-          resize: (c, r) => linuxTermResize(c, r),
-          kill: () => linuxTermKill(),
-        },
-        { drainMs: TERM_DRAIN_FAST_MS, onChunk: pushChunk },
-      ),
+  // Active-tab routing: only the tab the UI currently shows may paint.
+  const activeIdRef = useRef('')
+  const pushChunkFor = useCallback(
+    (tabId: string, b64: string) => {
+      if (activeIdRef.current === tabId) pushChunk(b64)
+    },
     [pushChunk],
   )
 
-  const send = useCallback(
-    (raw: string) => {
-      if (!raw) return
-      void ctl.send(raw)
+  const tabSeqRef = useRef(0)
+  /** Live cwd per tab — the controller's adapter reads this at start time. */
+  const cwdByIdRef = useRef<Record<string, string | null>>({})
+  const createTab = useCallback(
+    (cwd: string | null, saved?: PersistedTermTab): TerminalTab => {
+      if (saved) {
+        cwdByIdRef.current[saved.id] = cwd
+        const ctl = new TerminalController(
+          createSessionTermNative(TERM_TRANSPORT, saved.id, () => cwdByIdRef.current[saved.id] ?? null),
+          { drainMs: TERM_DRAIN_FAST_MS, onChunk: (b64) => pushChunkFor(saved.id, b64) },
+        )
+        return { id: saved.id, cwd, label: saved.label, ctl }
+      }
+      tabSeqRef.current += 1
+      const n = tabSeqRef.current
+      const id = newTermSessionId()
+      cwdByIdRef.current[id] = cwd
+      const ctl = new TerminalController(
+        createSessionTermNative(TERM_TRANSPORT, id, () => cwdByIdRef.current[id] ?? null),
+        { drainMs: TERM_DRAIN_FAST_MS, onChunk: (b64) => pushChunkFor(id, b64) },
+      )
+      return { id, cwd, label: folderName(cwd) ?? tr('terminal.tab.label', { n }), ctl }
     },
-    [ctl],
+    [pushChunkFor],
+  )
+
+  const [tabs, setTabs] = useState<TerminalTab[]>(() => {
+    if (persistedTabs.tabs.length) {
+      tabSeqRef.current = persistedTabs.seq
+      return persistedTabs.tabs.map((m) => createTab(m.cwd, m))
+    }
+    const cwd = pickProjectCwd(
+      projects.map((p) => ({ id: p.id, path: p.primaryPath, isNoProject: p.isNoProject })),
+      activeProjectId,
+    ) ?? null
+    return [createTab(cwd)]
+  })
+  const [activeId, setActiveId] = useState<string>(() => {
+    if (persistedTabs.activeId && tabs.some((x) => x.id === persistedTabs.activeId)) {
+      return persistedTabs.activeId
+    }
+    return tabs[0]?.id ?? ''
+  })
+  const activeTab = tabs.find((x) => x.id === activeId) ?? tabs[0] ?? null
+  const activeTabRef = useRef<TerminalTab | null>(activeTab)
+  activeTabRef.current = activeTab
+  if (activeId) activeIdRef.current = activeId
+  // The WebView is keyed by tab id and remounts on switch. Set its identity
+  // during render, not only in onLoadStart: the local asset can answer
+  // `ready` before that event is delivered (fast WebView cache), and a
+  // dropped ready would leave a blank xterm.
+  webTabRef.current = activeTab?.id ?? ''
+  const tabsRef = useRef<TerminalTab[]>(tabs)
+  tabsRef.current = tabs
+  /** Reattach snapshot in flight for a tab switch — ready waits for it. */
+  const pendingReattachRef = useRef<Promise<string> | null>(null)
+  const fontSizeRef = useRef(fontSize)
+  fontSizeRef.current = fontSize
+  const dead = snap.state === 'dead'
+  // Sticky pad modifiers (BUG-099): Ctrl/Alt arm and compose with the NEXT
+  // key — a pad key sends its ctrlSeq; a typed char gets Ctrl→\x03-class
+  // or Alt→ESC-prefix treatment. One-shot: consumed or disarmed.
+  const [armed, setArmed] = useState<'ctrl' | 'alt' | null>(null)
+  const armedRef = useRef<'ctrl' | 'alt' | null>(null)
+
+  // Persist tab metadata for the next mount (PTYs stay in the runtime).
+  useEffect(() => {
+    persistedTabs.tabs = tabs.map(({ id, cwd, label }) => ({ id, cwd, label }))
+    persistedTabs.activeId = activeId || null
+    persistedTabs.seq = tabSeqRef.current
+  }, [tabs, activeId])
+
+  const send = useCallback((raw: string) => {
+    if (!raw) return
+    void activeTabRef.current?.ctl.send(raw)
+  }, [])
+
+  /** Finish a WebView load for one tab (after its reattach snapshot lands). */
+  const paintReady = useCallback(
+    (tab: TerminalTab) => {
+      if (activeIdRef.current !== tab.id) return
+      out.current.ready = true
+      // The controller's raw bank is authoritative — it contains the native
+      // replay AND every chunk (including ones buffered while loading).
+      const bank = tab.ctl.rawBank
+      if (bank) inject(`window.__tq(${JSON.stringify(bank)});void 0;`)
+      out.current.buf = []
+      out.current.bytes = 0
+      inject(`window.__tsize(${fontSizeRef.current});void 0;`)
+      inject('window.__fit();void 0;')
+      tab.ctl.resume()
+    },
+    [inject],
   )
 
   const handleWebMsg = useCallback(
     (e: { nativeEvent: { data: string } }) => {
+      const tab = activeTabRef.current
+      if (!tab || webTabRef.current !== tab.id) return
       let msg: { type?: string; cols?: number; rows?: number; data?: string; url?: string }
       try {
         msg = JSON.parse(e.nativeEvent.data)
@@ -194,20 +330,22 @@ function TerminalInner() {
         return
       }
       if (msg.type === 'ready') {
-        out.current.ready = true
-        // The controller's raw bank is authoritative — it contains the
-        // replay AND every chunk (including ones buffered while loading).
-        const bank = ctl.rawBank
-        if (bank) inject(`window.__tq(${JSON.stringify(bank)});void 0;`)
-        out.current.buf = []
-        out.current.bytes = 0
-        inject('window.__fit();void 0;')
+        out.current.ready = false
+        const pending = pendingReattachRef.current
+        const tabId = tab.id
+        if (pending) {
+          void pending.then(() => {
+            if (activeIdRef.current === tabId) paintReady(tab)
+          })
+          return
+        }
+        paintReady(tab)
       } else if (msg.type === 'fit' && msg.cols && msg.rows) {
         const cols = msg.cols
         const rows = msg.rows
         // Display-only mirror for the status bar; resize itself unchanged.
         setTermGrid((prev) => (prev.cols === cols && prev.rows === rows ? prev : { cols, rows }))
-        void ctl.resize(cols, rows)
+        void tab.ctl.resize(cols, rows)
       } else if (msg.type === 'key' && typeof msg.data === 'string' && msg.data) {
         // BUG-100 safety net: if the WebView ever holds focus, the Android
         // IME types into xterm's internal textarea — forward those bytes
@@ -223,7 +361,7 @@ function TerminalInner() {
         openInAppBrowserTab(msg.url)
       }
     },
-    [cancelPendingRefocus, ctl, inject, send],
+    [cancelPendingRefocus, paintReady, send],
   )
 
   // Refit on layout changes (keyboard lift, font bump) — trailing throttle
@@ -235,8 +373,9 @@ function TerminalInner() {
   }, [inject])
   useEffect(() => () => clearTimeout(fitTimer.current), [])
 
+  // Gate check once per screen mount: status → probe → ready. Tabs are
+  // already created but never start until the guest is proven.
   useEffect(() => {
-    const off = ctl.onChange(setSnap)
     let alive = true
     ;(async () => {
       try {
@@ -259,9 +398,6 @@ function TerminalInner() {
           return
         }
         setGate('ready')
-        const ok = await ctl.start(80, 24)
-        if (!alive) return
-        if (!ok) setGate('failed')
       } catch (e) {
         if (alive) {
           setGate('failed')
@@ -271,18 +407,158 @@ function TerminalInner() {
     })()
     return () => {
       alive = false
-      off()
     }
-  }, [ctl])
+  }, [])
+
+  // On tab switch: only the target may poll. Reset the per-WebView buffers,
+  // clear the logical composer (text typed for tab A never goes to tab B),
+  // and take the target's 64 KiB replay snapshot before its xterm remounts.
+  useEffect(() => {
+    const tab = tabsRef.current.find((x) => x.id === activeId) ?? null
+    activeIdRef.current = tab?.id ?? ''
+    out.current = { ready: false, buf: [], bytes: 0 }
+    fieldRef.current = { logical: '', pendingKeys: 0 }
+    setHidden('')
+    armedRef.current = null
+    setArmed(null)
+    setSnap(tab ? { state: tab.ctl.state, alive: tab.ctl.alive } : { state: 'idle', alive: false })
+    cancelPendingRefocus()
+    for (const other of tabsRef.current) {
+      if (other.id !== tab?.id) other.ctl.pause()
+    }
+    if (!tab) {
+      pendingReattachRef.current = null
+      return
+    }
+    tab.ctl.pause()
+    pendingReattachRef.current = tab.ctl.reattach()
+  }, [activeId, cancelPendingRefocus])
+
+  // Subscribe to the active controller only; inactive tabs keep their state.
+  useEffect(() => {
+    if (!activeTab) return
+    const off = activeTab.ctl.onChange(setSnap)
+    setSnap({ state: activeTab.ctl.state, alive: activeTab.ctl.alive })
+    return off
+  }, [activeTab])
+
+  // Projects hydrate after the drawer's first refresh. If the Terminal mounts
+  // before that, adopt the selected project's folder before the shell starts,
+  // so the first tab does not silently stay at the workspace root.
+  useEffect(() => {
+    if (!activeTab || activeTab.cwd || activeTab.ctl.state !== 'idle') return
+    const resolved =
+      pickProjectCwd(
+        projects.map((p) => ({ id: p.id, path: p.primaryPath, isNoProject: p.isNoProject })),
+        activeProjectId,
+      ) ?? null
+    if (!resolved) return
+    cwdByIdRef.current[activeTab.id] = resolved
+    setTabs((prev) =>
+      prev.map((t) =>
+        t.id === activeTab.id ? { ...t, cwd: resolved, label: folderName(resolved) ?? t.label } : t,
+      ),
+    )
+  }, [projects, activeProjectId, activeTab])
+
+  // Start the active tab's shell once the gate is ready. A restored live
+  // session was adopted by reattach() (state live) and is skipped.
+  useEffect(() => {
+    if (gate !== 'ready' || !activeTab) return
+    const resolved =
+      pickProjectCwd(
+        projects.map((p) => ({ id: p.id, path: p.primaryPath, isNoProject: p.isNoProject })),
+        activeProjectId,
+      ) ?? null
+    if (!activeTab.cwd && resolved) return // cwd-adoption effect above runs first
+    let alive = true
+    const run = async () => {
+      // Let the switch's replay snapshot land first: a restored live shell
+      // is adopted there and must not be "started" a second time.
+      try {
+        await pendingReattachRef.current
+      } catch {
+        /* reattach is best-effort */
+      }
+      if (!alive || activeTab.ctl.state !== 'idle') return
+      const ok = await activeTab.ctl.start(80, 24)
+      if (!alive || ok) return
+      setGateMsg(activeTab.ctl.error ?? tr('terminal.startFailed'))
+      setGate('failed')
+    }
+    void run()
+    return () => {
+      alive = false
+    }
+  }, [gate, activeTab, projects, activeProjectId])
 
   // Session survives unmount (app holds the process) — stop polling only.
-  useEffect(() => ctl.destroy.bind(ctl), [ctl])
+  // The tab metadata above lets the next mount reattach to the same PTYs.
+  useEffect(() => {
+    return () => {
+      for (const tab of tabsRef.current) tab.ctl.destroy()
+    }
+  }, [])
 
-  // Sticky pad modifiers (BUG-099): Ctrl/Alt arm and compose with the NEXT
-  // key — a pad key sends its ctrlSeq; a typed char gets Ctrl→\x03-class
-  // or Alt→ESC-prefix treatment. One-shot: consumed or disarmed.
-  const [armed, setArmed] = useState<'ctrl' | 'alt' | null>(null)
-  const armedRef = useRef<'ctrl' | 'alt' | null>(null)
+  // ── Tab actions ────────────────────────────────────────────────────────
+  const switchTab = useCallback(
+    (id: string) => {
+      if (id === activeIdRef.current) return
+      activeIdRef.current = id
+      cancelPendingRefocus()
+      setActiveId(id)
+    },
+    [cancelPendingRefocus],
+  )
+
+  const newTabCwd = useCallback(
+    () =>
+      pickProjectCwd(
+        projects.map((p) => ({ id: p.id, path: p.primaryPath, isNoProject: p.isNoProject })),
+        activeProjectId,
+      ) ?? null,
+    [activeProjectId, projects],
+  )
+
+  const addTab = useCallback(() => {
+    const tab = createTab(newTabCwd())
+    activeIdRef.current = tab.id
+    setTabs((prev) => [...prev, tab])
+    setActiveId(tab.id)
+  }, [createTab, newTabCwd])
+
+  const closeTab = useCallback(
+    (id: string) => {
+      const current = tabsRef.current
+      const idx = current.findIndex((x) => x.id === id)
+      if (idx < 0) return
+      const closing = current[idx]
+      if (closing) {
+        delete cwdByIdRef.current[closing.id]
+        void closing.ctl.kill()
+        closing.ctl.destroy()
+      }
+      const next = current.filter((x) => x.id !== id)
+      if (next.length === 0) {
+        const fresh = createTab(newTabCwd())
+        activeIdRef.current = fresh.id
+        setTabs([fresh])
+        setActiveId(fresh.id)
+        return
+      }
+      if (id === activeIdRef.current) {
+        const nextActive = next[Math.min(idx, next.length - 1)] ?? next[0]
+        if (nextActive) {
+          activeIdRef.current = nextActive.id
+          setActiveId(nextActive.id)
+        }
+      }
+      setTabs(next)
+    },
+    [createTab, newTabCwd],
+  )
+
+  // ── Modifier / input state ─────────────────────────────────────────────
   const consumeArmed = useCallback(() => {
     const m = armedRef.current
     armedRef.current = null
@@ -383,6 +659,7 @@ function TerminalInner() {
     setHidden('')
   }, [send])
 
+  // Header clear/kill act on the ACTIVE tab (refs cross the ScreenShell gap).
   killRef.current = useCallback(() => {
     showAlert(tr('terminal.killTitle'), tr('terminal.killBody'), [
       { text: tr('common.cancel'), style: 'cancel' },
@@ -390,18 +667,20 @@ function TerminalInner() {
         text: tr('terminal.killCta'),
         style: 'destructive',
         onPress: () => {
-          void ctl.kill()
+          void activeTabRef.current?.ctl.kill()
         },
       },
     ])
-  }, [ctl])
+  }, [])
 
   clearRef.current = useCallback(() => {
-    // Wipe the xterm viewport AND the replay bank, so a WebView reload
-    // doesn't resurrect cleared output.
-    ctl.rawBank = ''
+    const ctl = activeTabRef.current?.ctl
+    if (!ctl) return
+    // Wipe the xterm viewport, this tab's raw bank AND python's replay bank
+    // — otherwise switching away and back repaints the cleared scrollback.
+    void ctl.clear()
     inject('window.__reset();void 0;')
-  }, [ctl, inject])
+  }, [inject])
 
   // Font size lives in xterm now — push it on change (13 on mount is the
   // HTML default; subsequent bumps arrive live).
@@ -444,12 +723,14 @@ function TerminalInner() {
     return (
       <View style={s.center}>
         <Txt size={13} color={C.textDim} center>{gateMsg || t('terminal.failed')}</Txt>
-        {snap.state === 'dead' ? (
+        {snap.state === 'dead' || gate === 'failed' ? (
           <GhostBtn
             label={t('common.retry')}
             onPress={() => {
+              const tab = activeTabRef.current
+              if (!tab) return
               setGate('checking')
-              void ctl.start(80, 24).then((ok) => setGate(ok ? 'ready' : 'failed'))
+              void tab.ctl.start(80, 24).then((ok) => setGate(ok ? 'ready' : 'failed'))
             }}
             style={s.gateRetry}
           />
@@ -460,9 +741,64 @@ function TerminalInner() {
 
   return (
     <Animated.View style={[s.root, kbPad]}>
+      {/* Tab strip (above the xterm frame): tap to switch, + opens a new
+          project-aware shell, × kills and removes one tab. Sessions of
+          inactive tabs stay alive; only this tab's controller polls. */}
+      {activeTab ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={s.tabScroll}
+          contentContainerStyle={s.tabStrip}
+          accessibilityLabel={t('terminal.tabs.a11y')}
+        >
+          {tabs.map((tab) => {
+            const selected = tab.id === activeTab.id
+            return (
+              <View key={tab.id} style={[s.tabChip, selected && s.tabChipActive]}>
+                <Pressable
+                  onPress={() => switchTab(tab.id)}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={tab.label}
+                  style={s.tabSelect}
+                >
+                  <Txt
+                    size={11}
+                    weight="600"
+                    color={selected ? C.greenSoft : C.textDim}
+                    numberOfLines={1}
+                    style={s.tabLabel}
+                  >
+                    {tab.label}
+                  </Txt>
+                </Pressable>
+                <Pressable
+                  onPress={() => closeTab(tab.id)}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('terminal.tab.close')}
+                  style={({ pressed }) => [s.tabClose, pressed && s.pressed]}
+                >
+                  <Icon name="close" size={12} color={selected ? C.greenSoft : C.textFaint} />
+                </Pressable>
+              </View>
+            )
+          })}
+          <Pressable
+            onPress={addTab}
+            accessibilityRole="button"
+            accessibilityLabel={t('terminal.tab.new')}
+            style={({ pressed }) => [s.tabAdd, pressed && s.pressed]}
+          >
+            <Icon name="add" size={16} color={C.greenSoft} />
+          </Pressable>
+        </ScrollView>
+      ) : null}
+
       {/* xterm.js frame (mockup screen 5): flex 1, 2/10/6 margins, near-black
-          surface, 14 radius, 10 padding; the font-size bar sits inside on a
-          hairline, the sticky key pad just below the frame. */}
+          green-tinted surface, 14 radius, 10 padding; the font-size bar sits
+          inside on a hairline, the sticky key pad just below the frame. */}
       <View style={s.termFrame}>
         {/* Tapping the output re-raises the IME when it's down (blur + refocus
             — see focusInput). BUG-100: Android enforces pointerEvents only on
@@ -474,10 +810,14 @@ function TerminalInner() {
         <View style={s.outputWrap} onLayout={scheduleFit}>
           <View ref={hitRef} style={s.outputHit} pointerEvents="box-only" onTouchEnd={onTapOutput}>
             <WebView
+              key={activeTab?.id ?? 'term'}
               ref={wvRef}
               source={{ uri: 'file:///android_asset/term/index.html' }}
               javaScriptEnabled
               allowFileAccess
+              onLoadStart={() => {
+                webTabRef.current = activeTab?.id ?? ''
+              }}
               onMessage={handleWebMsg}
               style={s.output}
               onRenderProcessGone={() => {
@@ -496,7 +836,7 @@ function TerminalInner() {
                 small
                 label={t('common.retry')}
                 accessibilityLabel={t('terminal.restart')}
-                onPress={() => void ctl.start(80, 24)}
+                onPress={() => void activeTabRef.current?.ctl.start(80, 24)}
                 style={s.deadRetry}
               />
             </View>
@@ -505,7 +845,7 @@ function TerminalInner() {
 
         {/* Font-size bar — mono xterm.js grid label + A− / A+ (real state). */}
         <View style={s.fontBar}>
-          <Txt mono ltr size={10.5} color={C.textFaint}>
+          <Txt mono ltr size={10.5} color={C.green}>
             {t('terminal.xtermSize', { cols: termGrid.cols, rows: termGrid.rows })}
           </Txt>
           <View style={s.fontBtns}>
@@ -565,7 +905,7 @@ function TerminalInner() {
       {dead ? null : (
         <Txt
           size={11.5}
-          color={keyboardVisible ? C.accent : C.textDim}
+          color={keyboardVisible ? C.greenSoft : C.textDim}
           center
           style={s.hint}
         >
@@ -638,7 +978,7 @@ function KeyRow({
                 accessibilityLabel={t(k.hintKey)}
                 accessibilityState={isModifier ? { selected: isArmed } : undefined}
               >
-                <Txt mono ltr size={11} weight="700" color={isArmed ? C.onAccent : C.text}>
+                <Txt mono ltr size={11} weight="700" color={isArmed ? C.bg : C.text}>
                   {k.label}
                 </Txt>
               </Pressable>
@@ -662,21 +1002,56 @@ const makeS = () => StyleSheet.create({
   emptyCta: { alignSelf: 'center' },
   gateRetry: { marginTop: 12 },
 
+  // ── Tab strip ─────────────────────────────────────────────────────────────
+  tabScroll: { flexGrow: 0, marginTop: 2 },
+  tabStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingBottom: 6,
+  },
+  tabChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 30,
+    maxWidth: 190,
+    backgroundColor: C.bgCard,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 9,
+    overflow: 'hidden',
+  },
+  tabChipActive: { backgroundColor: C.greenTint, borderColor: C.green },
+  tabSelect: { height: 30, justifyContent: 'center', paddingLeft: 10, paddingRight: 4, maxWidth: 150 },
+  tabLabel: { letterSpacing: 0.1 },
+  tabClose: { width: 26, height: 30, alignItems: 'center', justifyContent: 'center' },
+  tabAdd: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.bgElev,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+
   // ── xterm frame + font bar ────────────────────────────────────────────────
   termFrame: {
     flex: 1,
     marginTop: 2,
     marginHorizontal: 10,
     marginBottom: 6,
-    backgroundColor: '#050508',
+    backgroundColor: '#050807',
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: 'rgba(127,199,154,0.22)',
     borderRadius: 14,
     padding: 10,
   },
   outputWrap: { flex: 1 },
   outputHit: { flex: 1 },
-  output: { flex: 1, backgroundColor: '#050508' },
+  output: { flex: 1, backgroundColor: '#050807' },
   deadWrap: { position: 'absolute', top: 14, left: 0, right: 0, alignItems: 'center' },
   deadLine: { marginTop: 8 },
   deadRetry: { marginTop: 8 },
@@ -686,13 +1061,13 @@ const makeS = () => StyleSheet.create({
     justifyContent: 'space-between',
     paddingTop: 6,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.08)',
+    borderTopColor: 'rgba(127,199,154,0.14)',
   },
   fontBtns: { flexDirection: 'row', gap: 5 },
   fontBtn: {
-    backgroundColor: C.bgElev,
+    backgroundColor: C.greenTint,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: 'rgba(127,199,154,0.24)',
     borderRadius: 6,
     paddingHorizontal: 7,
     paddingVertical: 1,
@@ -717,7 +1092,7 @@ const makeS = () => StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
   },
-  keyArmed: { backgroundColor: C.accent, borderColor: C.accent },
+  keyArmed: { backgroundColor: C.green, borderColor: C.greenSoft },
   hint: { paddingTop: 4, paddingBottom: 8, paddingHorizontal: 10 },
 
   hiddenInput: { position: 'absolute', width: 1, height: 1, opacity: 0 },

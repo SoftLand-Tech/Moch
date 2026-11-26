@@ -81,6 +81,11 @@ type RelayModule = {
   tabOpAck(requestId: string, ok: boolean, error?: string | null): void
   /** The relay's full upstream page list — the tab⇔target registry source. */
   tabTargets(): Promise<TabTarget[]>
+  /**
+   * RN ack for a mochHandoff round-trip. Optional for the same OTA reason as
+   * setVisibleTargets: an older APK has no such bridge method.
+   */
+  handoffAck?(requestId: string, accepted: boolean): void
 }
 
 /** One "mochTabOp" event from the relay (CdpRelay → RN, BUG-136). */
@@ -91,16 +96,35 @@ export interface MochTabOpEvent {
   targetId?: string
 }
 
+/** One "mochHandoff" event from the relay (CdpRelay → RN). */
+export interface MochHandoffEvent {
+  requestId: string
+  reason: string
+  url: string
+  /** Relay wait budget, so the prompt can close if the tool timed out. */
+  timeoutMs?: number
+}
+
+/**
+ * The browser handoff the user has not answered yet. ONE pending request at
+ * a time (the relay refuses a concurrent one), so a plain atom is enough.
+ * BrowserHandoffPrompt renders from this; ackHandoff clears it.
+ */
+export const handoffRequestAtom = atom<MochHandoffEvent | null>(null)
+
 type EmitterLike = {
-  addListener(name: string, cb: (e: MochTabOpEvent) => void): { remove(): void }
+  addListener(name: string, cb: (e: any) => void): { remove(): void }
 }
 
 let moduleOverride: RelayModule | null = null
 let cached: RelayModule | null = null
 let tabOpEmitterOverride: EmitterLike | null = null
 let tabOpSub: { remove(): void } | null = null
+let handoffSub: { remove(): void } | null = null
+/** Request ids already acknowledged this process — the exactly-once guard. */
+const ackedHandoffIds = new Set<string>()
 
-/** Test seam — inject a fake native module (+ a fake mochTabOp emitter). */
+/** Test seam — inject a fake native module (+ a fake relay event emitter). */
 export function _useBrowserRelayForTests(m: RelayModule | null, e?: EmitterLike | null) {
   moduleOverride = m
   cached = null
@@ -108,6 +132,10 @@ export function _useBrowserRelayForTests(m: RelayModule | null, e?: EmitterLike 
   lastVisibleKey = ''
   tabOpSub?.remove()
   tabOpSub = null
+  handoffSub?.remove()
+  handoffSub = null
+  handoffRequestAtom.set(null)
+  ackedHandoffIds.clear()
 }
 
 function native(): RelayModule {
@@ -122,16 +150,19 @@ function native(): RelayModule {
 }
 
 /**
- * Subscribe ONCE (process lifetime) to the relay's "mochTabOp" events — the
- * RN side of the BUG-136 /json/new|close|activate round-trip. Armed lazily on
- * the first native-module touch (same no-react-native-at-module-scope
- * contract as shareIn.ts); scripts inject a fake emitter instead.
+ * Subscribe ONCE (process lifetime) to the relay's "mochTabOp" and
+ * "mochHandoff" events. Armed lazily on the first native-module touch (same
+ * no-react-native-at-module-scope contract as shareIn.ts); scripts inject a
+ * fake emitter instead. A module re-inject removes both subscriptions, so a
+ * Fast Refresh can never stack duplicate listeners.
  */
 function armTabOpListener() {
-  if (tabOpSub) return
+  if (tabOpSub && handoffSub) return
   try {
     const e = tabOpEmitterOverride ?? resolveDeviceEventEmitter()
-    if (e) tabOpSub = e.addListener(MOCH_TAB_OP_EVENT, onMochTabOp)
+    if (!e) return
+    if (!tabOpSub) tabOpSub = e.addListener(MOCH_TAB_OP_EVENT, onMochTabOp)
+    if (!handoffSub) handoffSub = e.addListener(MOCH_HANDOFF_EVENT, onMochHandoff)
   } catch {
     // node-side tests without an injected emitter: stay unarmed, retry later
   }
@@ -283,6 +314,7 @@ export function getActiveTab(): BrowserTab | null {
 //          Kotlin (200 / 409 refused / 502 unreachable / 504 timeout).
 
 const MOCH_TAB_OP_EVENT = 'mochTabOp'
+const MOCH_HANDOFF_EVENT = 'mochHandoff'
 
 function tabByTargetId(targetId: unknown): BrowserTab | null {
   const tid = typeof targetId === 'string' ? targetId : ''
@@ -326,6 +358,63 @@ function onMochTabOp(ev: MochTabOpEvent | null | undefined) {
   } catch (e) {
     log('warn', 'browserRelay', `tabOpAck(${requestId}) failed: ${e}`)
   }
+}
+
+// ── Browser handoff round-trip ──────────────────────────────────────────────
+//
+// CdpRelay's /<token>/moch/handoff emits "mochHandoff"
+// {requestId, reason, url, timeoutMs} and blocks until handoffAck lands.
+// Parse defensively (bridge maps arrive as primitives; a turbo interop layer
+// may hand back wrappers) and accept ONCE per requestId — the prompt's
+// double-tap guard and the relay's latch both depend on that.
+
+/** Pure: normalize one relay event; null when it has no usable requestId. */
+export function parseHandoffEvent(raw: unknown): MochHandoffEvent | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const requestId = typeof r.requestId === 'string' ? r.requestId.trim() : ''
+  if (!requestId) return null
+  const rawMs = typeof r.timeoutMs === 'number' ? r.timeoutMs : Number(r.timeoutMs)
+  const timeoutMs = Number.isFinite(rawMs) && rawMs > 0 ? Math.min(120_000, Math.max(1_000, rawMs)) : undefined
+  return {
+    requestId,
+    reason: typeof r.reason === 'string' ? r.reason : '',
+    url: typeof r.url === 'string' ? r.url : '',
+    ...(timeoutMs ? { timeoutMs } : {}),
+  }
+}
+
+function onMochHandoff(raw: unknown) {
+  const req = parseHandoffEvent(raw)
+  if (!req || ackedHandoffIds.has(req.requestId)) return
+  handoffRequestAtom.set(req)
+}
+
+/**
+ * Acknowledge the pending handoff exactly once. Returns true when this call
+ * actually answered it; a second call (double tap / stale modal) is a no-op.
+ * The native bridge method is optional so an OTA bundle on an older APK never
+ * crashes — the UI still closes locally.
+ */
+export function ackHandoff(requestId: string, accepted: boolean): boolean {
+  const id = typeof requestId === 'string' ? requestId.trim() : ''
+  const pending = handoffRequestAtom.get()
+  if (!id || !pending || pending.requestId !== id || ackedHandoffIds.has(id)) return false
+  ackedHandoffIds.add(id)
+  // Bounded dedupe set: only one request can be in flight at a time, so the
+  // oldest ids can never be a live relay wait.
+  if (ackedHandoffIds.size > 32) {
+    const oldest = ackedHandoffIds.values().next().value
+    if (oldest) ackedHandoffIds.delete(oldest)
+  }
+  handoffRequestAtom.set(null)
+  try {
+    const m = native()
+    if (typeof m.handoffAck === 'function') m.handoffAck(id, accepted)
+  } catch (e) {
+    log('warn', 'browserRelay', `handoffAck(${id}) failed: ${e}`)
+  }
+  return true
 }
 
 // ── tabs ⇔ DevTools targets registry (BUG-136) ──────────────────────────────

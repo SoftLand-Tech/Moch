@@ -12,6 +12,7 @@ import { log, logText } from '../src/lib/log'
 import { AnimatedSplash } from '../src/components/AnimatedSplash'
 import { AlertDialogHost, showAlert } from '../src/components/AlertDialog'
 import { SessionToasts } from '../src/components/SessionToasts'
+import { BrowserHandoffPrompt } from '../src/components/BrowserHandoffPrompt'
 import { MochiStage } from '../src/components/Mascot'
 import {
   isConnected as isConnectedAtom, connectionState, connConfig, loadSavedConfig,
@@ -321,6 +322,9 @@ export default function RootLayout() {
         {linkMsg ? <LinkToast msg={linkMsg} onDismiss={dismissLinkMsg} /> : null}
       </View>
       <AlertDialogHost />
+      {/* Browser tool handoff (login / CAPTCHA / destructive confirmation):
+          one global prompt above every screen, mounted once per root branch. */}
+      <BrowserHandoffPrompt />
       {splash}
       </KeyboardProvider>
       </>
@@ -434,6 +438,9 @@ export default function RootLayout() {
       <SessionToasts />
       {/* Themed dialogs (showAlert) — one host for the whole app. */}
       <AlertDialogHost />
+      {/* Browser tool handoff (login / CAPTCHA / destructive confirmation):
+          one global prompt above every screen, mounted once per root branch. */}
+      <BrowserHandoffPrompt />
     </View>
     {splash}
     </KeyboardProvider>

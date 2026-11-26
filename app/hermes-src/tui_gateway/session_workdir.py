@@ -28,6 +28,12 @@ def _completion_cwd(params: dict | None = None) -> str:
     raw = (params.get("cwd") or _sessions.get(params.get("session_id") or "", {}).get("cwd")
            or _profile_configured_cwd(_profile_home(params.get("profile"))) or _launch_configured_cwd()
            or os.environ.get("TERMINAL_CWD") or os.getcwd())
+    # Embedded Moch: the user may type the guest spelling of the workspace (`/workspace/foo`).
+    # Translate it to the host path before the isdir check, or session.create silently drops it
+    # and falls back to the gateway process cwd (grouping then shows the wrong project).
+    from .embedded_paths import map_guest_workspace_path
+
+    raw = map_guest_workspace_path(raw)
     with contextlib.suppress(Exception):
         resolved = os.path.abspath(os.path.expanduser(str(raw)))
         if os.path.isdir(resolved):
@@ -528,6 +534,11 @@ def _persist_session_cwd_and_schedule_git_meta(session: dict, cwd: str, *, db=No
 
 def _set_session_cwd(session: dict, cwd: str) -> str:
     from hermes_constants import translate_cwd_for_wsl_backend
+    # Same embedded guest-spelling translation as _completion_cwd: a workspace move accepts
+    # `/workspace/foo` from the app as its host equivalent.
+    from .embedded_paths import map_guest_workspace_path
+
+    cwd = str(map_guest_workspace_path(cwd))
     cwd = translate_cwd_for_wsl_backend(str(cwd))
     resolved = os.path.abspath(os.path.expanduser(cwd))
     if not os.path.isdir(resolved):

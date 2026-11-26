@@ -28,11 +28,13 @@ type FakeTarget = { id: string; url: string; title: string }
 function makeFakeNative() {
   const calls: Array<{ fn: string; args: unknown[] }> = []
   const acks: Array<{ requestId: string; ok: boolean; error: string | null }> = []
+  const handoffAcks: Array<{ requestId: string; accepted: boolean }> = []
   let url: string | null = null
   let targets: FakeTarget[] = []
   return {
     calls,
     acks,
+    handoffAcks,
     setTabTargets(next: FakeTarget[]) {
       targets = next
     },
@@ -65,6 +67,10 @@ function makeFakeNative() {
         calls.push({ fn: 'tabOpAck', args: [requestId, ok, error] })
         acks.push({ requestId, ok, error: error ?? null })
       },
+      handoffAck(requestId: string, accepted: boolean) {
+        calls.push({ fn: 'handoffAck', args: [requestId, accepted] })
+        handoffAcks.push({ requestId, accepted })
+      },
       async tabTargets() {
         calls.push({ fn: 'tabTargets', args: [] })
         return targets
@@ -73,19 +79,32 @@ function makeFakeNative() {
   }
 }
 
-/** Fake mochTabOp emitter (pattern from test-sharein.ts's fakeEmitter). */
+/** Fake relay event emitter (mochTabOp + mochHandoff). */
 function makeFakeEmitter() {
-  const listeners: Array<(e: TabOpEvent) => void> = []
+  const listeners: Record<string, Array<(e: unknown) => void>> = {}
+  const add = (name: string) => (listeners[name] ??= [])
+  const fire = (name: string, ev: unknown) => {
+    add(name).slice().forEach((cb) => cb(ev))
+  }
   return {
     emit(ev: Partial<TabOpEvent>) {
-      listeners.slice().forEach((cb) => cb(ev as TabOpEvent))
+      fire('mochTabOp', ev)
     },
-    listenerCount: () => listeners.length,
+    emitHandoff(ev: unknown) {
+      fire('mochHandoff', ev)
+    },
+    listenerCount: (name = 'mochTabOp') => add(name).length,
     emitter: {
-      addListener(name: string, cb: (e: TabOpEvent) => void) {
-        if (name !== 'mochTabOp') throw new Error(`unexpected event name: ${name}`)
-        listeners.push(cb)
-        return { remove: () => { const i = listeners.indexOf(cb); if (i >= 0) listeners.splice(i, 1) } }
+      addListener(name: string, cb: (e: any) => void) {
+        if (name !== 'mochTabOp' && name !== 'mochHandoff') throw new Error(`unexpected event name: ${name}`)
+        add(name).push(cb)
+        return {
+          remove: () => {
+            const list = add(name)
+            const i = list.indexOf(cb)
+            if (i >= 0) list.splice(i, 1)
+          },
+        }
       },
     },
   }
@@ -175,6 +194,52 @@ async function main() {
   await m.ensureBrowserRelay() // any native touchpoint arms the mochTabOp listener
   await tick()
   check('mochTabOp listener armed once', fe.listenerCount() === 1)
+  check('mochHandoff listener armed once', fe.listenerCount('mochHandoff') === 1)
+  await m.ensureBrowserRelay()
+  check(
+    're-ensuring never duplicates listeners',
+    fe.listenerCount() === 1 && fe.listenerCount('mochHandoff') === 1,
+  )
+
+  // ── handoff: pure parse + exactly-once ack ───────────────────────────────
+  check('handoff parse rejects empty/invalid', m.parseHandoffEvent(null) === null && m.parseHandoffEvent({}) === null)
+  const parsed = m.parseHandoffEvent({ requestId: ' h1 ', reason: 'Sign in', url: 'https://x.example', extra: 1 })
+  check(
+    'handoff parse normalizes the three string fields',
+    !!parsed && parsed.requestId === 'h1' && parsed.reason === 'Sign in' && parsed.url === 'https://x.example',
+  )
+  check(
+    'handoff parse clamps the relay wait budget',
+    m.parseHandoffEvent({ requestId: 't1', timeoutMs: '120000' })?.timeoutMs === 120_000 &&
+      m.parseHandoffEvent({ requestId: 't2', timeoutMs: 999_999 })?.timeoutMs === 120_000 &&
+      m.parseHandoffEvent({ requestId: 't3', timeoutMs: 5 })?.timeoutMs === 1_000 &&
+      m.parseHandoffEvent({ requestId: 't4', timeoutMs: 'nope' })?.timeoutMs === undefined,
+  )
+
+  fe.emitHandoff({ requestId: 'h1', reason: 'Sign in to continue', url: 'https://bank.example/login' })
+  check(
+    'mochHandoff lands in handoffRequestAtom',
+    m.handoffRequestAtom.get()?.requestId === 'h1' &&
+      m.handoffRequestAtom.get()?.reason === 'Sign in to continue' &&
+      m.handoffRequestAtom.get()?.url === 'https://bank.example/login',
+  )
+  check('acks to a different requestId are ignored', m.ackHandoff('not-h1', true) === false)
+  check('no native ack for a stale requestId', fx.handoffAcks.length === 0 && m.handoffRequestAtom.get()?.requestId === 'h1')
+  check('ackHandoff answers the pending request', m.ackHandoff('h1', false) === true)
+  check('ack clears the atom', m.handoffRequestAtom.get() === null)
+  check(
+    'ack reaches the native bridge with the answer',
+    fx.handoffAcks.length === 1 && fx.handoffAcks[0].requestId === 'h1' && fx.handoffAcks[0].accepted === false,
+  )
+  check('second ack is a no-op (exactly once)', m.ackHandoff('h1', true) === false && fx.handoffAcks.length === 1)
+
+  fe.emitHandoff({ requestId: 'h2', reason: '', url: '' })
+  check('a new handoff can replace after an ack', m.handoffRequestAtom.get()?.requestId === 'h2')
+  check('accept path reaches native', m.ackHandoff('h2', true) === true && fx.handoffAcks[1]?.accepted === true)
+  check('duplicate relay event after ack is ignored', (() => {
+    fe.emitHandoff({ requestId: 'h2', reason: 'again', url: '' })
+    return m.handoffRequestAtom.get() === null
+  })())
 
   // open → addTab + ok ack carrying the SAME requestId
   fe.emit({ requestId: 'req-open', op: 'open', url: 'https://round.trip/new' })
@@ -268,9 +333,21 @@ async function main() {
     m.browserTabs.get()[0].targetId === 'DUP-1' && m.browserTabs.get()[1].targetId === undefined,
   )
 
+  // a handoff is page-level state, never a tab-store mutation (quick task safe)
+  const tabIdsBefore = m.browserTabs.get().map((t) => t.id).join('|')
+  const activeBefore = m.activeTabId.get()
+  fe.emitHandoff({ requestId: 'h3', reason: 'CAPTCHA', url: 'https://dup.example/' })
+  check(
+    'handoff leaves the tab pool and active tab intact',
+    m.browserTabs.get().map((t) => t.id).join('|') === tabIdsBefore &&
+      m.activeTabId.get() === activeBefore &&
+      m.handoffRequestAtom.get()?.requestId === 'h3',
+  )
+  m.ackHandoff('h3', true)
+
   // re-injecting without an emitter unsubscribes the old one
   m._useBrowserRelayForTests(null)
-  check('re-inject without an emitter unsubscribes', fe.listenerCount() === 0)
+  check('re-inject without an emitter unsubscribes', fe.listenerCount() === 0 && fe.listenerCount('mochHandoff') === 0)
 
   console.log(`\n${pass} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)

@@ -18,11 +18,13 @@ import {
   ocListPermissions,
   ocPrompt,
   ocRunCommand,
+  ocSetModel,
   ocStream,
   describeOcError,
   type OcEvent,
   type OcPermissionRequest,
 } from './opencodeClient'
+import { ocDefaultPickModelRef, ocOneShotModelRef, parseOcDefaultPick, type OcDefaultPick } from './ocDefaultPick'
 import { extractOcEventSessionId, parseOcForm, type OcFormInfo } from './ocForm'
 import { findOcTurnAssistant, mapOcHistory, type OcHistoryRow } from './ocHistory'
 import { loadOcCommands } from './ocCommands'
@@ -40,6 +42,8 @@ import { log } from './log'
 // workspace's atoms are the same source the hermes create reads).
 import { activeProjectIdAtom, projectsAtom } from './workspace'
 import { pickProjectCwd } from './projectScope'
+import { getEmbeddedGateway } from './mochiRuntime'
+import { connConfig } from './gateway'
 
 const MAP_KEY = 'hermes.opencode.map.v1'
 
@@ -112,6 +116,8 @@ export async function findStoredIdForOcSession(ocId: string, liveKeys?: Iterable
 // turn, so the pick must survive restarts here. Same AsyncStorage, own key.
 
 const PICK_KEY = 'hermes.opencode.picks.v1'
+/** App-wide default for NEW OpenCode chats (`All sessions` in the picker). */
+const DEFAULT_PICK_KEY = 'hermes.opencode.defaultPick.v1'
 
 async function readPicks(): Promise<Record<string, string>> {
   try {
@@ -142,24 +148,98 @@ export async function rememberOcPick(storedId: string, modelID: string): Promise
   } catch {}
 }
 
+/** The app-persisted default for NEW chats, or null when none was picked. */
+export async function readOcDefaultPick(): Promise<OcDefaultPick | null> {
+  try {
+    return parseOcDefaultPick(await AsyncStorage.getItem(DEFAULT_PICK_KEY))
+  } catch {
+    return null
+  }
+}
+
+/** Persist the `All sessions` default (validated + normalized before writing). */
+export async function saveOcDefaultPick(pick: OcDefaultPick): Promise<void> {
+  const clean = parseOcDefaultPick(pick)
+  if (!clean) throw new Error('invalid OpenCode default model pick')
+  await AsyncStorage.setItem(DEFAULT_PICK_KEY, JSON.stringify(clean))
+}
+
+/**
+ * Apply the app default to a freshly minted OC session. Best-effort: a failed
+ * switch must not fail the mint/turn (the session still opens on OC's own
+ * default, and the warning names the status). The caller awaits this so the
+ * first prompt sees the chosen model, not a half-applied default.
+ */
+export async function applyOcDefaultPick(ocId: string): Promise<void> {
+  if (!ocId) return
+  const pick = await readOcDefaultPick()
+  if (!pick) return
+  try {
+    await ocSetModel(ocId, pick.providerID, pick.id)
+  } catch (e) {
+    const status = typeof (e as { status?: unknown })?.status === 'number' ? `HTTP ${(e as { status: number }).status}` : 'request failed'
+    log('warn', 'opencode', `default model not applied to the new session (${status})`)
+  }
+}
+
+/**
+ * One-shot model resolution: the chat's own pick wins; the app default is the
+ * fallback only when the chat never picked. `provider/model` is the CLI form.
+ */
+export async function ocOneShotModelFor(storedId: string): Promise<string | null> {
+  const own = await ocPickFor(storedId).catch(() => null)
+  if (own) return own
+  return ocDefaultPickModelRef(await readOcDefaultPick())
+}
+
+/** Re-export for callers that only need the fallback switch. */
+export { ocDefaultPickModelRef, ocOneShotModelRef, parseOcDefaultPick }
+export type { OcDefaultPick }
+
 /** The drawer's selected project's folder, or undefined (Personal bucket /
  *  folderless project — minting in an arbitrary cwd would file the session
  *  under the wrong project, the same rule pickProjectCwd encodes). */
-function currentProjectCwd(): string | undefined {
+export function ocSelectedProjectCwd(): string | undefined {
   return pickProjectCwd(
     projectsAtom.get().map((p) => ({ id: p.id, path: p.primaryPath, isNoProject: p.isNoProject })),
     activeProjectIdAtom.get(),
   )
 }
 
+/**
+ * THE directory a new OpenCode session opens in: the selected project's HOST
+ * folder when one exists (always wins — no silent workspace fallback), else
+ * the embedded gateway's workspace host path. Remote gateways keep their own
+ * default (undefined), exactly as before.
+ *
+ * Both mint sites (the turn runner and the model sheet) call this, so they can
+ * never drift. The host spelling is deliberate: the guest self-binds the
+ * workspace at its host path, and OpenCode echoes `directory` on session rows —
+ * `projectIdForCwd` then groups the chat under the same folders the app shows.
+ */
+export async function ocSessionDirectory(): Promise<string | undefined> {
+  const selected = ocSelectedProjectCwd()
+  if (selected) return selected
+  try {
+    const gw = await getEmbeddedGateway()
+    const host = connConfig.get()?.host ?? ''
+    if (!gw?.running || !gw.workspace || !host.startsWith('127.0.0.1')) return undefined
+    return gw.workspace
+  } catch {
+    return undefined
+  }
+}
+
 async function ensureOcSession(mapKey: string, title: string): Promise<string> {
   const existing = await ocSessionFor(mapKey)
   if (existing) return existing
-  // BUG-149: the mint files the session under the selected project so the
-  // drawer can group it (projectIdForCwd(row.directory)).
-  const created = await ocCreateSession(title.slice(0, 80) || 'Moch chat', currentProjectCwd())
+  // BUG-149: the mint files the session under the selected project (or the
+  // embedded workspace) so the drawer can group it (projectIdForCwd(row.directory)).
+  const created = await ocCreateSession(title.slice(0, 80) || 'Moch chat', await ocSessionDirectory())
   if (!created?.id) throw new Error('OpenCode did not return a session id')
   await ocRememberSession(mapKey, created.id)
+  // `All sessions` default: apply to every newly minted session, best-effort.
+  await applyOcDefaultPick(created.id)
   return created.id
 }
 
@@ -765,7 +845,15 @@ const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g
 /** `> build · big-pickle`-style header lines the CLI prints above the answer. */
 const RUN_HEADER_RE = /^>\s.*$/
 const SAFE_ID_RE = /^[A-Za-z0-9_-]+$/
-const SAFE_MODEL_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(#[A-Za-z0-9_.-]+)?$/
+// The model part may itself contain slashes (OpenRouter-style ids), so only the
+// leading `provider/` is constrained; quotes/whitespace still can never reach
+// the shell line.
+const SAFE_MODEL_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.\/#-]+$/
+
+/** POSIX single-quote for the guest shell (`'` → `'\''`). */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
 
 /** UTF-8 → base64 with surrogate-pair support (emoji must survive the pipe). */
 function utf8ToB64(input: string): string {
@@ -842,6 +930,8 @@ export interface OcOneShotOptions {
   text: string
   /** `provider/model` the user picked (omitted = server default). */
   model?: string
+  /** Host project folder to start the CLI in (omitted = guest /workspace). */
+  cwd?: string
   isCancelled?: () => boolean
 }
 
@@ -861,9 +951,16 @@ export async function runOneShotTurn(opts: OcOneShotOptions): Promise<OcOneShotR
     existing && SAFE_ID_RE.test(existing) ? ` -s '${existing}'` : ''
   const modelPart =
     opts.model && SAFE_MODEL_RE.test(opts.model) ? ` -m '${opts.model}'` : ''
+  // Project chats run in the selected project on the HOST (self-bound in the
+  // guest at the same path). No selection keeps the historical guest
+  // /workspace start. Shell-quoted so spaces/quotes in a folder can never
+  // split the command line.
+  // A stale/deleted project row, or a folder outside the guest binds, must not
+  // turn a one-shot turn into a shell error: fall back to the workspace.
+  const cwdPart = opts.cwd ? `cd ${shellQuote(opts.cwd)} 2>/dev/null || cd /workspace; ` : ''
   // Prompt via stdin (base64 pipe): arbitrary user text can never break the
   // shell line, and emoji survive through the correct UTF-8 encoder above.
-  const cmd = `echo ${utf8ToB64(opts.text)} | base64 -d | opencode run --format json${idPart}${modelPart}`
+  const cmd = `${cwdPart}echo ${utf8ToB64(opts.text)} | base64 -d | opencode run --format json${idPart}${modelPart}`
   const r = await guestRun(cmd, 300_000)
   if (!r.ok) {
     if (opts.isCancelled?.()) {

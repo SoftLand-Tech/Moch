@@ -51,6 +51,23 @@ interface HermesBridgeModule {
   linuxTermReplay(): Promise<{ chunk: string; alive: boolean }>
   linuxTermResize(cols: number, rows: number): Promise<boolean>
   linuxTermKill(): Promise<boolean>
+  /**
+   * Multi-session terminal (slice B). Optional on the interface: an OTA JS
+   * bundle can run against an older APK whose bridge predates these methods,
+   * and every wrapper below guards before calling — never a hard crash.
+   */
+  linuxTermStartSession?(
+    sessionId: string,
+    cwd: string | null,
+    cols: number,
+    rows: number,
+  ): Promise<{ ok: boolean; alreadyRunning: boolean; error?: string }>
+  linuxTermWriteSession?(sessionId: string, dataB64: string): Promise<boolean>
+  linuxTermDrainSession?(sessionId: string): Promise<{ chunks: string[]; alive: boolean }>
+  linuxTermReplaySession?(sessionId: string): Promise<{ chunk: string; alive: boolean }>
+  linuxTermClearSession?(sessionId: string): Promise<boolean>
+  linuxTermResizeSession?(sessionId: string, cols: number, rows: number): Promise<boolean>
+  linuxTermKillSession?(sessionId: string): Promise<boolean>
 }
 
 
@@ -199,4 +216,58 @@ export function linuxTermResize(cols: number, rows: number): Promise<boolean> {
 export function linuxTermKill(): Promise<boolean> {
   if (!bridge?.linuxTermKill) return Promise.resolve(false)
   return bridge.linuxTermKill().catch(() => false)
+}
+
+// ---- Multi-session interactive terminals (slice B) ----
+//
+// One PTY per session id. The legacy functions above remain bound to
+// python's `__default__` session (the hidden OpenCode server launch), so the
+// Terminal screen can open its own isolated tabs without touching it.
+
+export function linuxTermStartSession(
+  sessionId: string,
+  cwd: string | null,
+  cols: number,
+  rows: number,
+): Promise<{ ok: boolean; alreadyRunning: boolean; error?: string } | null> {
+  if (!bridge?.linuxTermStartSession) return Promise.resolve(null)
+  return bridge
+    .linuxTermStartSession(sessionId, cwd, cols, rows)
+    .catch(() => null)
+}
+
+export function linuxTermWriteSession(sessionId: string, dataB64: string): Promise<boolean> {
+  if (!bridge?.linuxTermWriteSession) return Promise.resolve(false)
+  return bridge.linuxTermWriteSession(sessionId, dataB64).catch(() => false)
+}
+
+export function linuxTermDrainSession(sessionId: string): Promise<LinuxTermDrain | null> {
+  if (!bridge?.linuxTermDrainSession) return Promise.resolve(null)
+  return bridge.linuxTermDrainSession(sessionId).catch(() => null)
+}
+
+export function linuxTermReplaySession(
+  sessionId: string,
+): Promise<{ chunk: string; alive: boolean } | null> {
+  if (!bridge?.linuxTermReplaySession) return Promise.resolve(null)
+  return bridge.linuxTermReplaySession(sessionId).catch(() => null)
+}
+
+export function linuxTermClearSession(sessionId: string): Promise<boolean> {
+  if (!bridge?.linuxTermClearSession) return Promise.resolve(false)
+  return bridge.linuxTermClearSession(sessionId).catch(() => false)
+}
+
+export function linuxTermResizeSession(
+  sessionId: string,
+  cols: number,
+  rows: number,
+): Promise<boolean> {
+  if (!bridge?.linuxTermResizeSession) return Promise.resolve(false)
+  return bridge.linuxTermResizeSession(sessionId, cols, rows).catch(() => false)
+}
+
+export function linuxTermKillSession(sessionId: string): Promise<boolean> {
+  if (!bridge?.linuxTermKillSession) return Promise.resolve(false)
+  return bridge.linuxTermKillSession(sessionId).catch(() => false)
 }

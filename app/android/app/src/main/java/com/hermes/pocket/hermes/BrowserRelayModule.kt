@@ -48,6 +48,11 @@ class BrowserRelayModule(reactContext: ReactApplicationContext) :
     // emitting through a destroyed catalyst context throws inside CdpRelay's
     // handler, which answers with an honest 502 instead of hanging.
     CdpRelay.setTabOpSink { event, payload -> emitToJs(event, payload) }
+    // Browser handoff round-trip: the relay's /moch/handoff emits one
+    // "mochHandoff" event and blocks for handoffAck. Re-installing the sink on
+    // a fresh module instance is the whole idempotency contract — the relay
+    // keeps ONE sink, and there is no listener to duplicate here.
+    CdpRelay.setHandoffSink { event, payload -> emitToJs(event, payload) }
   }
 
   /** Emit one relay event to JS (payload is all-strings by construction). */
@@ -216,6 +221,16 @@ class BrowserRelayModule(reactContext: ReactApplicationContext) :
   @ReactMethod
   fun tabOpAck(requestId: String, ok: Boolean, error: String?) {
     CdpRelay.tabOpAck(requestId, ok, error)
+  }
+
+  /**
+   * RN ack for a "mochHandoff" round-trip: the user accepted or declined the
+   * relay's handoff request. Fire-and-forget — CdpRelay already bounds the
+   * wait with its own clamped timeout, and a stale requestId is ignored.
+   */
+  @ReactMethod
+  fun handoffAck(requestId: String, accepted: Boolean) {
+    CdpRelay.handoffAck(requestId, accepted)
   }
 
   /**

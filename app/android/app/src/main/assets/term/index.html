@@ -6,6 +6,19 @@
 <meta name="color-scheme" content="dark">
 <style>
 /**
+ * JetBrains Mono — bundled locally so the terminal never falls back to the
+ * WebView's monospace. Copyright 2020 The JetBrains Mono Project Authors,
+ * licensed under the SIL Open Font License 1.1 (see OFL.txt beside this file).
+ */
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('JetBrainsMono-latin.woff2') format('woff2');
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: block;
+}
+
+/**
  * Copyright (c) 2014 The xterm.js authors. All rights reserved.
  * Copyright (c) 2012-2013, Christopher Jeffrey (MIT License)
  * https://github.com/chjj/term.js
@@ -85,8 +98,8 @@
 
 .xterm .composition-view {
     /* TODO: Composition position got messed up somewhere */
-    background: #000;
-    color: #FFF;
+    background: #050807;
+    color: #C9E3D3;
     display: none;
     position: absolute;
     white-space: nowrap;
@@ -99,7 +112,7 @@
 
 .xterm .xterm-viewport {
     /* On OS X this is required in order for the scroll bar to appear fully opaque */
-    background-color: #000;
+    background-color: #050807;
     overflow-y: scroll;
     cursor: default;
     position: absolute;
@@ -224,9 +237,9 @@
     position: relative;
 }
 
-html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hidden; }
-#t { width: 100%; height: 100%; }
-.xterm .xterm-viewport { background: #000 !important; scrollbar-width: none; }
+html, body { margin: 0; padding: 0; background: #050807; height: 100%; overflow: hidden; }
+#t { width: 100%; height: 100%; background: #050807; }
+.xterm .xterm-viewport { background: #050807 !important; scrollbar-width: none; }
 .xterm .xterm-viewport::-webkit-scrollbar { display: none; }
 </style>
 </head>
@@ -243,11 +256,19 @@ html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hi
 <script>
 (function () {
   'use strict';
+  // Wait for the bundled face before opening xterm: the renderer measures
+  // its cell from the ACTIVE font, and opening on the fallback monospace
+  // leaves every glyph misaligned once JetBrains Mono swaps in.
+  function bootTerminal() {
   var term = new Terminal({
     scrollback: 5000,
     convertEol: false,
     fontSize: 13,
-    fontFamily: 'monospace',
+    fontFamily: "'JetBrains Mono', monospace",
+    fontWeight: '400',
+    fontWeightBold: '700',
+    letterSpacing: 0,
+    lineHeight: 1.25,
     // Type indicator: a visible accent cursor. The RN screen drives typing
     // through its own hidden input, so the WebView's textarea is usually
     // unfocused — 'block' keeps the cursor drawn in that state instead of
@@ -263,12 +284,30 @@ html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hi
     linkHandler: {
       activate: function (_e, uri) { say({ type: 'link', url: uri }); }
     },
+    // Moch green/mono terminal: near-black canvas, soft green ink, muted
+    // ANSI, and the sprout-orange block cursor as the single warm accent.
     theme: {
-      background: '#000000',
-      foreground: '#E8E8E8',
+      background: '#050807',
+      foreground: '#C9E3D3',
       cursor: '#F79236',
-      cursorAccent: '#000000',
-      selectionBackground: 'rgba(232,232,232,0.3)'
+      cursorAccent: '#04100A',
+      selectionBackground: 'rgba(127,199,154,0.24)',
+      black: '#0B1210',
+      red: '#D98C8C',
+      green: '#86C79A',
+      yellow: '#D8C38C',
+      blue: '#8FB6CF',
+      magenta: '#C5A0CB',
+      cyan: '#8ACFC4',
+      white: '#C9E3D3',
+      brightBlack: '#5C7065',
+      brightRed: '#E8A3A3',
+      brightGreen: '#A5DDB4',
+      brightYellow: '#E7D5A5',
+      brightBlue: '#A8C9DE',
+      brightMagenta: '#D8B9DD',
+      brightCyan: '#A5E0D7',
+      brightWhite: '#EAF6EE'
     }
   });
   var fit = new FitAddon.FitAddon();
@@ -360,6 +399,14 @@ html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hi
   term.onData(function (d) { say({ type: 'key', data: d }); });
   term.onResize(function (sz) { say({ type: 'fit', cols: sz.cols, rows: sz.rows }); });
   say({ type: 'ready', cols: term.cols, rows: term.rows });
+  }
+  if (document.fonts && document.fonts.load) {
+    // load() resolves even when the file is missing — the catch keeps the
+    // terminal usable on a fallback face instead of never booting.
+    document.fonts.load('13px "JetBrains Mono"').then(bootTerminal, bootTerminal);
+  } else {
+    bootTerminal();
+  }
 })();
 </script>
 </body>

@@ -67,6 +67,17 @@ def _prepare_home(home: Path) -> None:
     workspace = home / "workspace"
     workspace.mkdir(parents=True, exist_ok=True)
     os.environ["MOCH_WORKSPACE"] = str(workspace)
+    # The embedded guest's HOME is /root (linux_env v6 seeds credentials there), NOT the
+    # workspace. Without this, the agent can read `~` as the project and root file/terminal
+    # work in /root instead of the session's cwd. Embedder hint only: an explicit
+    # HERMES_ENVIRONMENT_HINT (container/deployment) always wins.
+    os.environ.setdefault(
+        "HERMES_ENVIRONMENT_HINT",
+        "Embedded Moch runs inside a Linux guest whose HOME is /root. "
+        "/root is the guest's home directory, not the workspace and not a project folder. "
+        "The session's working directory (its project folder) is authoritative for file, "
+        "shell and terminal work; use that directory, not /root.",
+    )
     # BUG-118: the MCP Browse catalog reads optional-mcps manifests. The resolver
     # (hermes_constants._packaged_dir) already falls back to
     # <HERMES_HOME>/optional-mcps — but mcp_catalog passes the SOURCE-CHECKOUT

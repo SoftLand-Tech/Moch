@@ -29,6 +29,10 @@ export const terminal: Catalog = {
     'terminal.font.increase': 'A+',
     'terminal.restart': 'Restart shell',
     'terminal.inputA11y': 'Terminal input',
+    'terminal.tab.new': 'New terminal tab',
+    'terminal.tab.close': 'Close tab',
+    'terminal.tab.label': 'Terminal {n}',
+    'terminal.tabs.a11y': 'Terminal tabs',
 
     'terminal.key.escape': 'Escape',
     'terminal.key.tab': 'Autocomplete',
@@ -69,6 +73,10 @@ export const terminal: Catalog = {
     'terminal.font.increase': 'A+',
     'terminal.restart': 'إعادة تشغيل الصدفة',
     'terminal.inputA11y': 'إدخال الطرفية',
+    'terminal.tab.new': 'تبويب طرفية جديد',
+    'terminal.tab.close': 'إغلاق التبويب',
+    'terminal.tab.label': 'الطرفية {n}',
+    'terminal.tabs.a11y': 'تبويبات الطرفية',
 
     'terminal.key.escape': 'مفتاح Escape',
     'terminal.key.tab': 'إكمال تلقائي',
@@ -109,6 +117,10 @@ export const terminal: Catalog = {
     'terminal.font.increase': 'A+',
     'terminal.restart': '重启 shell',
     'terminal.inputA11y': '终端输入',
+    'terminal.tab.new': '新建终端标签页',
+    'terminal.tab.close': '关闭标签页',
+    'terminal.tab.label': '终端 {n}',
+    'terminal.tabs.a11y': '终端标签页',
 
     'terminal.key.escape': 'Escape 键',
     'terminal.key.tab': '自动补全',
@@ -149,6 +161,10 @@ export const terminal: Catalog = {
     'terminal.font.increase': 'A+',
     'terminal.restart': 'Redémarrer le shell',
     'terminal.inputA11y': 'Saisie du terminal',
+    'terminal.tab.new': 'Nouvel onglet de terminal',
+    'terminal.tab.close': 'Fermer l’onglet',
+    'terminal.tab.label': 'Terminal {n}',
+    'terminal.tabs.a11y': 'Onglets du terminal',
 
     'terminal.key.escape': 'Touche Échap',
     'terminal.key.tab': 'Complétion automatique',

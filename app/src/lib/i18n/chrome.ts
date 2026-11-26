@@ -80,12 +80,12 @@ export const chrome: Catalog = {
     'chrome.model.pickPrompt': 'Tap a provider, then a model',
     'chrome.model.applyScope': 'Apply Scope',
     'chrome.model.scopeSession': 'This chat',
-    'chrome.model.scopeGlobal': 'Everywhere',
+    'chrome.model.scopeGlobal': 'All sessions',
     'chrome.model.scopeOnce': 'Next reply only',
     'chrome.model.scopeSessionHint':
       'Switches this conversation now. Everything else keeps the current default.',
     'chrome.model.scopeGlobalHint':
-      'Persists on the server: new chats and other apps start on this model.',
+      'Saves the default for all sessions: new chats start on this model.',
     'chrome.model.scopeOnceHint': 'One turn with this model, then right back to the current one.',
     'chrome.model.done': 'Done · Use {model}',
     'chrome.model.switching': 'Switching…',
@@ -96,7 +96,7 @@ export const chrome: Catalog = {
     'chrome.model.useIt': 'Use it',
     'chrome.model.switched': 'Model switched to {model} ({provider}) — {where}.',
     'chrome.model.whereSession': 'this chat',
-    'chrome.model.whereGlobal': 'everywhere (new default)',
+    'chrome.model.whereGlobal': 'all sessions (new default)',
     'chrome.model.whereOnce': 'next reply only',
     'chrome.model.deferred': 'The agent is mid-turn, so it lands on the next turn.',
     'chrome.model.switchFailed': 'Model switch failed — {why}',
@@ -105,6 +105,9 @@ export const chrome: Catalog = {
     'chrome.model.ocNoSession': 'OpenCode did not return a session id',
     'chrome.model.ocSwitchFailed': 'Model switch failed',
     'chrome.model.ocDefaultTitle': 'Moch chat',
+    'chrome.model.ocDefault': 'All sessions default: {model} ({provider})',
+    'chrome.model.ocScopeAllHint':
+      'Saves this model for new OpenCode chats; this chat switches to it too.',
 
     // ── Toasts (a11y copy; titles/bodies come from lib/attention) ────────
     'chrome.toast.open': 'Open conversation',
@@ -182,11 +185,11 @@ export const chrome: Catalog = {
     'chrome.model.pickPrompt': 'اختر مزوّدًا ثم نموذجًا',
     'chrome.model.applyScope': 'نطاق التطبيق',
     'chrome.model.scopeSession': 'هذه المحادثة',
-    'chrome.model.scopeGlobal': 'في كل مكان',
+    'chrome.model.scopeGlobal': 'كل المحادثات',
     'chrome.model.scopeOnce': 'الرد التالي فقط',
     'chrome.model.scopeSessionHint': 'يبدّل هذه المحادثة الآن. يبقى كل شيء آخر على الافتراضي الحالي.',
     'chrome.model.scopeGlobalHint':
-      'يُحفظ على الخادم: المحادثات الجديدة والتطبيقات الأخرى تبدأ بهذا النموذج.',
+      'يحفظ الافتراضي لكل المحادثات: المحادثات الجديدة تبدأ بهذا النموذج.',
     'chrome.model.scopeOnceHint': 'دور واحد بهذا النموذج ثم العودة إلى النموذج الحالي.',
     'chrome.model.done': 'تم · استخدم {model}',
     'chrome.model.switching': 'جارٍ التبديل…',
@@ -197,7 +200,7 @@ export const chrome: Catalog = {
     'chrome.model.useIt': 'استخدمه',
     'chrome.model.switched': 'تم التبديل إلى {model} ({provider}) — {where}.',
     'chrome.model.whereSession': 'هذه المحادثة',
-    'chrome.model.whereGlobal': 'في كل مكان (الافتراضي الجديد)',
+    'chrome.model.whereGlobal': 'كل المحادثات (الافتراضي الجديد)',
     'chrome.model.whereOnce': 'الرد التالي فقط',
     'chrome.model.deferred': 'الوكيل في منتصف الدور، لذا سيُطبَّق في الدور التالي.',
     'chrome.model.switchFailed': 'فشل تبديل النموذج — {why}',
@@ -206,6 +209,9 @@ export const chrome: Catalog = {
     'chrome.model.ocNoSession': 'لم يُرجع OpenCode معرّف جلسة',
     'chrome.model.ocSwitchFailed': 'فشل تبديل النموذج',
     'chrome.model.ocDefaultTitle': 'محادثة Moch',
+    'chrome.model.ocDefault': 'افتراضي كل المحادثات: {model} ({provider})',
+    'chrome.model.ocScopeAllHint':
+      'يحفظ هذا النموذج لمحادثات OpenCode الجديدة؛ وتنتقل هذه المحادثة إليه أيضًا.',
 
     // ── Toasts ───────────────────────────────────────────────────────────
     'chrome.toast.open': 'افتح المحادثة',
@@ -283,10 +289,10 @@ export const chrome: Catalog = {
     'chrome.model.pickPrompt': '选择提供方，然后选择模型',
     'chrome.model.applyScope': '应用范围',
     'chrome.model.scopeSession': '此对话',
-    'chrome.model.scopeGlobal': '全局',
+    'chrome.model.scopeGlobal': '所有会话',
     'chrome.model.scopeOnce': '仅下一条回复',
     'chrome.model.scopeSessionHint': '立即切换此对话。其他内容保持当前默认。',
-    'chrome.model.scopeGlobalHint': '保存在服务器上：新对话和其他应用将以此模型启动。',
+    'chrome.model.scopeGlobalHint': '保存为所有会话的默认模型：新对话将以此模型启动。',
     'chrome.model.scopeOnceHint': '仅此一轮使用该模型，随后恢复当前模型。',
     'chrome.model.done': '完成 · 使用 {model}',
     'chrome.model.switching': '正在切换…',
@@ -296,7 +302,7 @@ export const chrome: Catalog = {
     'chrome.model.useIt': '使用',
     'chrome.model.switched': '已切换模型至 {model}（{provider}）— {where}。',
     'chrome.model.whereSession': '此对话',
-    'chrome.model.whereGlobal': '全局（新默认）',
+    'chrome.model.whereGlobal': '所有会话（新默认）',
     'chrome.model.whereOnce': '仅下一条回复',
     'chrome.model.deferred': '智能体正在执行当前回合，将在下一回合生效。',
     'chrome.model.switchFailed': '模型切换失败 — {why}',
@@ -305,6 +311,8 @@ export const chrome: Catalog = {
     'chrome.model.ocNoSession': 'OpenCode 未返回会话 ID',
     'chrome.model.ocSwitchFailed': '模型切换失败',
     'chrome.model.ocDefaultTitle': 'Moch 对话',
+    'chrome.model.ocDefault': '所有会话默认：{model}（{provider}）',
+    'chrome.model.ocScopeAllHint': '将此模型保存为新 OpenCode 对话的默认模型；本对话也会切换过去。',
 
     // ── Toasts ───────────────────────────────────────────────────────────
     'chrome.toast.open': '打开对话',
@@ -382,12 +390,12 @@ export const chrome: Catalog = {
     'chrome.model.pickPrompt': 'Choisissez un fournisseur, puis un modèle',
     'chrome.model.applyScope': 'Portée',
     'chrome.model.scopeSession': 'Cette discussion',
-    'chrome.model.scopeGlobal': 'Partout',
+    'chrome.model.scopeGlobal': 'Toutes les discussions',
     'chrome.model.scopeOnce': 'Prochaine réponse uniquement',
     'chrome.model.scopeSessionHint':
       'Change cette discussion maintenant. Le reste garde la valeur par défaut.',
     'chrome.model.scopeGlobalHint':
-      'Enregistré sur le serveur : les nouvelles discussions et les autres applications démarrent avec ce modèle.',
+      'Enregistre le modèle par défaut pour toutes les discussions : les nouvelles commencent avec lui.',
     'chrome.model.scopeOnceHint': 'Un tour avec ce modèle, puis retour au modèle actuel.',
     'chrome.model.done': 'Terminé · Utiliser {model}',
     'chrome.model.switching': 'Changement…',
@@ -398,7 +406,7 @@ export const chrome: Catalog = {
     'chrome.model.useIt': 'L’utiliser',
     'chrome.model.switched': 'Modèle changé pour {model} ({provider}) — {where}.',
     'chrome.model.whereSession': 'cette discussion',
-    'chrome.model.whereGlobal': 'partout (nouveau défaut)',
+    'chrome.model.whereGlobal': 'toutes les discussions (nouveau défaut)',
     'chrome.model.whereOnce': 'prochaine réponse uniquement',
     'chrome.model.deferred': 'L’agent est en cours de tour ; le changement s’appliquera au tour suivant.',
     'chrome.model.switchFailed': 'Échec du changement de modèle — {why}',
@@ -407,6 +415,9 @@ export const chrome: Catalog = {
     'chrome.model.ocNoSession': 'OpenCode n’a pas renvoyé d’identifiant de session',
     'chrome.model.ocSwitchFailed': 'Échec du changement de modèle',
     'chrome.model.ocDefaultTitle': 'Discussion Moch',
+    'chrome.model.ocDefault': 'Défaut toutes discussions : {model} ({provider})',
+    'chrome.model.ocScopeAllHint':
+      'Enregistre ce modèle pour les nouvelles discussions OpenCode ; cette discussion bascule aussi.',
 
     // ── Toasts ───────────────────────────────────────────────────────────
     'chrome.toast.open': 'Ouvrir la discussion',

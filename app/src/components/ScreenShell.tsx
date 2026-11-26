@@ -5,6 +5,7 @@ import {
   Pressable,
   StyleSheet,
   Animated,
+  Keyboard,
   PanResponder,
   useWindowDimensions,
 } from 'react-native'
@@ -95,6 +96,19 @@ export function ScreenShell({
   const [open, setOpen] = useState(false)
   const router = useRouter()
   const insets = useSafeAreaInsets()
+  // Opening the drawer abandons any IME that is already up (chat composer,
+  // terminal, etc.). Keyboard.dismiss() blurs the focused input, so focus
+  // leaves the composer instead of lingering behind the scrim; closing the
+  // drawer dismisses the sidebar's own search/underlying keyboard too. Every
+  // open/close path routes through these two callbacks.
+  const openDrawer = useCallback(() => {
+    Keyboard.dismiss()
+    setOpen(true)
+  }, [])
+  const closeDrawer = useCallback(() => {
+    Keyboard.dismiss()
+    setOpen(false)
+  }, [])
   const online = useStore(isConnectedAtom)
   // Tri-state: while the dial is in flight the app is neither connected nor
   // offline — flashing the dead-cloud icon for the ~1s connect window (or
@@ -163,7 +177,7 @@ export function ScreenShell({
       // Fixed-duration legs on both outcomes: the release glide is the SAME
       // animation as the hamburger open (and its close counterpart), just
       // starting from wherever the drag stopped — one consistent motion.
-      if ((dir.rtl ? g.vx < -FLICK : g.vx > FLICK) || dragProgress.current > 0.5) setOpen(true)
+      if ((dir.rtl ? g.vx < -FLICK : g.vx > FLICK) || dragProgress.current > 0.5) openDrawer()
       else settleTo(drawerAnim, 0, CANCEL_MS)
     }
     return PanResponder.create({
@@ -183,7 +197,12 @@ export function ScreenShell({
         !openRef.current &&
         (dir.rtl ? g.dx < -EDGE_CLAIM : g.dx > EDGE_CLAIM) &&
         Math.abs(g.dx) > Math.abs(g.dy) * DOMINANCE,
-      onPanResponderGrant: () => captureProgress(drawerAnim, dragProgress, moveSeen),
+      onPanResponderGrant: () => {
+        // The drawer is opening: drop any composer IME now, not only on
+        // release, so the panel never finger-tracks over a focused keyboard.
+        Keyboard.dismiss()
+        captureProgress(drawerAnim, dragProgress, moveSeen)
+      },
       onPanResponderMove: (_e, g) => {
         const p = clamp01((dir.rtl ? -g.dx : g.dx) / panelWidthRef.current)
         dragProgress.current = p
@@ -193,7 +212,7 @@ export function ScreenShell({
       onPanResponderRelease: settle,
       onPanResponderTerminate: settle,
     })
-  }, [drawerAnim, dir.rtl])
+  }, [drawerAnim, dir.rtl, openDrawer])
 
   // The drawer's chat list comes from the gateway, so it has to be fetched.
   React.useEffect(() => {
@@ -581,7 +600,7 @@ export function ScreenShell({
     <View style={s.root} {...openPan.panHandlers}>
       <View style={[s.headerWrap, { paddingTop: insets.top + 4 }]}>
         <View style={[s.header, { flexDirection: dir.row }, S.trayHeader ? s.headerTray : s.headerBar]}>
-          <HeaderButton onPress={() => setOpen(true)} accessibilityLabel={tr('shell.menu')}>
+          <HeaderButton onPress={openDrawer} accessibilityLabel={tr('shell.menu')}>
             <Icon name="menu" size={20} color={C.text} />
           </HeaderButton>
 
@@ -636,8 +655,8 @@ export function ScreenShell({
           // canonical `Bot Chat` that just appeared, must be there on open.
           void refreshFleet()
         }}
-        onClose={() => setOpen(false)}
-        onRequestOpen={() => setOpen(true)}
+        onClose={closeDrawer}
+        onRequestOpen={openDrawer}
         nav={topNav}
         bottomNav={bottomNav}
         identity={identity}
