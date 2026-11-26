@@ -32,8 +32,9 @@ import { isConnected as isConnectedAtom } from '../lib/gateway'
 import { archivedIds, groupChats, pinnedIds } from '../lib/chatListState'
 import type { RowStatus } from '../lib/attention'
 import { thinkerAtom } from '../lib/thinker'
-import { ocListSessions, describeOcError, type OcSession } from '../lib/opencodeClient'
+import { ocListSessions, ocSessionDir, describeOcError, type OcSession } from '../lib/opencodeClient'
 import { ocSessionsCached, ocSessionsStore } from '../lib/ocSessionsCache'
+import { rememberOcSessionDirs } from '../lib/opencodeChat'
 import { openOcChat } from '../lib/chat'
 import { projectIdForCwd } from '../lib/projectScope'
 import {
@@ -460,10 +461,11 @@ export function Sidebar({
       .then((rows) => {
         if (!alive) return
         // Newest activity first (ordering is the caller's job per the wire
-        // contract), capped at 30 rows.
+        // contract). Keep the full fetched list in cache so project filtering
+        // below does not drop older project sessions behind 30 Personal rows.
         const sorted = [...(rows ?? [])]
           .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
-          .slice(0, 30)
+        rememberOcSessionDirs(sorted)
         ocSessionsStore(sorted)
         setOcSessions(sorted)
         setOcLoading(false)
@@ -536,12 +538,12 @@ export function Sidebar({
     const projRows = projects.map((p) => ({ id: p.id, path: p.primaryPath, isNoProject: p.isNoProject }))
     const q = query.trim().toLowerCase()
     return ocSessions.filter((c) => {
-      const pid = projectIdForCwd(projRows, c.directory)
+      const pid = projectIdForCwd(projRows, ocSessionDir(c))
       const inProj = activeProject ? pid === activeProject.id : !pid
       if (!inProj) return false
       if (!q) return true
       return (c.title ?? '').toLowerCase().includes(q)
-    })
+    }).slice(0, 30)
   }, [ocSessions, projects, activeProject, query])
   const [archOpen, setArchOpen] = useState(false)
 

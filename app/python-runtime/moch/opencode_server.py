@@ -247,11 +247,17 @@ def _with_directory(path: str, directory: str) -> str:
 
 
 def create_session(password: str, title: str, directory: str = "") -> dict:
-    return _curl(
-        "POST", _with_directory("/api/session", directory), password=password,
-        body={"title": title}, timeout_s=30,
-        headers=_location_headers(directory) if directory else None,
-    )
+    body: dict[str, Any] = {"title": title}
+    if directory:
+        body["location"] = {"directory": directory}
+    res = _curl("POST", "/api/session", password=password, body=body, timeout_s=30)
+    if directory and not res.get("ok") and res.get("status") in (400, 422):
+        return _curl(
+            "POST", _with_directory("/api/session", directory), password=password,
+            body={"title": title}, timeout_s=30,
+            headers=_location_headers(directory),
+        )
+    return res
 
 
 def send_prompt(password: str, session_id: str, text: str, *, directory: str = "") -> dict:

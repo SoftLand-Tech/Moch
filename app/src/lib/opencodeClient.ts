@@ -140,15 +140,22 @@ export interface OcSession {
   id: string
   title?: string
   /**
-   * The folder the session was created in (BUG-149). oc 2.3.0 takes
-   * `directory` as a QUERY param on POST /api/session (the python twin's
-   * send_prompt proves the mechanism) and echoes it on session rows; the
-   * Sidebar buckets rows into the projects rail with it. Optional: sessions
-   * minted before BUG-149 (and rows from a server that omits it) stay flat.
+   * The folder the session was created in (BUG-149).
+   * - Legacy 2.3.x servers echo top-level `directory`.
+   * - Official OpenCode 2.x (`Session.Info`) nests it at `location.directory`.
+   * Use `ocSessionDir(s)` instead of reading `.directory` directly.
    */
   directory?: string
+  location?: { directory?: string; workspaceID?: string }
+  projectID?: string
   outcome?: 'succeeded' | 'failed' | 'interrupted' | string
   time?: { created?: number; updated?: number; idle?: number }
+}
+
+/** Extract the session's working directory across OpenCode server generations. */
+export function ocSessionDir(session?: Pick<OcSession, 'directory' | 'location'> | null): string | undefined {
+  const dir = session?.location?.directory?.trim() ? session.location.directory : session?.directory
+  return typeof dir === 'string' && dir.trim() ? dir.trim() : undefined
 }
 
 export interface OcModel {
@@ -223,12 +230,32 @@ function locationOpts(directory?: string): {
 
 /**
  * Create a session in the project directory. `directory` is the guest path.
+ *
+ * Official OpenCode (`POST /api/session`) reads `location: { directory }` from
+ * the JSON body — query params and `X-Opencode-Directory` are ignored there.
+ * Legacy 2.3.x servers rejected unknown body keys (`400`/`422`) and read
+ * `?directory=` instead; on that status we fall back automatically.
  */
-export const ocCreateSession = (title: string, directory?: string) =>
-  ocFetch<OcSession>(
-    `/api/session${locationQuery(directory)}`,
-    { method: 'POST', body: { title }, ...locationOpts(directory) },
-  )
+export async function ocCreateSession(title: string, directory?: string): Promise<OcSession> {
+  if (!directory) {
+    return ocFetch<OcSession>('/api/session', { method: 'POST', body: { title } })
+  }
+  try {
+    return await ocFetch<OcSession>('/api/session', {
+      method: 'POST',
+      body: { title, location: { directory } },
+    })
+  } catch (e) {
+    if (e instanceof OcError && (e.status === 400 || e.status === 422)) {
+      return ocFetch<OcSession>(`/api/session${locationQuery(directory)}`, {
+        method: 'POST',
+        body: { title },
+        ...locationOpts(directory),
+      })
+    }
+    throw e
+  }
+}
 
 /** Verify/repair a session location on servers that support session.move.
  *  Older servers may 404 this route; callers treat that as best-effort. */

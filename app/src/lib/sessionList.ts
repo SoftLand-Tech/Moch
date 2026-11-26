@@ -237,11 +237,24 @@ export function loadSessions(opts?: { force?: boolean }): Promise<SessionRow[]> 
       // through lib/botChat / profiles.list), so nothing is lost.
       const visible = rows.filter((r) => !isBotSessionRow(r))
       if (gen !== loadGen) return sessionRows.get()
-      sessionRows.set(visible)
+      // Server `session.list` rows omit `cwd` and `project_id`; preserve any
+      // optimistic project scope recorded locally until `projects.tree` owns it.
+      const prevById = new Map(sessionRows.get().map((r) => [r.id, r]))
+      const merged = visible.map((r) => {
+        if (r.project_id || r.cwd) return r
+        const prev = prevById.get(r.id)
+        if (!prev?.project_id && !prev?.cwd) return r
+        return {
+          ...r,
+          ...(prev.project_id ? { project_id: prev.project_id } : {}),
+          ...(prev.cwd ? { cwd: prev.cwd } : {}),
+        }
+      })
+      sessionRows.set(merged)
       // BUG-025: only a non-truncated list proves absence elsewhere — judged
       // on the RAW fetch, before the bot filter above shrinks it.
       sessionListComplete.set(rows.length < LIST_LIMIT)
-      return visible
+      return merged
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Could not load chats'
       if (gen === loadGen) sessionListError.set(msg)
