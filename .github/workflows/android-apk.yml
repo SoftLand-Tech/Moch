@@ -147,6 +147,15 @@ jobs:
           notes=$(cat <<EOF
           Test build from \`main@${sha_short}\`.
 
+          Moch — your agent runs on your phone. Your model is your choice.
+
+          This CI beta is the current local-first Android AI workspace: Hermes runs embedded by default, and OpenCode is an optional coding-agent thinker inside the on-device Ubuntu Linux guest. The standard path requires no Moch account, relay or remote gateway. Stable v1.0.0 is the legacy linked/relay build.
+
+          Local-first does not mean zero network traffic: hosted models, OpenCode's free hosted models, downloads, OTA updates, web browsing and optional services can still use the internet.
+
+          - Website: https://moch.softland.tech
+          - Setup guide: https://moch.softland.tech/setup.html
+
           ## Build
           - Package: \`com.hermes.pocket\`
           - versionCode: \`${version_code}\`

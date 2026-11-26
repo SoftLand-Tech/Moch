@@ -57,7 +57,7 @@ Do not publish any of these without qualification:
 
 ## 3. Site content contract
 
-`docs/index.html` must cover, in this order unless the approved comp improves it without losing content:
+`docs/index.html` must cover, in this order unless the approved Counter Recipe wireframe improves it without losing content:
 
 1. **Hero:** approved headline, one-sentence explanation, primary beta download, secondary setup CTA, real Moch/Mochi artwork, one proof line.
 2. **On-device proof:** a concrete local-runtime diagram or product UI illustration showing Phone → Moch runtime → Hermes or OpenCode → chosen model. Label model/network boundary honestly.
@@ -167,11 +167,10 @@ Do not run `npm run verify` as the docs/site gate; it includes live-gateway test
 
 ## 10. Commit order for the combined PR
 
-1. `docs: capture local-first product and site contract`
-2. `docs: lock code-first Counter Recipe direction`
-3. `fix: block legacy remote gateway retries`
+1. Product/site contract, Counter Recipe design lock and beta-version sync
+2. `fix: block legacy remote gateway retries`
+3. GitHub/product identity alignment and wording corrections
 4. `feat: redesign mobile-first local-first website`
-5. `docs: align GitHub and product identity`
-6. `ci: verify and deploy the website safely`
+5. `ci: verify and deploy the website safely`
 
 Each commit must be independently reviewable. The final PR body links the approved wireframe/surface brief and lists the verification evidence.
