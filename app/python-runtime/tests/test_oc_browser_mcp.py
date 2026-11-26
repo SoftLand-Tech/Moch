@@ -93,6 +93,16 @@ class _FakeRelayHandler(BaseHTTPRequestHandler):
             return self._w(200, json.dumps(relay["pages"][0]).encode())
         if "/json/close" in self.path or "/json/activate" in self.path:
             return self._w(200, b"ok")
+        if "/moch/handoff" in self.path:
+            relay["handoff_requests"].append(self.path)
+            status = relay.get("handoff_status", 200)
+            payload = relay.get("handoff_body")
+            if payload is None:
+                payload = ({"accepted": True, "requestId": "handoff-1"}
+                           if status == 200 else {"accepted": False,
+                                                  "requestId": "handoff-1",
+                                                  "error": "declined"})
+            return self._w(status, json.dumps(payload).encode())
         return self._w(404, b"no route")
 
     def do_GET(self):  # noqa: N802
@@ -108,7 +118,7 @@ class FakeRelay:
     """Owns a real HTTP server on 127.0.0.1:<ephemeral> with token routing."""
 
     def __init__(self):
-        self.state = {"pages": [], "requests": []}
+        self.state = {"pages": [], "requests": [], "handoff_requests": []}
         server = ThreadingHTTPServer(("127.0.0.1", 0), _FakeRelayHandler)
         server.relay = self.state
         t = threading.Thread(target=server.serve_forever, daemon=True)
@@ -403,6 +413,7 @@ class OcBrowserMcpTest(unittest.TestCase):
             for fn in (obm.tool_snapshot, obm.tool_console,
                        lambda: obm.tool_click("a"),
                        lambda: obm.tool_type("a", "x"),
+                       lambda: obm.tool_request_handoff("login"),
                        lambda: obm.tool_navigate("https://x.example")):
                 text, err = fn()
                 self.assertTrue(err)
@@ -474,6 +485,41 @@ class OcBrowserMcpTest(unittest.TestCase):
         self.assertFalse(err)
         self.assertEqual(text, "[warn] deprecation")
 
+    # ── browser handoff (the relay endpoint contract) ──
+
+    def test_request_handoff_accepted(self):
+        self.relay.set_pages([{"id": "p1", "type": "page",
+                               "url": "https://bank.example/login"}])
+        text, err = obm.tool_request_handoff("Sign in to continue")
+        self.assertFalse(err, text)
+        self.assertIn("human took over", text.lower())
+        req = self.relay.state["handoff_requests"][-1]
+        self.assertIn("/moch/handoff?", req)
+        self.assertIn("reason=Sign+in+to+continue", req)
+        self.assertIn("url=https%3A%2F%2Fbank.example%2Flogin", req)
+        self.assertIn("timeout_ms=", req)
+
+    def test_request_handoff_declined_is_not_silent_success(self):
+        self.relay.state["handoff_status"] = 409
+        text, err = obm.tool_request_handoff("Confirm delete")
+        self.assertFalse(err, "a decline is a normal tool outcome, not a crash")
+        self.assertIn("declined", text.lower())
+        self.assertIn("NOT handed over", text)
+
+    def test_request_handoff_timeout_is_an_honest_error(self):
+        self.relay.state["handoff_status"] = 504
+        text, err = obm.tool_request_handoff("Captcha")
+        self.assertTrue(err)
+        self.assertIn("timed out", text.lower())
+        self.assertIn("NOT handed over", text)
+
+    def test_request_handoff_no_ui_is_an_honest_error(self):
+        self.relay.state["handoff_status"] = 503
+        text, err = obm.tool_request_handoff("Login")
+        self.assertTrue(err)
+        self.assertIn("not available", text.lower())
+        self.assertIn("NOT handed over", text)
+
     # ── the MCP surface over REAL HTTP ──
 
     def test_adapter_http_protocol_end_to_end(self):
@@ -504,12 +550,13 @@ class OcBrowserMcpTest(unittest.TestCase):
             self.assertEqual(res.status, 202)
             self.assertEqual(res.read(), b"")
 
-        # tools/list: exactly the five browser tools.
+        # tools/list: exactly the six browser tools.
         status, resp = post({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         names = [t["name"] for t in resp["result"]["tools"]]
         self.assertEqual(names, ["browser_navigate", "browser_snapshot",
                                  "browser_click", "browser_type",
-                                 "browser_console"])
+                                 "browser_console",
+                                 "browser_request_handoff"])
 
         # tools/call rides the injected fake relay end-to-end.
         self.relay.set_pages([{"id": "p1", "type": "page"}])

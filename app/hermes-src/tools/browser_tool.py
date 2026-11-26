@@ -659,6 +659,20 @@ BROWSER_TOOL_SCHEMAS = [
             "required": []
         }
     },
+    {
+        "name": "browser_request_handoff",
+        "description": "Ask the human to take over the Moch in-app browser when you hit a login wall, CAPTCHA, payment step, or any destructive/irreversible confirmation. Shows a Take over prompt on the user's screen and waits (bounded) for their answer. If accepted, the human owns the browser — stop driving it and wait for their next instruction. If declined or timed out, control was not handed over.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "Short reason the human is needed (e.g. 'Sign in to continue' or 'Confirm deleting the draft')"
+                }
+            },
+            "required": ["reason"]
+        }
+    },
 ]
 
 from tools import browser_tool_snapshot as _snapshot
@@ -1136,6 +1150,16 @@ def browser_tab_switch(tab_id: Optional[str] = None, index: Any = None, task_id:
     return _tabs_not_available()
 
 
+def browser_request_handoff(reason: str = "", task_id: Optional[str] = None) -> str:
+    """Ask the human to take the Moch browser (login / CAPTCHA / destructive step)."""
+    if _is_webview_mode():
+        return _webview.webview_request_handoff(reason, task_id)
+    return _dumps(_err(
+        "browser_request_handoff is only available in the Moch embedded browser. "
+        "There is no human handoff surface on this backend — continue the task yourself, "
+        "or ask the user in chat."))
+
+
 from tools import browser_tool_eval_policy as _eval_policy
 
 
@@ -1467,6 +1491,7 @@ _BROWSER_TOOL_TABLE = (
     ("browser_tab_create", "🆕", None, {"url": ""}),
     ("browser_tab_close", "❌", None, {"tab_id": None}),
     ("browser_tab_switch", "🔀", None, {"tab_id": None, "index": None}),
+    ("browser_request_handoff", "🤝", _install.check_browser_requirements, {"reason": ""}),
 )
 
 
@@ -1488,8 +1513,13 @@ def _routed_handler(name: str, fallback):
 for _name, _emoji, _check_fn, _defaults, *_extra in _BROWSER_TOOL_TABLE:
     if _check_fn is None:  # also binds the legacy check_browser_<x>_requirements globals (tests + callers)
         _check_fn = globals()[f"check_{_name}_requirements"] = _routed_check_fn(_name)
+    # The handoff is the Moch app's own surface, never the browser-extension
+    # controller lane — route it straight to the backend handler.
+    _handler = (_fallback_call(_name, _defaults, *_extra)
+                if _name == "browser_request_handoff"
+                else _routed_handler(_name, _fallback_call(_name, _defaults, *_extra)))
     registry.register(name=_name, toolset="browser", schema=_BROWSER_SCHEMA_MAP[_name],
-                      handler=_routed_handler(_name, _fallback_call(_name, _defaults, *_extra)),
+                      handler=_handler,
                       check_fn=_check_fn, emoji=_emoji)
 
 

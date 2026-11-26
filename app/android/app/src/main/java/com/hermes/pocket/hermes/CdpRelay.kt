@@ -86,6 +86,12 @@ object CdpRelay {
   private const val TAB_OP_ACK_TIMEOUT_MS = 5_000L
   private const val TAB_OPEN_RESOLVE_TIMEOUT_MS = 3_000L
 
+  // Browser handoff round-trip (feat/browser-quick-takeover).
+  private const val HANDOFF_EVENT = "mochHandoff"
+  private const val HANDOFF_DEFAULT_TIMEOUT_MS = 60_000L
+  private const val HANDOFF_MIN_TIMEOUT_MS = 1_000L
+  private const val HANDOFF_MAX_TIMEOUT_MS = 120_000L
+
   // Mirror of AgentBrowserHost.tsx AGENT_START_URL — keep the two in
   // lockstep (same contract as the hermesHomeDir mirror below). The hidden
   // agent host page is a REAL upstream target but never a browserTabs-store
@@ -172,6 +178,10 @@ object CdpRelay {
   }
 
   fun stop() {
+    // A handoff request is blocked on an HTTP handler thread. Stopping the
+    // relay must release it (the helper answers 503) instead of leaving a
+    // tool call hanging against a dead app UI.
+    cancelPendingHandoff()
     // BH-000045 (BUG-99): an in-process stop used to leave TWO armed things
     // behind: (a) relay.json still describing a "live" relay (pid == this
     // process, so hermes_boot's pid gate would arm BROWSER_CDP_URL on the
@@ -254,6 +264,50 @@ object CdpRelay {
   /** RN ack (BrowserRelayModule.tabOpAck): resolve the op's latch. */
   fun tabOpAck(requestId: String, ok: Boolean, error: String?) {
     pendingTabOps.remove(requestId)?.resolve(ok, error)
+  }
+
+  // ── Browser handoff round-trip ───────────────────────────────────────────
+  //
+  // A browser tool asks the human to take the browser (login, CAPTCHA,
+  // destructive confirmation): one "mochHandoff" event to JS, then this
+  // handler thread blocks until BrowserRelayModule.handoffAck lands (or the
+  // caller's clamped timeout expires → honest 504). One request at a time;
+  // a concurrent one is refused with 409 rather than queued behind an
+  // invisible modal. stop() releases a pending wait with 503.
+
+  internal class HandoffAck(val requestId: String) {
+    internal val latch = CountDownLatch(1)
+    @Volatile internal var accepted = false
+    @Volatile internal var cancelled = false
+    internal fun resolve(ackAccepted: Boolean) {
+      accepted = ackAccepted
+      latch.countDown()
+    }
+    internal fun cancel() {
+      cancelled = true
+      latch.countDown()
+    }
+  }
+
+  private val handoffLock = Any()
+  @Volatile private var pendingHandoff: HandoffAck? = null
+
+  /** Installed by BrowserRelayModule.init; emits (event, jsonPayload) to JS. */
+  @Volatile private var handoffSink: ((String, JSONObject) -> Unit)? = null
+
+  fun setHandoffSink(sink: ((String, JSONObject) -> Unit)?) { handoffSink = sink }
+
+  /** RN ack (BrowserRelayModule.handoffAck): resolve the handoff latch. */
+  fun handoffAck(requestId: String, accepted: Boolean) {
+    val pending = pendingHandoff
+    if (pending != null && pending.requestId == requestId) pending.resolve(accepted)
+  }
+
+  private fun cancelPendingHandoff() {
+    synchronized(handoffLock) {
+      pendingHandoff?.cancel()
+      pendingHandoff = null
+    }
   }
 
   // ── State file (read by moch/hermes_boot.py) ─────────────────────────────
@@ -349,6 +403,10 @@ object CdpRelay {
         inner == "/json/version" && head.method == "GET" -> handleJsonVersion(out)
         (inner == "/json/list" || inner == "/json") && head.method == "GET" -> handleJsonList(out)
         inner == "/json/moch-tabs" && head.method == "GET" -> handleMochTabs(out)
+        inner == "/moch/handoff" -> {
+          if (head.method == "GET") handleHandoff(out, query)
+          else writeSimpleResponse(out, 405, "method not allowed: use GET on /moch/handoff")
+        }
         inner.startsWith("/json/new") || inner.startsWith("/json/close") ||
           inner.startsWith("/json/activate") -> handleTabLifecycle(out, head.method, inner, query)
         head.method == "GET" && inner.startsWith("/devtools/browser") -> {
@@ -481,6 +539,109 @@ object CdpRelay {
         (it.url.startsWith("http://") || it.url.startsWith("https://"))
     }
       .map { it.json.put("webSocketDebuggerUrl", pageWsUrl(it.id)) }
+
+  // ── /moch/handoff — ask the human to take the browser ───────────────────
+
+  /**
+   * `GET /<token>/moch/handoff?reason=…&url=…&timeout_ms=…`
+   *
+   * Emits one `mochHandoff` `{requestId, reason, url, timeoutMs}` to JS and
+   * waits for `BrowserRelay.handoffAck(requestId, accepted)`:
+   *   200 `{accepted:true,requestId}`  — the user took over;
+   *   409 `{accepted:false,…}`         — declined, or a concurrent request;
+   *   504 `{accepted:false,…}`         — nobody answered before the timeout;
+   *   503 `{accepted:false,…}`         — no app UI / the relay stopped.
+   * Timeout is clamped to 1–120 s so a tool can never hang forever.
+   */
+  private fun handleHandoff(out: OutputStream, query: String) {
+    val params = parseQueryString(query)
+    val reason = (params["reason"] ?: "").trim()
+      .ifEmpty { "Moch needs your help in the browser" }
+      .take(500)
+    val url = (params["url"] ?: "").trim().take(2048)
+    val requestedMs = params["timeout_ms"]?.toLongOrNull() ?: HANDOFF_DEFAULT_TIMEOUT_MS
+    val timeoutMs = requestedMs.coerceIn(HANDOFF_MIN_TIMEOUT_MS, HANDOFF_MAX_TIMEOUT_MS)
+
+    val sink = handoffSink
+    if (sink == null) {
+      writeJsonStatus(out, 503, JSONObject()
+        .put("accepted", false)
+        .put("error", "handoff unavailable: the app's Browser relay module is not loaded"))
+      return
+    }
+
+    val ack = HandoffAck(UUID.randomUUID().toString())
+    synchronized(handoffLock) {
+      val pending = pendingHandoff
+      if (pending != null) {
+        writeJsonStatus(out, 409, JSONObject()
+          .put("accepted", false)
+          .put("requestId", pending.requestId)
+          .put("error", "another browser handoff request is already pending"))
+        return
+      }
+      pendingHandoff = ack
+    }
+
+    val payload = JSONObject()
+      .put("requestId", ack.requestId)
+      .put("reason", reason)
+      .put("url", url)
+      .put("timeoutMs", timeoutMs)
+    try {
+      sink(HANDOFF_EVENT, payload)
+    } catch (e: Exception) {
+      synchronized(handoffLock) { if (pendingHandoff === ack) pendingHandoff = null }
+      writeJsonStatus(out, 503, JSONObject()
+        .put("accepted", false)
+        .put("requestId", ack.requestId)
+        .put("error", "handoff never reached the app UI (${e.message ?: e.javaClass.simpleName})"))
+      return
+    }
+
+    val answered = ack.latch.await(timeoutMs, TimeUnit.MILLISECONDS)
+    synchronized(handoffLock) { if (pendingHandoff === ack) pendingHandoff = null }
+    // A tap that lands in the same instant the timer expires must still win.
+    if (!answered && ack.latch.count > 0L) {
+      writeJsonStatus(out, 504, JSONObject()
+        .put("accepted", false)
+        .put("requestId", ack.requestId)
+        .put("error", "the handoff request timed out after ${timeoutMs / 1000}s"))
+      return
+    }
+    if (ack.cancelled) {
+      writeJsonStatus(out, 503, JSONObject()
+        .put("accepted", false)
+        .put("requestId", ack.requestId)
+        .put("error", "the browser relay stopped before the handoff was answered"))
+      return
+    }
+    writeJsonStatus(out, if (ack.accepted) 200 else 409, JSONObject()
+      .put("accepted", ack.accepted)
+      .put("requestId", ack.requestId))
+  }
+
+  /** Query string → first-value map; form-decoded (`+` = space, `%xx`). */
+  private fun parseQueryString(query: String): Map<String, String> {
+    if (query.isEmpty()) return emptyMap()
+    val out = mutableMapOf<String, String>()
+    for (pair in query.split('&')) {
+      if (pair.isEmpty()) continue
+      val idx = pair.indexOf('=')
+      val rawKey = if (idx >= 0) pair.substring(0, idx) else pair
+      val rawValue = if (idx >= 0) pair.substring(idx + 1) else ""
+      val key = formDecode(rawKey)
+      if (key.isEmpty() || out.containsKey(key)) continue
+      out[key] = formDecode(rawValue)
+    }
+    return out
+  }
+
+  private fun formDecode(raw: String): String = try {
+    java.net.URLDecoder.decode(raw, "UTF-8")
+  } catch (_: Exception) {
+    raw
+  }
 
   // ── /json/new|close|activate — the RN round-trip (BUG-136) ───────────────
 
@@ -865,6 +1026,16 @@ object CdpRelay {
   private fun writeJsonResponse(out: OutputStream, arr: JSONArray) {
     val body = arr.toString().toByteArray(StandardCharsets.UTF_8)
     val head = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\n" +
+      "Content-Length: ${body.size}\r\nConnection: close\r\n\r\n"
+    out.write(head.toByteArray(StandardCharsets.ISO_8859_1))
+    out.write(body)
+    out.flush()
+  }
+
+  /** JSON body with an explicit HTTP status (handoff's 200/409/503/504). */
+  private fun writeJsonStatus(out: OutputStream, code: Int, obj: JSONObject) {
+    val body = obj.toString().toByteArray(StandardCharsets.UTF_8)
+    val head = "HTTP/1.1 $code ${reasonFor(code)}\r\nContent-Type: application/json; charset=UTF-8\r\n" +
       "Content-Length: ${body.size}\r\nConnection: close\r\n\r\n"
     out.write(head.toByteArray(StandardCharsets.ISO_8859_1))
     out.write(body)

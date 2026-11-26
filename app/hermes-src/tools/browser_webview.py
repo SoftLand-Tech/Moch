@@ -879,6 +879,111 @@ def _same_page(a: str, b: str) -> bool:
     return bool(pa.netloc) and (pa.scheme, pa.netloc) == (pb.scheme, pb.netloc)
 
 
+# ── Human handoff ───────────────────────────────────────────────────────────
+#
+# The Moch app owns the browser UI. When a tool needs the human (login wall,
+# CAPTCHA, payment, destructive confirmation), GET /<token>/moch/handoff asks
+# the app to show its Take over prompt and BLOCKS there until the user answers
+# or the clamped timeout expires. The relay is bounded (1–120 s) and stays
+# honest with 409 declined / 504 timeout / 503 no UI, so this call can never
+# hang forever.
+
+_HANDOFF_WAIT_MS = 90_000
+
+
+def _active_tab_url() -> str:
+    """The active tab's live URL (best effort — the reason still works without)."""
+    try:
+        response = _relay_http("/json/list")
+        response.raise_for_status()
+        entries = [t for t in (response.json() or [])
+                   if isinstance(t, dict) and t.get("type", "page") == "page"]
+        return str(entries[0].get("url") or "") if entries else ""
+    except Exception:  # noqa: BLE001 — the site line is a nicety, not the handoff
+        return ""
+
+
+def webview_request_handoff(reason: str = "", task_id: Optional[str] = None) -> str:
+    """Ask the Moch app to hand the browser to the human; blocks until answered.
+
+    Returns JSON with an honest ``accepted`` flag. Accepted → the human owns the
+    browser and the model must stop driving. Declined/timeout/relay-down → the
+    control was NOT handed over; say so instead of pretending it was.
+    """
+    import urllib.parse
+
+    text = (reason or "").strip() or "Moch needs your help in the browser."
+    root = _relay_http_root()
+    if not root:
+        return json.dumps({
+            "success": False,
+            "accepted": False,
+            "error": _relay_down_error() or "no browser endpoint configured (BROWSER_CDP_URL is unset)",
+        })
+    query = urllib.parse.urlencode({
+        "reason": text[:400],
+        "url": _active_tab_url()[:2000],
+        "timeout_ms": str(_HANDOFF_WAIT_MS),
+    })
+    try:
+        response = _relay_http(
+            f"/moch/handoff?{query}",
+            timeout=(_HANDOFF_WAIT_MS / 1000.0) + 5.0,
+        )
+    except Exception as exc:  # noqa: BLE001 — a dead transport is an honest answer
+        return json.dumps({
+            "success": False,
+            "accepted": False,
+            "status": "unreachable",
+            "error": _relay_down_error() or f"handoff request failed: {exc}",
+        })
+    try:
+        payload = response.json() or {}
+    except Exception:  # noqa: BLE001 — older relay may answer text
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    request_id = str(payload.get("requestId") or "")
+    error = str(payload.get("error") or "").strip()
+    if response.status_code == 200 and payload.get("accepted") is True:
+        return json.dumps({
+            "success": True,
+            "accepted": True,
+            "request_id": request_id,
+            "message": ("The human took over the browser. They now own it: stop driving the page "
+                        "and wait until they ask you to continue."),
+        })
+    if response.status_code == 409:
+        concurrent = "already pending" in error
+        return json.dumps({
+            "success": True,
+            "accepted": False,
+            "status": "declined",
+            "request_id": request_id,
+            "message": ("Control was NOT handed over — another handoff request is already pending; "
+                        "wait for its outcome." if concurrent else
+                        "The user declined the handoff. Control was NOT handed over — continue only "
+                        "if it is safe, otherwise say what is blocked."),
+        })
+    if response.status_code == 504:
+        return json.dumps({
+            "success": False,
+            "accepted": False,
+            "status": "timeout",
+            "request_id": request_id,
+            "error": "The handoff request timed out; control was NOT handed over.",
+        })
+    return json.dumps({
+        "success": False,
+        "accepted": False,
+        "status": "unavailable" if response.status_code == 503 else "error",
+        "request_id": request_id,
+        "error": ("The Moch Browser UI is not available right now; control was NOT handed over."
+                  if response.status_code == 503 else
+                  f"handoff failed ({_describe_http(response)}); control was NOT handed over."),
+    })
+
+
 def webview_tab_switch(tab_id: Optional[str] = None, index: Any = None, task_id: Optional[str] = None) -> str:
     """Activate the tab named by ``tab_id`` or 0-based ``index`` and snapshot it,
     so the model sees the page it switched to."""
