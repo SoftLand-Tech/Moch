@@ -24,6 +24,39 @@ export function normalizeProjectPath(raw: string | null | undefined): string {
   return p
 }
 
+/** Host and guest spellings for a workspace folder. OpenCode sessions report
+ *  `/workspace/test`; the project DB keeps `<home>/.hermes/workspace/test` so
+ *  grouping must recognize both without weakening whole-segment matching. */
+/** Convert a host workspace folder to the guest spelling used by OpenCode.
+ *  Returns undefined when the folder is outside the workspace. */
+export function workspaceHostToGuestPath(
+  hostPath: string | null | undefined,
+  hostWorkspace: string | null | undefined,
+): string | undefined {
+  const host = normalizeProjectPath(hostPath)
+  const root = normalizeProjectPath(hostWorkspace)
+  if (!host || !root) return undefined
+  if (host === root) return '/workspace'
+  if (host.startsWith(root === '/' ? '/' : `${root}/`)) {
+    const rel = host.slice(root === '/' ? 1 : root.length + 1)
+    return rel ? `/workspace/${rel}` : '/workspace'
+  }
+  return undefined
+}
+
+function projectPathSpellings(raw: string | null | undefined): string[] {
+  const path = normalizeProjectPath(raw)
+  if (!path) return []
+  const out = [path]
+  const marker = '/workspace/'
+  const idx = path.lastIndexOf(marker)
+  if (idx >= 0) {
+    const guest = '/workspace/' + path.slice(idx + marker.length)
+    if (guest !== path) out.push(guest)
+  }
+  return out
+}
+
 /**
  * The cwd a new chat should open in: the selected project's primary folder.
  * `null`/unknown selection = the default (Personal) bucket, whose honest cwd
@@ -59,12 +92,12 @@ export function projectIdForCwd(
   let bestLen = -1
   for (const row of rows) {
     if (row.isNoProject) continue
-    const base = normalizeProjectPath(row.path)
-    if (!base) continue
-    if (path !== base && !path.startsWith(base === '/' ? '/' : `${base}/`)) continue
-    if (base.length > bestLen) {
-      best = row.id
-      bestLen = base.length
+    for (const base of projectPathSpellings(row.path)) {
+      if (path !== base && !path.startsWith(base === '/' ? '/' : `${base}/`)) continue
+      if (base.length > bestLen) {
+        best = row.id
+        bestLen = base.length
+      }
     }
   }
   return best

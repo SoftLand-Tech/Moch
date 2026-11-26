@@ -35,6 +35,17 @@ async function main() {
   check('empty cwd → no project', m.projectIdForCwd(rows, '') === undefined)
   check('personal bucket does not claim its folder', m.projectIdForCwd(rows, '/home/u/work') === undefined)
   check('backslashes normalize', m.projectIdForCwd(rows, '\\work\\client\\x') === 'p-client')
+  check('OpenCode guest cwd matches its host project folder', m.projectIdForCwd(rows, '/workspace/test') === undefined)
+
+  const guestRows = [{ id: 'p-test', path: '/data/user/0/com.hermes.pocket/files/.hermes/workspace/test' }]
+  check('OpenCode /workspace cwd maps to host project folder', m.projectIdForCwd(guestRows, '/workspace/test') === 'p-test')
+  check('OpenCode nested /workspace cwd maps to host project folder', m.projectIdForCwd(guestRows, '/workspace/test/src') === 'p-test')
+  check('OpenCode sibling prefix is not a project match', m.projectIdForCwd(guestRows, '/workspace/tester') === undefined)
+  check('host workspace root maps to guest /workspace', m.workspaceHostToGuestPath('/home/u/.hermes/workspace', '/home/u/.hermes/workspace') === '/workspace')
+  check('host project maps to guest /workspace/test', m.workspaceHostToGuestPath('/home/u/.hermes/workspace/test', '/home/u/.hermes/workspace') === '/workspace/test')
+  check('host nested folder maps to guest nested folder', m.workspaceHostToGuestPath('/home/u/.hermes/workspace/test/src', '/home/u/.hermes/workspace') === '/workspace/test/src')
+  check('external host folder is not mapped', m.workspaceHostToGuestPath('/storage/emulated/0/test', '/home/u/.hermes/workspace') === undefined)
+  check('sibling host folder is not mapped', m.workspaceHostToGuestPath('/home/u/.hermes/workspace-tester', '/home/u/.hermes/workspace') === undefined)
 
   // ── longest prefix wins ──────────────────────────────────────────────────
   const nested = [

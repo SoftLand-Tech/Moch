@@ -41,6 +41,7 @@ import { log } from './log'
 // createSession does for hermes chats (chat.ts is mode-agnostic here —
 // workspace's atoms are the same source the hermes create reads).
 import { ensureActiveProjectCwd } from './workspace'
+import { workspaceHostToGuestPath } from './projectScope'
 import { getEmbeddedGateway } from './mochiRuntime'
 import { connConfig } from './gateway'
 
@@ -195,10 +196,29 @@ export async function ocOneShotModelFor(storedId: string): Promise<string | null
 export { ocDefaultPickModelRef, ocOneShotModelRef, parseOcDefaultPick }
 export type { OcDefaultPick }
 
-/** The drawer's selected project's folder (re-reading projects.tree once if
- *  the cached row has no path), or undefined for Personal. */
-export function ocSelectedProjectCwd(): Promise<string | undefined> {
-  return ensureActiveProjectCwd()
+/** The selected project's folder as the OpenCode guest sees it.
+ *
+ * The app/project DB stores the Android host spelling for grouping. OpenCode
+ * runs inside proot, where the same folder is `/workspace/<rel>`; sending the
+ * host spelling caused newer servers to keep their `/workspace` default.
+ */
+export async function ocSelectedProjectCwd(): Promise<string | undefined> {
+  const host = await ensureActiveProjectCwd()
+  if (!host) return undefined
+  if (host === '/workspace') return '/workspace'
+  if (host.startsWith('/workspace/')) return host
+  try {
+    const gw = await getEmbeddedGateway()
+    const workspace = gw?.workspace
+    const connHost = connConfig.get()?.host ?? ''
+    if (gw?.running && workspace && connHost.startsWith('127.0.0.1')) {
+      const guest = workspaceHostToGuestPath(host, workspace)
+      if (guest) return guest
+    }
+  } catch {
+    // Remote/legacy callers keep the host path they supplied.
+  }
+  return host
 }
 
 /**
@@ -219,7 +239,9 @@ export async function ocSessionDirectory(): Promise<string | undefined> {
     const gw = await getEmbeddedGateway()
     const host = connConfig.get()?.host ?? ''
     if (!gw?.running || !gw.workspace || !host.startsWith('127.0.0.1')) return undefined
-    return gw.workspace
+    // OpenCode itself runs in the guest: Personal is the guest workspace,
+    // not the Android host spelling and never /root.
+    return '/workspace'
   } catch {
     return undefined
   }
@@ -741,7 +763,7 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
     if (opts.command) {
       await ocRunCommand(ocId, opts.command.name, opts.command.text)
     } else {
-      await ocPrompt(ocId, text)
+      await ocPrompt(ocId, text, await ocSessionDirectory())
     }
   } catch (e) {
     finishOnce()
