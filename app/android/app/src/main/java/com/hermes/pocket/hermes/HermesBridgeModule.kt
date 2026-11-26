@@ -330,4 +330,132 @@ class HermesBridgeModule(reactContext: ReactApplicationContext) :
       promise.reject("linux_term_kill", e.message, e)
     }
   }
+
+  /**
+   * Multi-session terminal (slice B). One native method per session op; each
+   * promise resolves the same shapes as its legacy sibling, with the session
+   * id bound by JS. `cwd` is a HOST path (active project primaryPath) or
+   * null — python maps/binds it; the shell start stays off the bridge thread
+   * exactly like linuxTermStart.
+   */
+  @ReactMethod
+  fun linuxTermStartSession(
+      sessionId: String,
+      cwd: String?,
+      cols: Int,
+      rows: Int,
+      promise: Promise,
+  ) {
+    Thread {
+      try {
+        val py = com.chaquo.python.Python.getInstance()
+        val result =
+            py.getModule("moch.terminal")
+                .callAttr("start_session", sessionId, cwd, cols, rows)
+                .toString()
+        val obj = org.json.JSONObject(result)
+        val map = Arguments.createMap()
+        map.putBoolean("ok", obj.optBoolean("ok", false))
+        map.putBoolean("alreadyRunning", obj.optBoolean("already_running", false))
+        if (obj.has("error")) map.putString("error", obj.optString("error"))
+        promise.resolve(map)
+      } catch (e: Exception) {
+        promise.reject("linux_term_start_session", e.message, e)
+      }
+    }.start()
+  }
+
+  @ReactMethod
+  fun linuxTermWriteSession(sessionId: String, dataB64: String, promise: Promise) {
+    try {
+      val py = com.chaquo.python.Python.getInstance()
+      val result =
+          py.getModule("moch.terminal")
+              .callAttr("write_session", sessionId, dataB64)
+              .toString()
+      val obj = org.json.JSONObject(result)
+      if (obj.optBoolean("ok", false)) promise.resolve(true)
+      else promise.reject("linux_term_write_session", obj.optString("error", "write failed"))
+    } catch (e: Exception) {
+      promise.reject("linux_term_write_session", e.message, e)
+    }
+  }
+
+  @ReactMethod
+  fun linuxTermDrainSession(sessionId: String, promise: Promise) {
+    try {
+      val py = com.chaquo.python.Python.getInstance()
+      val result =
+          py.getModule("moch.terminal").callAttr("drain_session", sessionId).toString()
+      val obj = org.json.JSONObject(result)
+      val map = Arguments.createMap()
+      val arr = Arguments.createArray()
+      val raw = obj.optJSONArray("chunks")
+      if (raw != null) {
+        for (i in 0 until raw.length()) arr.pushString(raw.optString(i))
+      }
+      map.putArray("chunks", arr)
+      map.putBoolean("alive", obj.optBoolean("alive", false))
+      promise.resolve(map)
+    } catch (e: Exception) {
+      promise.reject("linux_term_drain_session", e.message, e)
+    }
+  }
+
+  @ReactMethod
+  fun linuxTermReplaySession(sessionId: String, promise: Promise) {
+    try {
+      val py = com.chaquo.python.Python.getInstance()
+      val result =
+          py.getModule("moch.terminal").callAttr("replay_session", sessionId).toString()
+      val obj = org.json.JSONObject(result)
+      val map = Arguments.createMap()
+      map.putString("chunk", obj.optString("chunk", ""))
+      map.putBoolean("alive", obj.optBoolean("alive", false))
+      promise.resolve(map)
+    } catch (e: Exception) {
+      promise.reject("linux_term_replay_session", e.message, e)
+    }
+  }
+
+  @ReactMethod
+  fun linuxTermClearSession(sessionId: String, promise: Promise) {
+    try {
+      val py = com.chaquo.python.Python.getInstance()
+      val result =
+          py.getModule("moch.terminal").callAttr("clear_session", sessionId).toString()
+      val obj = org.json.JSONObject(result)
+      promise.resolve(obj.optBoolean("ok", false))
+    } catch (e: Exception) {
+      promise.reject("linux_term_clear_session", e.message, e)
+    }
+  }
+
+  @ReactMethod
+  fun linuxTermResizeSession(sessionId: String, cols: Int, rows: Int, promise: Promise) {
+    try {
+      val py = com.chaquo.python.Python.getInstance()
+      val result =
+          py.getModule("moch.terminal")
+              .callAttr("resize_session", sessionId, cols, rows)
+              .toString()
+      val obj = org.json.JSONObject(result)
+      promise.resolve(obj.optBoolean("ok", false))
+    } catch (e: Exception) {
+      promise.reject("linux_term_resize_session", e.message, e)
+    }
+  }
+
+  @ReactMethod
+  fun linuxTermKillSession(sessionId: String, promise: Promise) {
+    try {
+      val py = com.chaquo.python.Python.getInstance()
+      val result =
+          py.getModule("moch.terminal").callAttr("kill_session", sessionId).toString()
+      val obj = org.json.JSONObject(result)
+      promise.resolve(obj.optBoolean("ok", false))
+    } catch (e: Exception) {
+      promise.reject("linux_term_kill_session", e.message, e)
+    }
+  }
 }
