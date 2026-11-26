@@ -37,6 +37,11 @@ export const chrome: Catalog = {
     'chrome.drawer.projectExpand': 'Show recent chats for {name}',
     'chrome.drawer.projectCollapse': 'Hide recent chats for {name}',
     'chrome.drawer.moreChats': 'More',
+    'chrome.drawer.projectOptions': 'Project options for {name}',
+    'chrome.drawer.noProjectChats': 'No chats in {name} yet',
+    'chrome.drawer.switchProject': 'Switch to {name}',
+    'chrome.drawer.toolsTab': 'Workspace tools',
+    'chrome.drawer.botsTab': 'Bots',
 
     // ── Relative ages (compact, used by drawer rows / bots roster) ───────
     'chrome.age.lessMinute': '<1m',
@@ -142,6 +147,11 @@ export const chrome: Catalog = {
     'chrome.drawer.projectExpand': 'اعرض المحادثات الأخيرة لمشروع {name}',
     'chrome.drawer.projectCollapse': 'إخفاء المحادثات الأخيرة لمشروع {name}',
     'chrome.drawer.moreChats': 'المزيد',
+    'chrome.drawer.projectOptions': 'خيارات مشروع {name}',
+    'chrome.drawer.noProjectChats': 'لا محادثات في {name} بعد',
+    'chrome.drawer.switchProject': 'التبديل إلى {name}',
+    'chrome.drawer.toolsTab': 'أدوات مساحة العمل',
+    'chrome.drawer.botsTab': 'البوتات',
 
     // ── Relative ages ────────────────────────────────────────────────────
     'chrome.age.lessMinute': '<1 د',
@@ -246,6 +256,11 @@ export const chrome: Catalog = {
     'chrome.drawer.projectExpand': '显示“{name}”的最近对话',
     'chrome.drawer.projectCollapse': '隐藏“{name}”的最近对话',
     'chrome.drawer.moreChats': '更多',
+    'chrome.drawer.projectOptions': '{name} 的项目选项',
+    'chrome.drawer.noProjectChats': '{name} 中暂无对话',
+    'chrome.drawer.switchProject': '切换到 {name}',
+    'chrome.drawer.toolsTab': '工作区工具',
+    'chrome.drawer.botsTab': '机器人',
 
     // ── Relative ages ────────────────────────────────────────────────────
     'chrome.age.lessMinute': '<1分',
@@ -347,6 +362,11 @@ export const chrome: Catalog = {
     'chrome.drawer.projectExpand': 'Afficher les discussions récentes de {name}',
     'chrome.drawer.projectCollapse': 'Masquer les discussions récentes de {name}',
     'chrome.drawer.moreChats': 'Plus',
+    'chrome.drawer.projectOptions': 'Options du projet {name}',
+    'chrome.drawer.noProjectChats': 'Aucune discussion dans {name} pour le moment',
+    'chrome.drawer.switchProject': 'Passer à {name}',
+    'chrome.drawer.toolsTab': 'Outils de l’espace de travail',
+    'chrome.drawer.botsTab': 'Bots',
 
     // ── Relative ages ────────────────────────────────────────────────────
     'chrome.age.lessMinute': '<1 min',

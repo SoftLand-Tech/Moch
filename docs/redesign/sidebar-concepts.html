@@ -1,0 +1,1850 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="mocheme">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Moch Sidebar — 10 Project-Scoped AI Sidebar Concepts</title>
+  <style>
+    :root {
+      --bg: #0A0813;
+      --bg-card: #151220;
+      --bg-elev: #1A1727;
+      --bg-hover: #272535;
+      --input-bg: #1A1727;
+      --text: #FFFFFF;
+      --text-dim: #B4B1C4;
+      --text-faint: #86829B;
+      --accent: #F79236;
+      --accent-dark: #C56F1F;
+      --on-accent: #2E1A08;
+      --accent-soft: rgba(247, 146, 54, 0.14);
+      --green: #4ADE80;
+      --green-soft: rgba(74, 222, 128, 0.14);
+      --amber: #F5A524;
+      --amber-soft: rgba(245, 165, 36, 0.14);
+      --red: #FF5A5A;
+      --blush: #FA9B6A;
+      --border: rgba(248, 239, 229, 0.11);
+      --border-soft: rgba(248, 239, 229, 0.06);
+      --shadow: 0 20px 45px rgba(0, 0, 0, 0.45);
+      --page-bg: #07050D;
+    }
+
+    html[data-theme="relay"] {
+      --bg: #060D0F;
+      --bg-card: #121B1D;
+      --bg-elev: #162022;
+      --bg-hover: #233134;
+      --input-bg: #162022;
+      --text: #FFFFFF;
+      --text-dim: #AEBDBF;
+      --text-faint: #829396;
+      --accent: #39CADB;
+      --accent-dark: #2795A3;
+      --on-accent: #052529;
+      --accent-soft: rgba(57, 202, 219, 0.14);
+      --border: #26383A;
+      --border-soft: #1A2628;
+      --page-bg: #04090A;
+    }
+
+    html[data-theme="light"] {
+      --bg: #F6F4F0;
+      --bg-card: #FFFFFF;
+      --bg-elev: #F2EFE9;
+      --bg-hover: #EAE5DC;
+      --input-bg: #F2EFE9;
+      --text: #1E1B29;
+      --text-dim: #57536A;
+      --text-faint: #847F96;
+      --accent: #E67E22;
+      --accent-dark: #C26311;
+      --on-accent: #FFFFFF;
+      --accent-soft: rgba(230, 126, 34, 0.12);
+      --green: #16A34A;
+      --green-soft: rgba(22, 163, 74, 0.12);
+      --amber: #D97706;
+      --amber-soft: rgba(217, 119, 6, 0.12);
+      --border: rgba(30, 27, 41, 0.11);
+      --border-soft: rgba(30, 27, 41, 0.06);
+      --shadow: 0 16px 38px rgba(30, 27, 41, 0.10);
+      --page-bg: #ECE8E0;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+      background: var(--page-bg);
+      color: var(--text);
+      line-height: 1.4;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Top Showcase Toolbar ─────────────────────────────────────── */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: color-mix(in srgb, var(--page-bg) 88%, transparent);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+    }
+
+    .topbar-inner {
+      max-width: 1520px;
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .brand-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-title h1 {
+      margin: 0;
+      font-size: 17px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-title p {
+      margin: 2px 0 0;
+      font-size: 12.5px;
+      color: var(--text-dim);
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .seg {
+      display: inline-flex;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 3px;
+      gap: 2px;
+    }
+
+    .seg button {
+      border: 0;
+      background: transparent;
+      color: var(--text-dim);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 11px;
+      border-radius: 7px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .seg button.active {
+      background: var(--accent);
+      color: var(--on-accent);
+    }
+
+    .seg button:hover:not(.active) {
+      background: var(--bg-hover);
+      color: var(--text);
+    }
+
+    /* ── Intro / Rule Banner ─────────────────────────────────────── */
+    .wrap {
+      max-width: 1520px;
+      margin: 0 auto;
+      padding: 22px 24px 64px;
+    }
+
+    .diagnosis {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px 20px;
+      margin-bottom: 24px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .diagnosis-left { max-width: 860px; }
+
+    .diagnosis-kicker {
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+
+    .diagnosis-text {
+      font-size: 13px;
+      color: var(--text-dim);
+      margin: 0;
+    }
+
+    .diagnosis-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .dx-pill {
+      font-size: 11px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+    }
+
+    .chosen-banner {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      background: var(--accent-soft);
+      border: 1px solid var(--accent);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 12.5px;
+      font-weight: 600;
+    }
+
+    .chosen-banner.show { display: flex; }
+
+    /* ── Grid of 10 Concepts ─────────────────────────────────────── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(348px, 1fr));
+      gap: 24px;
+      align-items: start;
+    }
+
+    .grid.focus-mode {
+      grid-template-columns: 1fr;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    .concept-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .concept-card.selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-soft), var(--shadow);
+    }
+
+    .concept-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .concept-num {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 3px 8px;
+      border-radius: 999px;
+      display: inline-block;
+      margin-bottom: 6px;
+    }
+
+    .concept-title {
+      margin: 0;
+      font-size: 15.5px;
+      font-weight: 800;
+      letter-spacing: -0.015em;
+    }
+
+    .concept-ref {
+      margin: 3px 0 0;
+      font-size: 12px;
+      color: var(--text-faint);
+    }
+
+    .pick-btn {
+      flex-shrink: 0;
+      border: 1px solid var(--border);
+      background: var(--bg-elev);
+      color: var(--text-dim);
+      font-size: 11.5px;
+      font-weight: 700;
+      padding: 6px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .pick-btn:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    .concept-card.selected .pick-btn {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--on-accent);
+    }
+
+    .concept-notes {
+      display: grid;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text-dim);
+      background: var(--bg-elev);
+      border: 1px solid var(--border-soft);
+      border-radius: 12px;
+      padding: 10px 12px;
+    }
+
+    .concept-notes strong {
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    /* ── Realistic Drawer Mockup Frame (292px wide) ──────────────── */
+    .stage {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 10px 10px 10px 0;
+      display: flex;
+      justify-content: flex-start;
+      position: relative;
+      overflow: hidden;
+      min-height: 600px;
+    }
+
+    .stage::after {
+      content: "";
+      flex: 1;
+      background:
+        radial-gradient(circle at 60% 30%, var(--accent-soft), transparent 60%),
+        linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.25));
+      opacity: 0.65;
+      pointer-events: none;
+    }
+
+    .drawer {
+      width: 292px;
+      flex-shrink: 0;
+      height: 580px;
+      background: var(--bg-card);
+      border-right: 1px solid var(--border);
+      border-radius: 0 18px 18px 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+      z-index: 2;
+    }
+
+    .drawer.flush { border-radius: 0; }
+
+    .d-pad { padding: 12px 12px 0; }
+
+    .d-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 10px 10px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+    .d-scroll::-webkit-scrollbar { width: 4px; }
+    .d-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+    .d-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 11px 12px 8px;
+      gap: 8px;
+    }
+
+    .d-brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14.5px;
+      font-weight: 800;
+      letter-spacing: -0.01em;
+    }
+
+    .d-icon-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
+      border: 1px solid var(--border-soft);
+      background: var(--bg-elev);
+      color: var(--text-dim);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.14s, color 0.14s;
+      flex-shrink: 0;
+    }
+    .d-icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+    .d-icon-btn.accent { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+
+    .d-search {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      padding: 0 10px;
+      height: 35px;
+      color: var(--text-faint);
+      font-size: 12.5px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .d-search input {
+      border: 0;
+      background: transparent;
+      color: var(--text);
+      font-size: 12.5px;
+      width: 100%;
+      outline: none;
+    }
+    .d-search input::placeholder { color: var(--text-faint); }
+
+    .d-primary-btn {
+      width: 100%;
+      height: 38px;
+      border-radius: 11px;
+      border: 0;
+      background: var(--accent);
+      color: var(--on-accent);
+      font-size: 12.5px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      cursor: pointer;
+    }
+
+    .d-soft-btn {
+      width: 100%;
+      height: 36px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--bg-elev);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      cursor: pointer;
+    }
+    .d-soft-btn:hover { background: var(--bg-hover); }
+
+    .kicker {
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+      padding: 9px 8px 4px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .chat-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 9px;
+      border-radius: 10px;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: background 0.12s;
+      user-select: none;
+    }
+    .chat-row:hover { background: var(--bg-hover); color: var(--text); }
+    .chat-row.active { background: var(--accent-soft); color: var(--text); font-weight: 700; }
+
+    .chat-title {
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chat-age {
+      font-size: 10px;
+      color: var(--text-faint);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      flex-shrink: 0;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .dot.busy { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .dot.input { background: var(--amber); }
+    .dot.done { background: var(--green); }
+    .dot.proj { width: 8px; height: 8px; }
+
+    .nav-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 7px 9px;
+      border-radius: 10px;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-dim);
+      cursor: pointer;
+    }
+    .nav-row:hover { background: var(--bg-hover); color: var(--text); }
+    .nav-row.active { background: var(--accent-soft); color: var(--text); font-weight: 700; }
+
+    .nav-label {
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .badge {
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+    }
+    .badge.amber { background: var(--amber-soft); border-color: transparent; color: var(--amber); }
+    .badge.green { background: var(--green-soft); border-color: transparent; color: var(--green); }
+    .badge.accent { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+
+    .divider { height: 1px; background: var(--border-soft); margin: 6px 10px; }
+
+    .d-footer {
+      border-top: 1px solid var(--border-soft);
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      background: var(--bg-card);
+    }
+
+    /* Concept 03 Dual Rail */
+    .dual { display: flex; flex: 1; min-height: 0; }
+    .rail {
+      width: 52px;
+      background: var(--bg-elev);
+      border-right: 1px solid var(--border-soft);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 10px 0;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .rail-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 11px;
+      border: 0;
+      background: transparent;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      position: relative;
+    }
+    .rail-btn:hover { background: var(--bg-hover); color: var(--text); }
+    .rail-btn.active { background: var(--accent-soft); color: var(--accent); }
+    .rail-dot {
+      position: absolute;
+      top: 5px;
+      right: 5px;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--amber);
+      border: 1.5px solid var(--bg-elev);
+    }
+    .rail-spacer { flex: 1; }
+    .rail-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+    /* Concept 05 Bento */
+    .bento {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      padding: 4px 10px 6px;
+    }
+    .bento-tile {
+      background: var(--bg-elev);
+      border: 1px solid var(--border-soft);
+      border-radius: 11px;
+      padding: 8px 9px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      cursor: pointer;
+    }
+    .bento-tile:hover { background: var(--bg-hover); border-color: var(--border); }
+    .bento-top { display: flex; align-items: center; justify-content: space-between; }
+    .bento-name { font-size: 11.5px; font-weight: 700; color: var(--text); }
+
+    /* Pills / Chips */
+    .chip-strip {
+      display: flex;
+      gap: 6px;
+      padding: 4px 10px 8px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .chip-strip::-webkit-scrollbar { display: none; }
+    .chip {
+      flex-shrink: 0;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: var(--bg-elev);
+      border: 1px solid var(--border-soft);
+      color: var(--text-dim);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .chip.active {
+      background: var(--accent);
+      color: var(--on-accent);
+      border-color: var(--accent);
+    }
+
+    /* Concept 08 Bot Avatars */
+    .bot-strip {
+      display: flex;
+      gap: 7px;
+      padding: 4px 10px 8px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .bot-pill {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 9px;
+      border-radius: 999px;
+      background: var(--bg-elev);
+      border: 1px solid var(--border-soft);
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-dim);
+    }
+    .bot-pill.active {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    /* Accordions & Popovers */
+    .acc-btn {
+      width: 100%;
+      background: var(--bg-elev);
+      border: 1px solid var(--border-soft);
+      color: var(--text-dim);
+      border-radius: 10px;
+      padding: 7px 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-bottom: 5px;
+    }
+    .acc-btn.active {
+      border-color: var(--accent);
+      color: var(--text);
+      background: var(--accent-soft);
+    }
+    .acc-body {
+      display: none;
+      padding: 2px 0 6px 10px;
+      margin-left: 10px;
+      border-left: 1px solid var(--border);
+    }
+    .acc-body.open { display: block; }
+
+    .dock-icons {
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      padding: 6px 8px;
+      border-top: 1px solid var(--border-soft);
+      background: var(--bg-card);
+    }
+    .dock-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      padding: 4px 8px;
+      border-radius: 10px;
+      color: var(--text-dim);
+      font-size: 9.5px;
+      font-weight: 700;
+      cursor: pointer;
+      position: relative;
+    }
+    .dock-item:hover { background: var(--bg-hover); color: var(--text); }
+    .dock-item.active { color: var(--accent); }
+
+    .mini-popover {
+      margin: 4px 10px 8px;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 6px;
+      display: none;
+    }
+    .mini-popover.open { display: block; }
+
+    .scope-select {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0 10px;
+      height: 36px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text);
+      cursor: pointer;
+      flex: 1;
+      min-width: 0;
+    }
+    .scope-select:hover { border-color: var(--accent); }
+
+    .project-card-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 10px;
+      border-radius: 12px;
+      background: var(--bg-elev);
+      border: 1px solid var(--border-soft);
+      margin-bottom: 6px;
+      cursor: pointer;
+      font-size: 12.5px;
+      font-weight: 700;
+    }
+    .project-card-row:hover { border-color: var(--accent); background: var(--bg-hover); }
+
+    .back-crumb {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      border-radius: 9px;
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--text);
+      cursor: pointer;
+      background: var(--bg-elev);
+      border: 1px solid var(--border-soft);
+    }
+    .back-crumb:hover { border-color: var(--accent); }
+
+    .svg-icon {
+      width: 16px;
+      height: 16px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.9;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      flex-shrink: 0;
+    }
+    .svg-icon.sm { width: 14px; height: 14px; }
+
+    .hidden-card { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="4"/><path d="M12 4v4M9 14h.01M15 14h.01"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+    <symbol id="i-term" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></symbol>
+    <symbol id="i-lib" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></symbol>
+    <symbol id="i-chev-l" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></symbol>
+    <symbol id="i-chev-r" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16h14v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></symbol>
+    <symbol id="i-mochi" viewBox="240 230 780 780">
+      <path d="M 780 375 C 820 410, 835 365, 890 350 C 945 350, 972 310, 960 286 C 958 264, 940 260, 910 255 C 872 255, 832 275, 806 310 C 770 348, 772 370, 780 375 Z" fill="#F89236"/>
+      <path d="M 627 335 C 730 335, 835 375, 905 440 C 960 495, 974 570, 974 645 C 974 770, 930 870, 835 940 C 775 985, 700 985, 627 985 C 554 985, 479 985, 419 940 C 324 870, 280 770, 280 645 C 280 570, 294 495, 349 440 C 419 375, 524 335, 627 335 Z" fill="#F6ECE1"/>
+      <path d="M 627 420 C 725 420, 815 440, 858 480 C 892 515, 897 565, 897 615 C 897 670, 890 720, 855 758 C 812 795, 725 812, 627 812 C 529 812, 442 795, 399 758 C 364 720, 357 670, 357 615 C 357 565, 362 515, 396 480 C 439 440, 529 420, 627 420 Z" fill="#2B283B"/>
+      <path d="M 457 655 C 446 655, 439 646, 439 634 C 439 598, 468 572, 505 572 C 542 572, 571 598, 571 634 C 571 646, 564 655, 553 655 C 543 655, 537 646, 536 635 C 533 618, 521 608, 505 608 C 489 608, 477 618, 474 635 C 473 646, 467 655, 457 655 Z" fill="#FAF1E7"/>
+      <path d="M 797 655 C 808 655, 815 646, 815 634 C 815 598, 786 572, 749 572 C 712 572, 683 598, 683 634 C 683 646, 690 655, 701 655 C 711 655, 717 646, 718 635 C 721 618, 733 608, 749 608 C 765 608, 777 618, 780 635 C 781 646, 787 655, 797 655 Z" fill="#FAF1E7"/>
+      <ellipse cx="442" cy="695" rx="24" ry="12" transform="rotate(35 442 695)" fill="#FA9B6A"/>
+      <ellipse cx="482" cy="705" rx="22" ry="12" transform="rotate(22 482 705)" fill="#FA9B6A"/>
+      <ellipse cx="812" cy="695" rx="24" ry="12" transform="rotate(-35 812 695)" fill="#FA9B6A"/>
+      <ellipse cx="772" cy="705" rx="22" ry="12" transform="rotate(-22 772 705)" fill="#FA9B6A"/>
+    </symbol>
+  </svg>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand-title">
+        <svg style="width:32px;height:32px;flex-shrink:0"><use href="#i-mochi"/></svg>
+        <div>
+          <h1>Moch Sidebar — 10 Project-Scoped Concepts</h1>
+          <p>In every layout, <strong>sessions live inside Projects</strong>: picking a project shows only its sessions.</p>
+        </div>
+      </div>
+
+      <div class="controls">
+        <div class="seg" role="group" aria-label="Filter concepts">
+          <button class="active" data-filter="all">All 10</button>
+          <button data-filter="chat-first">Dropdown / Picker</button>
+          <button data-filter="power">Folders / Split</button>
+          <button data-filter="mobile">Pills / Thumb</button>
+        </div>
+
+        <div class="seg" role="group" aria-label="View layout">
+          <button class="active" data-view="grid">Grid</button>
+          <button data-view="focus">Single Column</button>
+        </div>
+
+        <div class="seg" role="group" aria-label="Theme">
+          <button class="active" data-theme-btn="mocheme">Mocheme</button>
+          <button data-theme-btn="relay">Relay</button>
+          <button data-theme-btn="light">Light</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="diagnosis">
+      <div class="diagnosis-left">
+        <div class="diagnosis-kicker">Updated Rule Across All 10 Sidebars</div>
+        <p class="diagnosis-text">
+          Every concept below is now <strong>project-scoped</strong>: there is no global dump of unrelated sessions.
+          Click any project (<strong>Moch App</strong>, <strong>Recipe Meal</strong>, <strong>Infra &amp; Ops</strong>, or <strong>Personal</strong>) inside any mockup to see only that project's sessions live.
+        </p>
+        <div class="diagnosis-pills">
+          <span class="dx-pill">✓ Click a project → see only its sessions</span>
+          <span class="dx-pill">✓ "+ New chat" lands in the chosen project</span>
+          <span class="dx-pill">✓ Clean AI app conventions (no 8-section clutter)</span>
+        </div>
+      </div>
+
+      <div id="chosenBanner" class="chosen-banner">
+        <span id="chosenText">Selected: #1</span>
+        <button id="clearChoice" class="pick-btn" style="padding:4px 10px;">Clear</button>
+      </div>
+    </section>
+
+    <section id="grid" class="grid">
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           01. CHATGPT CLASSIC (PROJECTS + SCOPED SESSIONS)
+           ═══════════════════════════════════════════════════════════════ -->
+      <article class="concept-card" data-id="1" data-cat="power">
+        <div class="concept-head">
+          <div>
+            <span class="concept-num">CONCEPT 01</span>
+            <h2 class="concept-title">Compact Projects + Scoped List</h2>
+            <p class="concept-ref">Convention: ChatGPT Projects</p>
+          </div>
+          <button class="pick-btn" data-pick="1">Choose #1</button>
+        </div>
+        <div class="concept-notes">
+          <div><strong>Layout:</strong> Search + New Chat at top → compact 4-row <code>Projects</code> selector → <strong>only the selected project's sessions</strong> below → collapsible <code>Tools ▾</code>.</div>
+          <div><strong>Try it:</strong> Click any project row to switch the sessions shown below.</div>
+        </div>
+        <div class="stage">
+          <div class="drawer" data-concept="1">
+            <div class="d-pad" style="display:flex;gap:8px;align-items:center;padding-bottom:6px;">
+              <div class="d-search">
+                <svg class="svg-icon sm"><use href="#i-search"/></svg>
+                <input type="text" placeholder="Search in project..." data-search-for="1" />
+              </div>
+              <button class="d-icon-btn accent" title="New chat"><svg class="svg-icon"><use href="#i-plus"/></svg></button>
+            </div>
+
+            <div class="d-scroll">
+              <div class="kicker">Projects <span style="cursor:pointer;color:var(--accent);">+ New</span></div>
+              <div data-proj-list="1"></div>
+
+              <div class="divider"></div>
+              <div class="kicker"><span data-active-proj-title="1">Moch App Sessions</span><span class="badge accent" data-active-proj-count="1">4</span></div>
+              <div data-session-list="1"></div>
+
+              <div class="divider"></div>
+              <div class="nav-row" data-toggle-target="c1-tools">
+                <svg class="svg-icon sm"><use href="#i-grid"/></svg>
+                <span class="nav-label">Bots &amp; Tools</span>
+                <span class="badge amber">2</span>
+                <svg class="svg-icon sm"><use href="#i-chev"/></svg>
+              </div>
+              <div id="c1-tools" class="mini-popover" style="margin:2px 0 6px;">
+                <div class="nav-row"><svg class="svg-icon sm"><use href="#i-bot"/></svg><span class="nav-label">Bots</span><span class="badge">3</span></div>
+                <div class="nav-row"><svg class="svg-icon sm"><use href="#i-inbox"/></svg><span class="nav-label">Inbox</span><span class="badge amber">2</span></div>
+                <div class="nav-row"><svg class="svg-icon sm"><use href="#i-globe"/></svg><span class="nav-label">Browser</span></div>
+                <div class="nav-row"><svg class="svg-icon sm"><use href="#i-term"/></svg><span class="nav-label">Terminal</span></div>
+                <div class="nav-row"><svg class="svg-icon sm"><use href="#i-clock"/></svg><span class="nav-label">Automations</span><span class="badge green">2</span></div>
+              </div>
+            </div>
+
+            <div class="d-footer">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <svg style="width:22px;height:22px"><use href="#i-mochi"/></svg>
+                <span style="font-size:12.5px;font-weight:800;">Moch</span>
+              </div>
+              <button class="d-icon-btn" title="Settings"><svg class="svg-icon sm"><use href="#i-gear"/></svg></button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           02. CLAUDE DRILL-IN (PROJECT -> ONLY ITS SESSIONS)
+           ═══════════════════════════════════════════════════════════════ -->
+      <article class="concept-card" data-id="2" data-cat="power">
+        <div class="concept-head">
+          <div>
+            <span class="concept-num">CONCEPT 02</span>
+            <h2 class="concept-title">Drill-In Project View</h2>
+            <p class="concept-ref">Convention: Claude Projects / Apple Notes</p>
+          </div>
+          <button class="pick-btn" data-pick="2">Choose #2</button>
+        </div>
+        <div class="concept-notes">
+          <div><strong>Layout:</strong> Two super-clean levels: either see your <strong>Project folders</strong>, or drill into one project (`‹ Projects / Moch App`) to see <strong>only its sessions</strong>.</div>
+          <div><strong>Try it:</strong> Click <code>‹ All Projects</code> to browse folders, then tap a project!</div>
+        </div>
+        <div class="stage">
+          <div class="drawer" data-concept="2">
+            <div class="d-header">
+              <div class="d-brand"><svg style="width:22px;height:22px"><use href="#i-mochi"/></svg><span>Moch</span></div>
+              <div style="display:flex;gap:6px;">
+                <button class="d-icon-btn" data-toggle-target="c2-search"><svg class="svg-icon sm"><use href="#i-search"/></svg></button>
+                <button class="d-icon-btn"><svg class="svg-icon sm"><use href="#i-close"/></svg></button>
+              </div>
+            </div>
+
+            <div id="c2-search" class="mini-popover" style="margin-top:0;">
+              <div class="d-search" style="border:0;height:30px;padding:0 4px;">
+                <svg class="svg-icon sm"><use href="#i-search"/></svg>
+                <input type="text" placeholder="Search sessions..." data-search-for="2" />
+              </div>
+            </div>
+
+            <!-- Level B: Inside a project (default shown) -->
+            <div id="c2-inside" style="display:flex;flex-direction:column;flex:1;min-height:0;">
+              <div class="d-pad" style="padding-top:0;display:flex;flex-direction:column;gap:8px;padding-bottom:6px;">
+                <div class="back-crumb" id="c2-back-btn">
+                  <svg class="svg-icon sm"><use href="#i-chev-l"/></svg>
+                  <span style="color:var(--text-faint);font-weight:600;">Projects /</span>
+                  <span style="flex:1;" data-active-proj-name="2">Moch App</span>
+                  <span class="badge accent" data-active-proj-count="2">4</span>
+                </div>
+                <button class="d-primary-btn">
+                  <svg class="svg-icon sm"><use href="#i-plus"/></svg>
+                  <span data-new-in-proj="2">New chat in Moch App</span>
+                </button>
+              </div>
+
+              <div class="d-scroll">
+                <div class="kicker">Sessions</div>
+                <div data-session-list="2"></div>
+              </div>
+            </div>
+
+            <!-- Level A: Project folders list -->
+            <div id="c2-folders" style="display:none;flex-direction:column;flex:1;min-height:0;">
+              <div class="d-pad" style="padding-top:0;padding-bottom:6px;">
+                <button class="d-soft-btn"><svg class="svg-icon sm"><use href="#i-plus"/></svg> New project</button>
+              </div>
+              <div class="d-scroll">
+                <div class="kicker">Your Projects</div>
+                <div id="c2-proj-cards"></div>
+              </div>
+            </div>
+
+            <div class="dock-icons">
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-bot"/></svg><span>Bots</span></div>
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-inbox"/></svg><span>Inbox</span><span class="rail-dot" style="top:2px;right:6px;"></span></div>
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-globe"/></svg><span>Browser</span></div>
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-term"/></svg><span>Term</span></div>
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-gear"/></svg><span>Prefs</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           03. ICON RAIL + PROJECT-SCOPED SESSIONS
+           ═══════════════════════════════════════════════════════════════ -->
+      <article class="concept-card" data-id="3" data-cat="power">
+        <div class="concept-head">
+          <div>
+            <span class="concept-num">CONCEPT 03</span>
+            <h2 class="concept-title">Project Rail + Session Pane</h2>
+            <p class="concept-ref">Convention: Discord / Slack / Perplexity</p>
+          </div>
+          <button class="pick-btn" data-pick="3">Choose #3</button>
+        </div>
+        <div class="concept-notes">
+          <div><strong>Layout:</strong> Left 52px rail holds <strong>your Projects</strong> as colored badges (plus <code>Bots</code> &amp; <code>Tools</code> at bottom). Right pane shows <strong>only that project's sessions</strong>!</div>
+          <div><strong>Try it:</strong> Click the colored project icons on the left rail!</div>
+        </div>
+        <div class="stage">
+          <div class="drawer flush" data-concept="3">
+            <div class="dual">
+              <div class="rail">
+                <svg style="width:24px;height:24px;margin-bottom:4px"><use href="#i-mochi"/></svg>
+                <button class="rail-btn active" data-c3-proj="moch" title="Moch App"><span style="width:26px;height:26px;border-radius:8px;background:var(--accent);color:var(--on-accent);font-size:11px;font-weight:900;display:flex;align-items:center;justify-content:center;">M</span></button>
+                <button class="rail-btn" data-c3-proj="recipe" title="Recipe Meal"><span style="width:26px;height:26px;border-radius:8px;background:rgba(74,222,128,0.2);color:#4ADE80;font-size:11px;font-weight:900;display:flex;align-items:center;justify-content:center;">R</span></button>
+                <button class="rail-btn" data-c3-proj="infra" title="Infra &amp; Ops"><span style="width:26px;height:26px;border-radius:8px;background:rgba(192,132,252,0.2);color:#C084FC;font-size:11px;font-weight:900;display:flex;align-items:center;justify-content:center;">I</span></button>
+                <button class="rail-btn" data-c3-proj="personal" title="Personal"><span style="width:26px;height:26px;border-radius:8px;background:rgba(56,189,248,0.2);color:#38BDF8;font-size:11px;font-weight:900;display:flex;align-items:center;justify-content:center;">P</span></button>
+                <button class="rail-btn" title="New Project" style="border:1px dashed var(--border);"><svg class="svg-icon sm"><use href="#i-plus"/></svg></button>
+                <div class="rail-spacer"></div>
+                <button class="rail-btn" data-c3-pane="bots" title="Bots"><svg class="svg-icon sm"><use href="#i-bot"/></svg></button>
+                <button class="rail-btn" data-c3-pane="tools" title="Workspace"><svg class="svg-icon sm"><use href="#i-grid"/></svg><span class="rail-dot"></span></button>
+                <button class="rail-btn" title="Settings"><svg class="svg-icon sm"><use href="#i-gear"/></svg></button>
+              </div>
+
+              <div class="rail-body">
+                <div id="c3-sessions-pane" style="display:flex;flex-direction:column;height:100%;">
+                  <div class="d-header" style="padding:10px 10px 6px;">
+                    <span style="font-size:13.5px;font-weight:800;" data-active-proj-name="3">Moch App</span>
+                    <button class="d-icon-btn accent" style="width:28px;height:28px;border-radius:8px;"><svg class="svg-icon sm"><use href="#i-plus"/></svg></button>
+                  </div>
+                  <div style="padding:0 10px 6px;">
+                    <div class="d-search" style="height:32px;"><svg class="svg-icon sm"><use href="#i-search"/></svg><input type="text" placeholder="Search project..." data-search-for="3"/></div>
+                  </div>
+                  <div class="d-scroll" style="padding:0 8px 8px;">
+                    <div class="kicker">Sessions <span data-active-proj-count="3">4</span></div>
+                    <div data-session-list="3"></div>
+                  </div>
+                </div>
+
+                <div id="c3-bots-pane" style="display:none;flex-direction:column;height:100%;">
+                  <div class="d-header" style="padding:10px 10px 6px;"><span style="font-size:13.5px;font-weight:800;">Bots (3)</span></div>
+                  <div class="d-scroll" style="padding:4px 8px;">
+                    <div class="nav-row active"><svg style="width:18px;height:18px"><use href="#i-mochi"/></svg><span class="nav-label">Moch</span></div>
+                    <div class="nav-row"><span>🧑‍💻</span><span class="nav-label">Coder</span></div>
+                    <div class="nav-row"><span>🔎</span><span class="nav-label">Scout</span></div>
+                  </div>
+                </div>
+
+                <div id="c3-tools-pane" style="display:none;flex-direction:column;height:100%;">
+                  <div class="d-header" style="padding:10px 10px 6px;"><span style="font-size:13.5px;font-weight:800;">Tools</span></div>
+                  <div class="d-scroll" style="padding:4px 8px;">
+                    <div class="nav-row"><svg class="svg-icon sm"><use href="#i-inbox"/></svg><span class="nav-label">Inbox</span><span class="badge amber">2</span></div>
+                    <div class="nav-row"><svg class="svg-icon sm"><use href="#i-globe"/></svg><span class="nav-label">Browser</span></div>
+                    <div class="nav-row"><svg class="svg-icon sm"><use href="#i-term"/></svg><span class="nav-label">Terminal</span></div>
+                    <div class="nav-row"><svg class="svg-icon sm"><use href="#i-clock"/></svg><span class="nav-label">Automations</span><span class="badge green">2</span></div>
+                    <div class="nav-row"><svg class="svg-icon sm"><use href="#i-lib"/></svg><span class="nav-label">Library</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           04. PROJECT DROPDOWN (CURSOR / LINEAR STYLE)
+           ═══════════════════════════════════════════════════════════════ -->
+      <article class="concept-card" data-id="4" data-cat="chat-first">
+        <div class="concept-head">
+          <div>
+            <span class="concept-num">CONCEPT 04</span>
+            <h2 class="concept-title">Project Switcher Dropdown</h2>
+            <p class="concept-ref">Convention: Cursor / Linear / Notion</p>
+          </div>
+          <button class="pick-btn" data-pick="4">Choose #4</button>
+        </div>
+        <div class="concept-notes">
+          <div><strong>Layout:</strong> One clean dropdown at top (`📁 Moch App ▾`) + `+ New`. Switching project swaps the entire session list to <strong>only that project's chats</strong>.</div>
+          <div><strong>Try it:</strong> Click the <code>Moch App ▾</code> dropdown pill to switch projects!</div>
+        </div>
+        <div class="stage">
+          <div class="drawer" data-concept="4">
+            <div class="d-header">
+              <div class="d-brand"><svg style="width:22px;height:22px"><use href="#i-mochi"/></svg><span>Moch</span></div>
+              <div style="display:flex;gap:6px;">
+                <button class="d-icon-btn" data-toggle-target="c4-search"><svg class="svg-icon sm"><use href="#i-search"/></svg></button>
+                <button class="d-icon-btn"><svg class="svg-icon sm"><use href="#i-close"/></svg></button>
+              </div>
+            </div>
+
+            <div id="c4-search" class="mini-popover" style="margin-top:0;">
+              <div class="d-search" style="border:0;height:30px;padding:0 4px;"><svg class="svg-icon sm"><use href="#i-search"/></svg><input type="text" placeholder="Search in project..." data-search-for="4"/></div>
+            </div>
+
+            <div style="display:flex;gap:7px;padding:0 12px 8px;">
+              <div class="scope-select" data-toggle-target="c4-projmenu">
+                <span class="dot proj" data-active-proj-dot="4" style="background:var(--accent)"></span>
+                <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" data-active-proj-name="4">Moch App</span>
+                <svg class="svg-icon sm"><use href="#i-chev"/></svg>
+              </div>
+              <button class="d-icon-btn accent" style="width:auto;padding:0 12px;gap:5px;font-size:12px;font-weight:800;height:36px;">
+                <svg class="svg-icon sm"><use href="#i-plus"/></svg> New
+              </button>
+            </div>
+
+            <div id="c4-projmenu" class="mini-popover" style="margin-top:0;" data-proj-dropdown="4"></div>
+
+            <div class="d-scroll">
+              <div class="kicker"><span data-active-proj-title="4">Moch App Sessions</span><span class="badge" data-active-proj-count="4">4</span></div>
+              <div data-session-list="4"></div>
+            </div>
+
+            <div class="dock-icons">
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-bot"/></svg><span>Bots</span></div>
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-inbox"/></svg><span>Inbox</span><span class="rail-dot" style="top:2px;right:6px;"></span></div>
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-globe"/></svg><span>Browser</span></div>
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-term"/></svg><span>Term</span></div>
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-gear"/></svg><span>Prefs</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           05. 2×2 BENTO + PROJECT-SCOPED SESSIONS
+           ═══════════════════════════════════════════════════════════════ -->
+      <article class="concept-card" data-id="5" data-cat="power">
+        <div class="concept-head">
+          <div>
+            <span class="concept-num">CONCEPT 05</span>
+            <h2 class="concept-title">2×2 Tools Bento + Project Tabs</h2>
+            <p class="concept-ref">Convention: Poe / Copilot / Mobile Superapp</p>
+          </div>
+          <button class="pick-btn" data-pick="5">Choose #5</button>
+        </div>
+        <div class="concept-notes">
+          <div><strong>Layout:</strong> 2×2 bento tiles for tools (`Bots`, `Inbox`, `Automations`, `Dev & Web`), then project chips so you see <strong>only one project's sessions</strong> at a time.</div>
+          <div><strong>Try it:</strong> Tap the project chips above the session list!</div>
+        </div>
+        <div class="stage">
+          <div class="drawer" data-concept="5">
+            <div class="d-header" style="padding-bottom:6px;">
+              <div class="d-brand"><svg style="width:22px;height:22px"><use href="#i-mochi"/></svg><span>Moch</span></div>
+              <button class="d-icon-btn accent" style="width:auto;padding:0 10px;gap:5px;height:30px;font-size:11.5px;font-weight:800;">
+                <svg class="svg-icon sm"><use href="#i-plus"/></svg> <span data-new-short="5">New in Moch</span>
+              </button>
+            </div>
+
+            <div class="bento">
+              <div class="bento-tile"><div class="bento-top"><svg class="svg-icon sm" style="color:var(--accent)"><use href="#i-bot"/></svg><span class="badge">3</span></div><div class="bento-name">Bots</div></div>
+              <div class="bento-tile"><div class="bento-top"><svg class="svg-icon sm" style="color:var(--amber)"><use href="#i-inbox"/></svg><span class="badge amber">2</span></div><div class="bento-name">Inbox</div></div>
+              <div class="bento-tile"><div class="bento-top"><svg class="svg-icon sm" style="color:var(--green)"><use href="#i-clock"/></svg><span class="badge green">2 live</span></div><div class="bento-name">Automations</div></div>
+              <div class="bento-tile"><div class="bento-top"><svg class="svg-icon sm"><use href="#i-term"/></svg><svg class="svg-icon sm" style="color:var(--text-faint)"><use href="#i-globe"/></svg></div><div class="bento-name">Browser &amp; Term</div></div>
+            </div>
+
+            <div class="chip-strip" data-proj-chips="5"></div>
+
+            <div class="d-scroll">
+              <div class="kicker"><span data-active-proj-title="5">Moch App</span><span data-active-proj-count="5">4</span></div>
+              <div data-session-list="5"></div>
+            </div>
+
+            <div class="d-footer">
+              <div class="nav-row" style="padding:4px 6px;flex:1;"><svg class="svg-icon sm"><use href="#i-gear"/></svg><span class="nav-label">Settings</span></div>
+              <span style="font-size:10.5px;color:var(--green);font-weight:700;">● Local</span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           06. PROJECT PILL BAR + SCOPED FEED
+           ═══════════════════════════════════════════════════════════════ -->
+      <article class="concept-card" data-id="6" data-cat="mobile">
+        <div class="concept-head">
+          <div>
+            <span class="concept-num">CONCEPT 06</span>
+            <h2 class="concept-title">Project Pills + Scoped Feed</h2>
+            <p class="concept-ref">Convention: Telegram Folders / Gemini</p>
+          </div>
+          <button class="pick-btn" data-pick="6">Choose #6</button>
+        </div>
+        <div class="concept-notes">
+          <div><strong>Layout:</strong> Horizontal scrollable <strong>Project pills</strong> right under Search. Choosing a pill shows <strong>only that project's sessions</strong> immediately.</div>
+          <div><strong>Try it:</strong> Click <code>Moch App</code>, <code>Recipe Meal</code>, <code>Infra &amp; Ops</code>, or <code>Personal</code>!</div>
+        </div>
+        <div class="stage">
+          <div class="drawer" data-concept="6">
+            <div class="d-header">
+              <div class="d-brand"><svg style="width:22px;height:22px"><use href="#i-mochi"/></svg><span>Moch</span></div>
+              <div style="display:flex;gap:6px;">
+                <button class="d-icon-btn accent" title="New chat"><svg class="svg-icon sm"><use href="#i-plus"/></svg></button>
+                <button class="d-icon-btn"><svg class="svg-icon sm"><use href="#i-close"/></svg></button>
+              </div>
+            </div>
+
+            <div style="padding:0 10px 4px;">
+              <div class="d-search" style="height:34px;"><svg class="svg-icon sm"><use href="#i-search"/></svg><input type="text" placeholder="Search in project..." data-search-for="6"/></div>
+            </div>
+
+            <div class="chip-strip" data-proj-chips="6"></div>
+
+            <div class="d-scroll">
+              <div class="kicker"><span data-active-proj-title="6">Moch App</span><span class="badge accent" data-active-proj-count="6">4</span></div>
+              <div data-session-list="6"></div>
+            </div>
+
+            <div class="dock-icons">
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-bot"/></svg><span>Bots</span></div>
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-inbox"/></svg><span>Inbox</span><span class="rail-dot" style="top:2px;right:6px;"></span></div>
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-globe"/></svg><span>Browser</span></div>
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-term"/></svg><span>Term</span></div>
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-gear"/></svg><span>Prefs</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           07. PROJECT FOLDER ACCORDIONS (SESSIONS INSIDE FOLDERS)
+           ═══════════════════════════════════════════════════════════════ -->
+      <article class="concept-card" data-id="7" data-cat="power">
+        <div class="concept-head">
+          <div>
+            <span class="concept-num">CONCEPT 07</span>
+            <h2 class="concept-title">Project Folder Tree</h2>
+            <p class="concept-ref">Convention: Arc Spaces / VS Code / Obsidian</p>
+          </div>
+          <button class="pick-btn" data-pick="7">Choose #7</button>
+        </div>
+        <div class="concept-notes">
+          <div><strong>Layout:</strong> Sessions literally live <strong>inside collapsible project folders</strong>. Expanding one project shows its sessions inside it (auto-collapsing the others).</div>
+          <div><strong>Try it:</strong> Click any project folder to expand its sessions!</div>
+        </div>
+        <div class="stage">
+          <div class="drawer" data-concept="7">
+            <div class="d-header">
+              <div class="d-brand"><svg style="width:22px;height:22px"><use href="#i-mochi"/></svg><span>Moch</span></div>
+              <div style="display:flex;gap:6px;">
+                <button class="d-icon-btn" data-toggle-target="c7-search"><svg class="svg-icon sm"><use href="#i-search"/></svg></button>
+                <button class="d-icon-btn"><svg class="svg-icon sm"><use href="#i-close"/></svg></button>
+              </div>
+            </div>
+
+            <div id="c7-search" class="mini-popover" style="margin-top:0;">
+              <div class="d-search" style="border:0;height:30px;padding:0 4px;"><svg class="svg-icon sm"><use href="#i-search"/></svg><input type="text" placeholder="Filter active folder..." data-search-for="7"/></div>
+            </div>
+
+            <div class="d-pad" style="padding-top:0;padding-bottom:8px;">
+              <button class="d-primary-btn"><svg class="svg-icon sm"><use href="#i-plus"/></svg> <span data-new-in-proj="7">New chat in Moch App</span></button>
+            </div>
+
+            <div class="d-scroll">
+              <div class="kicker">Projects <span style="color:var(--accent);cursor:pointer;">+ New</span></div>
+              <div id="c7-accordion-tree"></div>
+
+              <div class="divider"></div>
+              <button class="acc-btn" data-toggle-target="c7-tools">
+                <svg class="svg-icon sm"><use href="#i-grid"/></svg>
+                <span style="flex:1;text-align:left;">Bots &amp; Workspace</span>
+                <span class="badge amber">2</span>
+                <svg class="svg-icon sm"><use href="#i-chev"/></svg>
+              </button>
+              <div id="c7-tools" class="acc-body">
+                <div class="nav-row"><svg class="svg-icon sm"><use href="#i-bot"/></svg><span class="nav-label">Bots (3)</span></div>
+                <div class="nav-row"><svg class="svg-icon sm"><use href="#i-inbox"/></svg><span class="nav-label">Inbox</span><span class="badge amber">2</span></div>
+                <div class="nav-row"><svg class="svg-icon sm"><use href="#i-globe"/></svg><span class="nav-label">Browser</span></div>
+                <div class="nav-row"><svg class="svg-icon sm"><use href="#i-term"/></svg><span class="nav-label">Terminal</span></div>
+                <div class="nav-row"><svg class="svg-icon sm"><use href="#i-clock"/></svg><span class="nav-label">Automations</span><span class="badge green">2</span></div>
+              </div>
+            </div>
+
+            <div class="d-footer">
+              <div class="nav-row" style="padding:4px 6px;flex:1;"><svg class="svg-icon sm"><use href="#i-gear"/></svg><span class="nav-label">Settings</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           08. PROJECT PICKER + BOT STRIP
+           ═══════════════════════════════════════════════════════════════ -->
+      <article class="concept-card" data-id="8" data-cat="mobile">
+        <div class="concept-head">
+          <div>
+            <span class="concept-num">CONCEPT 08</span>
+            <h2 class="concept-title">Project Scope + Bot Strip</h2>
+            <p class="concept-ref">Convention: Poe / Character.ai + Projects</p>
+          </div>
+          <button class="pick-btn" data-pick="8">Choose #8</button>
+        </div>
+        <div class="concept-notes">
+          <div><strong>Layout:</strong> Top <strong>Project selector</strong> scopes the sessions below, while a compact horizontal <strong>Bot pill strip</strong> keeps Moch &amp; custom bots 1 tap away.</div>
+          <div><strong>Try it:</strong> Switch the project dropdown or tap a bot pill!</div>
+        </div>
+        <div class="stage">
+          <div class="drawer" data-concept="8">
+            <div class="d-header" style="padding-bottom:6px;">
+              <div class="scope-select" data-toggle-target="c8-projmenu" style="height:32px;">
+                <span class="dot proj" data-active-proj-dot="8" style="background:var(--accent)"></span>
+                <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" data-active-proj-name="8">Moch App</span>
+                <svg class="svg-icon sm"><use href="#i-chev"/></svg>
+              </div>
+              <button class="d-icon-btn" data-toggle-target="c8-search"><svg class="svg-icon sm"><use href="#i-search"/></svg></button>
+            </div>
+
+            <div id="c8-projmenu" class="mini-popover" style="margin-top:0;" data-proj-dropdown="8"></div>
+            <div id="c8-search" class="mini-popover" style="margin-top:0;">
+              <div class="d-search" style="border:0;height:30px;padding:0 4px;"><svg class="svg-icon sm"><use href="#i-search"/></svg><input type="text" placeholder="Search in project..." data-search-for="8"/></div>
+            </div>
+
+            <div class="kicker" style="padding-top:2px;">Bots</div>
+            <div class="bot-strip" data-bot-strip="8">
+              <div class="bot-pill active" data-bot-name="Moch"><svg style="width:15px;height:15px"><use href="#i-mochi"/></svg><span>Moch</span></div>
+              <div class="bot-pill" data-bot-name="Coder"><span>🧑‍💻</span><span>Coder</span></div>
+              <div class="bot-pill" data-bot-name="Scout"><span>🔎</span><span>Scout</span></div>
+            </div>
+
+            <div class="d-pad" style="padding-top:0;padding-bottom:6px;">
+              <button class="d-primary-btn"><svg class="svg-icon sm"><use href="#i-plus"/></svg> <span data-new-in-proj="8">New chat in Moch App</span></button>
+            </div>
+
+            <div class="d-scroll">
+              <div class="kicker"><span data-active-proj-title="8">Moch App Sessions</span><span data-active-proj-count="8">4</span></div>
+              <div data-session-list="8"></div>
+            </div>
+
+            <div class="dock-icons">
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-inbox"/></svg><span>Inbox</span><span class="rail-dot" style="top:2px;right:6px;"></span></div>
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-globe"/></svg><span>Browser</span></div>
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-term"/></svg><span>Term</span></div>
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-clock"/></svg><span>Auto</span></div>
+              <div class="dock-item"><svg class="svg-icon sm"><use href="#i-gear"/></svg><span>Prefs</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           09. RADICAL MINIMALIST (PROJECT + SESSIONS ONLY)
+           ═══════════════════════════════════════════════════════════════ -->
+      <article class="concept-card" data-id="9" data-cat="chat-first">
+        <div class="concept-head">
+          <div>
+            <span class="concept-num">CONCEPT 09</span>
+            <h2 class="concept-title">Minimalist Project Focus</h2>
+            <p class="concept-ref">Convention: Grok / Spotlight Minimal</p>
+          </div>
+          <button class="pick-btn" data-pick="9">Choose #9</button>
+        </div>
+        <div class="concept-notes">
+          <div><strong>Layout:</strong> Pure focus: <code>Search</code> + <code>Project ▾</code> + <code>+ New chat</code> + <strong>only that project's sessions</strong>. Everything else sits in one bottom <code>Apps &amp; Bots ⌃</code> sheet.</div>
+          <div><strong>Try it:</strong> Switch project or open the bottom sheet!</div>
+        </div>
+        <div class="stage">
+          <div class="drawer" data-concept="9">
+            <div class="d-header">
+              <div class="d-brand"><svg style="width:22px;height:22px"><use href="#i-mochi"/></svg><span>Moch</span></div>
+              <button class="d-icon-btn" title="Settings"><svg class="svg-icon sm"><use href="#i-gear"/></svg></button>
+            </div>
+
+            <div class="d-pad" style="padding-top:0;display:flex;flex-direction:column;gap:7px;padding-bottom:6px;">
+              <div class="d-search">
+                <svg class="svg-icon sm"><use href="#i-search"/></svg>
+                <input type="text" placeholder="Search in project..." data-search-for="9"/>
+              </div>
+              <div style="display:flex;gap:7px;">
+                <div class="scope-select" data-toggle-target="c9-projmenu">
+                  <span class="dot proj" data-active-proj-dot="9" style="background:var(--accent)"></span>
+                  <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" data-active-proj-name="9">Moch App</span>
+                  <svg class="svg-icon sm"><use href="#i-chev"/></svg>
+                </div>
+                <button class="d-icon-btn accent" style="width:36px;height:36px;"><svg class="svg-icon sm"><use href="#i-plus"/></svg></button>
+              </div>
+            </div>
+
+            <div id="c9-projmenu" class="mini-popover" style="margin-top:0;" data-proj-dropdown="9"></div>
+
+            <div class="d-scroll">
+              <div class="kicker"><span data-active-proj-title="9">Moch App Sessions</span><span data-active-proj-count="9">4</span></div>
+              <div data-session-list="9"></div>
+            </div>
+
+            <div id="c9-more" class="mini-popover" style="margin-bottom:4px;">
+              <div class="nav-row"><svg class="svg-icon sm"><use href="#i-bot"/></svg><span class="nav-label">Bots</span><span class="badge">3</span></div>
+              <div class="nav-row"><svg class="svg-icon sm"><use href="#i-inbox"/></svg><span class="nav-label">Inbox</span><span class="badge amber">2</span></div>
+              <div class="nav-row"><svg class="svg-icon sm"><use href="#i-globe"/></svg><span class="nav-label">Browser &amp; Terminal</span></div>
+              <div class="nav-row"><svg class="svg-icon sm"><use href="#i-clock"/></svg><span class="nav-label">Automations</span><span class="badge green">2</span></div>
+              <div class="nav-row"><svg class="svg-icon sm"><use href="#i-lib"/></svg><span class="nav-label">Library</span></div>
+            </div>
+
+            <div class="d-footer" data-toggle-target="c9-more" style="cursor:pointer;">
+              <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;">
+                <svg class="svg-icon sm"><use href="#i-grid"/></svg>
+                <span>Bots &amp; Apps</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span class="badge amber">2</span>
+                <svg class="svg-icon sm"><use href="#i-chev"/></svg>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           10. BOTTOM-THUMB ERGONOMIC (BOTTOM PROJECT PILLS)
+           ═══════════════════════════════════════════════════════════════ -->
+      <article class="concept-card" data-id="10" data-cat="mobile">
+        <div class="concept-head">
+          <div>
+            <span class="concept-num">CONCEPT 10</span>
+            <h2 class="concept-title">Bottom-Thumb Project Switcher</h2>
+            <p class="concept-ref">Convention: Arc Search / One-Handed Mobile</p>
+          </div>
+          <button class="pick-btn" data-pick="10">Choose #10</button>
+        </div>
+        <div class="concept-notes">
+          <div><strong>Layout:</strong> Sessions for the chosen project fill the top/middle. <strong>Project pills</strong>, <strong>Search</strong>, <strong>+ New</strong>, and utility tabs live in the bottom thumb zone!</div>
+          <div><strong>Try it:</strong> Tap the project pills near the bottom to switch sessions!</div>
+        </div>
+        <div class="stage">
+          <div class="drawer" data-concept="10">
+            <div class="d-header" style="border-bottom:1px solid var(--border-soft);">
+              <div class="d-brand">
+                <svg style="width:20px;height:20px"><use href="#i-mochi"/></svg>
+                <span data-active-proj-name="10">Moch App</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span class="badge accent" data-active-proj-count="10">4</span>
+                <button class="d-icon-btn" style="width:28px;height:28px;"><svg class="svg-icon sm"><use href="#i-close"/></svg></button>
+              </div>
+            </div>
+
+            <div class="d-scroll" style="padding-top:4px;">
+              <div class="kicker">Sessions in <span data-active-proj-name="10">Moch App</span></div>
+              <div data-session-list="10"></div>
+            </div>
+
+            <div style="border-top:1px solid var(--border-soft);background:var(--bg-card);padding-top:6px;">
+              <div class="chip-strip" style="padding-bottom:6px;" data-proj-chips="10"></div>
+
+              <div style="padding:0 10px 6px;display:flex;gap:7px;">
+                <div class="d-search" style="height:36px;">
+                  <svg class="svg-icon sm"><use href="#i-search"/></svg>
+                  <input type="text" placeholder="Search project..." data-search-for="10"/>
+                </div>
+                <button class="d-icon-btn accent" style="width:auto;padding:0 12px;height:36px;gap:5px;font-size:12px;font-weight:800;">
+                  <svg class="svg-icon sm"><use href="#i-plus"/></svg> New
+                </button>
+              </div>
+
+              <div class="dock-icons" style="border-top:0;padding-top:2px;padding-bottom:8px;">
+                <div class="dock-item active"><svg class="svg-icon sm"><use href="#i-folder"/></svg><span>Projects</span></div>
+                <div class="dock-item"><svg class="svg-icon sm"><use href="#i-bot"/></svg><span>Bots</span></div>
+                <div class="dock-item"><svg class="svg-icon sm"><use href="#i-inbox"/></svg><span>Inbox</span><span class="rail-dot" style="top:2px;right:6px;"></span></div>
+                <div class="dock-item"><svg class="svg-icon sm"><use href="#i-grid"/></svg><span>Tools</span></div>
+                <div class="dock-item"><svg class="svg-icon sm"><use href="#i-gear"/></svg><span>Prefs</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      const PROJECTS = [
+        {
+          id: 'moch',
+          name: 'Moch App',
+          color: '#F79236',
+          sessions: [
+            { title: 'Fix OpenCode project cwd', age: '2m', status: 'busy', active: true, pinned: true },
+            { title: 'Refactor sidebar gestures', age: '1h', status: 'input' },
+            { title: 'Expo keyboard avoidance notes', age: '1d', status: '' },
+            { title: 'Arabic RTL drawer mirror', age: '3d', status: '' }
+          ]
+        },
+        {
+          id: 'recipe',
+          name: 'Recipe Meal',
+          color: '#4ADE80',
+          sessions: [
+            { title: 'Recipe dedup SQL query', age: '25m', status: 'done', active: true, pinned: true },
+            { title: 'Meal plan import script', age: '2d', status: '' },
+            { title: 'Halal filter edge cases', age: '5d', status: '' }
+          ]
+        },
+        {
+          id: 'infra',
+          name: 'Infra & Ops',
+          color: '#C084FC',
+          sessions: [
+            { title: 'Daily briefing cron setup', age: '40m', status: 'input', active: true },
+            { title: 'Android APK release pipeline', age: '4d', status: '' }
+          ]
+        },
+        {
+          id: 'personal',
+          name: 'Personal',
+          color: '#38BDF8',
+          sessions: [
+            { title: 'Weekend reading notes', age: '3h', status: '', active: true },
+            { title: 'Travel packing checklist', age: '6d', status: '' }
+          ]
+        }
+      ];
+
+      // Per-concept state (active project + search query + active session index)
+      const state = {};
+      for (let i = 1; i <= 10; i++) {
+        state[i] = { projId: 'moch', query: '', activeIdx: 0 };
+      }
+
+      function getProj(id) {
+        return PROJECTS.find((p) => p.id === id) || PROJECTS[0];
+      }
+
+      function renderSessionRowHTML(s, idx, isActive) {
+        const dot = s.status ? `<span class="dot ${s.status}"></span>` : s.pinned ? `<svg class="svg-icon sm" style="color:var(--accent)"><use href="#i-pin"/></svg>` : '';
+        return `<div class="chat-row ${isActive ? 'active' : ''}" data-sidx="${idx}">
+          ${dot}
+          <span class="chat-title">${s.title}</span>
+          <span class="chat-age">${s.age}</span>
+        </div>`;
+      }
+
+      function syncConcept(id) {
+        const st = state[id];
+        const proj = getProj(st.projId);
+        const q = st.query.trim().toLowerCase();
+        const filtered = proj.sessions.filter((s) => !q || s.title.toLowerCase().includes(q));
+
+        // Update labels / badges / dots
+        document.querySelectorAll(`[data-active-proj-name="${id}"]`).forEach((el) => {
+          el.textContent = proj.name;
+        });
+        document.querySelectorAll(`[data-active-proj-title="${id}"]`).forEach((el) => {
+          el.textContent = proj.name + ' Sessions';
+        });
+        document.querySelectorAll(`[data-active-proj-count="${id}"]`).forEach((el) => {
+          el.textContent = filtered.length;
+        });
+        document.querySelectorAll(`[data-active-proj-dot="${id}"]`).forEach((el) => {
+          el.style.background = proj.color;
+        });
+        document.querySelectorAll(`[data-new-in-proj="${id}"]`).forEach((el) => {
+          el.textContent = 'New chat in ' + proj.name;
+        });
+        document.querySelectorAll(`[data-new-short="${id}"]`).forEach((el) => {
+          el.textContent = 'New in ' + proj.name.split(' ')[0];
+        });
+
+        // Render session list container
+        const listEl = document.querySelector(`[data-session-list="${id}"]`);
+        if (listEl) {
+          listEl.innerHTML = filtered.length
+            ? filtered.map((s, idx) => renderSessionRowHTML(s, idx, idx === st.activeIdx)).join('')
+            : `<div style="padding:12px 8px;font-size:12px;color:var(--text-faint);">No sessions matching "${st.query}" in ${proj.name}</div>`;
+          bindSessionClicks(listEl, id);
+        }
+
+        // Concept 1 compact project list
+        const c1Proj = document.querySelector('[data-proj-list="1"]');
+        if (c1Proj && id === 1) {
+          c1Proj.innerHTML = PROJECTS.map((p) => `
+            <div class="nav-row ${p.id === st.projId ? 'active' : ''}" data-pick-proj="1:${p.id}">
+              <span class="dot proj" style="background:${p.color}"></span>
+              <span class="nav-label">${p.name}</span>
+              <span class="chat-age">${p.sessions.length}</span>
+            </div>
+          `).join('');
+          bindProjectPickers(c1Proj);
+        }
+
+        // Dropdown menus (4, 8, 9)
+        const dd = document.querySelector(`[data-proj-dropdown="${id}"]`);
+        if (dd) {
+          dd.innerHTML = PROJECTS.map((p) => `
+            <div class="nav-row ${p.id === st.projId ? 'active' : ''}" data-pick-proj="${id}:${p.id}" data-close-popover="${dd.id}">
+              <span class="dot proj" style="background:${p.color}"></span>
+              <span class="nav-label">${p.name}</span>
+              <span class="chat-age">${p.sessions.length}</span>
+            </div>
+          `).join('') + `<div class="nav-row" style="color:var(--accent)"><svg class="svg-icon sm"><use href="#i-plus"/></svg><span class="nav-label">New project</span></div>`;
+          bindProjectPickers(dd);
+        }
+
+        // Horizontal project chips (5, 6, 10)
+        const chips = document.querySelector(`[data-proj-chips="${id}"]`);
+        if (chips) {
+          chips.innerHTML = PROJECTS.map((p) => `
+            <button class="chip ${p.id === st.projId ? 'active' : ''}" data-pick-proj="${id}:${p.id}">
+              <span class="dot proj" style="background:${p.id === st.projId ? 'currentColor' : p.color};width:6px;height:6px;"></span>
+              <span>${p.name}</span>
+              <span style="opacity:0.75;font-size:10px;">${p.sessions.length}</span>
+            </button>
+          `).join('');
+          bindProjectPickers(chips);
+        }
+
+        // Concept 7 accordion folder tree
+        if (id === 7) {
+          const tree = document.getElementById('c7-accordion-tree');
+          if (tree) {
+            tree.innerHTML = PROJECTS.map((p) => {
+              const isOpen = p.id === st.projId;
+              const rows = isOpen
+                ? (filtered.length
+                    ? filtered.map((s, idx) => renderSessionRowHTML(s, idx, idx === st.activeIdx)).join('')
+                    : `<div style="padding:8px;font-size:11.5px;color:var(--text-faint);">No matching sessions</div>`)
+                : '';
+              return `
+                <button class="acc-btn ${isOpen ? 'active' : ''}" data-pick-proj="7:${p.id}">
+                  <span class="dot proj" style="background:${p.color}"></span>
+                  <span style="flex:1;text-align:left;">${p.name}</span>
+                  <span class="badge">${p.sessions.length}</span>
+                  <svg class="svg-icon sm"><use href="${isOpen ? '#i-chev' : '#i-chev-r'}"/></svg>
+                </button>
+                <div class="acc-body ${isOpen ? 'open' : ''}">${rows}</div>
+              `;
+            }).join('');
+            bindProjectPickers(tree);
+            bindSessionClicks(tree, 7);
+          }
+        }
+
+        // Concept 2 project folder cards
+        if (id === 2) {
+          const cards = document.getElementById('c2-proj-cards');
+          if (cards) {
+            cards.innerHTML = PROJECTS.map((p) => `
+              <div class="project-card-row" data-pick-proj="2:${p.id}" data-c2-enter="1">
+                <span class="dot proj" style="background:${p.color};width:10px;height:10px;"></span>
+                <span style="flex:1;">${p.name}</span>
+                <span class="badge">${p.sessions.length} chats</span>
+                <svg class="svg-icon sm" style="color:var(--text-faint)"><use href="#i-chev-r"/></svg>
+              </div>
+            `).join('');
+            bindProjectPickers(cards);
+          }
+        }
+      }
+
+      function bindSessionClicks(container, id) {
+        container.querySelectorAll('.chat-row[data-sidx]').forEach((row) => {
+          row.addEventListener('click', () => {
+            state[id].activeIdx = Number(row.dataset.sidx);
+            syncConcept(id);
+          });
+        });
+      }
+
+      function bindProjectPickers(container) {
+        container.querySelectorAll('[data-pick-proj]').forEach((el) => {
+          el.addEventListener('click', () => {
+            const [cid, pid] = el.dataset.pickProj.split(':');
+            const id = Number(cid);
+            state[id].projId = pid;
+            state[id].activeIdx = 0;
+            if (el.dataset.closePopover) {
+              const pop = document.getElementById(el.dataset.closePopover);
+              if (pop) pop.classList.remove('open');
+            }
+            if (el.dataset.c2Enter) {
+              document.getElementById('c2-folders').style.display = 'none';
+              document.getElementById('c2-inside').style.display = 'flex';
+            }
+            syncConcept(id);
+          });
+        });
+      }
+
+      // Initialize all 10 concepts
+      for (let i = 1; i <= 10; i++) syncConcept(i);
+
+      // Concept 2 back to All Projects
+      const c2Back = document.getElementById('c2-back-btn');
+      if (c2Back) {
+        c2Back.addEventListener('click', () => {
+          document.getElementById('c2-inside').style.display = 'none';
+          document.getElementById('c2-folders').style.display = 'flex';
+        });
+      }
+
+      // Concept 3 Rail project buttons & tool buttons
+      document.querySelectorAll('[data-c3-proj]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('#grid [data-concept="3"] .rail-btn').forEach((b) => b.classList.remove('active'));
+          btn.classList.add('active');
+          document.getElementById('c3-sessions-pane').style.display = 'flex';
+          document.getElementById('c3-bots-pane').style.display = 'none';
+          document.getElementById('c3-tools-pane').style.display = 'none';
+          state[3].projId = btn.dataset.c3Proj;
+          state[3].activeIdx = 0;
+          syncConcept(3);
+        });
+      });
+
+      document.querySelectorAll('[data-c3-pane]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('#grid [data-concept="3"] .rail-btn').forEach((b) => b.classList.remove('active'));
+          btn.classList.add('active');
+          document.getElementById('c3-sessions-pane').style.display = 'none';
+          document.getElementById('c3-bots-pane').style.display = btn.dataset.c3Pane === 'bots' ? 'flex' : 'none';
+          document.getElementById('c3-tools-pane').style.display = btn.dataset.c3Pane === 'tools' ? 'flex' : 'none';
+        });
+      });
+
+      // Live search inputs
+      document.querySelectorAll('[data-search-for]').forEach((input) => {
+        input.addEventListener('input', () => {
+          const id = Number(input.dataset.searchFor);
+          state[id].query = input.value;
+          syncConcept(id);
+        });
+      });
+
+      // Popover / Accordion toggles
+      document.querySelectorAll('[data-toggle-target]').forEach((trigger) => {
+        trigger.addEventListener('click', () => {
+          const target = document.getElementById(trigger.dataset.toggleTarget);
+          if (target) target.classList.toggle('open');
+        });
+      });
+
+      // Concept 8 Bot Strip
+      document.querySelectorAll('[data-bot-strip="8"] .bot-pill').forEach((pill) => {
+        pill.addEventListener('click', () => {
+          document.querySelectorAll('[data-bot-strip="8"] .bot-pill').forEach((p) => p.classList.remove('active'));
+          pill.classList.add('active');
+        });
+      });
+
+      // Top bar controls (theme, view, category filter, choose)
+      document.querySelectorAll('[data-theme-btn]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('[data-theme-btn]').forEach((b) => b.classList.remove('active'));
+          btn.classList.add('active');
+          document.documentElement.setAttribute('data-theme', btn.dataset.themeBtn);
+        });
+      });
+
+      const grid = document.getElementById('grid');
+      document.querySelectorAll('[data-view]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('[data-view]').forEach((b) => b.classList.remove('active'));
+          btn.classList.add('active');
+          grid.classList.toggle('focus-mode', btn.dataset.view === 'focus');
+        });
+      });
+
+      document.querySelectorAll('[data-filter]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('[data-filter]').forEach((b) => b.classList.remove('active'));
+          btn.classList.add('active');
+          const f = btn.dataset.filter;
+          document.querySelectorAll('.concept-card').forEach((card) => {
+            card.classList.toggle('hidden-card', f !== 'all' && card.dataset.cat !== f);
+          });
+        });
+      });
+
+      const chosenBanner = document.getElementById('chosenBanner');
+      const chosenText = document.getElementById('chosenText');
+      document.querySelectorAll('[data-pick]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.pick;
+          document.querySelectorAll('.concept-card').forEach((card) => {
+            const isMatch = card.dataset.id === String(id);
+            card.classList.toggle('selected', isMatch);
+            const b = card.querySelector('.pick-btn');
+            if (b) b.textContent = isMatch ? '✓ Chosen #' + id : 'Choose #' + card.dataset.id;
+          });
+          const card = document.querySelector(`.concept-card[data-id="${id}"]`);
+          chosenText.textContent = 'Chosen: Concept #' + id + ' — ' + card.querySelector('.concept-title').textContent;
+          chosenBanner.classList.add('show');
+        });
+      });
+
+      document.getElementById('clearChoice').addEventListener('click', () => {
+        document.querySelectorAll('.concept-card').forEach((card) => {
+          card.classList.remove('selected');
+          const b = card.querySelector('.pick-btn');
+          if (b) b.textContent = 'Choose #' + card.dataset.id;
+        });
+        chosenBanner.classList.remove('show');
+      });
+    })();
+  </script>
+</body>
+</html>

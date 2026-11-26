@@ -44,11 +44,11 @@ import {
 } from '../lib/sidebarKeyboard'
 import { C, useStyles } from '../lib/theme'
 import { useReduceMotion } from './useReduceMotion'
-import { IdentitySwitch } from './IdentitySwitch'
-import { ProjectList } from './ProjectList'
+import { Identity } from '../lib/workspace'
+import { ProjectDialogs, type ProjectDialogRequest } from './ProjectList'
 import { BotsRoster } from './BotsRoster'
 import { tr, localeAtom, useDir } from '../lib/strings'
-import type { Identity, ProjectRow } from '../lib/workspace'
+import type { ProjectRow } from '../lib/workspace'
 import type { FleetProfile } from '../lib/fleet'
 
 // ── OpenCode sessions drawer list (OPENCODE-MODE contract) ──────────────────
@@ -276,10 +276,24 @@ const SNAP_MS = 180
 export const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
 
 /**
- * The mockup's drawer is 292dp wide (`design.html .drawer-panel`), capped so
- * it never looks empty on a tablet.
+ * Compact 1-2 character monogram for a project's rail badge (Concept #3).
+ * Multi-word names take initials ("Moch App" → "MA"); single words take the
+ * first two characters ("Recipe" → "RE").
  */
-export const drawerPanelWidth = (windowWidth: number) => Math.min(windowWidth * 0.84, 292)
+function projectMonogram(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return 'P'
+  if (parts.length >= 2) {
+    return `${Array.from(parts[0])[0] ?? ''}${Array.from(parts[1])[0] ?? ''}`.toUpperCase()
+  }
+  return Array.from(parts[0]).slice(0, 2).join('').toUpperCase()
+}
+
+/**
+ * Concept #3 drawer width: 56dp project rail + focused right pane, capped at
+ * 304dp so it leaves the conversation peeking cleanly on phones and tablets.
+ */
+export const drawerPanelWidth = (windowWidth: number) => Math.min(windowWidth * 0.86, 304)
 
 /** SectionList keyExtractor hoisted to module scope for identity stability. */
 const chatKey = (c: RecentChat) => c.id
@@ -375,8 +389,8 @@ export function Sidebar({
   onProject,
   onNewProject,
   onProjectMenu,
-  projectChats,
-  onProjectChatsMore,
+  projectChats: _projectChats,
+  onProjectChatsMore: _onProjectChatsMore,
   profiles,
   onOpenBot,
   onNewBot,
@@ -489,42 +503,46 @@ export function Sidebar({
   // exported helper so both map finger pixels to the same 0→1 progress.
   const panelWidth = drawerPanelWidth(width)
   const [query, setQuery] = useState('')
-  // The mockup has no always-on search field: a compact affordance in the
-  // drawer header expands the real search input (same query state/behaviour;
-  // top-anchored-search avoidance below keeps results above the keyboard).
-  const [searchOpen, setSearchOpen] = useState(false)
-  // The drawer's search filters OpenCode sessions by title too (declared here
-  // because it reads `query`).
+  // Concept #3 right-pane mode: 'sessions' (default — scoped to the active
+  // project on the rail), 'bots' (Hermes mode only), or 'tools' (Workspace).
+  const [pane, setPane] = useState<'sessions' | 'bots' | 'tools'>(() =>
+    !ocMode && identity === 'bots' ? 'bots' : 'sessions',
+  )
+  const [projectDialogReq, setProjectDialogReq] = useState<ProjectDialogRequest>(null)
+  const projectDialogSeq = useRef(0)
+  const nextProjectSeq = useCallback(() => {
+    projectDialogSeq.current += 1
+    return projectDialogSeq.current
+  }, [])
+  useEffect(() => {
+    if (ocMode && pane === 'bots') setPane('sessions')
+  }, [ocMode, pane])
+  useEffect(() => {
+    if (!open) setProjectDialogReq(null)
+  }, [open])
+
+  const namedProjects = useMemo(
+    () => projects.filter((p) => !p.isNoProject),
+    [projects],
+  )
+  const activeProject = useMemo(
+    () => (activeProjectId == null ? null : namedProjects.find((p) => p.id === activeProjectId) ?? null),
+    [activeProjectId, namedProjects],
+  )
+
+  // OpenCode sessions filtered to the active project (Concept #3: choosing a
+  // project shows ONLY that project's sessions; Personal shows unassigned ones).
   const ocFiltered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return ocSessions
-    return ocSessions.filter((c) => (c.title ?? '').toLowerCase().includes(q))
-  }, [ocSessions, query])
-  // BUG-149: bucket the oc rows under their project via each row's
-  // `directory` (mints carry the selected project's cwd). Same labeled-group
-  // shape as the hermes list's section headers; rows without a directory
-  // (pre-BUG-149 sessions) or whose folder matches no project stay in the
-  // flat tail, ungrouped. The list is still NOT project-filtered — selecting
-  // a project changes where NEW sessions are created, not what is listed.
-  const ocGroups = useMemo(() => {
     const projRows = projects.map((p) => ({ id: p.id, path: p.primaryPath, isNoProject: p.isNoProject }))
-    const byProject = new Map<string, OcSession[]>()
-    const flat: OcSession[] = []
-    for (const c of ocFiltered) {
+    const q = query.trim().toLowerCase()
+    return ocSessions.filter((c) => {
       const pid = projectIdForCwd(projRows, c.directory)
-      if (!pid) {
-        flat.push(c)
-        continue
-      }
-      const arr = byProject.get(pid)
-      if (arr) arr.push(c)
-      else byProject.set(pid, [c])
-    }
-    const groups = projects
-      .filter((p) => !p.isNoProject && byProject.has(p.id))
-      .map((p) => ({ id: p.id, name: p.name, rows: byProject.get(p.id) ?? [] }))
-    return { groups, flat }
-  }, [ocFiltered, projects])
+      const inProj = activeProject ? pid === activeProject.id : !pid
+      if (!inProj) return false
+      if (!q) return true
+      return (c.title ?? '').toLowerCase().includes(q)
+    })
+  }, [ocSessions, projects, activeProject, query])
   const [archOpen, setArchOpen] = useState(false)
 
   // Number of named bots, for the mockup's "Bots (n)" segment label.
@@ -605,7 +623,7 @@ export function Sidebar({
   const widthRef = useRef(width)
   widthRef.current = width
   const dialogActiveRef = useRef(false)
-  dialogActiveRef.current = !!(menuFor || renaming || confirming)
+  dialogActiveRef.current = !!(menuFor || renaming || confirming || projectDialogReq)
   const onOpenRef = useRef(onOpen)
   onOpenRef.current = onOpen
   const onCloseRef = useRef(onClose)
@@ -630,14 +648,24 @@ export function Sidebar({
   const moveSeenRef = useRef(false)
   const firstRun = useRef(true)
 
-  // Focus the expanded search field on demand (the tap that opened it is the
-  // user gesture; the top-anchored-search kbPad below keeps results above the
-  // IME — app/AGENTS.md pattern #4).
-  useEffect(() => {
-    if (!searchOpen) return
-    const id = setTimeout(() => searchInputRef.current?.focus(), 60)
-    return () => clearTimeout(id)
-  }, [searchOpen])
+  // Rail & Tools pane helpers (Concept #3)
+  const toolsNav = useMemo(
+    () => shownNav.filter((n) => n.key !== 'chat'),
+    [shownNav],
+  )
+  const toolsBadgeCount = useMemo(
+    () => toolsNav.reduce((sum, n) => sum + (n.badge && n.badge > 0 ? n.badge : 0), 0),
+    [toolsNav],
+  )
+  const toolsHasRunning = useMemo(
+    () => toolsNav.some((n) => (n.mochis ?? 0) > 0),
+    [toolsNav],
+  )
+  const settingsItem = useMemo(
+    () => (shownBottomNav ?? []).find((n) => n.key === 'settings') ?? { key: 'settings', label: tr('sidebar.settings'), icon: 'settings-outline' as const },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shownBottomNav, locale],
+  )
 
   // ── Navigation rows ("Workspace") ────────────────────────────────────────
   // UX pass: the old 2-column tile grid rendered label-ONLY tiles at 32dp —
@@ -714,42 +742,6 @@ export function Sidebar({
     return <View style={s.navList}>{items.map((item) => renderNavRow(item))}</View>
   }
 
-  // Bottom bar: Settings (and any future docked item) as a LABELLED row —
-  // icon + text, full width, hairline above. The old floating centred
-  // icon-only gear (feedback round 2 [2]) read as decoration, not as a
-  // control, and gave the panel's most persistent action the smallest,
-  // least discoverable target in the drawer.
-  const renderBottomBar = (items: NavItem[]) => (
-    <View style={s.bottomBar}>
-      {items.map((item) => {
-        const on = item.key === activeKey
-        return (
-          <Pressable
-            key={item.key}
-            style={({ pressed }) => [
-              s.bottomBarRow,
-              { flexDirection: dir.row },
-              on && s.navRowOn,
-              pressed && s.rowPressed,
-            ]}
-            onPress={() => {
-              onNav(item.key)
-              onClose()
-            }}
-            accessibilityRole="button"
-            accessibilityState={{ selected: on }}
-            accessibilityLabel={item.label}
-          >
-            <Icon name={item.icon} size={19} color={on ? C.accent : C.textDim} />
-            <Txt size={13.5} weight="600" color={on ? C.text : C.textDim} numberOfLines={1}>
-              {item.label}
-            </Txt>
-          </Pressable>
-        )
-      })}
-    </View>
-  )
-
   // Open/close slide. A layout effect on the `open` prop flip, so no extra
   // render sits between the tap/gesture-release and the first animated frame;
   // the tree is already mounted (from the first open on). First run is a no-op:
@@ -763,7 +755,6 @@ export function Sidebar({
     if (open) {
       setDormant(false)
       setQuery('')
-      setSearchOpen(false)
       // Fixed-duration leg, identical to the hamburger-open animation,
       // starting wherever the drag released: one consistent glide the user
       // already knows. (Scaling the duration by remaining distance made the
@@ -782,7 +773,6 @@ export function Sidebar({
     setRenaming(null)
     setConfirming(null)
     setDialogError(null)
-    setSearchOpen(false)
     searchInputRef.current?.blur()
     const a = Animated.timing(anim, { toValue: 0, duration: CLOSE_MS, easing: Easing.in(Easing.cubic), useNativeDriver: true })
     a.start(({ finished }) => {
@@ -801,18 +791,7 @@ export function Sidebar({
     return () => sub.remove()
   }, [open])
 
-  const toggleSearch = () => {
-    if (searchOpen) {
-      searchInputRef.current?.blur()
-      setQuery('')
-      setSearchOpen(false)
-    } else {
-      setSearchOpen(true)
-    }
-  }
-
-  // One oc row — shared by the project groups and the flat tail so both
-  // render the exact same row language (BUG-149 grouping).
+  // One oc row — rendered inside the active project's OpenCode sessions list.
   const renderOcRow = (c: OcSession) => (
     <Pressable
       key={c.id}
@@ -1062,15 +1041,7 @@ export function Sidebar({
   // ── A2-18: stable identities for everything the SectionList re-renders ────
   const handleCloseDrawer = useCallback(() => onCloseRef.current?.(), [])
   const handleOpenChat = useCallback((id: string) => onOpenChatRef.current(id), [])
-  // [12] opening a mini-list chat from an expanded project row: close the
-  // drawer, then swap the screen (same hand-off as the plain chat rows).
-  const openProjectChat = useCallback(
-    (id: string) => {
-      onCloseRef.current?.()
-      onOpenChatRef.current(id)
-    },
-    [],
-  )
+  const activeProjectName = activeProject?.name ?? tr('sidebar.personal')
 
   const renderItem = useCallback(
     ({ item: c }: { item: RecentChat }) => (
@@ -1122,13 +1093,36 @@ export function Sidebar({
   const listEmpty = useCallback(() => {
     // `locale` keeps the empty-state copy in the deps (tr() reads the atom).
     void locale
-    if (!searching) return null
+    if (searching) {
+      return (
+        <Txt size={13} color={C.textFaint} style={s.noMatch}>
+          {tr('sidebar.noMatch', { query: query.trim() })}
+        </Txt>
+      )
+    }
     return (
-      <Txt size={13} color={C.textFaint} style={s.noMatch}>
-        {tr('sidebar.noMatch', { query: query.trim() })}
-      </Txt>
+      <View style={s.emptyProj}>
+        <MochiMark size={38} mood="sleepy" />
+        <Txt size={13} color={C.textFaint} center style={s.emptyProjText}>
+          {tr('chrome.drawer.noProjectChats', { name: activeProjectName })}
+        </Txt>
+        <Pressable
+          style={({ pressed }) => [s.emptyNewBtn, { flexDirection: dir.row }, pressed && s.newChatBtnPressed]}
+          onPress={() => {
+            onNewChat()
+            onClose()
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={tr('sidebar.newChat')}
+        >
+          <Icon name="add" size={16} color={C.onAccent} />
+          <Txt size={12.5} weight="700" color={C.onAccent}>
+            {tr('sidebar.newChat')}
+          </Txt>
+        </Pressable>
+      </View>
     )
-  }, [searching, query, locale, s.noMatch])
+  }, [searching, query, locale, activeProjectName, dir.row, onNewChat, onClose, s.noMatch, s.emptyProj, s.emptyProjText, s.emptyNewBtn, s.newChatBtnPressed])
 
   // A2-22: memoized dialog scales — stable interpolation nodes.
   const menuScale = useMemo(() => menuAnim.interpolate({ inputRange: [0, 1], outputRange: [0.88, 1] }), [menuAnim])
@@ -1192,70 +1186,13 @@ export function Sidebar({
       }
     : { left: 0, borderRightWidth: 1, borderRightColor: C.border }
 
-  const showSearchButton = ocMode || identity === 'sessions'
-  const showChatList = ocMode || identity === 'sessions'
-  const showBots = !ocMode && identity === 'bots'
-  const showFooter = !ocMode && identity === 'sessions' && footer != null
-
-  // The drawer's primary action, promoted out of the Recent Chats heading
-  // (where it was an 11px text link competing with the section label): a
-  // full-width accent button directly under the identity switch, in the
-  // same place on every open. Sessions identity only — Bots mode's primary
-  // action is the roster's "+ New bot", and OpenCode mode mints OC chats
-  // through the same owner callback.
-  const newChatButton = (
-    <Pressable
-      style={({ pressed }) => [s.newChatBtn, { flexDirection: dir.row }, pressed && s.newChatBtnPressed]}
-      onPress={() => {
-        onNewChat()
-        onClose()
-      }}
-      accessibilityRole="button"
-      accessibilityLabel={tr('sidebar.newChat')}
-    >
-      <Icon name="add" size={18} color={C.onAccent} />
-      <Txt size={13.5} weight="700" color={C.onAccent}>
-        {tr('sidebar.newChat')}
-      </Txt>
-    </Pressable>
-  )
-
-  // Section heading for the chat list — a label only now; the action that
-  // used to trail it lives in `newChatButton` above.
-  const chatsHeading = (
-    <View style={[s.chatsHead, { flexDirection: dir.row }]}>
-      <Kicker style={s.chatsKicker}>
-        {ocMode ? tr('chrome.drawer.ocSessions') : tr('chrome.drawer.recentChats')}
-      </Kicker>
-    </View>
-  )
-
-  // Section order (UX pass): Projects BEFORE Workspace. A project scopes
-  // everything below it (the chat list filters on it, new chats land in
-  // it), so the scope picker leads and the global destinations follow —
-  // the old order put the unscoped grid first and made Projects read as
-  // an afterthought between the grid and the chats. Selection state lives
-  // in lib/workspace; "More" hands off to the owner (activates the project
-  // + navigates to the Chats screen, which filters on the active project).
-  const navAndProjects = (
-    <>
-      {newChatButton}
-      <Kicker style={s.firstKicker}>{tr('sidebar.projects')}</Kicker>
-      <ProjectList
-        projects={projects}
-        activeProjectId={activeProjectId}
-        onSelect={onProject}
-        onNewProject={onNewProject}
-        onProjectMenu={onProjectMenu}
-        active={open}
-        projectChats={projectChats}
-        onOpenProjectChat={openProjectChat}
-        onProjectMore={onProjectChatsMore}
-      />
-      <Kicker>{tr('chrome.drawer.workspace')}</Kicker>
-      {renderNavList(shownNav)}
-    </>
-  )
+  const showFooter = !ocMode && pane === 'sessions' && footer != null
+  const railEdge: ViewStyle = dir.rtl
+    ? { borderLeftWidth: 1, borderLeftColor: C.borderSoft }
+    : { borderRightWidth: 1, borderRightColor: C.borderSoft }
+  const activeBarEdge: ViewStyle = dir.rtl
+    ? { right: 0, borderTopLeftRadius: 3, borderBottomLeftRadius: 3 }
+    : { left: 0, borderTopRightRadius: 3, borderBottomRightRadius: 3 }
 
   return (
     // box-none: the overlay itself never blocks the screen underneath — only
@@ -1286,9 +1223,8 @@ export function Sidebar({
           panelEdge,
           {
             width: panelWidth,
-            paddingTop: insets.top + 8,
-            // The body wrapper owns the bottom inset + IME lift (see
-            // drawerBodyKbPad); adding a safe-area pad here would stack.
+            // The rail and body wrappers own top/bottom insets so the rail's
+            // background extends cleanly into the status-bar & nav-bar edges.
             transform: [{ translateX }],
           },
           dormantStyle,
@@ -1298,222 +1234,455 @@ export function Sidebar({
         importantForAccessibility={open ? 'auto' : 'no-hide-descendants'}
         {...panelPan.panHandlers}
       >
-        {/* ── Brand row: MochiMark + Moch + search affordance + close ─────── */}
-        <View style={[s.header, { flexDirection: dir.row }]}>
-          <View style={[s.brandRow, { flexDirection: dir.row }]}>
-            <MochiMark size={26} />
-            <Txt size={15} weight="800">Moch</Txt>
-          </View>
-          <View style={[s.headerActions, { flexDirection: dir.row }]}>
-            {showSearchButton ? (
-              <HeaderButton
-                onPress={toggleSearch}
-                style={s.headerBtn}
-                accessibilityLabel={
-                  searchOpen ? tr('chrome.drawer.searchClose') : tr('chrome.drawer.searchOpen')
-                }
-              >
-                <Icon name="search" size={15} color={searchOpen ? C.accent : C.textDim} />
-              </HeaderButton>
-            ) : null}
-            <HeaderButton
-              onPress={onClose}
-              style={s.headerBtn}
-              accessibilityLabel={tr('sidebar.closeMenu')}
+        {/* ── Concept #3: Project Rail (56dp) + Focused Right Pane ────────── */}
+        <View style={[s.dual, { flexDirection: dir.row }]}>
+          {/* Left Icon Rail: Personal + Projects + New Project at top;
+              Bots, Workspace Tools, Settings pinned at bottom. */}
+          <View
+            style={[
+              s.rail,
+              railEdge,
+              {
+                paddingTop: insets.top + 10,
+                paddingBottom: Math.max(insets.bottom, 10) + 10,
+              },
+            ]}
+          >
+            <Pressable
+              onPress={() => {
+                setPane('sessions')
+                if (!ocMode && identity === 'bots') onIdentity('sessions')
+              }}
+              style={({ pressed }) => [s.railLogoBtn, pressed && s.iconBtnPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Moch"
             >
-              <Icon name="close" size={14} color={C.textDim} />
-            </HeaderButton>
+              <MochiMark size={26} />
+            </Pressable>
+
+            <View style={s.railDivider} />
+
+            <ScrollView
+              style={s.railProjectsScroll}
+              contentContainerStyle={s.railProjectsBody}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {/* Personal / default bucket (activeProjectId === null) */}
+              {(() => {
+                const personalActive = pane === 'sessions' && activeProject == null
+                return (
+                  <View style={s.railItemWrap}>
+                    {personalActive ? (
+                      <View style={[s.railActiveBar, activeBarEdge, { backgroundColor: C.accent }]} />
+                    ) : null}
+                    <Pressable
+                      style={({ pressed }) => [
+                        s.railBadge,
+                        personalActive && { backgroundColor: C.accentSoft, borderColor: C.accent },
+                        pressed && s.rowPressed,
+                      ]}
+                      onPress={() => {
+                        onProject(null)
+                        setPane('sessions')
+                        if (!ocMode && identity === 'bots') onIdentity('sessions')
+                      }}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: personalActive }}
+                      accessibilityLabel={tr('chrome.drawer.switchProject', { name: tr('sidebar.personal') })}
+                    >
+                      <Icon
+                        name="home-outline"
+                        size={18}
+                        color={personalActive ? C.accent : C.textDim}
+                      />
+                    </Pressable>
+                  </View>
+                )
+              })()}
+
+              {/* Named projects */}
+              {namedProjects.map((p) => {
+                const isSelected = pane === 'sessions' && activeProject?.id === p.id
+                const tint = p.color || C.accent
+                return (
+                  <View key={p.id} style={s.railItemWrap}>
+                    {isSelected ? (
+                      <View style={[s.railActiveBar, activeBarEdge, { backgroundColor: tint }]} />
+                    ) : null}
+                    <Pressable
+                      style={({ pressed }) => [
+                        s.railBadge,
+                        isSelected && { backgroundColor: C.accentSoft, borderColor: tint },
+                        pressed && s.rowPressed,
+                      ]}
+                      onPress={() => {
+                        onProject(p.id)
+                        setPane('sessions')
+                        if (!ocMode && identity === 'bots') onIdentity('sessions')
+                      }}
+                      onLongPress={() => {
+                        onProjectMenu?.(p)
+                        setProjectDialogReq({ kind: 'menu', project: p, seq: nextProjectSeq() })
+                      }}
+                      delayLongPress={350}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isSelected }}
+                      accessibilityLabel={tr('chrome.drawer.switchProject', { name: p.name })}
+                      accessibilityHint={tr('sidebar.projectActionsHint')}
+                    >
+                      <Txt
+                        size={12.5}
+                        weight="800"
+                        color={isSelected ? C.text : tint}
+                        numberOfLines={1}
+                        center
+                      >
+                        {projectMonogram(p.name)}
+                      </Txt>
+                      <View style={[s.railColorDot, { backgroundColor: tint }]} />
+                    </Pressable>
+                  </View>
+                )
+              })}
+
+              {/* + New project */}
+              <View style={s.railItemWrap}>
+                <Pressable
+                  style={({ pressed }) => [s.railAddBadge, pressed && s.rowPressed]}
+                  onPress={() => setProjectDialogReq({ kind: 'new', seq: nextProjectSeq() })}
+                  accessibilityRole="button"
+                  accessibilityLabel={tr('sidebar.newProject')}
+                >
+                  <Icon name="add" size={18} color={C.textDim} />
+                </Pressable>
+              </View>
+            </ScrollView>
+
+            <View style={s.railDivider} />
+
+            {/* Bottom utility icons: Bots (Hermes only) + Workspace Tools + Settings */}
+            <View style={s.railBottom}>
+              {!ocMode ? (
+                <Pressable
+                  style={({ pressed }) => [
+                    s.railToolBtn,
+                    pane === 'bots' && s.railToolBtnOn,
+                    pressed && s.rowPressed,
+                  ]}
+                  onPress={() => {
+                    setPane('bots')
+                    onIdentity('bots')
+                  }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: pane === 'bots' }}
+                  accessibilityLabel={tr('chrome.drawer.botsTab')}
+                >
+                  <Icon
+                    name="people-outline"
+                    size={19}
+                    color={pane === 'bots' ? C.accent : C.textDim}
+                  />
+                  {botsN > 0 ? (
+                    <View style={s.railMiniCount}>
+                      <Txt size={8.5} weight="800" color={C.text}>
+                        {botsN > 9 ? '9+' : botsN}
+                      </Txt>
+                    </View>
+                  ) : null}
+                </Pressable>
+              ) : null}
+
+              <Pressable
+                style={({ pressed }) => [
+                  s.railToolBtn,
+                  pane === 'tools' && s.railToolBtnOn,
+                  pressed && s.rowPressed,
+                ]}
+                onPress={() => setPane('tools')}
+                accessibilityRole="button"
+                accessibilityState={{ selected: pane === 'tools' }}
+                accessibilityLabel={tr('chrome.drawer.toolsTab')}
+              >
+                <Icon
+                  name="grid-outline"
+                  size={19}
+                  color={pane === 'tools' ? C.accent : C.textDim}
+                />
+                {toolsBadgeCount > 0 ? (
+                  <View style={[s.railAlertDot, { backgroundColor: C.amber }]} />
+                ) : toolsHasRunning ? (
+                  <View style={[s.railAlertDot, { backgroundColor: C.greenSoft }]} />
+                ) : null}
+              </Pressable>
+
+              <Pressable
+                style={({ pressed }) => [
+                  s.railToolBtn,
+                  activeKey === 'settings' && s.railToolBtnOn,
+                  pressed && s.rowPressed,
+                ]}
+                onPress={() => {
+                  onNav(settingsItem.key)
+                  onClose()
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: activeKey === 'settings' }}
+                accessibilityLabel={settingsItem.label}
+              >
+                <Icon
+                  name={settingsItem.icon}
+                  size={19}
+                  color={activeKey === 'settings' ? C.accent : C.textDim}
+                />
+              </Pressable>
+            </View>
+          </View>
+
+          {/* Right Focused Pane */}
+          <View style={[s.pane, { paddingTop: insets.top + 8 }]}>
+            {/* Pane Header */}
+            <View style={[s.paneHeader, { flexDirection: dir.row }]}>
+              {pane === 'sessions' ? (
+                <>
+                  <View style={[s.paneTitleRow, { flexDirection: dir.row }]}>
+                    <View
+                      style={[
+                        s.paneProjDot,
+                        { backgroundColor: activeProject?.color || C.accent },
+                      ]}
+                    />
+                    <Txt size={15} weight="800" numberOfLines={1} style={s.paneTitleText}>
+                      {activeProjectName}
+                    </Txt>
+                    {activeProject ? (
+                      <HeaderButton
+                        onPress={() => {
+                          onProjectMenu?.(activeProject)
+                          setProjectDialogReq({
+                            kind: 'menu',
+                            project: activeProject,
+                            seq: nextProjectSeq(),
+                          })
+                        }}
+                        style={s.paneHeaderIconBtn}
+                        accessibilityLabel={tr('chrome.drawer.projectOptions', {
+                          name: activeProject.name,
+                        })}
+                      >
+                        <Icon name="ellipsis-horizontal" size={14} color={C.textDim} />
+                      </HeaderButton>
+                    ) : null}
+                  </View>
+                  <View style={[s.headerActions, { flexDirection: dir.row }]}>
+                    <Pressable
+                      style={({ pressed }) => [s.paneNewBtn, pressed && s.newChatBtnPressed]}
+                      onPress={() => {
+                        onNewChat()
+                        onClose()
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={tr('sidebar.newChat')}
+                    >
+                      <Icon name="add" size={17} color={C.onAccent} />
+                    </Pressable>
+                    <HeaderButton
+                      onPress={onClose}
+                      style={s.paneHeaderIconBtn}
+                      accessibilityLabel={tr('sidebar.closeMenu')}
+                    >
+                      <Icon name="close" size={14} color={C.textDim} />
+                    </HeaderButton>
+                  </View>
+                </>
+              ) : (
+                <>
+                  <Txt size={15} weight="800" numberOfLines={1} style={s.paneTitleText}>
+                    {pane === 'bots'
+                      ? botsN > 0
+                        ? tr('chrome.drawer.botsCount', { n: botsN })
+                        : tr('sidebar.bots')
+                      : tr('chrome.drawer.workspace')}
+                  </Txt>
+                  <HeaderButton
+                    onPress={onClose}
+                    style={s.paneHeaderIconBtn}
+                    accessibilityLabel={tr('sidebar.closeMenu')}
+                  >
+                    <Icon name="close" size={14} color={C.textDim} />
+                  </HeaderButton>
+                </>
+              )}
+            </View>
+
+            {/* BUG-133: the pane body owns bottom inset + IME lift. */}
+            <RAnimated.View style={[s.panelBody, drawerBodyKbPad]}>
+              {pane === 'sessions' ? (
+                <>
+                  <View style={[s.searchRow, { flexDirection: dir.row }]}>
+                    <Field
+                      ref={searchInputRef}
+                      value={query}
+                      onChangeText={setQuery}
+                      placeholder={ocMode ? tr('chrome.drawer.searchOc') : tr('sidebar.searchChats')}
+                      autoCorrect={false}
+                      autoCapitalize="none"
+                      editable={open}
+                      returnKeyType="search"
+                      accessibilityLabel={ocMode ? tr('chrome.drawer.searchOc') : tr('sidebar.searchChats')}
+                      onFocus={() => {
+                        searchFocusRef.current = true
+                      }}
+                      onBlur={() => {
+                        searchFocusRef.current = false
+                      }}
+                      wrapStyle={s.searchField}
+                    />
+                    {query ? (
+                      <Pressable
+                        onPress={() => setQuery('')}
+                        hitSlop={8}
+                        style={({ pressed }) => [s.clearBtn, pressed && s.iconBtnPressed]}
+                        accessibilityLabel={tr('sidebar.clearSearch')}
+                      >
+                        <Icon name="close" size={14} color={C.textFaint} />
+                      </Pressable>
+                    ) : null}
+                  </View>
+
+                  {ocMode ? (
+                    <ScrollView
+                      style={{ flex: 1 }}
+                      contentContainerStyle={{ paddingBottom: 8 }}
+                      showsVerticalScrollIndicator={false}
+                      keyboardShouldPersistTaps="handled"
+                    >
+                      {ocLoading ? (
+                        <View accessibilityLabel={tr('chrome.drawer.ocLoading')}>
+                          {[0, 1, 2].map((i) => (
+                            <View
+                              key={i}
+                              style={[s.recentRow, { flexDirection: dir.row }, { opacity: 0.55 - i * 0.15 }]}
+                            >
+                              <View style={{ flex: 1, gap: 7 }}>
+                                <View style={{ height: 12, width: `${74 - i * 16}%`, borderRadius: 6, backgroundColor: C.border }} />
+                                <View style={{ height: 9, width: '38%', borderRadius: 5, backgroundColor: C.border, opacity: 0.6 }} />
+                              </View>
+                            </View>
+                          ))}
+                        </View>
+                      ) : ocError ? (
+                        <Txt size={13} color={C.textFaint} style={s.ocStateText}>{ocError}</Txt>
+                      ) : ocFiltered.length ? (
+                        ocFiltered.map(renderOcRow)
+                      ) : searching ? (
+                        <Txt size={13} color={C.textFaint} style={s.noMatch}>
+                          {tr('sidebar.noMatch', { query: query.trim() })}
+                        </Txt>
+                      ) : (
+                        <View style={s.emptyProj}>
+                          <MochiMark size={38} mood="sleepy" />
+                          <Txt size={13} color={C.textFaint} center style={s.emptyProjText}>
+                            {tr('chrome.drawer.noProjectChats', { name: activeProjectName })}
+                          </Txt>
+                          <Pressable
+                            style={({ pressed }) => [s.emptyNewBtn, { flexDirection: dir.row }, pressed && s.newChatBtnPressed]}
+                            onPress={() => {
+                              onNewChat()
+                              onClose()
+                            }}
+                            accessibilityRole="button"
+                            accessibilityLabel={tr('sidebar.newChat')}
+                          >
+                            <Icon name="add" size={16} color={C.onAccent} />
+                            <Txt size={12.5} weight="700" color={C.onAccent}>
+                              {tr('sidebar.newChat')}
+                            </Txt>
+                          </Pressable>
+                        </View>
+                      )}
+                    </ScrollView>
+                  ) : (
+                    <SectionList<RecentChat, Section>
+                      sections={sections}
+                      keyExtractor={chatKey}
+                      style={{ flex: 1 }}
+                      contentContainerStyle={{ paddingBottom: 8 }}
+                      showsVerticalScrollIndicator={false}
+                      keyboardShouldPersistTaps="handled"
+                      windowSize={5}
+                      maxToRenderPerBatch={8}
+                      updateCellsBatchingPeriod={50}
+                      initialNumToRender={12}
+                      renderItem={renderItem}
+                      renderSectionHeader={renderSectionHeader}
+                      renderSectionFooter={renderSectionFooter}
+                      ListEmptyComponent={listEmpty}
+                    />
+                  )}
+
+                  {showFooter ? (
+                    <Pressable
+                      style={({ pressed }) => [
+                        s.pendingCard,
+                        { flexDirection: dir.row },
+                        pressed && s.rowPressed,
+                      ]}
+                      onPress={() => {
+                        onNav('inbox')
+                        onClose()
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={tr('chrome.drawer.pendingView')}
+                    >
+                      <View style={s.pendingBody}>{footer}</View>
+                      <Txt size={11} color={C.amber}>
+                        {tr('chrome.drawer.view')} {dir.rtl ? '←' : '→'}
+                      </Txt>
+                    </Pressable>
+                  ) : null}
+                </>
+              ) : null}
+
+              {pane === 'bots' && !ocMode ? (
+                <View style={s.botsBody}>
+                  <BotsRoster
+                    profiles={profiles ?? []}
+                    onOpenBot={(key) => {
+                      onClose()
+                      onOpenBot?.(key)
+                    }}
+                    onNewBot={() => {
+                      onClose()
+                      onNewBot?.()
+                    }}
+                    onCloseDrawer={onClose}
+                    active={open}
+                  />
+                </View>
+              ) : null}
+
+              {pane === 'tools' ? (
+                <ScrollView
+                  style={{ flex: 1 }}
+                  contentContainerStyle={{ paddingBottom: 8 }}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  {renderNavList(toolsNav)}
+                </ScrollView>
+              ) : null}
+            </RAnimated.View>
           </View>
         </View>
-
-        {/* Compact search affordance expanded from the header (mockup keeps
-            search out of the drawer body; the behaviour is preserved). */}
-        {searchOpen && showSearchButton ? (
-          <View style={[s.searchRow, { flexDirection: dir.row }]}>
-            <Field
-              ref={searchInputRef}
-              value={query}
-              onChangeText={setQuery}
-              placeholder={ocMode ? tr('chrome.drawer.searchOc') : tr('sidebar.searchChats')}
-              autoCorrect={false}
-              autoCapitalize="none"
-              editable={open}
-              returnKeyType="search"
-              accessibilityLabel={ocMode ? tr('chrome.drawer.searchOc') : tr('sidebar.searchChats')}
-              onFocus={() => {
-                searchFocusRef.current = true
-              }}
-              onBlur={() => {
-                searchFocusRef.current = false
-              }}
-              wrapStyle={s.searchField}
-            />
-            {query ? (
-              <Pressable
-                onPress={() => setQuery('')}
-                hitSlop={8}
-                style={({ pressed }) => [s.clearBtn, pressed && s.iconBtnPressed]}
-                accessibilityLabel={tr('sidebar.clearSearch')}
-              >
-                <Icon name="close" size={14} color={C.textFaint} />
-              </Pressable>
-            ) : null}
-          </View>
-        ) : null}
-
-        {/* Identity (Sessions | Bots) — the drawer's top-level switch. OpenCode
-            mode has no Bots surface: [14] the Bots half is not rendered at all
-            (an inert segment reads as broken), only the Sessions label stays. */}
-        <IdentitySwitch
-          identity={ocMode ? 'sessions' : identity}
-          onChange={ocMode ? () => {} : onIdentity}
-          botsCount={botsN}
-          hideBots={ocMode}
-        />
-
-        {/* BUG-133: the body wrapper (scrollable results + amber footer +
-            bottom bar) is the SINGLE keyboard-avoidance/bottom-inset owner.
-            RNKC's height is negative while the IME is up, so the pad keeps
-            the panel's resting gutter at 0 and follows the keyboard when
-            open: the footer and bottom nav rise with the results instead of
-            leaving a dead band behind the keys. Header/search/identity stay
-            top-anchored, and the panel itself adds no bottom inset. */}
-        <RAnimated.View style={[s.panelBody, drawerBodyKbPad]}>
-          {showChatList ? (
-            ocMode ? (
-              // OpenCode sessions: rows come from the OpenCode server, keyed
-              // by oc id. Tapping opens a fresh chat window bound to that
-              // session and hydrates its transcript. Deliberately NOT
-              // project-filtered — but BUG-149 GROUPS them: rows whose
-              // `directory` lands inside a project folder render under that
-              // project's name (same section shape as the hermes list);
-              // everything else stays flat below.
-              <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
-                {navAndProjects}
-                {chatsHeading}
-                {ocLoading ? (
-                  // Skeleton rows while the agent boots (or the list loads):
-                  // placeholder bars in the row rhythm — no spinner, no error
-                  // copy that reads like a failure before anything failed.
-                  <View accessibilityLabel={tr('chrome.drawer.ocLoading')}>
-                    {[0, 1, 2].map((i) => (
-                      <View
-                        key={i}
-                        style={[s.recentRow, { flexDirection: dir.row }, { opacity: 0.55 - i * 0.15 }]}
-                      >
-                        <View style={{ flex: 1, gap: 7 }}>
-                          <View style={{ height: 12, width: `${74 - i * 16}%`, borderRadius: 6, backgroundColor: C.border }} />
-                          <View style={{ height: 9, width: '38%', borderRadius: 5, backgroundColor: C.border, opacity: 0.6 }} />
-                        </View>
-                      </View>
-                    ))}
-                  </View>
-                ) : ocError ? (
-                  <Txt size={13} color={C.textFaint} style={s.ocStateText}>{ocError}</Txt>
-                ) : ocFiltered.length ? (
-                  <>
-                    {ocGroups.groups.map((g) => (
-                      <View key={g.id}>
-                        <View style={[s.sectionLabelRow, { flexDirection: dir.row }]}>
-                          <Kicker style={s.sectionKicker}>{g.name}</Kicker>
-                        </View>
-                        {g.rows.map(renderOcRow)}
-                      </View>
-                    ))}
-                    {ocGroups.flat.length ? (
-                      <View>
-                        {ocGroups.groups.length ? (
-                          <View style={[s.sectionLabelRow, { flexDirection: dir.row }]}>
-                            <Kicker style={s.sectionKicker}>{tr('oc.otherSessions')}</Kicker>
-                          </View>
-                        ) : null}
-                        {ocGroups.flat.map(renderOcRow)}
-                      </View>
-                    ) : null}
-                  </>
-                ) : (
-                  <Txt size={13} color={C.textFaint} style={s.ocStateText}>
-                    {tr('chrome.drawer.ocEmpty')}
-                  </Txt>
-                )}
-                <View style={{ height: 12 }} />
-              </ScrollView>
-            ) : (
-              <SectionList<RecentChat, Section>
-                sections={sections}
-                keyExtractor={chatKey}
-                style={{ flex: 1 }}
-                contentContainerStyle={{ paddingBottom: 8 }}
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
-                // A2-17: a drawer doesn't need ~20 viewports of pre-render —
-                // 44dp rows make windowSize=5 plenty.
-                windowSize={5}
-                maxToRenderPerBatch={8}
-                updateCellsBatchingPeriod={50}
-                initialNumToRender={12}
-                renderItem={renderItem}
-                renderSectionHeader={renderSectionHeader}
-                renderSectionFooter={renderSectionFooter}
-                ListHeaderComponent={
-                  <>
-                    {navAndProjects}
-                    {chatsHeading}
-                  </>
-                }
-                ListEmptyComponent={listEmpty}
-              />
-            )
-          ) : null}
-
-          {showBots ? (
-            <View style={s.botsBody}>
-              <BotsRoster
-                profiles={profiles ?? []}
-                onOpenBot={(key) => {
-                  onClose()
-                  onOpenBot?.(key)
-                }}
-                onNewBot={() => {
-                  onClose()
-                  onNewBot?.()
-                }}
-                onCloseDrawer={onClose}
-                active={open}
-              />
-            </View>
-          ) : null}
-
-          {/* The pending-questions note counts CHATS waiting on you, so it is
-              Sessions-only (mockup: the amber bottom card). Hermes-only:
-              OpenCode questions render in the chat itself. */}
-          {showFooter ? (
-            <Pressable
-              style={({ pressed }) => [
-                s.pendingCard,
-                { flexDirection: dir.row },
-                pressed && s.rowPressed,
-              ]}
-              onPress={() => {
-                onNav('inbox')
-                onClose()
-              }}
-              accessibilityRole="button"
-              accessibilityLabel={tr('chrome.drawer.pendingView')}
-            >
-              <View style={s.pendingBody}>{footer}</View>
-              <Txt size={11} color={C.amber}>
-                {tr('chrome.drawer.view')} {dir.rtl ? '←' : '→'}
-              </Txt>
-            </Pressable>
-          ) : null}
-
-          {/* Bottom bar (Settings), pinned at the panel's bottom edge and
-              reachable from every drawer mode — Sessions, Bots and OpenCode
-              alike. Labelled, full-width, ≥48dp (see renderBottomBar). */}
-          {shownBottomNav?.length ? renderBottomBar(shownBottomNav) : null}
-        </RAnimated.View>
       </Animated.View>
+
+      <ProjectDialogs
+        request={projectDialogReq}
+        onSelect={onProject}
+        onNewProject={onNewProject}
+        active={open}
+      />
 
       {/* ── Per-chat popover, anchored where the row was pressed ──────────── */}
       {shownMenu ? (
@@ -1844,37 +2013,182 @@ const makeS = () => StyleSheet.create({
     top: 0,
     bottom: 0,
     backgroundColor: C.bgCard,
-    paddingHorizontal: 12,
+    overflow: 'hidden',
     shadowColor: '#000',
     shadowOpacity: 0.45,
     shadowRadius: 40,
     shadowOffset: { width: 12, height: 0 },
     elevation: 16,
   },
-  header: {
+  // Concept #3: 56dp project icon rail + focused right pane
+  dual: { flex: 1 },
+  rail: {
+    width: 56,
+    backgroundColor: C.bgElev,
+    alignItems: 'center',
+  },
+  railLogoBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  railDivider: {
+    width: 24,
+    height: 1,
+    backgroundColor: C.borderSoft,
+    marginVertical: 8,
+  },
+  railProjectsScroll: { flex: 1, width: '100%' },
+  railProjectsBody: {
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 2,
+  },
+  railItemWrap: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  railActiveBar: {
+    position: 'absolute',
+    width: 3,
+    height: 20,
+  },
+  railBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: C.bgCard,
+    borderWidth: 1.5,
+    borderColor: C.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  railColorDot: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+  },
+  railAddBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: C.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  railBottom: {
+    alignItems: 'center',
+    gap: 6,
+  },
+  railToolBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  railToolBtnOn: {
+    backgroundColor: C.accentSoft,
+  },
+  railAlertDot: {
+    position: 'absolute',
+    top: 7,
+    right: 7,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: C.bgElev,
+  },
+  railMiniCount: {
+    position: 'absolute',
+    top: 3,
+    right: 3,
+    minWidth: 14,
+    height: 14,
+    paddingHorizontal: 3,
+    borderRadius: 7,
+    backgroundColor: C.bgCard,
+    borderWidth: 1,
+    borderColor: C.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pane: {
+    flex: 1,
+    minWidth: 0,
+    paddingHorizontal: 10,
+  },
+  paneHeader: {
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
-    marginBottom: 10,
+    gap: 6,
+    minHeight: 40,
+    marginBottom: 8,
   },
-  brandRow: { alignItems: 'center', gap: 8, flexShrink: 0 },
+  paneTitleRow: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+    gap: 7,
+  },
+  paneProjDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    flexShrink: 0,
+  },
+  paneTitleText: {
+    flexShrink: 1,
+  },
+  paneHeaderIconBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+  },
+  paneNewBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    backgroundColor: C.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   headerActions: { alignItems: 'center', gap: 4 },
-  headerBtn: { width: 26, height: 26, borderRadius: 8 },
-  searchRow: { alignItems: 'center', gap: 6, marginBottom: 10 },
+  searchRow: { alignItems: 'center', gap: 6, marginBottom: 8 },
   searchField: { flex: 1 },
   clearBtn: { width: 26, height: 26, alignItems: 'center', justifyContent: 'center' },
   iconBtnPressed: { opacity: 0.5 },
-  // Primary action: full-width accent button under the identity switch.
-  newChatBtn: {
+  newChatBtnPressed: { opacity: 0.85 },
+  emptyProj: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 36,
+    paddingHorizontal: 16,
+    gap: 10,
+  },
+  emptyProjText: { lineHeight: 18 },
+  emptyNewBtn: {
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    minHeight: 48,
-    borderRadius: 12,
+    paddingHorizontal: 14,
+    minHeight: 38,
+    borderRadius: 11,
     backgroundColor: C.accent,
-    marginBottom: 12,
+    marginTop: 4,
   },
-  newChatBtnPressed: { opacity: 0.85 },
   // "Workspace" destination rows: one column, icon + label, ≥48dp targets.
   navList: { gap: 2, marginBottom: 10 },
   navRow: {

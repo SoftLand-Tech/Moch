@@ -293,7 +293,11 @@ export function resetSessionList() {
  * (the old sortSessions re-sort by creation time buried actively-used old
  * chats under newer-but-idle ones).
  */
-export function upsertOptimisticRow(storedId: string, title: string) {
+export function upsertOptimisticRow(
+  storedId: string,
+  title: string,
+  scope?: { project_id?: string; cwd?: string },
+) {
   if (!storedId) return
   const rows = sessionRows.get()
   const existing = rows.find((r) => r.id === storedId)
@@ -308,7 +312,7 @@ export function upsertOptimisticRow(storedId: string, title: string) {
   // the next poll. The honest "— msgs" renders instead; the server row
   // replaces this one on the next session.list fetch (≤60s) — no bump
   // machinery, the poll self-heals it.
-  sessionRows.set([optimisticSessionRow(storedId, title, Date.now() / 1000), ...rows])
+  sessionRows.set([optimisticSessionRow(storedId, title, Date.now() / 1000, scope), ...rows])
 }
 
 /**

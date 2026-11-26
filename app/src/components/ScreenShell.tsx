@@ -323,24 +323,16 @@ export function ScreenShell({
     // path still cannot render. In Bots identity this list is not rendered
     // at all (the roster is), so server rows contribute nothing either way.
 
-    // UI-1 project filter: only when a project is selected. Rows that carry
-    // the project id filter on it; rows without one resolve through the
-    // tree's membership map (or the folder map on `cwd`); rows with NO
-    // metadata at all are never hidden — an old row disappearing because the
-    // client couldn't classify it reads as data loss, not as a filter.
-    // A selection that is no longer in the tree (archived on another device)
-    // is not a filter either: it would blank the whole list.
+    // Project-scoped sessions (Concept #3): when a named project is chosen on
+    // the rail, show ONLY sessions belonging to that project; when Personal
+    // (`activeProjectId == null`) is chosen, show ONLY sessions not assigned
+    // to any named project.
     const selected = activeProjectId == null ? null : projects.find((p) => p.id === activeProjectId) ?? null
-    // Reverse index of the tree's membership map: session id → project id.
-    // Built here so the filter below stays O(rows) and re-runs only when the
-    // tree actually changes.
     const ownerIndex = buildSessionOwnerIndex(projectSessionIds)
 
     const inProject = (r: { id?: string; project_id?: string; cwd?: string }) => {
-      if (!selected) return true
       const owner = projectIdForSession(r, ownerIndex)
-      // undefined = nothing classifies the row → never hide it.
-      if (owner === undefined) return true
+      if (!selected) return owner === null || owner === undefined
       return owner === selected.id
     }
 
@@ -389,6 +381,7 @@ export function ScreenShell({
         return true
       })
       .filter((s) => !isServerOnlySession(s.storedId) && !isBotSessionRow({ title: s.title }))
+      .filter((s) => inProject({ id: s.storedId }))
       // In Bots identity the drawer renders the roster, not this list.
       .filter(() => identity !== 'bots')
       .sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0))
