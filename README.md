@@ -74,7 +74,7 @@ Moch is a monorepo: the whole product — phone app, link, and website — ships
 | [`embedded/`](embedded/) | Design docs and milestone reports for the embedded runtime — the technical assessment, guest-exec under targetSdk 36, Moch Linux, knocks, and on-device verification procedures. |
 | [`moch-link/`](moch-link/) | The **moch-link** installer — the one-command link between an existing hermes install and the official relay. [`docs/install.sh`](docs/install.sh) is the published copy served at `moch.softland.tech/install.sh`; keep the two in sync. |
 | [`relay/`](relay/) | The **official relay** — the single-file Node service phones dial into. Run your own with [`relay/README.md`](relay/README.md); ours at `api.moch.softland.tech` is **free while Moch is new**. |
-| [`docs/`](docs/) | The **website source** — live at [moch.softland.tech](https://moch.softland.tech) and mirrored to [GitHub Pages](https://softland-tech.github.io/Relay). The site's `/Moch.apk` is the newest CI beta; CI also publishes every successful APK as a `ci-<sha>` GitHub pre-release. |
+| [`docs/`](docs/) | The **website source** — live at [moch.softland.tech](https://moch.softland.tech), served from the production VPS. The site's `/Moch.apk` is the newest CI beta; CI also publishes every successful APK as a `ci-<sha>` GitHub pre-release. |
 
 ## Features
 
