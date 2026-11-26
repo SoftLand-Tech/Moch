@@ -12,3 +12,15 @@ __pycache__/
 .gradle-home/
 .uv-cache/
 .devtest/
+
+# local build artifacts & scratch
+/Moch-*.apk
+/.cargo-home/
+/.npm-cache/
+/.pin-cache/
+/.distro/
+/.write-probe
+/:memory:*
+/research/
+/brag-output/
+*.bak

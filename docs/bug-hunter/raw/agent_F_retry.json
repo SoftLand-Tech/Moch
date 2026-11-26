@@ -1,0 +1,43 @@
+{
+ "agent": "F_challenger_retry",
+ "subagent_id": "eaf0db95-e743-4b48-980d-d09454e5c651",
+ "status": "completed",
+ "collected_at": "2026-10-12T00:46:00Z",
+ "note": "Retry run launched when the original challenger appeared orphaned; the original later completed too. This retry independently reviewed the 9 findings lacking other verification and reached verdicts consistent with the original challenger, including the same single rejection (BH-000022).",
+ "summary": {
+  "verdicts": {
+   "uphold": 8,
+   "reject": 1
+  },
+  "rejection": "BH-000022 — steerRun double-apply unreachable: server session.redirect returns only 'redirected'|'queued'|'rejected' or an RPC error; the session.steer fallback fires only when the redirect was NOT applied.",
+  "upheld_with_detail": [
+   "C-01/BH-000034: relay tokenHash-only register + offline-twin delete confirmed at moch-relay-server.js:183-203",
+   "C-02/BH-000035: raw token in query on both legs confirmed; relay:9-12 comment factually wrong (phoneEntry reads the raw token)",
+   "C-03/BH-000036: all four hardening gaps confirmed incl. heartbeat only after registration",
+   "C-04/BH-000037: build.gradle:140 release->debug signing fallback confirmed (context: stock RN template default; debug.keystore tracked since the initial commit of this tree)",
+   "C-05/BH-000038: cleartext + warn-only dial confirmed",
+   "B-02/BH-000046: HermesService.kt has no onTimeout; targetSdk 36; START_STICKY cannot beat the 6h/24h dataSync quota",
+   "B-03/BH-000047: one-shot CAS with gateway-before-knocks in one try/catch confirmed; partial mitigation noted — manual re-arm only via HermesBridgeModule.kt:71",
+   "B-11/BH-000055: unguarded systemctl --user at install.sh:412/967/971-972/1091 under set -e confirmed"
+  ]
+ },
+ "full_verdicts_received": true,
+ "verdict_detail": {
+  "BH-000034": "uphold — register validates machine id + tokenHash only; twin-delete branch reached whenever holder socket not OPEN; re-register same id may swap tokenHash entirely (relay:219-220)",
+  "BH-000035": "uphold — phone leg gateway.ts:148-149 builds /api/ws?token=<raw>; tunnel leg install.sh:222-223 sets ?key=raw token; relay:313-318 already accepts X-Hermes-Session-Token headers for REST (header fix has in-repo precedent)",
+  "BH-000036": "uphold — heartbeat created only post-registration (relay:237-246); controlWss handler has no reaper; nuance: /health leaks only counts, payload capped 4096 — hardening debt consistent with severity",
+  "BH-000037": "uphold — ternary at build.gradle:140 hits RELEASE builds; debug.keystore tracked since initial commit 322d80c; context: stock RN template default, inherited not introduced",
+  "BH-000038": "uphold — full dial path traced post-warning: persist -> ensureClient -> connect, no confirmation UI anywhere; cleartext needed for LAN self-hosting supports severity C",
+  "BH-000046": "uphold — no onTimeout in HermesService.kt; targetSdk 36; nuance: START_STICKY does NOT mitigate (rolling 24h quota blocks same-window restarts)",
+  "BH-000047": "uphold — CAS one-shot; gateway start precedes cron_knocks in one try; only external re-arm is HermesBridgeModule.kt:71 restartApp (user-driven)",
+  "BH-000051": "uphold — set -euo pipefail at :11; unguarded daemon-reload at :412,967,1091 (adjacent enable/restart have || true); no systemctl probe in preflight",
+  "BH-000022": "reject — exhaustive server response surface: 'queued' (applied), 'redirected' (applied), 'rejected' (NOT applied — interrupt_control.py:255-297 returns False only on no-op paths), or RPC errors; every fall-through path is one where the redirect did not take effect"
+ },
+ "notes_full": [
+  "BH-000035: relay:9-12 comment demonstrably false; in-repo header precedent exists for the fix",
+  "BH-000037: stock RN template ternary — fix as 'fail release build when keystore.properties missing'",
+  "BH-000046: START_STICKY cannot beat the rolling 24h dataSync quota",
+  "BH-000022: optional cosmetic — client could treat 'rejected' explicitly; no correctness bug",
+  "All work read-only; no files modified, no network, no servers"
+ ]
+}

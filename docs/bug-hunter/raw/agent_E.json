@@ -1,0 +1,115 @@
+{
+ "agent": "E_github_history",
+ "status": "completed",
+ "collected_at": "2026-10-12T00:27:00Z",
+ "result": {
+  "api_access": {
+   "ok": true,
+   "limitations": "gh authenticated (MamounHisham1, repo scope). All calls read-only. Issue total confirmed via gh api /repos/SoftLand-Tech/Moch/issues?state=all&per_page=1 (HTTP 200; search/issues total_count=0). No pagination limits hit; PR list retrieved in full (limit 200, got 61)."
+  },
+  "repo": {
+   "description": "Moch — your AI agent at home, in your pocket. React Native app + self-hosted backend in one repo.",
+   "stars": 2,
+   "default_branch": "main",
+   "created_at": "2026-09-30T12:04:34Z",
+   "pushed_at": "2026-10-12T00:11:52Z"
+  },
+  "counts": {
+   "issues_retrieved": 0,
+   "issues_total_reported_by_api": 0,
+   "prs_retrieved": 61,
+   "bug_flavored_issues": 0
+  },
+  "releases": [
+   {
+    "tag": "v1.0.0",
+    "name": "Moch v1.0.0",
+    "published_at": "2026-09-30T13:04:18Z",
+    "is_latest": true
+   }
+  ],
+  "issues": [],
+  "prs_summary": "61 PRs total: 60 merged, 1 open (PR #61, head feat/browser-always-available = current checkout branch). GitHub hosts ZERO issues — all bug tracking lives in the local bugs.md (133 BUG-xxx) and PR titles/bodies carry the BUG-xxx references. Representative PR↔BUG map (from titles/bodies): #1→BUG-001/007, #2→BUG-002/003/008/019, #3→BUG-082, #4→BUG-083/084, #5→BUG-085/023, #6→BUG-004/006, #7→BUG-005, #8→BUG-010/012, #9→BUG-011, #10→BUG-013, #11→BUG-014/015, #12→BUG-016/017, #13→BUG-018, #14→BUG-020/021/022/024/028, #15→BUG-025, #16→BUG-026, #17→BUG-027/037/038, #18→BUG-029/030/033/034, #19→BUG-009, #20→BUG-031, #21→BUG-050/051, #22→BUG-035, #23→BUG-041/042/043, #24→BUG-040/045, #25→BUG-046/047/048/052/055, #26→BUG-032, #27→BUG-044/056/057, #28→BUG-054/049/053, #29→BUG-062/063, #30→BUG-058/059/075/077/078, #31→BUG-060/061/064/067/073, #32→BUG-068/070/071/072, #33→BUG-087/088, #34→BUG-065/080/049, #35→BUG-081, #36→BUG-049/069, #43→terminal PTY typing, #46→BUG-090..093 (+waves BUG-094..100 per body), #48→BUG-101, #49→BUG-102, #50→BUG-103, #53→BUG-104, #55/60→M9 fleet, #56→browser relay IPv4/gate, #57→bots fixes, #58→runtime/Linux/fts5, #59→tracker wave 9, #61→BUG-132 (OPEN).",
+  "prs": [
+   {
+    "number": 46,
+    "title": "fix(terminal): caret indicator, IME re-raise on tap, backspace after Enter, keyboard lift (BUG-090..093)",
+    "url": "https://github.com/SoftLand-Tech/Moch/pull/46",
+    "state": "MERGED",
+    "merged": true,
+    "merged_at": "2026-10-09T23:11:32Z",
+    "head": "fix/terminal-input-ux",
+    "summary": "Three-wave terminal overhaul. Wave1 BUG-090..093 (caret, blur+rAF IME re-raise, empty-field DEL backspace, reanimated keyboard pad). Wave2 BUG-094..096 (whole-scrollback re-render starvation -> 12k tail window, U+200B sentinel composer field, gated scroll). Wave3 BUG-097..099 (stripAnsi drops x08 -> display/PTY divergence; replaced with xterm.js 5.5.0 offline android_asset page)."
+   },
+   {
+    "number": 61,
+    "title": "feat(browser): always-available browser tools — the agent boots the relay itself",
+    "url": "https://github.com/SoftLand-Tech/Moch/pull/61",
+    "state": "OPEN",
+    "merged": false,
+    "head": "feat/browser-always-available",
+    "summary": "BUG-132 root fix: (1) new AgentBrowserHost.tsx app-owned offscreen agent tab, relay process-scoped; (2) model_tools._tool_defs_cache_key now carries MOCH_BROWSER_RELAY + BROWSER_CDP_URL (pre-arm catalog was replayed browser-less forever); (3) BrowserRelayModule.ensureRunning gate-arm retry until Python runtime up + hermes_boot pid-gated arming re-invoked by gateway_server. 116 py tests OK incl. tests/test_browser_cache_key.py. AUTHOR STATES: end-to-end on-device acceptance is PENDING (USB dropped mid-test)."
+   }
+  ],
+  "history_notes": [
+   "git log at HEAD 3191fe1: BUG-132 has 6 commits (e16c995 feat, 0155696 native arm-retry, 122d6bf widen gate window 120x1s, 5577d7b round32, 1290c9f 'close all four verified BUG-132 gaps', eaba8be/3191fe1 rounds 33-34 docs). Round 33/34 reframe: tools absent from the callable kit itself; extended toolset wholly absent, browser is a casualty not the cause.",
+   "Merge chain: #60 (m9/integration) merged into main before BUG-132 work branched; HEAD branch feat/browser-always-available is PR #61's head — i.e. the BUG-132 fix is NOT yet on main (open PR).",
+   "bugs.md check-offs map PR numbers to BUG-xxx extensively."
+  ],
+  "local_verification_at_3191fe1": {
+   "BUG-132": "fix PRESENT in checkout: app/hermes-src/model_tools.py:283-284 includes MOCH_BROWSER_RELAY + BROWSER_CDP_URL in _tool_defs_cache_key (comment cites BUG-132); BrowserRelayModule.kt:68 'gate arm retry' logging present; AgentBrowserHost.tsx exists; tests/test_browser_cache_key.py exists. Caveat: this code is only on the open PR branch (current checkout), not main.",
+   "BUG-090..099 (PR #46)": "tracker marks fixed with on-device video evidence; terminal files present at HEAD. Not independently re-executed — classified fixed per tracker + merged PR."
+  },
+  "findings": [
+   {
+    "temp_key": "E-01",
+    "category": "github-issue",
+    "severity": "high",
+    "confidence": "high",
+    "title": "BUG-132 fix exists only on open PR #61 — unmerged, and the PR author's own end-to-end on-device acceptance is still pending",
+    "github_issue": null,
+    "pr": 61,
+    "file": "app/hermes-src/model_tools.py",
+    "line_start": 283,
+    "line_end": 284,
+    "failure_scenario": "If the feat/browser-always-available branch is not merged, main (and any release built from it) still carries the un-keyed _tool_defs_cache_key: a tool catalog computed while the browser relay was down is memoized without TTL and replayed browser-less for the process lifetime — browser_* tools permanently invisible to the agent even after the relay arms. Even on the fix branch, the author notes the fresh-boot acceptance test did not complete (USB dropped).",
+    "evidence": [
+     "app/hermes-src/model_tools.py:283-284 (fix present on branch, comment cites BUG-132)",
+     "app/android/app/src/main/java/com/hermes/pocket/hermes/BrowserRelayModule.kt:68 (gate arm retry)",
+     "app/src/components/AgentBrowserHost.tsx (new, present)",
+     "tests/test_browser_cache_key.py (present)",
+     "PR #61 body: on-device check pending — USB dropped mid-test",
+     "bugs.md:975,1011,1040,1067 BUG-132 rounds 31-34"
+    ],
+    "reproduction_steps": [
+     "On a main-branch build: boot app cold, ask agent in a new chat to open example.com before/without visiting Browser screen",
+     "Observe browser_* tools absent from callable kit (bugs.md round 33: tools absent from kit itself)"
+    ],
+    "related_known_bug": "BUG-132",
+    "suggested_remediation": "Complete the pending E2E acceptance on PR #61 and merge to main; add CI asserting the tool catalog changes after gate activation (wire tests/test_browser_cache_key.py into CI).",
+    "limitations": "Zero GitHub issues exist, so no external reports to reconcile; PR #61 body taken at face value, not independently run on device."
+   },
+   {
+    "temp_key": "E-02",
+    "category": "process",
+    "severity": "info",
+    "confidence": "high",
+    "title": "GitHub issue tracker is empty (0 issues, 0 total per API) — all bug history is PR titles + local bugs.md",
+    "github_issue": null,
+    "file": "bugs.md",
+    "line_start": 1,
+    "line_end": 133,
+    "failure_scenario": "External users cannot report bugs; the 133-entry local tracker is the single source of truth and lives only in-repo.",
+    "evidence": [
+     "gh api search/issues repo:SoftLand-Tech/Moch type:issue -> total_count 0",
+     "gh issue list --state all -> []",
+     "60 merged PRs #1-#60 each name BUG-xxx ranges in titles"
+    ],
+    "reproduction_steps": [],
+    "related_known_bug": null,
+    "suggested_remediation": "Consider mirroring high-severity tracker entries as GitHub issues for external visibility.",
+    "limitations": null
+   }
+  ]
+ }
+}

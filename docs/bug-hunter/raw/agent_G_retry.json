@@ -1,0 +1,225 @@
+{
+ "agent": "G_gap_pass_retry",
+ "subagent_id": "8d55cd88-a2fc-49ce-9bb3-a9a30cca045ce",
+ "status": "completed",
+ "collected_at": "2026-10-12T00:47:00Z",
+ "note": "Full JSON delivered after the summary. Independent second pass over the same scope: 7 findings corroborate/sharpen the original gap-pass; 3 are NEW (R-G-02 WebView renderer recovery, R-G-07 KAV 'height'/core-KAV specifics, R-G-09 browser retry affordance). Two hypotheses self-rejected per the summary (terminal applyFieldChange safeguard; browser.tsx opacity unverifiable).",
+ "coverage": {
+  "files_examined": [
+   "all original scope + MochiSurface.tsx/.native/.web/Common, mochi/useMochiState",
+   "cross-reads: browserRelay.ts, fleet.ts, mochiRuntime.ts, modelState.ts, terminal.ts, pairing.ts"
+  ],
+  "areas_still_not_examined": [
+   "mochiStates.gen.ts (generated, skimmed)",
+   "SessionToasts body (excluded)",
+   "AlertDialog/CommandCatalogSheet/CommandOptionsSheet/CommandOutput/Mascot/VoiceRecStrip/AnimatedSplash/useReduceMotion/media/* (crossed via imports only)"
+  ]
+ },
+ "findings": [
+  {
+   "temp_key": "R-G-01",
+   "category": "lifecycle",
+   "severity": "high",
+   "confidence": "high",
+   "title": "AgentBrowserHost boots the relay exactly once per process — any early failure leaves browser tools hidden for the whole app lifetime",
+   "file": "app/src/components/AgentBrowserHost.tsx",
+   "line_start": 37,
+   "line_end": 48,
+   "detail": "One ensureBrowserRelay() call gated by booted.current; renders null until st.running; .catch(()=>{}) swallows and a running:false resolve (browserRelay.ts:101-117 resolves, not throws) also latches null forever — no retry, no relayStatus subscription, no re-arm. Mounted once at root in both _layout returns (:263,:290) so no remount retry. Reproduces the BUG-132 symptom class from a cold-start race.",
+   "evidence": [
+    "AgentBrowserHost.tsx:38-46 booted ref latches before await",
+    "browserRelay.ts:101-117 failure resolves running:false + lastError",
+    "_layout.tsx:263,290 mounted once"
+   ],
+   "related": [
+    "BUG-132",
+    "BH-000084"
+   ],
+   "kind": "corroborates"
+  },
+  {
+   "temp_key": "R-G-02",
+   "category": "lifecycle",
+   "severity": "medium",
+   "confidence": "medium",
+   "title": "AgentBrowserHost's resident WebView has no onRenderProcessGone/onError recovery — a killed renderer silently kills the agent's browser tab",
+   "file": "app/src/components/AgentBrowserHost.tsx",
+   "line_start": 50,
+   "line_end": 70,
+   "detail": "Android kills background WebView renderers under memory pressure (hazard documented and handled in MochiSurface.native.tsx:29-38 with a foreground probe + reload). The always-on host WebView handles neither onRenderProcessGone nor onError — after renderer death the relay has no live tab while tools stay advertised: every browser verb returns 'No browser page...' until app restart. The Browser screen's visible WebViews DO handle it (browser.tsx:267-269 remount).",
+   "evidence": [
+    "AgentBrowserHost.tsx:50-69 no onRenderProcessGone/onError",
+    "MochiSurface.native.tsx:29-38 documents the hazard + recovery pattern",
+    "browser.tsx:267-269 visible tabs handle it"
+   ],
+   "related": [
+    "BUG-132",
+    "BUG-127"
+   ],
+   "kind": "NEW"
+  },
+  {
+   "temp_key": "R-G-03",
+   "category": "state",
+   "severity": "medium",
+   "confidence": "high",
+   "title": "Fleet create/freeze try/finally with no catch — unhandled rejections with zero UI; create also ignores ok:false",
+   "file": "app/app/(tabs)/fleet.tsx",
+   "line_start": 57,
+   "line_end": 77,
+   "detail": "create()/toggleFreeze() await createProfile()/freezeProfile() with no catch; failures are unhandled rejections, fleetError only set inside refreshFleet. NEW nuance vs BH-000080: create() also ignores createProfile's {ok:boolean} result (fleet.ts:101-117 returns ok:res.ok!==false WITHOUT throwing) — a server-side ok:false (e.g. duplicate profile name) clears the job text and closes the form as if the bot was created.",
+   "evidence": [
+    "fleet.tsx:57-66,70-76 no catch",
+    "fleet.ts:101-117 ok:false does not throw",
+    "fleet.ts:119-122 freezeProfile bare await"
+   ],
+   "related": [
+    "BH-000080"
+   ],
+   "kind": "corroborates+extends"
+  },
+  {
+   "temp_key": "R-G-04",
+   "category": "state",
+   "severity": "medium",
+   "confidence": "high",
+   "title": "Bot detail Save and Delete swallow failures as unhandled rejections",
+   "file": "app/app/bot.tsx",
+   "line_start": 58,
+   "line_end": 115,
+   "detail": "save() try/finally no catch; doDelete() same — rejection propagates out of the void'd handler, router.back() never runs, deleting resets, armed button left with no explanation. connectProvider in the same file (:70-86) DOES alert — the pattern exists in-repo.",
+   "evidence": [
+    "bot.tsx:58-67,97-107 no catch",
+    "bot.tsx:70-86 contrast"
+   ],
+   "related": [
+    "BUG-110",
+    "BH-000081"
+   ],
+   "kind": "corroborates"
+  },
+  {
+   "temp_key": "R-G-05",
+   "category": "state",
+   "severity": "medium",
+   "confidence": "high",
+   "title": "Settings' Linux install/reset ignore results and errors (BUG-016 fix applied to setup.tsx only)",
+   "file": "app/app/(tabs)/settings.tsx",
+   "line_start": 58,
+   "line_end": 81,
+   "detail": "Install discards the {ok,steps} result, no spinner/progress/error; state only updates on the 60s linuxStatus tick. NEW nuance vs BH-000085: 'Reset Linux environment' fires void linuxReset() with no busy state and no result check — a failed reset looks identical to success until the 60s poll. setup.tsx EnvStep (post-BUG-016) handles both modes correctly.",
+   "evidence": [
+    "settings.tsx:62-66 result never inspected",
+    "mochiRuntime.ts:97-100 linuxBootstrap resolves/throws",
+    "settings.tsx:74-79 reset fire-and-forget",
+    "setup.tsx:95-113 the fixed pattern"
+   ],
+   "related": [
+    "BUG-016",
+    "BH-000085"
+   ],
+   "kind": "corroborates+extends"
+  },
+  {
+   "temp_key": "R-G-06",
+   "category": "contract",
+   "severity": "medium",
+   "confidence": "medium",
+   "title": "Reasoning effort / show-thinking sends a provisional ('new:') session id to config.set",
+   "file": "app/app/(tabs)/agent.tsx",
+   "line_start": 89,
+   "line_end": 118,
+   "detail": "refresh() guards provisional reads (line 54, BUG-013) but setAndSave (:94) and toggleReasoning (:113) pass the raw sid — brand-new unsent chat => config.set targets an unknown session => 'Failed to save'/spurious revert. applyReasoning forwards session_id verbatim (modelState.ts:376-391).",
+   "evidence": [
+    "agent.tsx:53-54 guard reads only",
+    "agent.tsx:94,113 no guard",
+    "modelState.ts:376-391 forwards verbatim"
+   ],
+   "related": [
+    "BUG-013",
+    "BH-000088"
+   ],
+   "kind": "corroborates"
+  },
+  {
+   "temp_key": "R-G-07",
+   "category": "ui",
+   "severity": "low",
+   "confidence": "high",
+   "title": "Automations modal uses RNKC KeyboardAvoidingView behavior='height' on Android — the exact pattern AGENTS.md documents as rejected on-device; ModelPickerSheet uses RN-core KAV (Android no-op)",
+   "file": "app/app/(tabs)/automations.tsx",
+   "line_start": 316,
+   "line_end": 316,
+   "detail": "AGENTS.md pattern 2 mandates behavior='padding' full-screen root and explicitly rejects 'height' ('parent-relative frame math — rejected on-device, MIUI undershoot'). automations.tsx:316 uses behavior={ios?'padding':'height'}. Sibling hazard: ModelPickerSheet.tsx:10,192 imports KeyboardAvoidingView from react-native CORE with behavior undefined on Android — a literal no-op, so its key-entry form relies on nothing.",
+   "evidence": [
+    "automations.tsx:316 behavior 'height' on Android",
+    "app/AGENTS.md pattern 2 rejection note",
+    "ModelPickerSheet.tsx:10,192 core KAV, behavior undefined"
+   ],
+   "related": [
+    "BUG-133",
+    "BH-000087"
+   ],
+   "kind": "NEW-specifics"
+  },
+  {
+   "temp_key": "R-G-08",
+   "category": "edge-case",
+   "severity": "low",
+   "confidence": "medium",
+   "title": "Crew leaves RefreshControl refreshing forever while offline",
+   "file": "app/app/(tabs)/crew.tsx",
+   "line_start": 59,
+   "line_end": 76,
+   "detail": "refresh() early-returns 'if (!online) return' BEFORE any state update, so loading stays true forever offline; the FlatList's RefreshControl binds refreshing={loading} — pull-to-refresh spinner runs permanently. Sibling screens clear loading on the offline branch (automations.tsx:74-78).",
+   "evidence": [
+    "crew.tsx:59-62 no setLoading(false) on offline path",
+    "crew.tsx:70-73 refreshing={loading}"
+   ],
+   "related": [
+    "BH-000089"
+   ],
+   "kind": "corroborates+sharpens"
+  },
+  {
+   "temp_key": "R-G-09",
+   "category": "ui",
+   "severity": "low",
+   "confidence": "high",
+   "title": "Browser relay-failure state has no retry — recovery requires leaving and re-entering the screen",
+   "file": "app/app/(tabs)/browser.tsx",
+   "line_start": 66,
+   "line_end": 76,
+   "detail": "Mount runs ensureBrowserRelay once; on failure the 'Browser relay unavailable' branch renders status.lastError with NO retry control, and the status atom only changes on an ensure/stop call — a transient bind failure strands the user on a dead-end error screen. Parallel affordances elsewhere are tappable retry rows (ScreenShell BUG-046, sessions BUG-022).",
+   "evidence": [
+    "browser.tsx:66-76 one-shot mount effect",
+    "browser.tsx:148,158-163 no Pressable in relayBad branch",
+    "browserRelay.ts:101-117 atom only updated by ensure/stop"
+   ],
+   "related": [
+    "BUG-132"
+   ],
+   "kind": "NEW"
+  },
+  {
+   "temp_key": "R-G-10",
+   "category": "ui",
+   "severity": "low",
+   "confidence": "high",
+   "title": "Deep-link pairing-error toast (linkMsg) never dismisses",
+   "file": "app/app/_layout.tsx",
+   "line_start": 55,
+   "line_end": 55,
+   "detail": "setLinkMsg on failure (:158); toast rendered as a plain View in both branches (:267-269,:351-353); grep shows no setLinkMsg(null) anywhere, no timer, not pressable — pinned over the UI until another link or restart. Sibling transient paths use timers (SessionToasts 6.5-9s, automations 4s).",
+   "evidence": [
+    "_layout.tsx:55,158 set only",
+    "_layout.tsx:267-269,351-353 plain View"
+   ],
+   "related": [
+    "BUG-124",
+    "BH-000083"
+   ],
+   "kind": "corroborates"
+  }
+ ]
+}

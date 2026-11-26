@@ -110,6 +110,60 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # Publish every successful main APK as a per-commit pre-release. The tag
+  # is immutable (ci-<short-sha>), so reruns clobber the matching asset
+  # instead of force-moving a rolling tag. The releases page is the public
+  # source of truth for beta APKs; stable releases keep the v* tags.
+  release:
+    name: Publish CI pre-release
+    needs: apk
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: moch-apk
+          path: dist
+
+      - name: Create or update pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          apk=$(find dist -name '*.apk' -print -quit)
+          [ -n "$apk" ] || { echo "No APK artifact found"; exit 1; }
+          version_code=$(grep -m1 'versionCode ' app/android/app/build.gradle | awk '{print $2}')
+          version_name=$(grep -m1 'versionName ' app/android/app/build.gradle | sed -E 's/.*"([^"]+)".*/\1/')
+          sha_short="${GITHUB_SHA::7}"
+          tag="ci-${sha_short}"
+          asset="Moch-build${version_code}-${sha_short}.apk"
+          checksum=$(sha256sum "$apk" | awk '{print $1}')
+          cp "$apk" "dist/$asset"
+          notes=$(cat <<EOF
+          Test build from \`main@${sha_short}\`.
+
+          ## Build
+          - Package: \`com.hermes.pocket\`
+          - versionCode: \`${version_code}\`
+          - versionName: \`${version_name}\`
+          - Signed by Android CI. The workflow uses the stable Moch release key when the signing secrets are configured, so builds install over previous releases.
+          - Commit: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}
+          - Workflow: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          - SHA-256: \`${checksum}\`
+          EOF
+          )
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --title "Moch CI build (${sha_short})" --notes "$notes" --prerelease
+            gh release upload "$tag" "dist/$asset" --clobber
+          else
+            gh release create "$tag" "dist/$asset" --title "Moch CI build (${sha_short})" --notes "$notes" --prerelease --target "$GITHUB_SHA"
+          fi
+
   # OTA (expo-updates): publish the JS bundle to the production channel so
   # installed phones pick it up on next launch — no APK download needed.
   # JS/assets changes only; anything native (gradle/py/manifest) must ship
