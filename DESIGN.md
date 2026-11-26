@@ -3,309 +3,289 @@ name: Moch
 description: "Your agent runs on your phone. Your model is your choice."
 colors:
   accent: "#f79236"
+  accent-hover: "#ffa34f"
   on-accent: "#2e1a08"
   accent-line: "rgba(247, 146, 54, 0.38)"
-  green-soft: "#4ade80"
+  green: "#4ade80"
   green-tint: "rgba(74, 222, 128, 0.12)"
   bg: "#0a0813"
   bg-soft: "#100e1a"
   card: "#151220"
   elevated: "#1a1727"
   text: "#ffffff"
-  text-dim: "#b4b1c4"
-  text-faint: "#86829b"
+  dim: "#b4b1c4"
+  faint: "#86829b"
   cream: "#f6ece1"
-  user-text: "#2b283b"
-  on-cream-muted: "#575267"
-  border: "rgba(248, 239, 229, 0.11)"
-  border-soft: "rgba(248, 239, 229, 0.06)"
-  border-strong: "rgba(248, 239, 229, 0.2)"
+  navy: "#2b283b"
+  muted-ink: "#575267"
+  line: "rgba(248, 239, 229, 0.11)"
+  line-strong: "rgba(248, 239, 229, 0.2)"
 typography:
   display:
     fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
-    fontSize: "clamp(3rem, 5.3vw, 4.5rem)"
+    fontSize: "clamp(34px, 9vw, 48px)"
     fontWeight: 800
-    lineHeight: 1.01
-    letterSpacing: "-0.035em"
+    lineHeight: 1.05
+    letterSpacing: "-0.045em"
   headline:
     fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
-    fontSize: "clamp(2rem, 5.8vw, 3.55rem)"
+    fontSize: "clamp(28px, 7vw, 38px)"
     fontWeight: 800
-    lineHeight: 1.06
-    letterSpacing: "-0.035em"
+    lineHeight: 1.1
+    letterSpacing: "-0.04em"
   title:
     fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
-    fontSize: "clamp(1.3rem, 3vw, 1.65rem)"
-    fontWeight: 750
-    lineHeight: 1.2
-    letterSpacing: "-0.035em"
+    fontSize: "15px"
+    fontWeight: 700
+    lineHeight: 1.3
+    letterSpacing: "-0.01em"
   body:
     fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
-    fontSize: "16px"
+    fontSize: "15px"
     fontWeight: 400
     lineHeight: 1.65
     letterSpacing: "normal"
   label:
     fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
-    fontSize: "0.95rem"
-    fontWeight: 750
+    fontSize: "13.5px"
+    fontWeight: 700
     lineHeight: 1.2
     letterSpacing: "normal"
+  eyebrow:
+    fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+    fontSize: "10.5px"
+    fontWeight: 600
+    lineHeight: 1.2
+    letterSpacing: "0.16em"
   data:
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
-    fontSize: "0.86em"
+    fontSize: "0.92em"
     letterSpacing: "-0.02em"
 rounded:
   pill: "999px"
   circle: "50%"
-  hero: "28px"
-  card: "22px"
-  container: "20px"
-  control: "14px"
-  phone: "32px"
-  phone-screen: "25px"
-  user-bubble: "14px 14px 5px 14px"
-  assistant-bubble: "14px 14px 14px 5px"
+  card: "16px"
+  panel: "18px"
+  feature: "14px"
+  control: "12px"
+  tile: "9px"
+  bubble-user: "12px 12px 4px 12px"
+  bubble-assistant: "12px 12px 12px 4px"
 components:
   button-primary:
     backgroundColor: "{colors.accent}"
     textColor: "{colors.on-accent}"
     typography: "{typography.label}"
     rounded: "{rounded.pill}"
-    padding: "12px 19px"
-    size: "48px"
+    padding: "0 17px"
+    size: "44px"
   button-primary-hover:
-    backgroundColor: "#ffa34f"
+    backgroundColor: "{colors.accent-hover}"
     textColor: "{colors.on-accent}"
     typography: "{typography.label}"
     rounded: "{rounded.pill}"
-    padding: "12px 19px"
-    size: "48px"
-  button-secondary:
-    backgroundColor: "rgba(255, 255, 255, 0.035)"
+    padding: "0 17px"
+    size: "44px"
+  button-ghost:
+    backgroundColor: "transparent"
     textColor: "{colors.text}"
     typography: "{typography.label}"
     rounded: "{rounded.pill}"
-    padding: "12px 19px"
-    size: "48px"
-  button-dark:
-    backgroundColor: "transparent"
-    textColor: "{colors.user-text}"
-    typography: "{typography.label}"
-    rounded: "{rounded.pill}"
-    padding: "12px 19px"
-    size: "48px"
-  button-small:
-    backgroundColor: "{colors.accent}"
-    textColor: "{colors.on-accent}"
-    typography: "{typography.label}"
-    rounded: "{rounded.pill}"
-    padding: "10px 16px"
+    padding: "0 17px"
     size: "44px"
-  card:
+  button-dark:
+    backgroundColor: "{colors.navy}"
+    textColor: "{colors.cream}"
+    typography: "{typography.label}"
+    rounded: "{rounded.pill}"
+    padding: "0 17px"
+    size: "44px"
+  product-card:
     backgroundColor: "{colors.card}"
     textColor: "{colors.text}"
     typography: "{typography.body}"
-    rounded: "{rounded.container}"
-    padding: "24px"
-  ingredient:
-    backgroundColor: "{colors.elevated}"
+    rounded: "{rounded.card}"
+    padding: "0"
+  feature-card:
+    backgroundColor: "{colors.bg-soft}"
     textColor: "{colors.text}"
     typography: "{typography.body}"
-    rounded: "18px"
-    padding: "20px 18px"
-  method-step:
-    backgroundColor: "transparent"
-    textColor: "{colors.text-dim}"
+    rounded: "{rounded.feature}"
+    padding: "22px"
+  thinker-card:
+    backgroundColor: "{colors.card}"
+    textColor: "{colors.text}"
     typography: "{typography.body}"
-    rounded: "{rounded.control}"
-    padding: "15px 6px"
-    size: "88px"
+    rounded: "{rounded.card}"
+    padding: "24px"
+  closing-panel:
+    backgroundColor: "{colors.cream}"
+    textColor: "{colors.navy}"
+    typography: "{typography.body}"
+    rounded: "{rounded.card}"
+    padding: "30px 24px"
 ---
 
 # Design System: Moch
 
 ## Overview
 
-**Creative North Star: "The Counter Recipe"**
+**Creative North Star: "Quiet Product Page"**
 
-Moch feels like a short, reassuring recipe for putting an agent on a phone: a dominant introduction, three ingredients, a numbered method, visible runtime proof and a choice of thinker. This is the shipped site's signature composition inside the existing Mocheme identity, not a separate visual world. The voice is friendly, plain and concrete; real Mochi artwork and honest interface illustrations carry the personality instead of decorative tech imagery.
+The site reads like a calm, current AI product page: a compact navigation bar, a two-column hero pairing one direct claim with an honest product mockup, a strip of four plain facts, then evenly spaced sections that each answer one question. Nothing is dressed up as a console, a dashboard or a launch campaign. The page earns trust by showing the product, stating limits and staying quiet.
 
-The material system is near-black indigo, raised indigo card stock, Mochi cream and one sprout-orange action color. System typography keeps the site dependency-free and consumer-facing. On phones, major sections open into ruled editorial flows rather than a stack of boxes; on desktop, soft cards return and the recipe becomes a two-column countertop. Motion is brief and functional, never a persistent ambient effect.
-
-The shipped system has no emojis, novelty display face, terminal/editor costume, third-party fonts, stock photography, analytics or tracking scripts. Monospace appears only where literal data or legacy commands benefit from it.
+The material system is near-black indigo ground, raised indigo cards, cream for emphasis and a single sprout-orange action color. Mint is functional only: on-device status, availability and checks. Type is the system UI stack, so the site stays dependency-free; monospace appears only for literal build data and commands.
 
 **Key Characteristics:**
-- A recipe sequence with persistent numbered orientation and visible on-device proof.
-- Mobile-open sections below 900px; soft, tonal desktop cards at 900px and above.
-- Sprout orange for action and restrained emphasis; mint for on-device and success states.
-- Cream reserved for the user's words, selected controls and high-contrast closing panels.
-- Real Moch logo/Mochi assets, inline stroke icons and clearly labeled illustrative UI.
+- One idea per section, separated by generous rhythm rather than decorative dividers.
+- A real chat mockup as the hero's second column; no stock art, no abstract gradients.
+- Bordered tonal cards on all sizes; no open-section/card-mode switch at a breakpoint.
+- Orange for the primary action only; cream for the closing panel and inline links.
+- Copy states what is local and what still uses the network, in the interface itself.
 
 ## Colors
 
-The palette is hue-locked to Mochi's visor navy and cream, with sprout orange as the single brand accent and mint as a functional local/success signal.
-
 ### Primary
-- **Sprout Orange** (`colors.accent`): primary download/setup actions, the phone send control, active mobile step marker and small emphasis lines.
-- **Espresso Ink** (`colors.on-accent`): text and icons on sprout orange; dark ink is required rather than white.
-- **Sprout Orange Line** (`colors.accent-line`): the default Hermes card and badge outline; a quieter accent cue than a filled action.
+- **Sprout Orange** (`colors.accent`): the one filled action per region — header download, hero download, closing download.
+- **Espresso Ink** (`colors.on-accent`): text and icons on orange; never white.
+- **Orange Line** (`colors.accent-line`): the default thinker card edge, note rule and feature hover edge.
 
 ### Neutral
-- **Mocheme Night** (`colors.bg`): page ground and inset runtime nodes.
-- **Soft Night** (`colors.bg-soft`): the honest local-first band and isolated legacy setup area.
-- **Raised Indigo** (`colors.card`): hero, proof, thinker, navigation disclosure and code-block-adjacent surfaces.
-- **Inset Indigo** (`colors.elevated`): ingredient tiles, icon tiles, setup notes and the illustrative phone composer.
+- **Mocheme Night** (`colors.bg`): page ground.
+- **Soft Night** (`colors.bg-soft`): feature cards, the honest panel, step discs and code blocks.
+- **Raised Indigo** (`colors.card`): hero product mockup, thinker cards, setup panels and the download panel.
+- **Inset Indigo** (`colors.elevated`): icon tiles, the assistant bubble and flow-step discs.
 - **White** (`colors.text`): headings and primary copy.
-- **Lavender Mist** (`colors.text-dim`): supporting paragraphs, secondary navigation and inactive controls.
-- **Muted Lavender** (`colors.text-faint`): captions, build-adjacent metadata, diagram annotations and footer text.
-- **Mochi Cream** (`colors.cream`): links, focus rings, selected pills, active number discs, user bubble and cream panels.
-- **Visor Navy** (`colors.user-text`): ink on cream, including the user's chat bubble and closing panels.
-- **Cream Panel Muted Ink** (`colors.on-cream-muted`): secondary copy inside cream panels.
-- **Cream Hairline** (`colors.border`): default separators and quiet card edges.
-- **Faint Hairline** (`colors.border-soft`): the sticky header's understated bottom rule.
-- **Strong Hairline** (`colors.border-strong`): card perimeters, disclosure controls and emphasized dividers.
+- **Lavender Mist** (`colors.dim`): body copy, navigation and secondary labels.
+- **Muted Lavender** (`colors.faint`): eyebrows, captions, metadata and footer text.
+- **Mochi Cream** (`colors.cream`): inline links, focus ring, step numbers, the user bubble and the closing panel.
+- **Visor Navy** (`colors.navy`): ink on cream, including the user bubble and closing panel.
+- **Cream Panel Muted Ink** (`colors.muted-ink`): supporting copy inside the cream closing panel.
+- **Cream Hairline** (`colors.line`) / **Strong Hairline** (`colors.line-strong`): separators, card edges and control borders.
 
 ### Status
-- **Local Mint** (`colors.green-soft`): beta presence dot, on-device badge, proof checks and active runtime-node icons.
-- **Local Mint Wash** (`colors.green-tint`): the on-device pill background; active proof nodes use a separate low-opacity mint wash in component CSS.
+- **Local Mint** (`colors.green`): presence dots, check marks, thinker list bullets.
+- **Local Mint Wash** (`colors.green-tint`): the "on this phone" pill background.
 
-**The Reserved Orange Rule.** Keep one strong orange action per region. Orange lines and washes may support emphasis, but orange is not scattered as decoration.
+**The One Orange Rule.** Orange marks the action you want next. If a region already has a filled orange button, everything else there is cream, mint or a hairline.
 
 ## Typography
 
-**Display Font:** System UI stack (`system-ui`, `-apple-system`, `BlinkMacSystemFont`, `"Segoe UI"`, `sans-serif`).
-**Body Font:** The same system UI stack.
-**Label/Mono Font:** System UI for labels; `ui-monospace`, `SFMono-Regular`, `Menlo`, `Consolas`, `monospace` for data and code.
-
-**Character:** Large, heavy, tightly tracked headings create compression through scale and weight rather than a novelty face. Body copy is open and conversational, while monospace is a small literal-data voice.
+**Display and Body:** system UI stack (`system-ui`, `-apple-system`, `BlinkMacSystemFont`, `"Segoe UI"`, `sans-serif`).
+**Data:** `ui-monospace`, `SFMono-Regular`, `Menlo`, `Consolas`, `monospace`.
 
 ### Hierarchy
-- **Display** (800; desktop `clamp(3rem, 5.3vw, 4.5rem)`, 4.65rem at 1400px; mobile `clamp(1.9rem, 7.8vw, 2.6rem)`; 1.01 line-height; -0.035em tracking): the single hero heading on each page.
-- **Headline** (800; desktop `clamp(2rem, 5.8vw, 3.55rem)`; mobile `clamp(1.65rem, 5.6vw, 2.2rem)`; 1.06 line-height): section headings. Proof, thinker and closing headings use smaller local clamps.
-- **Title** (750; `clamp(1.3rem, 3vw, 1.65rem)`; 1.16rem below 900px; 1.2 line-height): card and subsection headings.
-- **Body** (400; 16px/1.65 on desktop, 15px/1.65 below 900px): paragraphs and list copy. Reading measures are component-bound, usually 48–68ch.
-- **Label** (750; 0.95rem/1.2): pill actions. Navigation uses 650 weight; badges and diagram labels use smaller 0.7–0.86rem sizes.
-- **Data** (monospace; 0.86em; tabular numerals; -0.02em tracking): version/build values, step numbers and isolated legacy commands.
+- **Display** (800; `clamp(34px, 9vw, 48px)`; 40–52px from 640px; 42–56px from 900px, capped at 680px wide; 1.05 line-height; -0.045em): the single hero heading on each page.
+- **Headline** (800; `clamp(28px, 7vw, 38px)`; 30–40px from 640px; 1.1 line-height): section and closing headings. The honest panel and legacy panel use local 26–32px sizes.
+- **Title** (700; 15px, 20px in thinker cards, 17–18px in setup options; 1.3 line-height): card headings.
+- **Body** (400; 15px/1.65; 16px at 900px): hero lede, section intros and prose. Card copy sits at 12.5–13.5px. Measures stop at 48–68ch.
+- **Label** (700; 13.5px): buttons and primary navigation. Section eyebrows are 10.5px uppercase at .16em; fact keys are 10px at .12em.
+- **Data** (monospace; 0.92em): build and version values only.
 
-**The System Voice Rule.** System faces carry the consumer voice. Monospace is limited to build data, numbered markers and the isolated legacy command blocks; it must not turn the page into a terminal aesthetic.
+**The System Voice Rule.** System faces carry the consumer voice. Monospace is reserved for build data and copyable commands; it must never turn the page into a terminal.
 
 ## Layout
 
-The shared shell is `width: min(calc(100% - 32px), 1220px)` with auto inline margins. At 480px the gutter becomes 48px, but the below-900px rule restores 32px. The sticky header is 68px tall, becomes 74px at 900px, respects the top safe-area inset and uses a soft translucent night background without backdrop blur. Anchor scrolling clears the header by 18px plus the safe-area inset.
+The shell is `width: min(100% - 36px, 1120px)` with auto inline margins; gutters grow to 48px from 640px. The sticky header is 62px tall (70px from 640px) with a 1px hairline bottom edge and an opaque night background. Anchor scrolling clears the header by 18px.
 
-The recipe flow is a single-column grid below 900px with 28px gaps and 12px top padding. Its section rhythm is 72px, increased to 88px at 680px; short landscape viewports reduce it to 54px. Recurring component gaps are 8–30px rather than a formal spacing-token scale. Text blocks commonly stop at 48–68ch.
+The page sequence is: hero → four facts → features → thinkers → four-step start → honest local-first panel → FAQ → cream closing panel → footer. Sections use 56px vertical rhythm on phones, 72px from 640px and 96px from 900px; consecutive sections drop their top padding so the rhythm stays even.
 
-Below 900px, major containers deliberately lose their card treatment: hero, proof, thinker, final CTA, download panel, setup finish, legacy panel, Hermes-only panel, release note and setup note become borderless, transparent, square-cornered open sections. Rules and spacing carry hierarchy. Ingredients become a single ruled list with a 34px icon column; thinker cards stack with horizontal rules; runtime nodes become ruled rows; the active method step gets a 3px orange inset rule instead of a filled card. The disclosure navigation, setup rail, phone shell, code blocks and small icon tiles retain their own containers.
+Mobile is a single column. The hero stacks copy above the product mockup. Facts are a 2×2 ruled grid, features one per row, thinkers stacked, steps a numbered left-rail list. At 640px the hero stays stacked but facts become four columns, features two and steps two. At 900px the hero becomes `1.12fr / .88fr`, navigation moves inline, features become three columns, thinkers two and steps four across with a hairline running through the number row. The honest panel becomes two columns at 1000px (`0.9fr / 1.1fr`). The setup guide uses a sticky 210px rail from 900px, widening to 240px at 1100px.
 
-At 900px the desktop shell returns. The hero becomes a copy/mascot grid, ingredients return as three equal tiles, method and proof share a 0.9fr/1.1fr row, and the method panel sticks below the header. Honest-local-first and FAQ sections become 0.78fr/1.22fr two-column layouts. The setup guide uses a 220px sticky rail plus content, widening to 240px at 1100px.
+The closing panel is a cream card: on phones the mascot is a 56px accent pinned top-right with the heading and copy padded clear of it, and the actions stack full width; from 640px it becomes a horizontal row with a 104px mascot on the right.
 
-At 1200px the landing page becomes the full Counter Recipe countertop: a 350px-minimum left column and a wider right column. Hero spans both columns; ingredients stack as compact rows above the method on the left; runtime proof occupies the upper right and the thinker comparison sits beneath it. The method panel stops sticking, ingredients become vertical rows, the runtime diagram turns horizontal, and the model boundary becomes a 108px vertical dashed divider. At 1100px the proof detail additionally places its copy beside the 232px phone illustration.
-
-Hero actions stack below 380px and become a no-wrap flex row from 380px, then wrap naturally at wider sizes. Setup rails use two columns on phones, three at 680px and one sticky column at 900px. The shipped pages reflow without document-level horizontal overflow at 320px.
-
-**The Open-Section Rule.** Below 900px, remove card chrome from major content sections and let rules carry structure; do not turn the phone layout into a stack of boxed cards.
+**The Even Rhythm Rule.** Sections are separated by spacing and hairlines, not by alternating background bands or decorative dividers.
 
 ## Elevation & Depth
 
-Depth is primarily tonal, not shadow-driven. Night, raised indigo and inset indigo establish the surface order; hairline borders do most of the remaining work. Shadows are reserved for genuinely floating or illustrative objects. There is no heavy glass treatment and no `backdrop-filter`.
+Depth is tonal. Night, soft night, card and elevated surfaces establish order; 1px cream hairlines define edges. Shadows appear in exactly two places.
 
 ### Shadow Vocabulary
-- **Navigation disclosure** (`box-shadow: 0 24px 60px rgba(0, 0, 0, 0.48)`): the floating mobile menu only.
-- **Primary action glow** (`box-shadow: 0 12px 30px -18px rgba(247, 146, 54, 0.9)`): a restrained lift under orange actions.
-- **Hero lift** (`box-shadow: 0 28px 70px -46px rgba(0, 0, 0, 0.95)`): the desktop recipe card; removed with the rest of the mobile card chrome.
-- **Phone lift** (`box-shadow: 0 24px 46px -28px rgba(0, 0, 0, 0.95)`): the illustrative handset inside runtime proof.
-- **Mascot grounding**: drop shadows are applied to the real Mochi artwork, not to every card.
+- **Product mockup** (`box-shadow: 0 30px 70px -44px rgba(0, 0, 0, .95)`): lifts the hero chat card off the ground.
+- **Presence dot** (`box-shadow: 0 0 10px rgba(74, 222, 128, .55)`): the mint glow on the beta dot and live status dots.
 
-**The Flat-Surface Rule.** Cards are flat and tonal at rest. Reserve shadows for the floating menu, hero, primary action, phone illustration and mascot grounding.
+**The Flat-Surface Rule.** Cards are flat at rest. No glass, no blur, no neon glow, no shadow on hover — hover changes borders, not elevation.
 
 ## Shapes
 
-The form language is soft, rounded and consumer-friendly: pill actions and badges, circular numbers and menu controls, 14px controls, 18–22px content cards and 28px hero/closing cards. The phone uses a 32px outer shell and 25px screen. Chat bubbles use asymmetric 14px corners with a 5px tail on the user's bottom-right and the assistant's bottom-left.
+Pills for actions, badges, tags and chips. Circles for step numbers, the menu control and the send button. Cards use 16px corners, panels 18px, feature cards 14px, icon tiles 9px and controls 12px. Chat bubbles use asymmetric 12px corners with a 4px tail toward the sender.
 
-Borders are 1px cream-tinted hairlines. Dashed borders mark the model boundary, model chip, release note and legacy isolation; they mean "boundary" or "older path," not decoration. Icons use a 24px viewBox, render at 20px by default and use 1.8px round strokes.
+Borders are 1px. Dashed borders mean "legacy or boundary" and appear only on the legacy setup panel. Icons are inline SVG on a 24px viewBox, rendered at 14–19px with 1.8–1.9px round strokes.
 
-**The Soft-Not-Glass Rule.** Use soft corners, hairline borders and tonal surfaces. Do not add hard neon glow, blur-heavy glass or sharp technical framing.
+**The Soft-Not-Glass Rule.** Rounded, hairline-bordered, tonal. No hard technical framing, no gradient mesh, no glow.
 
 ## Components
 
 ### Buttons
-- **Character:** Friendly pill actions with a small lift, not square console controls.
-- **Primary:** Sprout orange with espresso ink, label typography and the frontmatter padding/minimum size. The compact header variant is 44px tall with tighter horizontal padding.
-- **Hover / Focus:** The primary action lightens to the `button-primary-hover` token and all buttons rise 1px over 160ms. Focus uses the global cream ring.
-- **Secondary:** Translucent white surface, white text and a strong hairline; hover strengthens the border to cream and raises the white wash.
-- **Dark:** Used on cream closing panels; transparent with visor-navy ink and a low-opacity navy border. Below 900px it switches to the dark-surface secondary treatment.
-- **Icons:** Inline SVG, 20px, decorative `aria-hidden`; text remains live HTML.
+- **Primary:** orange pill, espresso ink, 44px minimum height, 13.5px/700 label; hover lightens to `accent-hover` and lifts 1px over 160ms.
+- **Ghost:** transparent with a strong hairline; hover turns the border cream.
+- **Dark:** navy pill with cream ink, used inside the cream closing panel.
+- **Hero pair:** a two-column grid at every width so both actions stay on one line down to 320px. The primary label is the short "Download beta"; the full "Download the current beta" wording is kept on the closing panel and setup guide.
+- **Icons:** 14–15px inline SVG, decorative and `aria-hidden`.
 
-### Chips and badges
-- **Style:** Pill outlines for beta, thinker and model states; filled cream for selected step/model controls.
-- **Beta mark:** A 7px mint presence dot precedes the label.
-- **On-device label:** Mint text and mint wash with a shield icon; this is status, not an orange action.
-- **Selection:** Selected model buttons use cream with visor-navy ink and `aria-pressed`.
+### Hero product mockup
+A bordered card with a 46px title bar (logo, "Mochi", mint "On this phone" status), a short chat exchange, tool chips, and a composer with a model chip and orange send control. The user bubble is cream with navy ink; the assistant bubble is elevated indigo with a hairline. It is illustrative UI built in HTML/CSS, not a screenshot.
 
-### Cards / Containers
-- **Corner Style:** Hero/closing cards use the hero radius; proof uses the card radius; thinker/download/setup cards use the container radius; ingredients use 18px.
-- **Background:** Raised indigo for dark cards, inset indigo for ingredient tiles and Mochi cream for Hermes-only and closing panels.
-- **Shadow Strategy:** Flat by default; see Elevation & Depth.
-- **Border:** Strong hairline on hero/proof, default hairline on most cards, orange line on the default Hermes card.
-- **Surface Detail:** The desktop hero layers a subtle orange radial wash in its upper-right with a 9px cream dot field; proof and thinker cards remain flat.
-- **Internal Padding:** Frontmatter records the default card and ingredient values. Desktop hero/proof/final padding increases with breakpoint; below 900px the open-section rules replace card padding with editorial spacing.
+### Facts strip
+Four ruled cells with a 10px uppercase key and a 13.5px value: platform, runtime, model choice, account requirement. Two columns on phones, four from 640px.
 
-### Inputs / Fields
-No general text-field system ships. The only input is the dynamically revealed read-only copy fallback: full width, 44px minimum height, 12px radius, night background, strong hairline and inherited type. Clipboard success changes the button label to “Copied”; failure reveals a focused “Select & copy” field and announces the state.
+### Feature grid
+Tonal soft-night cards with a 36px inset icon tile, a 15px title, 13px body and an optional uppercase "Hermes only" note. Hover only shifts the border to orange.
+
+### Thinker cards
+Two raised-indigo cards comparing Moch (Hermes) and OpenCode. The default card carries the orange edge and an orange "Default" tag; the other uses a neutral tag. Lists use mint bullets; a closing fine-print line explains that existing chats keep their thinker.
+
+### Steps
+A four-step "start" sequence. On phones each step is a 40px cream-numbered disc in a left rail; from 640px it becomes a two-column grid; from 900px four columns with a hairline through the number row and text beneath.
+
+### Honest local-first panel
+A soft-night panel with a 28–32px heading, the required local-first caveat, a build/release note, and two rule-separated columns: "Stays on the phone" and "Can use the internet". Dashes in orange mark list items. It is the one place that argues rather than describes, and it does so plainly.
+
+### FAQ and troubleshooting
+Native `details`/`summary` with a hairline under each row, 17px vertical padding, and a text `+`/`−` marker at the right. The landing FAQ keeps one item open at a time; setup troubleshooting uses the same pattern.
+
+### Closing panel
+A cream card with navy heading, muted ink copy, a dark primary download button and an underlined setup link. On phones the mascot is a small top-right accent; from 640px it sits at the right edge at 104px.
 
 ### Navigation
-- **Style:** Live-text Moch wordmark with the existing logo mark, compact 650-weight links and 44px minimum targets.
-- **Desktop:** Horizontal navigation from 900px; hover/current state uses inset indigo. The nav download link is replaced by the compact header download button.
-- **Mobile:** A 46px circular menu button controls an absolutely positioned disclosure panel with 20px corners, strong border and the navigation-disclosure shadow. Arrow Down opens and focuses the first link; Escape closes and returns focus; outside pointer dismissal and link-click closing are supported.
-- **Progressive enhancement:** Without JavaScript the navigation remains visible below the brand and the menu button stays hidden.
+- **Desktop (900px+):** live-text wordmark with the logo mark, 13.5px links, a ghost "Setup guide" and the orange download button.
+- **Mobile:** a 44px circular menu button toggles an absolutely positioned panel under the header. `aria-expanded` and `aria-controls` are wired; Escape closes and returns focus; outside clicks and link clicks close it. Without JavaScript the nav stays visible.
 
-### Disclosures
-FAQ and troubleshooting entries use native `details`/`summary`, 64px and 58px minimum summary heights respectively, horizontal rules and a circular plus marker. The plus's vertical stroke rotates away over 160ms when open. The landing FAQ keeps only one item open at a time. Legacy instructions remain isolated in their own disclosure and dashed boundary.
-
-### The Counter Recipe
-The shipped landing sequence is: recipe hero → Linux/Thinker/Model ingredients → five-step method → runtime proof with hosted/local model preview → thinker comparison. The method is an ordered list of five full-width buttons; the active button updates `aria-pressed`, the proof heading/copy and the highlighted runtime node. Proof then continues into capability ledger, Hermes-only surfaces, honest local-first explanation, FAQ and closing download card.
-
-The runtime diagram is Phone → Moch runtime → Hermes/OpenCode → model boundary → chosen model. It is vertical on phones and horizontal from 1200px. Mint marks on-device activity; the dashed model boundary and hosted/local labels make the network edge explicit. The adjacent phone is an HTML/CSS illustration with the real logo and Mochi artwork, captioned “Illustrative interface, not a screenshot.”
-
-**The Active Step Rule.** Use a cream number disc for the active desktop step and a 3px orange inset rule on mobile. Use mint, not orange, to mark on-device runtime activity.
+### Setup page
+A hero with the download card, a sticky section rail (chips on phones), numbered step sections with a 38px disc, tonal panels for instructions, copy buttons for commands, an option/provider grid, a cream finish panel, and a dashed legacy panel that keeps stable v1.0.0 clearly separated.
 
 ### Asset and illustration grammar
-- Keep the existing `assets/logo.png`, `assets/favicon.png` and `assets/moch/*.svg` Mochi artwork. The wordmark stays live text.
-- Use `mochi-greeting.svg` in the landing/setup heroes and illustrative phone, and `mochi-celebration.svg` in the final CTA.
-- Use the shipped inline SVG sprite for interface icons; no icon font, CDN or third-party script.
-- Keep product UI illustrations semantic HTML/CSS/SVG and label them as illustrative. Do not present the older `docs/screenshots/*.png` captures as the current OpenCode interface.
-- Social sharing uses the shipped 1200×630 `assets/og-image.png`; keep its adjacent provenance record when regenerating it.
-- No stock mascot replacement, local font files, third-party analytics or tracking assets.
+- Keep `assets/logo.png`, `assets/favicon.png` and `assets/moch/*.svg`. The wordmark stays live text.
+- Logo mark renders at 32px in the header and 28px in the footer; the hero mockup uses 21–25px.
+- Use `mochi-greeting.svg` in the product mockup and `mochi-celebration.svg` in the closing panel.
+- Product UI illustrations are semantic HTML/CSS, labelled illustrative. Do not present legacy `docs/screenshots/*.png` as current UI.
+- Social sharing uses the shipped 1200×630 `assets/og-image.png` with its provenance record.
+- No stock mascot, third-party fonts, analytics or tracking.
 
 ### Motion
-One orchestrated entrance runs after two animation frames: the hero enters over 620ms and ingredient tiles over 560ms with 80ms/150ms stagger, all using `cubic-bezier(0.16, 1, 0.3, 1)`. Content is visible before enhancement. State transitions use 160ms `ease-out`; runtime-node color transitions use 180ms. Smooth anchor scrolling is enabled by default. Step/model changes swap content and state attributes without a panel animation.
-
-`prefers-reduced-motion: reduce` disables all animation and transitions, removes button/arrow transforms and makes scrolling immediate.
+State changes use 160ms ease-out: button lift, border color, hover. Anchor scrolling is smooth and becomes immediate under `prefers-reduced-motion: reduce`. `site.js` adds a `motion-ready` class after two animation frames so content is never hidden before enhancement. No scroll-triggered or ambient animation.
 
 ### Accessibility and progressive enhancement
-- One `h1` per page; semantic header, nav, main, sections, articles, asides and footer; a skip link targets a focusable main landmark.
-- Global focus is a 3px cream outline with 4px offset. Interactive targets are at least 44px; primary buttons are 48px and FAQ summaries 64px.
-- The mobile menu exposes `aria-expanded` and `aria-controls`; method/model controls expose `aria-pressed`; proof copy is a polite live region.
-- Method controls support Arrow keys, Home and End with wrapped focus movement. Model controls support Left/Right arrows.
-- Copy controls use Clipboard API, selection-based fallback and a polite status region. FAQ behavior uses native disclosures enhanced by JavaScript.
-- JavaScript-disabled visitors keep the content, static hosted proof and visible navigation; enhanced controls begin disabled and are enabled by `site.js`.
-- Safe-area insets, clipped horizontal overflow, responsive reflow and reduced motion are part of the shipped implementation.
+- One `h1` per page; semantic header, nav, main, sections and footer; skip link to a focusable main.
+- Focus is a 2px cream outline with 3px offset.
+- Targets are at least 44px; the menu button is 44px.
+- `site.js` owns navigation, copy buttons, version sync, FAQ grouping, the current year and enhancement hooks; no inline scripts.
+- Reduced motion, safe-area insets, 320px reflow and 200% zoom are part of the shipped implementation.
 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** keep the recipe order and make the on-device/model boundary visible wherever runtime behavior is explained.
-- **Do** use the open-section layout below 900px and restore soft cards only at the desktop breakpoints.
-- **Do** pair sprout orange with espresso ink and reserve mint for on-device/success meaning.
-- **Do** keep actions and navigation targets at least 44px and preserve the 3px/4px cream focus ring.
-- **Do** use the existing Moch assets and inline SVG icons, with provenance records for shipping rasters.
-- **Do** label illustrative interface artwork and isolate legacy relay instructions from the current beta recipe.
+- **Do** lead with the approved headline and keep the required local-first caveat visible near the first privacy claim.
+- **Do** show the product as a labelled chat mockup rather than a screenshot or abstract illustration.
+- **Do** keep one orange action per region and reserve mint for on-device/success meaning.
+- **Do** keep both hero actions on one line at 320px.
+- **Do** use the existing Moch assets and inline SVG icons.
+- **Do** keep the stable v1.0.0 legacy path isolated and clearly labelled.
 
 ### Don't:
-- **Don't** turn the site into a terminal/code-editor aesthetic or use monospace as the main consumer voice.
-- **Don't** stack boxed cards on phones or add glass blur, hard neon glow or decorative orange fields.
-- **Don't** use white text on sprout orange; use the on-accent ink token.
-- **Don't** imply that local-first means every request is offline or that stable v1.0.0 is the current local-first build.
-- **Don't** replace Mochi with stock/generated mascot art or present legacy screenshots as current OpenCode UI.
-- **Don't** add third-party fonts, analytics, tracking requests or icon-font dependencies.
+- **Don't** reintroduce the Counter Recipe composition, numbered method controls or runtime diagrams.
+- **Don't** alternate full-bleed background bands between sections.
+- **Don't** use white text on orange, glass blur, neon glow or gradient mesh.
+- **Don't** imply local-first means every request is offline, or that v1.0.0 is the current build.
+- **Don't** present OpenCode as the default thinker or the free models as on-device.
+- **Don't** add third-party fonts, analytics, tracking or icon fonts.
