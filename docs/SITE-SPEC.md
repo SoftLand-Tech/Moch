@@ -28,7 +28,7 @@ Required caveat, visible near the first privacy/local claim:
 
 ### Release truth
 
-- Current development build: **1.0.53-beta.2, versionCode 57**.
+- Current development build: **1.0.53-beta.3, versionCode 58**.
 - Stable **v1.0.0** is the legacy linked/relay build. Label it clearly; never link it as the current local-first download without that warning.
 - Primary download CTA: `/Moch.apk`, labeled **Download the current beta**.
 - Secondary link: GitHub Releases for build history and checksums.

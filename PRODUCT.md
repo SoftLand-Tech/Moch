@@ -30,7 +30,7 @@ Moch integrates OpenCode as a selectable thinker. It is not the official OpenCod
 
 ## Operating Context
 
-- Current development build: **1.0.53-beta.2, versionCode 57**.
+- Current development build: **1.0.53-beta.3, versionCode 58**.
 - Stable GitHub release: **v1.0.0**, a legacy linked/relay-only build. It does not contain the embedded runtime or OpenCode and must never be presented as the current local-first experience.
 - First-run flow: **Environment → Thinker → Providers → About you**.
 - Ubuntu 24.04 is the default guest selection; users can skip Linux, but OpenCode requires the guest.
