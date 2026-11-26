@@ -222,6 +222,65 @@ export interface TermNative {
   replay(): Promise<{ chunk: string; alive: boolean } | null>
   resize(cols: number, rows: number): Promise<boolean>
   kill(): Promise<boolean>
+  /** Optional: older adapters simply clear the local bank. */
+  clear?(): Promise<boolean>
+}
+
+/**
+ * The per-session native surface (structurally the session wrappers in
+ * mochiRuntime.ts). Kept as a local interface so this module stays free of
+ * react-native imports and scripts/test-terminal.ts can run it in node.
+ */
+export interface TermSessionTransport {
+  startSession(
+    sessionId: string,
+    cwd: string | null,
+    cols: number,
+    rows: number,
+  ): Promise<{ ok: boolean; alreadyRunning: boolean; error?: string } | null>
+  writeSession(sessionId: string, dataB64: string): Promise<boolean>
+  drainSession(sessionId: string): Promise<{ chunks: string[]; alive: boolean } | null>
+  replaySession(sessionId: string): Promise<{ chunk: string; alive: boolean } | null>
+  clearSession(sessionId: string): Promise<boolean>
+  resizeSession(sessionId: string, cols: number, rows: number): Promise<boolean>
+  killSession(sessionId: string): Promise<boolean>
+}
+
+/**
+ * Bind one session id (and its start cwd) to the generic TermNative shape.
+ * Every TerminalController gets its own adapter, so no module-global
+ * controller exists and two tabs can never write into one another's PTY.
+ */
+export function createSessionTermNative(
+  transport: TermSessionTransport,
+  sessionId: string,
+  cwd: string | null | (() => string | null),
+): TermNative {
+  // The screen can adopt a project folder after the tab/controller was
+  // created (projects.tree hydrates late), so read the getter at start time
+  // instead of freezing the initial cwd into the adapter.
+  const startCwd = () => (typeof cwd === 'function' ? cwd() : cwd)
+  return {
+    start: (cols, rows) => transport.startSession(sessionId, startCwd(), cols, rows),
+    write: (dataB64) => transport.writeSession(sessionId, dataB64),
+    drain: () => transport.drainSession(sessionId),
+    replay: () => transport.replaySession(sessionId),
+    clear: () => transport.clearSession(sessionId),
+    resize: (cols, rows) => transport.resizeSession(sessionId, cols, rows),
+    kill: () => transport.killSession(sessionId),
+  }
+}
+
+let termSessionSeq = 0
+
+/**
+ * RN-side session id: `term-<timestamp>-<seq>`. Timestamp keeps ids distinct
+ * across app restarts; the process-local sequence keeps same-millisecond
+ * tabs apart. Python validates the shape again (length ≤ 64, path-safe).
+ */
+export function newTermSessionId(nowMs: number = Date.now()): string {
+  termSessionSeq = (termSessionSeq + 1) % 1_000_000
+  return `term-${Math.floor(nowMs)}-${termSessionSeq}`
 }
 
 export type TermListener = (snap: { state: TermState; alive: boolean }) => void
@@ -252,12 +311,16 @@ export class TerminalController {
   error: string | null = null
   /** Raw base64 bank of recent PTY bytes — refills a freshly (re)loaded xterm (BUG-097). */
   rawBank = ''
+  /** True while the drain interval is armed. Inactive tabs stay paused. */
+  polling = false
   private native: TermNative
   private timer: ReturnType<typeof setInterval> | null = null
   private listeners = new Set<TermListener>()
   private draining = false
   private drainMs: number
   private onChunk: ((b64: string) => void) | null
+  /** Set by destroy(); a late start() must kill the shell it just spawned. */
+  private destroyed = false
 
   constructor(native: TermNative, opts: TerminalOptions = {}) {
     this.native = native
@@ -284,6 +347,7 @@ export class TerminalController {
   }
 
   async start(cols = 80, rows = 24): Promise<boolean> {
+    if (this.destroyed) return false
     if (this.state === 'starting' || this.state === 'live') return this.state === 'live'
     this.state = 'starting'
     this.error = null
@@ -301,6 +365,17 @@ export class TerminalController {
       this.emit()
       return false
     }
+    if (this.destroyed) {
+      // The tab was closed while the bridge was spawning — do not leak the
+      // fresh PTY (or arm a poll timer for a controller nobody owns).
+      try {
+        await this.native.kill()
+      } catch {
+        /* best effort */
+      }
+      this.state = 'dead'
+      return false
+    }
     // Reattach paint: bank the RAW replay so a fresh xterm can be refilled,
     // and hand the same bytes to the live renderer.
     try {
@@ -313,6 +388,7 @@ export class TerminalController {
     } catch {
       this.alive = true
     }
+    if (this.destroyed) return false
     if (!this.alive) {
       // The shell was already dead before the first drain (crashed between
       // start and replay) — report dead instead of a zombie live session.
@@ -327,7 +403,9 @@ export class TerminalController {
   }
 
   private beginPoll() {
+    if (this.destroyed) return
     this.stopPoll()
+    this.polling = true
     this.timer = setInterval(() => {
       void this.tick()
     }, this.drainMs)
@@ -339,11 +417,70 @@ export class TerminalController {
     // scripts typecheck (TS2769) under tsconfig.scripts.json.
     clearInterval(this.timer ?? undefined)
     this.timer = null
+    this.polling = false
+  }
+
+  /**
+   * Multi-tab lifecycle: an inactive tab keeps its PTY + controller alive
+   * but stops polling. `resume` re-arms only a live session; a dead shell is
+   * restarted explicitly through start()/the dead overlay.
+   */
+  pause(): void {
+    this.stopPoll()
+  }
+
+  resume(): void {
+    if (!this.destroyed && this.state === 'live') this.beginPoll()
+  }
+
+  /**
+   * Reattach snapshot for a remounted xterm (tab switch / WebView reload):
+   * the native replay is the last ~64 KiB of THIS session, and python
+   * consumes its pending drain queue with the snapshot, so the next tick
+   * continues with only newer bytes. Returns the new raw bank.
+   */
+  async reattach(): Promise<string> {
+    if (this.destroyed) return this.rawBank
+    // Never race an in-flight drain: a chunk drained after the replay
+    // snapshot would be neither in the snapshot nor paintable later.
+    this.stopPoll()
+    for (let i = 0; i < 50 && this.draining; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    try {
+      const rep = await this.native.replay()
+      if (rep) {
+        const chunk = rep.chunk ?? ''
+        this.rawBank =
+          chunk.length > TERM_RAW_BANK_B64_CAP
+            ? chunk.slice(chunk.length - TERM_RAW_BANK_B64_CAP)
+            : chunk
+        const wasAlive = this.alive
+        this.alive = rep.alive
+        if (rep.alive) {
+          // Restored screen (same session id still alive in python): adopt
+          // the live shell instead of starting a second one on top of it.
+          if (this.state === 'idle' || this.state === 'starting') {
+            this.state = 'live'
+            this.emit()
+          }
+        } else if (this.state === 'live') {
+          this.state = 'dead'
+          this.stopPoll()
+          this.emit()
+        } else if (this.alive !== wasAlive) {
+          this.emit()
+        }
+      }
+    } catch {
+      /* reattach is best-effort — the existing bank remains usable */
+    }
+    return this.rawBank
   }
 
   /** One drain pass — public so tests drive it without timers. */
   async tick(): Promise<void> {
-    if (this.state !== 'live' || this.draining) return
+    if (this.destroyed || this.state !== 'live' || this.draining) return
     this.draining = true
     try {
       const d = await this.native.drain()
@@ -376,7 +513,7 @@ export class TerminalController {
   }
 
   async send(raw: string): Promise<boolean> {
-    if (this.state !== 'live') return false
+    if (this.destroyed || this.state !== 'live') return false
     try {
       return await this.native.write(b64encodeText(raw))
     } catch {
@@ -385,11 +522,34 @@ export class TerminalController {
   }
 
   async resize(cols: number, rows: number): Promise<void> {
+    if (this.destroyed) return
     try {
       await this.native.resize(cols, rows)
     } catch {
       /* best effort */
     }
+  }
+
+  /**
+   * Clear this session's scrollback on both sides. The native half matters
+   * after a tab switch: reattach repaints from python's replay bank, so
+   * wiping only `rawBank` would resurrect cleared output.
+   */
+  async clear(): Promise<void> {
+    const wasPolling = this.polling
+    this.stopPoll()
+    // An in-flight drain must land before the native bank is wiped, or its
+    // pre-clear chunk would paint into the freshly reset xterm.
+    for (let i = 0; i < 50 && this.draining; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    this.rawBank = ''
+    try {
+      await this.native.clear?.()
+    } catch {
+      /* best effort — the local bank is already empty */
+    }
+    if (wasPolling) this.resume()
   }
 
   async kill(): Promise<void> {
@@ -405,6 +565,7 @@ export class TerminalController {
   }
 
   destroy() {
+    this.destroyed = true
     this.stopPoll()
     this.listeners.clear()
   }

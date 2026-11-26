@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import posixpath
 import shutil
 import subprocess
 import sys
@@ -202,7 +203,78 @@ def loader_path() -> Path:
     return Path(_native_lib_dir()) / LOADER_LIB_NAME
 
 
-def build_guest_launch(guest_argv: list[str]) -> tuple[list[str], dict]:
+def _workspace_dir() -> Path:
+    """The HOST dir bound at guest ``/workspace``.
+
+    ``MOCH_WORKSPACE`` is exported by the embedded gateway boot
+    (hermes_boot._prepare_home); fall back to ``<hermes home>/workspace`` so
+    desktop tests and non-embedded callers resolve the same tree.
+    """
+    override = str(os.environ.get("MOCH_WORKSPACE") or "").strip()
+    if override:
+        return Path(override).expanduser().absolute()
+    from moch import hermes_boot
+
+    return (hermes_boot._hermes_home() / "workspace").absolute()
+
+
+def _within(path: str, root: str) -> bool:
+    """True when ``path`` is ``root`` or below it (both absolute, normalized)."""
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:  # different drives / empty — never a match
+        return False
+
+
+def _resolve_guest_cwd(cwd: str | None, workspace: Path) -> tuple[str, str | None]:
+    """Map a HOST cwd to the guest workdir + an optional extra self-bind.
+
+    Rules (never creates a directory):
+
+    - None/empty/non-existent → guest ``/workspace`` (the default).
+    - A host path under the workspace → ``/workspace/<rel>`` (already bound).
+    - A guest-style ``/workspace[/...]`` → the matching host workspace dir.
+    - Any other EXISTING host dir → self-bind ``path:path`` and start there.
+    """
+    if not cwd:
+        return "/workspace", None
+    raw = str(cwd).strip()
+    if not raw:
+        return "/workspace", None
+    ws = os.path.abspath(str(workspace))
+
+    # Guest-style path: accept it only when it normalizes back inside
+    # /workspace (a "../" escape falls back instead of reaching the host).
+    if raw == "/workspace" or raw.startswith("/workspace/"):
+        rel = posixpath.normpath(raw[len("/workspace"):].lstrip("/") or ".")
+        if rel in ("", "."):
+            return "/workspace", None
+        if rel == ".." or rel.startswith("../"):
+            return "/workspace", None
+        host = os.path.abspath(os.path.join(ws, *rel.split("/")))
+        if _within(host, ws) and os.path.isdir(host):
+            return "/workspace/" + rel, None
+        return "/workspace", None
+
+    host = os.path.abspath(os.path.expanduser(raw))
+    if _within(host, ws):
+        rel = os.path.relpath(host, ws)
+        if rel in ("", "."):
+            return "/workspace", None
+        if not rel.startswith("..") and os.path.isdir(host):
+            return "/workspace/" + rel.replace(os.sep, "/"), None
+        return "/workspace", None
+
+    # Never self-bind the host root over the guest rootfs. Nothing the app
+    # selects points there; treat it like any other unusable cwd.
+    if host == os.path.sep:
+        return "/workspace", None
+    if os.path.isdir(host):
+        return host, host
+    return "/workspace", None
+
+
+def build_guest_launch(guest_argv: list[str], cwd: str | None = None) -> tuple[list[str], dict]:
     """The ONE argv/env shape for entering the guest (§4.3):
 
     - ``/system/bin/linker64`` execs a system file (legal), then mmaps the
@@ -216,6 +288,12 @@ def build_guest_launch(guest_argv: list[str]) -> tuple[list[str], dict]:
       which made gh/git/ssh credentials written at guest /root invisible
       to every command that entered through this builder.
 
+    ``cwd`` is an optional HOST path for the terminal's start directory. It
+    is translated by ``_resolve_guest_cwd`` (workspace paths → guest
+    ``/workspace/<rel>``, guest-style paths → the host workspace, another
+    existing host dir → self-bound at its own path). None keeps the
+    historical ``/workspace`` start. No directory is ever created here.
+
     Used by exec_in_guest and the persistent session; the PATH shims carry
     the same shape inline.
     """
@@ -224,7 +302,8 @@ def build_guest_launch(guest_argv: list[str]) -> tuple[list[str], dict]:
     rootfs = linux_dir / "rootfs"
     from moch import hermes_boot
 
-    workspace = hermes_boot._hermes_home() / "workspace"
+    workspace = _workspace_dir()
+    workdir, extra_bind = _resolve_guest_cwd(cwd, workspace)
     tmp_dir = linux_dir / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     # hermes' session machinery ($TMPDIR = <home>/cache/scratch, set by
@@ -246,6 +325,8 @@ def build_guest_launch(guest_argv: list[str]) -> tuple[list[str], dict]:
     # env source for the terminal PTY and the bridge's exec_in_guest.
     env["HOME"] = GUEST_HOME
     env["PATH"] = GUEST_PATH_PREFIX + ":" + env.get("PATH", "")
+    if extra_bind and extra_bind in (str(workspace), str(scratch)):
+        extra_bind = None  # already bound above
     argv = [
         LINKER64,
         str(proot),
@@ -259,14 +340,16 @@ def build_guest_launch(guest_argv: list[str]) -> tuple[list[str], dict]:
         # pwd-based cwd tracking stays consistent across the boundary.
         "-b", f"{workspace}:{workspace}",
         "-b", f"{scratch}:{scratch}",
+        *(["-b", f"{extra_bind}:{extra_bind}"] if extra_bind else []),
         "-b", "/dev",
         "-b", "/proc",
         "-0",
         *PROOT_PARITY_FLAGS,
-        # Start in /workspace (the bind of MOCH_WORKSPACE) so `ls` shows the
-        # project folders the app creates; /workspace always exists in the
-        # guest because proot creates every bind target. HOME stays /root.
-        "-w", "/workspace",
+        # Start in the requested project dir when it exists; otherwise
+        # /workspace (the bind of MOCH_WORKSPACE) so `ls` shows the project
+        # folders the app creates. proot creates every bind target. HOME
+        # stays /root.
+        "-w", workdir,
         *guest_argv,
     ]
     return argv, env

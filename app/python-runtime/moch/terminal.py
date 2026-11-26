@@ -1,20 +1,26 @@
-"""Interactive guest PTY session — the user's own live Ubuntu terminal.
+"""Interactive guest PTY sessions — the user's own live Ubuntu terminals.
 
 Unlike ``linux_session.py`` (a pipe shell: ``TERM=dumb``, sentinel
 framing, no cursor addressing — ``vim`` can never work there), this module
-holds ONE persistent ``/bin/bash -i`` attached to a real pseudo-terminal
-(``pty.openpty``). The pty sits on the HOST side of the proot boundary: the
+holds persistent ``/bin/bash -i`` processes attached to real pseudo-terminals
+(``pty.openpty``). Each pty sits on the HOST side of the proot boundary: the
 guest argv is the same M8 shape as every other entry
 (``linux_env.build_guest_launch`` — linker64 + native-lib ``PROOT_LOADER``,
 EXEC-DESIGN.md §4.3), only its stdio is the pty slave instead of pipes. ANSI
 escape sequences flow through untouched, so fullscreen programs work.
 
-Transport to JS is poll-based (v1): the reader thread banks raw byte chunks
-and Kotlin drains them on a timer — no Python→Java callbacks, no native
+Sessions are a ``session_id -> _Session`` registry. The legacy module-level
+functions (``start`` / ``write`` / …) are the ``__default__`` session — the
+OpenCode hidden server launch still types into it. The Terminal screen uses
+the per-session functions so every tab owns an isolated shell.
+
+Transport to JS is poll-based: each reader thread banks raw byte chunks and
+Kotlin drains one session on a timer — no Python→Java callbacks, no native
 event emitter. Chunks leave as base64 (guest bytes are not valid UTF-8).
 
-Lifecycle: started by ``start()``; dies with the process (daemon thread). A
-dead shell restarts transparently on the next ``start()``. The agent's own
+Lifecycle: a session starts on ``start_session``; dies with the process
+(daemon thread). A dead shell restarts transparently on the next
+``start_session``. Closing one session never touches another. The agent's own
 path (``exec_in_guest`` / ``linux_session``) is a SEPARATE proot process —
 terminal input can never corrupt agent output and vice versa.
 
@@ -26,6 +32,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 import select
 import sys
 import threading
@@ -33,21 +40,50 @@ import time
 from collections import deque
 from pathlib import Path
 
-# Tunables (v1, single session).
+# Tunables.
 _DRAIN_MAX_CHUNKS = 32
 _DRAIN_MAX_BYTES = 256 * 1024
 _REPLAY_MAX_BYTES = 64 * 1024
+# Inactive tabs are not drained by design. Their pending queue must stay
+# bounded even when a job floods output for hours: keep the newest 256 KiB
+# (the reattach path repaints from the 64 KiB replay bank, not this queue).
+_PENDING_MAX_BYTES = 256 * 1024
 _READ_SIZE = 4096
+
+LEGACY_SESSION_ID = "__default__"
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
 
 def _log(msg: str) -> None:
     print(f"[moch-terminal] {msg}", file=sys.stderr, flush=True)
 
 
-def _default_build_launch(guest_argv: list[str]) -> tuple[list[str], dict]:
+def _normalize_session_id(session_id: object) -> str | None:
+    """Validate + normalize a session id (strip, length-bound, path-safe).
+
+    ``None`` means invalid: empty, non-string, too long, or containing
+    anything outside ``[A-Za-z0-9_.-]``. ``.``/``..`` are refused too so an
+    id can never be mistaken for a directory. The legacy id passes here but
+    is refused by every PUBLIC per-session function below — only the thin
+    legacy wrappers may address the OpenCode server's hidden shell.
+    """
+    if not isinstance(session_id, str):
+        return None
+    sid = session_id.strip()
+    if not sid or sid in (".", "..") or not _SESSION_ID_RE.fullmatch(sid):
+        return None
+    return sid
+
+
+def _public_session_id(session_id: object) -> str | None:
+    sid = _normalize_session_id(session_id)
+    return None if sid == LEGACY_SESSION_ID else sid
+
+
+def _default_build_launch(guest_argv: list[str], cwd: str | None = None) -> tuple[list[str], dict]:
     from moch import linux_env
 
-    return linux_env.build_guest_launch(guest_argv)
+    return linux_env.build_guest_launch(guest_argv, cwd)
 
 
 # Injectable guest-launch seam: tests replace this with (["/bin/bash", "-i"], env).
@@ -61,7 +97,8 @@ def _linux_dir() -> Path:
 
 
 class _Session:
-    def __init__(self) -> None:
+    def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
         self.lock = threading.Lock()
         self.proc = None
         self.master_fd: int | None = None
@@ -75,26 +112,49 @@ class _Session:
         self.rows = 24
         # Generation: bumped on every start/kill so a stale reader thread
         # (still inside its 0.5s select when its shell died) can neither
-        # bank into the next session nor mark it dead on exit.
+        # bank into the next shell of THIS session nor mark it dead on exit.
         self.gen = 0
 
     def _bank(self, data: bytes) -> None:
+        """Append reader output. Called with ``self.lock`` held."""
         self.chunks.append(data)
         self.chunks_bytes += len(data)
+        while self.chunks_bytes > _PENDING_MAX_BYTES and len(self.chunks) > 1:
+            old = self.chunks.popleft()
+            self.chunks_bytes -= len(old)
         self.replay.append(data)
         self.replay_bytes += len(data)
         while self.replay_bytes > _REPLAY_MAX_BYTES and self.replay:
-            old = self.replay.popleft()
-            self.replay_bytes -= len(old)
+            overflow = self.replay_bytes - _REPLAY_MAX_BYTES
+            head = self.replay[0]
+            if len(head) <= overflow:
+                self.replay.popleft()
+                self.replay_bytes -= len(head)
+            else:
+                # Keep the bank at exactly the documented 64 KiB ceiling.
+                self.replay[0] = head[overflow:]
+                self.replay_bytes -= overflow
+
+    def _alive_locked(self) -> bool:
+        return not self.dead and self.proc is not None and self.proc.poll() is None
 
 
-# SINGLE-SESSION CONTRACT: exactly one interactive pty exists per device —
-# the RN Terminal screen, the Hermes bridge, and this module all assume one
-# shared _Session behind this module global. A later start() replaces the
-# previous shell (it closes the old process first). Multi-instance support
-# = follow-up: turn this into a session-id -> _Session registry and thread
-# ids through the bridge + TS layers with a multiplexed drain.
-_state = _Session()
+_sessions: dict[str, _Session] = {LEGACY_SESSION_ID: _Session(LEGACY_SESSION_ID)}
+_registry_lock = threading.Lock()
+
+
+def _lookup(session_id: str) -> _Session | None:
+    with _registry_lock:
+        return _sessions.get(session_id)
+
+
+def _get_or_create(session_id: str) -> _Session:
+    with _registry_lock:
+        session = _sessions.get(session_id)
+        if session is None:
+            session = _Session(session_id)
+            _sessions[session_id] = session
+        return session
 
 
 def pty_available() -> bool:
@@ -123,11 +183,11 @@ def _set_winsize(fd: int, cols: int, rows: int) -> None:
         _log(f"winsize ignored: {exc}")
 
 
-def _reader_loop(master_fd: int, proc, gen: int) -> None:
+def _reader_loop(session: _Session, master_fd: int, proc, gen: int) -> None:
     while True:
-        with _state.lock:
-            if gen != _state.gen:
-                break  # superseded by a newer session — touch nothing
+        with session.lock:
+            if gen != session.gen:
+                break  # superseded by a newer shell in THIS session — touch nothing
         try:
             r, _, _ = select.select([master_fd], [], [], 0.5)
         except (OSError, ValueError):
@@ -142,20 +202,27 @@ def _reader_loop(master_fd: int, proc, gen: int) -> None:
             break
         if not data:
             break
-        with _state.lock:
-            if gen == _state.gen:
-                _state._bank(data)
-    with _state.lock:
-        if gen == _state.gen:
-            _state.dead = True
-    _log("reader exited (shell dead)")
+        with session.lock:
+            if gen == session.gen:
+                session._bank(data)
+    with session.lock:
+        if gen == session.gen:
+            session.dead = True
+    _log(f"reader exited (shell dead: {session.session_id})")
 
 
-def _spawn(cols: int, rows: int) -> dict:
+def _spawn(session_id: str, cols: int, rows: int, cwd: str | None) -> dict:
     import pty
     import subprocess
 
-    argv, env = _build_launch(["/bin/bash", "-i"])
+    guest_argv = ["/bin/bash", "-i"]
+    # cwd=None calls the seam with one argument so old desktop test patches
+    # (``lambda argv: …``) keep working; a real cwd is a host path that
+    # build_guest_launch translates/binds.
+    if cwd is None:
+        argv, env = _build_launch(guest_argv)
+    else:
+        argv, env = _build_launch(guest_argv, cwd)
     env = dict(env)
     # TERM only: HOME=/root and the guest PATH prefix come from
     # build_guest_launch now (BUG-134 — one HOME for every guest path, so
@@ -175,62 +242,18 @@ def _spawn(cols: int, rows: int) -> dict:
         )
     finally:
         os.close(slave_fd)  # parent keeps the master only
+    _log(f"spawned {session_id}")
     return {"proc": proc, "master_fd": master_fd}
 
 
-def start(cols: int = 80, rows: int = 24) -> dict:
-    """Start the interactive shell. Idempotent while alive."""
-    with _state.lock:
-        if _state.proc is not None and _state.proc.poll() is None and not _state.dead:
-            return {"ok": True, "already_running": True}
-        _close_locked()
-        if not pty_available():
-            return {"ok": False, "error": "pty unavailable on this device"}
-        try:
-            linux_dir = _linux_dir()
-        except Exception as exc:  # noqa: BLE001 — hermes home unresolvable
-            return {"ok": False, "error": f"hermes home: {exc}"}
-        if not (linux_dir / "bin" / "proot").exists() or not (linux_dir / "rootfs").exists():
-            # Desktop-test seam: when _build_launch is patched, the guest
-            # check is meaningless — the patched argv is the shell already.
-            if _build_launch is _default_build_launch:
-                return {"ok": False, "error": "guest not bootstrapped"}
-        try:
-            spawned = _spawn(int(cols) or 80, int(rows) or 24)
-        except Exception as exc:  # noqa: BLE001
-            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-        _state.proc = spawned["proc"]
-        _state.master_fd = spawned["master_fd"]
-        _state.chunks.clear()
-        _state.chunks_bytes = 0
-        # BUG-115: the replay bank must reset with the session it belonged to
-        # — start() boots a NEW shell, and the JS cold-attach repaints from
-        # replay(); leaving the dead session's scrollback banked repainted it
-        # into the fresh shell. (The bank itself stays: a WebView reload of a
-        # LIVE session still needs it.)
-        _state.replay.clear()
-        _state.replay_bytes = 0
-        _state.dead = False
-        _state.cols = int(cols) or 80
-        _state.rows = int(rows) or 24
-        _state.gen += 1
-        gen = _state.gen
-        reader = threading.Thread(
-            target=_reader_loop, args=(_state.master_fd, _state.proc, gen), daemon=True
-        )
-        _state.reader = reader
-        reader.start()
-        _log(f"interactive shell started ({_state.cols}x{_state.rows})")
-        return {"ok": True, "already_running": False}
-
-
-def _close_locked() -> None:
-    proc, fd = _state.proc, _state.master_fd
-    _state.proc = None
-    _state.master_fd = None
-    _state.reader = None
-    _state.dead = True
-    _state.gen += 1  # orphan any lingering reader before it can clobber the next session
+def _close_locked(session: _Session) -> None:
+    """Close THIS session's pty + shell. Caller holds ``session.lock``."""
+    proc, fd = session.proc, session.master_fd
+    session.proc = None
+    session.master_fd = None
+    session.reader = None
+    session.dead = True
+    session.gen += 1  # orphan any lingering reader before it can clobber the next shell
     if fd is not None:
         try:
             os.close(fd)
@@ -243,41 +266,148 @@ def _close_locked() -> None:
             pass
 
 
-def write(data_b64: str) -> dict:
-    """Write bytes (base64) to the shell's stdin. ``\\x03`` = Ctrl+C."""
+def _clear_locked(session: _Session) -> None:
+    session.chunks.clear()
+    session.chunks_bytes = 0
+    # BUG-115: the replay bank must reset with the shell it belonged to.
+    session.replay.clear()
+    session.replay_bytes = 0
+
+
+def start_session(
+    session_id: str,
+    cwd: str | None = None,
+    cols: int = 80,
+    rows: int = 24,
+    _allow_legacy: bool = False,
+) -> dict:
+    """Start (or reuse) one interactive shell for ``session_id``.
+
+    ``cwd`` is a HOST path (the active project's ``primaryPath``) or None.
+    ``linux_env.build_guest_launch`` maps it into the guest: paths under the
+    workspace become ``/workspace/<rel>``, guest ``/workspace[/...]`` paths map
+    back to the host workspace, and another existing host path is self-bound
+    and used as the workdir. None/missing paths stay at ``/workspace``. This
+    function never creates directories.
+    """
+    sid = _public_session_id(session_id) if not _allow_legacy else _normalize_session_id(session_id)
+    if sid is None:
+        return {"ok": False, "error": "invalid session id"}
+    cwd_value: str | None
+    if cwd is None:
+        cwd_value = None
+    elif isinstance(cwd, str):
+        cwd_value = cwd.strip() or None
+    else:
+        return {"ok": False, "error": "invalid cwd"}
+
+    session = _get_or_create(sid)
+    cols_n = int(cols) or 80
+    rows_n = int(rows) or 24
+    with session.lock:
+        if session.proc is not None and session.proc.poll() is None and not session.dead:
+            return {"ok": True, "already_running": True}
+        _close_locked(session)
+        if not pty_available():
+            return {"ok": False, "error": "pty unavailable on this device"}
+        try:
+            linux_dir = _linux_dir()
+        except Exception as exc:  # noqa: BLE001 — hermes home unresolvable
+            return {"ok": False, "error": f"hermes home: {exc}"}
+        if not (linux_dir / "bin" / "proot").exists() or not (linux_dir / "rootfs").exists():
+            # Desktop-test seam: when _build_launch is patched, the guest
+            # check is meaningless — the patched argv is the shell already.
+            if _build_launch is _default_build_launch:
+                return {"ok": False, "error": "guest not bootstrapped"}
+        try:
+            spawned = _spawn(sid, cols_n, rows_n, cwd_value)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        session.proc = spawned["proc"]
+        session.master_fd = spawned["master_fd"]
+        _clear_locked(session)
+        session.dead = False
+        session.cols = cols_n
+        session.rows = rows_n
+        session.gen += 1
+        gen = session.gen
+        reader = threading.Thread(
+            target=_reader_loop,
+            args=(session, session.master_fd, session.proc, gen),
+            daemon=True,
+            name=f"moch-term-{sid}",
+        )
+        session.reader = reader
+        reader.start()
+    _log(f"interactive shell started ({sid}, {cols_n}x{rows_n})")
+    return {"ok": True, "already_running": False}
+
+
+def write_session(session_id: str, data_b64: str, _allow_legacy: bool = False) -> dict:
+    """Write bytes (base64) to one session's stdin. ``\\x03`` = Ctrl+C."""
+    sid = _public_session_id(session_id) if not _allow_legacy else _normalize_session_id(session_id)
+    if sid is None:
+        return {"ok": False, "error": "invalid session id"}
     try:
         data = base64.b64decode(data_b64, validate=True)
     except Exception:
         return {"ok": False, "error": "bad base64"}
-    with _state.lock:
-        if _state.master_fd is None or _state.dead:
+    session = _lookup(sid)
+    if session is None:
+        return {"ok": False, "error": "unknown session"}
+    with session.lock:
+        if session.master_fd is None or session.dead:
             return {"ok": False, "error": "terminal not running"}
         try:
-            os.write(_state.master_fd, data)
+            os.write(session.master_fd, data)
             return {"ok": True, "bytes": len(data)}
         except OSError as exc:
             return {"ok": False, "error": f"write: {exc}"}
 
 
-def drain() -> dict:
+def drain_session(session_id: str, _allow_legacy: bool = False) -> dict:
     """Take up to _DRAIN_MAX_CHUNKS banked output chunks (base64 list)."""
+    sid = _public_session_id(session_id) if not _allow_legacy else _normalize_session_id(session_id)
+    if sid is None:
+        return {"ok": False, "error": "invalid session id", "chunks": [], "alive": False}
+    session = _lookup(sid)
+    if session is None:
+        return {"ok": True, "chunks": [], "alive": False}
     out: list[str] = []
     taken = 0
-    with _state.lock:
-        while _state.chunks and len(out) < _DRAIN_MAX_CHUNKS and taken < _DRAIN_MAX_BYTES:
-            raw = _state.chunks.popleft()
-            _state.chunks_bytes -= len(raw)
+    with session.lock:
+        while (
+            session.chunks
+            and len(out) < _DRAIN_MAX_CHUNKS
+            and taken < _DRAIN_MAX_BYTES
+        ):
+            raw = session.chunks.popleft()
+            session.chunks_bytes -= len(raw)
             taken += len(raw)
             out.append(base64.b64encode(raw).decode("ascii"))
-        alive = not _state.dead and _state.proc is not None and _state.proc.poll() is None
+        alive = session._alive_locked()
     return {"ok": True, "chunks": out, "alive": alive}
 
 
-def replay() -> dict:
-    """Last ~64KB of output for reattach (cold screen repaint)."""
-    with _state.lock:
-        blob = b"".join(_state.replay)
-        alive = not _state.dead and _state.proc is not None and _state.proc.poll() is None
+def replay_session(session_id: str, _allow_legacy: bool = False) -> dict:
+    """Reattach snapshot for one session (last ~64KB, base64).
+
+    Atomically consumes the pending drain queue: those bytes are already in
+    the replay bank (up to the 64 KiB cap), so the next ``drain_session``
+    returns only output produced after this snapshot. That keeps a remounted
+    xterm from painting the same bytes twice.
+    """
+    sid = _public_session_id(session_id) if not _allow_legacy else _normalize_session_id(session_id)
+    if sid is None:
+        return {"ok": False, "error": "invalid session id", "chunk": "", "alive": False}
+    session = _lookup(sid)
+    if session is None:
+        return {"ok": True, "chunk": "", "alive": False}
+    with session.lock:
+        blob = b"".join(session.replay)
+        session.chunks.clear()
+        session.chunks_bytes = 0
+        alive = session._alive_locked()
     return {
         "ok": True,
         "chunk": base64.b64encode(blob).decode("ascii"),
@@ -285,34 +415,107 @@ def replay() -> dict:
     }
 
 
-def resize(cols: int, rows: int) -> dict:
-    """TIOCSWINSZ the pty (rotation / font-size reflow)."""
-    with _state.lock:
-        if _state.master_fd is None or _state.dead:
-            return {"ok": False, "error": "terminal not running"}
-        _set_winsize(_state.master_fd, int(cols) or 80, int(rows) or 24)
-        _state.cols = int(cols) or 80
-        _state.rows = int(rows) or 24
-        return {"ok": True, "cols": _state.cols, "rows": _state.rows}
+def clear_session(session_id: str, _allow_legacy: bool = False) -> dict:
+    """Drop one session's scrollback (live queue + replay bank), keep the shell.
 
-
-def kill() -> dict:
-    """Kill the shell (the dieable half). Next start() boots fresh."""
-    with _state.lock:
-        _close_locked()
-        _state.chunks.clear()
-        _state.chunks_bytes = 0
-        # BUG-115, symmetry with "boots fresh": the replay bank dies with the
-        # session (see start()).
-        _state.replay.clear()
-        _state.replay_bytes = 0
-    _log("interactive shell killed")
+    The Terminal header's Clear must stay cleared when its tab is switched
+    away and reattached; wiping only the TS bank would let the old replay
+    resurrect on the next remount.
+    """
+    sid = _public_session_id(session_id) if not _allow_legacy else _normalize_session_id(session_id)
+    if sid is None:
+        return {"ok": False, "error": "invalid session id"}
+    session = _lookup(sid)
+    if session is None:
+        return {"ok": True}
+    with session.lock:
+        _clear_locked(session)
     return {"ok": True}
 
 
+def resize_session(session_id: str, cols: int, rows: int, _allow_legacy: bool = False) -> dict:
+    """TIOCSWINSZ one pty (rotation / font-size reflow)."""
+    sid = _public_session_id(session_id) if not _allow_legacy else _normalize_session_id(session_id)
+    if sid is None:
+        return {"ok": False, "error": "invalid session id"}
+    session = _lookup(sid)
+    if session is None:
+        return {"ok": False, "error": "unknown session"}
+    with session.lock:
+        if session.master_fd is None or session.dead:
+            return {"ok": False, "error": "terminal not running"}
+        session.cols = int(cols) or 80
+        session.rows = int(rows) or 24
+        _set_winsize(session.master_fd, session.cols, session.rows)
+        return {"ok": True, "cols": session.cols, "rows": session.rows}
+
+
+def kill_session(session_id: str, _allow_legacy: bool = False) -> dict:
+    """Kill one shell and drop its registry entry. Other sessions untouched."""
+    sid = _public_session_id(session_id) if not _allow_legacy else _normalize_session_id(session_id)
+    if sid is None:
+        return {"ok": False, "error": "invalid session id"}
+    session = _lookup(sid)
+    if session is None:
+        return {"ok": True}
+    with session.lock:
+        _close_locked(session)
+        _clear_locked(session)
+    if sid != LEGACY_SESSION_ID:
+        with _registry_lock:
+            _sessions.pop(sid, None)
+    _log(f"interactive shell killed ({sid})")
+    return {"ok": True}
+
+
+def is_session_running(session_id: str) -> bool:
+    sid = _normalize_session_id(session_id)
+    if sid is None:
+        return False
+    session = _lookup(sid)
+    if session is None:
+        return False
+    with session.lock:
+        return session._alive_locked()
+
+
+# ── Legacy default session ──────────────────────────────────────────────────
+# The OpenCode hidden server launch still types into this one shell; keep
+# every signature and result shape exactly as before.
+
+
+def start(cols: int = 80, rows: int = 24) -> dict:
+    """Start the legacy interactive shell. Idempotent while alive."""
+    return start_session(LEGACY_SESSION_ID, None, cols, rows, _allow_legacy=True)
+
+
+def write(data_b64: str) -> dict:
+    """Write bytes (base64) to the legacy shell's stdin."""
+    return write_session(LEGACY_SESSION_ID, data_b64, _allow_legacy=True)
+
+
+def drain() -> dict:
+    """Take up to _DRAIN_MAX_CHUNKS banked output chunks (base64 list)."""
+    return drain_session(LEGACY_SESSION_ID, _allow_legacy=True)
+
+
+def replay() -> dict:
+    """Last ~64KB of output for reattach (cold screen repaint)."""
+    return replay_session(LEGACY_SESSION_ID, _allow_legacy=True)
+
+
+def resize(cols: int, rows: int) -> dict:
+    """TIOCSWINSZ the legacy pty (rotation / font-size reflow)."""
+    return resize_session(LEGACY_SESSION_ID, cols, rows, _allow_legacy=True)
+
+
+def kill() -> dict:
+    """Kill the legacy shell (the dieable half). Next start() boots fresh."""
+    return kill_session(LEGACY_SESSION_ID, _allow_legacy=True)
+
+
 def is_running() -> bool:
-    with _state.lock:
-        return not _state.dead and _state.proc is not None and _state.proc.poll() is None
+    return is_session_running(LEGACY_SESSION_ID)
 
 
 def probe() -> dict:

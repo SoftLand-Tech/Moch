@@ -15,31 +15,52 @@ const check = (name: string, ok: boolean, detail = '') => {
 
 const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64')
 
-function fakeNative(outChunks: string[] = [], alive = true) {
-  const writes: string[] = []
+// Fake per-session transport: records the bound session id on every call so
+// the adapter (createSessionTermNative) is exercised, not bypassed.
+function fakeTransport(outChunks: string[] = [], alive = true) {
+  const writes: { sessionId: string; data: string }[] = []
+  const starts: { sessionId: string; cwd: string | null; cols: number; rows: number }[] = []
+  const kills: string[] = []
+  const clears: string[] = []
+  const resizes: { sessionId: string; cols: number; rows: number }[] = []
   return {
     writes,
-    async start() {
+    starts,
+    kills,
+    clears,
+    resizes,
+    async startSession(sessionId: string, cwd: string | null, cols: number, rows: number) {
+      starts.push({ sessionId, cwd, cols, rows })
       return { ok: true, alreadyRunning: false }
     },
-    async write(d: string) {
-      writes.push(d)
+    async writeSession(sessionId: string, d: string) {
+      writes.push({ sessionId, data: d })
       return true
     },
-    async drain() {
+    async drainSession() {
       const c = outChunks.splice(0, outChunks.length)
       return { chunks: c, alive }
     },
-    async replay() {
+    async replaySession() {
       return { chunk: '', alive }
     },
-    async resize() {
+    async clearSession(sessionId: string) {
+      clears.push(sessionId)
       return true
     },
-    async kill() {
+    async resizeSession(sessionId: string, cols: number, rows: number) {
+      resizes.push({ sessionId, cols, rows })
+      return true
+    },
+    async killSession(sessionId: string) {
+      kills.push(sessionId)
       return true
     },
   }
+}
+
+function nativeFor(transport: ReturnType<typeof fakeTransport>, sessionId = 'term-1', cwd: string | null = '/workspace') {
+  return m.createSessionTermNative(transport, sessionId, cwd)
 }
 
 async function main() {
@@ -101,19 +122,71 @@ async function main() {
   check('full storm through pairing', seq.bytes === '\x7f\x7f' && seq.next.logical === '')
   check('resync sends nothing, keeps logical', m.applyFieldChange({ logical: 'ls', pendingKeys: 0 }, 'ls').bytes === '')
 
+  // ── session id + adapter binding ──────────────────────────────────────
+  const idA = m.newTermSessionId(1_700_000_000_000)
+  const idB = m.newTermSessionId(1_700_000_000_000)
+  check('session id shape term-<ts>-<seq>', /^term-1700000000000-\d+$/.test(idA), idA)
+  check('session ids are unique per process', idA !== idB)
+  check('session id stays inside python bound (≤64)', idA.length <= 64)
+
+  const bindT = fakeTransport()
+  const bindA = nativeFor(bindT, 'term-bind-a', '/workspace/proj-a')
+  const bindB = nativeFor(bindT, 'term-bind-b', null)
+  const bindCtlA = new m.TerminalController(bindA, { drainMs: 50 })
+  const bindCtlB = new m.TerminalController(bindB, { drainMs: 50 })
+  await bindCtlA.start(80, 24)
+  await bindCtlB.start(90, 30)
+  check(
+    'adapter passes its bound session + cwd on start',
+    bindT.starts[0]?.sessionId === 'term-bind-a' &&
+      bindT.starts[0]?.cwd === '/workspace/proj-a' &&
+      bindT.starts[1]?.sessionId === 'term-bind-b' &&
+      bindT.starts[1]?.cwd === null,
+  )
+  let lateCwd: string | null = null
+  const lateNative = m.createSessionTermNative(bindT, 'term-bind-late', () => lateCwd)
+  const lateCtl = new m.TerminalController(lateNative)
+  lateCwd = '/workspace/adopted-after-mount'
+  await lateCtl.start(80, 24)
+  check(
+    'adapter reads a late-adopted project cwd at start time',
+    bindT.starts[2]?.sessionId === 'term-bind-late' &&
+      bindT.starts[2]?.cwd === '/workspace/adopted-after-mount',
+  )
+  lateCtl.destroy()
+  await bindCtlA.send('a\n')
+  await bindCtlB.send('b\n')
+  check(
+    'two adapters never cross-write',
+    bindT.writes[0]?.sessionId === 'term-bind-a' &&
+      bindT.writes[1]?.sessionId === 'term-bind-b',
+  )
+  check('adapter resize stays on its session', (await bindA.resize(100, 40)) && bindT.resizes[0]?.sessionId === 'term-bind-a')
+  bindCtlA.rawBank = 'stale'
+  await bindCtlA.clear()
+  check(
+    'adapter clear stays on its session and wipes the local bank',
+    bindT.clears.length === 1 && bindT.clears[0] === 'term-bind-a' && bindCtlA.rawBank === '',
+  )
+  await bindCtlA.kill()
+  check('adapter kill stays on its session', bindT.kills.length === 1 && bindT.kills[0] === 'term-bind-a')
+  bindCtlA.destroy()
+  bindCtlB.destroy()
+
   // ── controller: RAW byte flow (BUG-097) ───────────────────────────────
   const rep = b64('\x1b[1mroot@moch\x1b[0m:~# ')
   const live = b64('hello\x08 \x08pty\n') // backspace erases — must survive untouched
   const got: string[] = []
-  const fake = fakeNative([live])
-  fake.replay = async () => ({ chunk: rep, alive: true })
-  const ctl = new m.TerminalController(fake, { drainMs: 50, onChunk: (c) => got.push(c) })
+  const fake = fakeTransport([live])
+  fake.replaySession = async () => ({ chunk: rep, alive: true })
+  const ctl = new m.TerminalController(nativeFor(fake), { drainMs: 50, onChunk: (c) => got.push(c) })
   const snaps: string[] = []
   ctl.onChange((s) => snaps.push(s.state))
   const ok = await ctl.start(80, 24)
   check('start ok → live', ok && ctl.state === 'live')
   check('replay forwarded RAW through onChunk', got[0] === rep)
   check('raw bank holds the replay', ctl.rawBank === rep)
+  check('start passed the adapter cwd to the transport', fake.starts[0]?.cwd === '/workspace')
   await ctl.tick()
   check('drain chunk forwarded RAW (esc + \\x08 intact)', got[1] === live)
   check('raw bank accumulates ticks', ctl.rawBank === rep + live)
@@ -121,15 +194,28 @@ async function main() {
 
   // ── controller: send base64s the bytes ────────────────────────────────
   await ctl.send('ls\n')
-  const sent = Buffer.from(fake.writes[0] ?? '', 'base64').toString('utf8')
+  const sent = Buffer.from(fake.writes[0]?.data ?? '', 'base64').toString('utf8')
   check('send writes base64 line', sent === 'ls\n')
   await ctl.send(m.TERM_KEYS.CTRL_C)
-  const sentCtrl = Buffer.from(fake.writes[1] ?? '', 'base64').toString('utf8')
+  const sentCtrl = Buffer.from(fake.writes[1]?.data ?? '', 'base64').toString('utf8')
   check('Ctrl+C sends \\x03', sentCtrl === '\x03')
 
+  // ── controller: pause/resume + reattach ───────────────────────────────
+  check('controller polls while active', ctl.polling)
+  ctl.pause()
+  check('pause stops polling', !ctl.polling)
+  ctl.resume()
+  check('resume re-arms a live controller', ctl.polling)
+  ctl.pause()
+  const snap = b64('reattached scrollback\n')
+  fake.replaySession = async () => ({ chunk: snap, alive: true })
+  ctl.rawBank = ''
+  const reattached = await ctl.reattach()
+  check('reattach replaces the raw bank with native replay', reattached === snap && ctl.rawBank === snap)
+
   // ── controller: raw bank cap trims on a b64 boundary ──────────────────
-  const big = fakeNative([b64('a'.repeat(200000))])
-  const ctlBig = new m.TerminalController(big, { onChunk: () => {} })
+  const big = fakeTransport([b64('a'.repeat(200000))])
+  const ctlBig = new m.TerminalController(nativeFor(big), { onChunk: () => {} })
   await ctlBig.start(80, 24)
   await ctlBig.tick()
   check('raw bank capped', ctlBig.rawBank.length <= m.TERM_RAW_BANK_B64_CAP)
@@ -137,16 +223,16 @@ async function main() {
   await ctlBig.send('q\n')
 
   // ── controller: shell death → dead ────────────────────────────────────
-  const dying = fakeNative([], false)
-  const ctl2 = new m.TerminalController(dying)
+  const dying = fakeTransport([], false)
+  const ctl2 = new m.TerminalController(nativeFor(dying))
   await ctl2.start(80, 24)
   await ctl2.tick()
   check('dead shell marks dead', ctl2.state === 'dead' && !ctl2.alive)
 
   // ── controller: start failure ─────────────────────────────────────────
-  const bad = fakeNative()
-  bad.start = async () => ({ ok: false, alreadyRunning: false, error: 'guest not bootstrapped' })
-  const ctl3 = new m.TerminalController(bad)
+  const bad = fakeTransport()
+  bad.startSession = async () => ({ ok: false, alreadyRunning: false, error: 'guest not bootstrapped' })
+  const ctl3 = new m.TerminalController(nativeFor(bad))
   const ok3 = await ctl3.start(80, 24)
   check('failed start → dead + error', !ok3 && ctl3.state === 'dead' && ctl3.error === 'guest not bootstrapped')
 
