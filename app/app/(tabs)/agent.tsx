@@ -506,7 +506,17 @@ export default function Controls() {
           </Card>
         </KeyboardAwareScrollView>
       </ScreenShell>
-      <ModelPickerSheet open={pickerOpen} initialSlug={pickerSlug} onClose={() => setPickerOpen(false)} />
+      <ModelPickerSheet
+        open={pickerOpen}
+        initialSlug={pickerSlug}
+        onClose={() => {
+          setPickerOpen(false)
+          setPickerSlug(null)
+          // The sheet may have written the global default (or a session pick);
+          // refresh so the saved-everywhere line and the model card are honest.
+          void refresh()
+        }}
+      />
     </SafeAreaView>
   )
 }

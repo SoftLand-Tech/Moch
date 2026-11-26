@@ -471,7 +471,7 @@ async function typeOpencodeLaunchHidden(password: string): Promise<boolean> {
     if (!(await write(' export HISTCONTROL=ignorespace; stty -echo\n'))) return false
     await sleepMs(200)
     const cmd =
-      ` exec 2>/dev/null; cd /root && export OPENCODE_PASSWORD=${shQuote(password)} && ` +
+      ` exec 2>/dev/null; cd /workspace && export OPENCODE_PASSWORD=${shQuote(password)} && ` +
       `opencode serve --hostname 127.0.0.1 --port ${OC_PORT} ` +
       `>/root/opencode.log 2>&1 & exec 2>&1\n`
     const wrote = await write(cmd)

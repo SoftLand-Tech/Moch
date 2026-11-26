@@ -84,7 +84,7 @@ import { isConnected as isConnectedAtom, everConnected, connectionState, gateway
 import { completeSlash, loadCatalog, runCommand, parseSlashCommand, canonicalName, interactiveTarget, describeCommand, subsFor, argumentModeFor, slashLabel, localCompleteSync, resolveSlashRoute, type CompletionItem, type SlashOutcome } from '../../src/lib/slash'
 import { liveModel, liveReasoning, liveReasoningDisplay, fetchReasoningDisplay } from '../../src/lib/modelState'
 import { thinkerAtom, ocOneShotAtom } from '../../src/lib/thinker'
-import { ocPickFor, rememberOcPick } from '../../src/lib/opencodeChat'
+import { ocOneShotModelFor, readOcDefaultPick, rememberOcPick } from '../../src/lib/opencodeChat'
 import { ocDefaultModel, ocEnsureServer } from '../../src/lib/opencodeClient'
 import { ModelPickerSheet } from '../../src/components/ModelPickerSheet'
 import { CommandOptionsSheet } from '../../src/components/CommandOptionsSheet'
@@ -236,7 +236,7 @@ export default function Chat() {
     if (ocOneShot) {
       setOcModel('')
       if (storedId) {
-        ocPickFor(storedId)
+        ocOneShotModelFor(storedId)
           .then((m) => { if (alive && m) setOcPicks((p) => ({ ...p, [storedId]: m })) })
           .catch(() => {})
       }
@@ -244,8 +244,13 @@ export default function Chat() {
     }
     ocEnsureServer()
       .catch(() => {})
-      .then(() => ocDefaultModel())
-      .then((m) => { if (alive) setOcModel(m?.modelID ?? '') })
+      .then(() => Promise.all([ocDefaultModel(), readOcDefaultPick()]))
+      .then(([m, saved]) => {
+        // The app-wide "All sessions" pick is Moch state; the server default
+        // is only a fallback. Without this, restarting after setting a default
+        // in an unsent chat showed the old server default and looked ignored.
+        if (alive) setOcModel(saved?.modelID ?? m?.modelID ?? '')
+      })
       .catch(() => {})
     return () => { alive = false }
   }, [ocMode, ocOneShot, modelPickerOpen, storedId, online])
@@ -2075,7 +2080,14 @@ export default function Chat() {
             // The chip's label is the sheet's checked row — per-session picks
             // never reach /api/model/default, so the sheet must be told.
             ocCurrent={ocModelForChip || null}
-            onPicked={(modelID) => { const sid = activeStoredId.get(); if (sid) { setOcPicks((p) => ({ ...p, [sid]: modelID })); void rememberOcPick(sid, modelID) } }}
+            onPicked={(modelID, scope) => {
+              const sid = activeStoredId.get()
+              if (!sid) return
+              setOcPicks((p) => ({ ...p, [sid]: modelID }))
+              // Session-scoped pick: persist it. `All sessions` only comes here as
+              // 'chat' when it actually switched this chat's live OC session.
+              if (scope !== 'all') void rememberOcPick(sid, modelID)
+            }}
           />
           <CommandCatalogSheet
             open={catalogOpen}

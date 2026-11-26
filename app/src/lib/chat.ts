@@ -42,6 +42,8 @@ import {
   findStoredIdForOcSession,
   ocPickFor,
   rememberOcPick,
+  ocOneShotModelFor,
+  ocSelectedProjectCwd,
   loadOcHistory,
   noteOcInteractiveChanged,
   ocInteractiveRevisionValue,
@@ -1135,7 +1137,15 @@ async function createSessionRpc<T>(params: Record<string, unknown>): Promise<T> 
   }
 }
 
-export async function createSession(title?: string, opts?: { thinker?: Thinker }): Promise<ResumeResult> {
+export async function createSession(
+  title?: string,
+  opts?: {
+    thinker?: Thinker
+    /** Background work (browser quick task, cron-like spawn): create + track
+     *  the chat, but do NOT make it the app's next-boot "last session". */
+    background?: boolean
+  },
+): Promise<ResumeResult> {
   // Bot Mode rule (audit: BOT-MODE.md): an ordinary chat is NEVER scoped to a
   // bot profile. A bot's only conversation is its canonical `Bot Chat`,
   // resolved/created by lib/botChat.ts through the native exact-title
@@ -1178,7 +1188,9 @@ export async function createSession(title?: string, opts?: { thinker?: Thinker }
   // Activation is the CALLERS' job (newChat re-keys its optimistic entry,
   // ensureSession sets explicitly after its two create tails) — an
   // unconditional set here would yank the screen back on a rapid double-tap.
-  void AsyncStorage.setItem(LAST_SESSION_KEY, storedId)
+  // Background sessions are tracked for their transcript, but must not
+  // replace what the user gets on the next cold start.
+  if (!opts?.background) void AsyncStorage.setItem(LAST_SESSION_KEY, storedId)
   return { sessionId: id, storedId, messages: res.messages ?? [] }
 }
 
@@ -2516,11 +2528,12 @@ async function runOcOneShot(sid: string, text: string): Promise<void> {
   try {
     const hooks = ocHooksFor(sid)
     hooks.start()
-    const model = await ocPickFor(stored || '').catch(() => null)
+    const model = await ocOneShotModelFor(stored || '').catch(() => null)
     const out = await runOneShotTurn({
       mapKey,
       text,
       model: model ?? undefined,
+      cwd: ocSelectedProjectCwd(),
       isCancelled: () => cancel.current,
     })
     // Tool usage renders as finished rows (same reducers, no fake stream).

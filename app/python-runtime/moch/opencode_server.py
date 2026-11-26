@@ -139,7 +139,7 @@ def _type_hidden_launch(password: str) -> bool:
             return False
         time.sleep(0.2)
         cmd = (
-            " exec 2>/dev/null; cd /root && "
+            " exec 2>/dev/null; cd /workspace && "
             f"export OPENCODE_PASSWORD={shlex.quote(password)} && "
             f"opencode serve --hostname 127.0.0.1 --port {OC_PORT} "
             ">/root/opencode.log 2>&1 & exec 2>&1\n"
