@@ -1,0 +1,14 @@
+{
+  "prompt": "Create a 1200x630 Moch social card in the Mocheme palette: near-black indigo ground, soft matte card stock, antenna orange only for the download action, cream headline, real Moch favicon mark and Mochi greeting artwork. Exact headline: Moch — your agent runs on your phone. Your model is your choice. Supporting copy: Hermes built in, OpenCode in an optional Ubuntu guest. Current Android beta 1.0.53-beta.3, build 58. No terminal aesthetic, no QR code, no fabricated metrics.",
+  "kind": "authored-vector-raster",
+  "created": "2026-11-26",
+  "tool": "Authored SVG; rasterized with ImageMagick 7.1.2-34",
+  "model": "Not applicable; no image model used",
+  "sourceAssets": [
+    "docs/assets/favicon.png",
+    "docs/assets/moch/mochi-greeting.svg"
+  ],
+  "derivedAssetNote": "Mochi was rasterized from the shipped SVG to a temporary 326x355 PNG8 asset before embedding, because ImageMagick cropped nested SVG image data. The temporary file is not shipped.",
+  "license": "MIT",
+  "intendedUse": "Open Graph and Twitter social preview for moch.softland.tech"
+}

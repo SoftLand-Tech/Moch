@@ -1,0 +1,12 @@
+{
+  "kind": "authored-vector-source",
+  "created": "2026-11-26",
+  "tool": "Hand-authored SVG with embedded real Moch assets",
+  "sourceAssets": [
+    "docs/assets/favicon.png",
+    "docs/assets/moch/mochi-greeting.svg"
+  ],
+  "rasterOutput": "docs/assets/og-image.png",
+  "license": "MIT",
+  "intendedUse": "Editable source for the 1200x630 social preview."
+}

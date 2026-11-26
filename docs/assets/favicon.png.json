@@ -1,0 +1,11 @@
+{
+  "prompt": "Origin metadata, not a generation prompt: pre-existing Moch favicon artwork shipped in the SoftLand-Tech/Moch repository initial commit 322d80c02940b0bf8680055c2ae228145acd0789 on 2026-10-05.",
+  "kind": "pre-existing-brand-asset",
+  "origin": {
+    "repository": "https://github.com/SoftLand-Tech/Moch",
+    "commit": "322d80c02940b0bf8680055c2ae228145acd0789",
+    "path": "docs/assets/favicon.png"
+  },
+  "license": "MIT",
+  "intendedUse": "Site favicon and the real Moch mark in the authored social card."
+}
