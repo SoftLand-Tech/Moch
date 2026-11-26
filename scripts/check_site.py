@@ -14,8 +14,8 @@ Examples:
 The verifier uses only the Python standard library and never accesses the
 network. External navigation links are allowed, but external resource loads
 (fonts, stylesheets, scripts, images, analytics, and CSS url()/import requests)
-are not. /Moch.apk is the one permitted repository-absent URL: it already lives
-on the VPS and deployment must leave it in place.
+are not. /Moch.apk is the one permitted repository-absent URL: the deploy
+workflow adds it from the verified matching CI release.
 """
 
 from __future__ import annotations

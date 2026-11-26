@@ -1,0 +1,517 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-26T16:44:29.460Z",
+  "title": "Design System: Moch",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Sprout Orange",
+        "canonical": "#f79236",
+        "tonalRamp": [
+          "oklch(15% 0.1580 58.3)",
+          "oklch(26% 0.1580 58.3)",
+          "oklch(38% 0.1580 58.3)",
+          "oklch(50% 0.1580 58.3)",
+          "oklch(62% 0.1580 58.3)",
+          "oklch(74% 0.1580 58.3)",
+          "oklch(86% 0.1580 58.3)",
+          "oklch(95% 0.1580 58.3)"
+        ]
+      },
+      "on-accent": {
+        "role": "primary",
+        "displayName": "Espresso Ink",
+        "canonical": "#2e1a08",
+        "tonalRamp": [
+          "oklch(15% 0.0431 60.5)",
+          "oklch(26% 0.0431 60.5)",
+          "oklch(38% 0.0431 60.5)",
+          "oklch(50% 0.0431 60.5)",
+          "oklch(62% 0.0431 60.5)",
+          "oklch(74% 0.0431 60.5)",
+          "oklch(86% 0.0431 60.5)",
+          "oklch(95% 0.0431 60.5)"
+        ]
+      },
+      "accent-line": {
+        "role": "primary",
+        "displayName": "Sprout Orange Line",
+        "canonical": "rgba(247, 146, 54, 0.38)",
+        "tonalRamp": [
+          "oklch(15% 0.1580 58.3)",
+          "oklch(26% 0.1580 58.3)",
+          "oklch(38% 0.1580 58.3)",
+          "oklch(50% 0.1580 58.3)",
+          "oklch(62% 0.1580 58.3)",
+          "oklch(74% 0.1580 58.3)",
+          "oklch(86% 0.1580 58.3)",
+          "oklch(95% 0.1580 58.3)"
+        ]
+      },
+      "green-soft": {
+        "role": "status",
+        "displayName": "Local Mint",
+        "canonical": "#4ade80",
+        "tonalRamp": [
+          "oklch(15% 0.1821 151.7)",
+          "oklch(26% 0.1821 151.7)",
+          "oklch(38% 0.1821 151.7)",
+          "oklch(50% 0.1821 151.7)",
+          "oklch(62% 0.1821 151.7)",
+          "oklch(74% 0.1821 151.7)",
+          "oklch(86% 0.1821 151.7)",
+          "oklch(95% 0.1821 151.7)"
+        ]
+      },
+      "green-tint": {
+        "role": "status",
+        "displayName": "Local Mint Wash",
+        "canonical": "rgba(74, 222, 128, 0.12)",
+        "tonalRamp": [
+          "oklch(15% 0.1821 151.7)",
+          "oklch(26% 0.1821 151.7)",
+          "oklch(38% 0.1821 151.7)",
+          "oklch(50% 0.1821 151.7)",
+          "oklch(62% 0.1821 151.7)",
+          "oklch(74% 0.1821 151.7)",
+          "oklch(86% 0.1821 151.7)",
+          "oklch(95% 0.1821 151.7)"
+        ]
+      },
+      "bg": {
+        "role": "neutral",
+        "displayName": "Mocheme Night",
+        "canonical": "#0a0813",
+        "tonalRamp": [
+          "oklch(15% 0.0240 291.9)",
+          "oklch(26% 0.0240 291.9)",
+          "oklch(38% 0.0240 291.9)",
+          "oklch(50% 0.0240 291.9)",
+          "oklch(62% 0.0240 291.9)",
+          "oklch(74% 0.0240 291.9)",
+          "oklch(86% 0.0240 291.9)",
+          "oklch(95% 0.0240 291.9)"
+        ]
+      },
+      "bg-soft": {
+        "role": "neutral",
+        "displayName": "Soft Night",
+        "canonical": "#100e1a",
+        "tonalRamp": [
+          "oklch(15% 0.0247 291.2)",
+          "oklch(26% 0.0247 291.2)",
+          "oklch(38% 0.0247 291.2)",
+          "oklch(50% 0.0247 291.2)",
+          "oklch(62% 0.0247 291.2)",
+          "oklch(74% 0.0247 291.2)",
+          "oklch(86% 0.0247 291.2)",
+          "oklch(95% 0.0247 291.2)"
+        ]
+      },
+      "card": {
+        "role": "neutral",
+        "displayName": "Raised Indigo",
+        "canonical": "#151220",
+        "tonalRamp": [
+          "oklch(15% 0.0281 293.4)",
+          "oklch(26% 0.0281 293.4)",
+          "oklch(38% 0.0281 293.4)",
+          "oklch(50% 0.0281 293.4)",
+          "oklch(62% 0.0281 293.4)",
+          "oklch(74% 0.0281 293.4)",
+          "oklch(86% 0.0281 293.4)",
+          "oklch(95% 0.0281 293.4)"
+        ]
+      },
+      "elevated": {
+        "role": "neutral",
+        "displayName": "Inset Indigo",
+        "canonical": "#1a1727",
+        "tonalRamp": [
+          "oklch(15% 0.0312 292.2)",
+          "oklch(26% 0.0312 292.2)",
+          "oklch(38% 0.0312 292.2)",
+          "oklch(50% 0.0312 292.2)",
+          "oklch(62% 0.0312 292.2)",
+          "oklch(74% 0.0312 292.2)",
+          "oklch(86% 0.0312 292.2)",
+          "oklch(95% 0.0312 292.2)"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "White",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "oklch(15% 0 0)",
+          "oklch(26% 0 0)",
+          "oklch(38% 0 0)",
+          "oklch(50% 0 0)",
+          "oklch(62% 0 0)",
+          "oklch(74% 0 0)",
+          "oklch(86% 0 0)",
+          "oklch(95% 0 0)"
+        ]
+      },
+      "text-dim": {
+        "role": "neutral",
+        "displayName": "Lavender Mist",
+        "canonical": "#b4b1c4",
+        "tonalRamp": [
+          "oklch(15% 0.0270 293.0)",
+          "oklch(26% 0.0270 293.0)",
+          "oklch(38% 0.0270 293.0)",
+          "oklch(50% 0.0270 293.0)",
+          "oklch(62% 0.0270 293.0)",
+          "oklch(74% 0.0270 293.0)",
+          "oklch(86% 0.0270 293.0)",
+          "oklch(95% 0.0270 293.0)"
+        ]
+      },
+      "text-faint": {
+        "role": "neutral",
+        "displayName": "Muted Lavender",
+        "canonical": "#86829b",
+        "tonalRamp": [
+          "oklch(15% 0.0376 292.6)",
+          "oklch(26% 0.0376 292.6)",
+          "oklch(38% 0.0376 292.6)",
+          "oklch(50% 0.0376 292.6)",
+          "oklch(62% 0.0376 292.6)",
+          "oklch(74% 0.0376 292.6)",
+          "oklch(86% 0.0376 292.6)",
+          "oklch(95% 0.0376 292.6)"
+        ]
+      },
+      "cream": {
+        "role": "neutral",
+        "displayName": "Mochi Cream",
+        "canonical": "#f6ece1",
+        "tonalRamp": [
+          "oklch(15% 0.0182 70.2)",
+          "oklch(26% 0.0182 70.2)",
+          "oklch(38% 0.0182 70.2)",
+          "oklch(50% 0.0182 70.2)",
+          "oklch(62% 0.0182 70.2)",
+          "oklch(74% 0.0182 70.2)",
+          "oklch(86% 0.0182 70.2)",
+          "oklch(95% 0.0182 70.2)"
+        ]
+      },
+      "user-text": {
+        "role": "neutral",
+        "displayName": "Visor Navy",
+        "canonical": "#2b283b",
+        "tonalRamp": [
+          "oklch(15% 0.0345 291.3)",
+          "oklch(26% 0.0345 291.3)",
+          "oklch(38% 0.0345 291.3)",
+          "oklch(50% 0.0345 291.3)",
+          "oklch(62% 0.0345 291.3)",
+          "oklch(74% 0.0345 291.3)",
+          "oklch(86% 0.0345 291.3)",
+          "oklch(95% 0.0345 291.3)"
+        ]
+      },
+      "on-cream-muted": {
+        "role": "neutral",
+        "displayName": "Cream Panel Muted Ink",
+        "canonical": "#575267",
+        "tonalRamp": [
+          "oklch(15% 0.0344 295.9)",
+          "oklch(26% 0.0344 295.9)",
+          "oklch(38% 0.0344 295.9)",
+          "oklch(50% 0.0344 295.9)",
+          "oklch(62% 0.0344 295.9)",
+          "oklch(74% 0.0344 295.9)",
+          "oklch(86% 0.0344 295.9)",
+          "oklch(95% 0.0344 295.9)"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Cream Hairline",
+        "canonical": "rgba(248, 239, 229, 0.11)",
+        "tonalRamp": [
+          "oklch(15% 0.0165 70.5)",
+          "oklch(26% 0.0165 70.5)",
+          "oklch(38% 0.0165 70.5)",
+          "oklch(50% 0.0165 70.5)",
+          "oklch(62% 0.0165 70.5)",
+          "oklch(74% 0.0165 70.5)",
+          "oklch(86% 0.0165 70.5)",
+          "oklch(95% 0.0165 70.5)"
+        ]
+      },
+      "border-soft": {
+        "role": "neutral",
+        "displayName": "Faint Hairline",
+        "canonical": "rgba(248, 239, 229, 0.06)",
+        "tonalRamp": [
+          "oklch(15% 0.0165 70.5)",
+          "oklch(26% 0.0165 70.5)",
+          "oklch(38% 0.0165 70.5)",
+          "oklch(50% 0.0165 70.5)",
+          "oklch(62% 0.0165 70.5)",
+          "oklch(74% 0.0165 70.5)",
+          "oklch(86% 0.0165 70.5)",
+          "oklch(95% 0.0165 70.5)"
+        ]
+      },
+      "border-strong": {
+        "role": "neutral",
+        "displayName": "Strong Hairline",
+        "canonical": "rgba(248, 239, 229, 0.2)",
+        "tonalRamp": [
+          "oklch(15% 0.0165 70.5)",
+          "oklch(26% 0.0165 70.5)",
+          "oklch(38% 0.0165 70.5)",
+          "oklch(50% 0.0165 70.5)",
+          "oklch(62% 0.0165 70.5)",
+          "oklch(74% 0.0165 70.5)",
+          "oklch(86% 0.0165 70.5)",
+          "oklch(95% 0.0165 70.5)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Hero h1. Desktop clamp is normative; below 900px use clamp(1.9rem, 7.8vw, 2.6rem), and at 1400px the hero becomes 4.65rem."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Section h2. Below 900px use clamp(1.65rem, 5.6vw, 2.2rem); proof, thinker and closing headings have smaller local clamps."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Card and subsection h3; 1.16rem below 900px."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Paragraphs and list copy; 15px below 900px with the same 1.65 line-height."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Pill actions. Navigation, badges and diagram labels use smaller component-specific sizes."
+      },
+      "data": {
+        "displayName": "Data / Mono",
+        "purpose": "Version/build data, numbered markers and isolated legacy commands; tabular numerals where applicable."
+      }
+    },
+    "shadows": [
+      {
+        "name": "navigation-disclosure",
+        "value": "0 24px 60px rgba(0, 0, 0, 0.48)",
+        "purpose": "Floating mobile navigation panel."
+      },
+      {
+        "name": "primary-action-glow",
+        "value": "0 12px 30px -18px rgba(247, 146, 54, 0.9)",
+        "purpose": "Restrained lift beneath sprout-orange actions."
+      },
+      {
+        "name": "hero-lift",
+        "value": "0 28px 70px -46px rgba(0, 0, 0, 0.95)",
+        "purpose": "Desktop recipe hero; removed with mobile card chrome."
+      },
+      {
+        "name": "phone-lift",
+        "value": "0 24px 46px -28px rgba(0, 0, 0, 0.95)",
+        "purpose": "Illustrative handset inside runtime proof."
+      },
+      {
+        "name": "hero-mascot-grounding",
+        "value": "drop-shadow(0 16px 18px rgba(0, 0, 0, 0.38))",
+        "purpose": "Filter applied to the real hero Mochi artwork."
+      },
+      {
+        "name": "final-mascot-grounding",
+        "value": "drop-shadow(0 14px 16px rgba(43, 40, 59, 0.16))",
+        "purpose": "Filter applied to the celebration Mochi artwork."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-transition",
+        "value": "160ms ease-out",
+        "purpose": "Buttons, step arrows, skip link and FAQ plus state changes."
+      },
+      {
+        "name": "runtime-transition",
+        "value": "180ms ease-out",
+        "purpose": "Runtime-node border and background changes."
+      },
+      {
+        "name": "recipe-enter-hero",
+        "value": "620ms cubic-bezier(0.16, 1, 0.3, 1) both",
+        "purpose": "One enhanced hero entrance after two animation frames."
+      },
+      {
+        "name": "recipe-enter-ingredients",
+        "value": "560ms cubic-bezier(0.16, 1, 0.3, 1) both",
+        "purpose": "Ingredient entrance; second and third tiles delay 80ms and 150ms."
+      },
+      {
+        "name": "anchor-scroll",
+        "value": "smooth",
+        "purpose": "Default anchor scrolling; becomes auto under reduced motion."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "animation: none !important; transition: none !important; scroll-behavior: auto",
+        "purpose": "Removes non-essential motion and hover/arrow transforms."
+      }
+    ],
+    "breakpoints": [
+      { "name": "actions-row", "value": "380px" },
+      { "name": "wide-gutters", "value": "480px" },
+      { "name": "expanded-content", "value": "680px" },
+      { "name": "phone-max", "value": "899px" },
+      { "name": "desktop-shell", "value": "900px" },
+      { "name": "proof-detail", "value": "1100px" },
+      { "name": "countertop", "value": "1200px" },
+      { "name": "large-hero", "value": "1400px" },
+      { "name": "short-landscape", "value": "max-height 560px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single strong sprout-orange action for downloads and primary progression.",
+      "html": "<a class=\"ds-btn-primary\" href=\"#\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3v12m0 0 5-5m-5 5-5-5M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3\"/></svg><span>Download the current beta</span></a>",
+      "css": ".ds-btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:48px;padding:12px 19px;border:1px solid transparent;border-radius:999px;background:var(--accent);color:var(--on-accent);font:750 .95rem/1.2 var(--font);text-align:center;text-decoration:none;box-shadow:0 12px 30px -18px rgba(247,146,54,.9);transition:background-color 160ms ease-out,border-color 160ms ease-out,transform 160ms ease-out}.ds-btn-primary:hover{background:#ffa34f;text-decoration:none;transform:translateY(-1px)}.ds-btn-primary:focus-visible{outline:3px solid var(--cream);outline-offset:4px}.ds-icon{width:20px;height:20px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A quiet outlined companion to the primary action on dark surfaces.",
+      "html": "<a class=\"ds-btn-secondary\" href=\"#\">See how it works</a>",
+      "css": ".ds-btn-secondary{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:12px 19px;border:1px solid var(--border-strong);border-radius:999px;background:rgba(255,255,255,.035);color:var(--text);font:750 .95rem/1.2 var(--font);text-align:center;text-decoration:none;transition:background-color 160ms ease-out,border-color 160ms ease-out,transform 160ms ease-out}.ds-btn-secondary:hover{border-color:var(--cream);background:rgba(255,255,255,.065);text-decoration:none;transform:translateY(-1px)}.ds-btn-secondary:focus-visible{outline:3px solid var(--cream);outline-offset:4px}"
+    },
+    {
+      "name": "Dark Button",
+      "kind": "button",
+      "refersTo": "button-dark",
+      "description": "The transparent visor-navy companion used on cream closing panels.",
+      "html": "<a class=\"ds-btn-dark\" href=\"#\">Follow the setup recipe</a>",
+      "css": ".ds-btn-dark{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:12px 19px;border:1px solid rgba(43,40,59,.24);border-radius:999px;background:transparent;color:var(--user-text);font:750 .95rem/1.2 var(--font);text-align:center;text-decoration:none;transition:background-color 160ms ease-out,border-color 160ms ease-out,transform 160ms ease-out}.ds-btn-dark:hover{background:rgba(43,40,59,.07);text-decoration:none;transform:translateY(-1px)}.ds-btn-dark:focus-visible{outline:3px solid var(--cream);outline-offset:4px}"
+    },
+    {
+      "name": "Raised Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "A tonal thinker card that opens into a ruled section below 900px.",
+      "html": "<article class=\"ds-card ds-card-default\"><span class=\"ds-card-badge\">Default · full workspace</span><h3>Moch (Hermes)</h3><p>Hermes runs embedded in the app. It is the broadest Moch experience and does not require the Linux guest.</p><dl class=\"ds-card-facts\"><div><dt>Linux</dt><dd>Optional</dd></div><div><dt>Core</dt><dd>Chat, Projects, Terminal, Browser</dd></div></dl></article>",
+      "css": ".ds-card{min-width:0;padding:24px;border:1px solid var(--border);border-radius:20px;background:var(--card);color:var(--text);font:400 16px/1.65 var(--font)}.ds-card.ds-card-default{border-color:var(--accent-line)}.ds-card-badge{display:inline-flex;margin-bottom:13px;padding:4px 9px;border:1px solid var(--border-strong);border-radius:999px;color:var(--text-dim);font-size:.7rem;font-weight:750}.ds-card.ds-card-default .ds-card-badge{border-color:var(--accent-line);color:var(--cream)}.ds-card h3{margin:0;font-size:clamp(1.3rem,3vw,1.65rem);font-weight:750;line-height:1.2;letter-spacing:-.035em}.ds-card p{margin:10px 0 0;color:var(--text-dim);font-size:.88rem}.ds-card-facts{margin:16px 0 0}.ds-card-facts div{display:grid;grid-template-columns:82px minmax(0,1fr);gap:10px;padding-block:9px;border-top:1px solid var(--border);font-size:.8rem}.ds-card-facts dt{color:var(--text-faint)}.ds-card-facts dd{margin:0;color:var(--text)}@media(min-width:1200px){.ds-card{padding:20px}.ds-card-facts div{grid-template-columns:1fr;gap:2px}}@media(max-width:899px){.ds-card,.ds-card.ds-card-default{padding:22px 0;border:0;border-bottom:1px solid var(--border);border-radius:0;background:transparent}.ds-card h3{font-size:1.16rem}}"
+    },
+    {
+      "name": "Ingredient Row",
+      "kind": "custom",
+      "refersTo": "ingredient",
+      "description": "Three equal desktop ingredient tiles that become a single ruled list on phones and compact rows at 1200px.",
+      "html": "<ul class=\"ds-ingredients\"><li><span class=\"ds-ingredient-icon\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M8 8c0-3 2-5 4-5s4 2 4 5c0 3-1 4-1 7 0 3-1 5-3 5s-3-2-3-5c0-3-1-4-1-7Z\"/><path d=\"m9 4-3-2m9 2 3-2M6 11l-3 2m15-2 3 2M7 17l-3 3m13-3 3 3\"/></svg></span><strong>Linux</strong><span>Optional Ubuntu guest for OpenCode.</span></li><li><span class=\"ds-ingredient-icon\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5a3 3 0 0 0-5-2A4 4 0 0 0 4 9a4 4 0 0 0 1 7 3 3 0 0 0 5 2V6a2 2 0 0 1 2-1Z\"/><path d=\"M12 5a3 3 0 0 1 5-2 4 4 0 0 1 3 6 4 4 0 0 1-1 7 3 3 0 0 1-5 2V6a2 2 0 0 0-2-1Z\"/></svg></span><strong>Thinker</strong><span>Hermes by default, or OpenCode.</span></li><li><span class=\"ds-ingredient-icon\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5\"/></svg></span><strong>Model</strong><span>Hosted provider or local endpoint.</span></li></ul>",
+      "css": ".ds-ingredients{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0;padding:0;list-style:none}.ds-ingredients li{min-width:0;min-height:154px;display:flex;flex-direction:column;gap:12px;padding:20px 18px;border:1px solid var(--border);border-radius:18px;background:var(--elevated);color:var(--text);font:400 16px/1.65 var(--font)}.ds-ingredient-icon{width:36px;height:36px;display:grid;place-items:center;border:1px solid var(--border);border-radius:10px;color:var(--cream)}.ds-ingredients strong{font-size:1.1rem;font-weight:750}.ds-ingredients li>span:last-child{color:var(--text-dim);font-size:.9rem;line-height:1.45}.ds-icon{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}@media(max-width:899px){.ds-ingredients{grid-template-columns:1fr;gap:0;border-top:1px solid var(--border)}.ds-ingredients li{min-height:0;display:grid;grid-template-columns:34px minmax(0,1fr);gap:3px 12px;padding:14px 0;border:0;border-bottom:1px solid var(--border);border-radius:0;background:transparent}.ds-ingredient-icon{grid-row:1/span 2}.ds-ingredients strong{font-size:.98rem}.ds-ingredients li>span:last-child{font-size:.84rem}}@media(min-width:1200px){.ds-ingredients{grid-template-columns:1fr;gap:10px}.ds-ingredients li{min-height:88px;display:grid;grid-template-columns:40px minmax(0,1fr);align-items:center;gap:2px 14px;padding:16px 18px}.ds-ingredient-icon{grid-row:1/3}.ds-ingredients li>span:last-child{font-size:.82rem}}"
+    },
+    {
+      "name": "Method Step",
+      "kind": "custom",
+      "refersTo": "method-step",
+      "description": "A numbered method control with a cream active disc on desktop and an orange inset rule on mobile.",
+      "html": "<button class=\"ds-step ds-step-active\" type=\"button\" aria-pressed=\"true\"><span class=\"ds-step-number\">1</span><span class=\"ds-step-copy\"><strong>Download the beta</strong><span>Install the current Android APK.</span></span><svg class=\"ds-step-arrow\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12h16m0 0-6-6m6 6-6 6\"/></svg></button>",
+      "css": ".ds-step{width:100%;min-height:88px;display:grid;grid-template-columns:36px minmax(0,1fr) 18px;align-items:center;gap:12px;padding:15px 6px;border:0;border-radius:14px;background:transparent;color:var(--text-dim);font:400 16px/1.65 var(--font);text-align:left;cursor:pointer}.ds-step:hover{background:rgba(255,255,255,.025)}.ds-step.ds-step-active{padding-inline:12px;background:var(--card);color:var(--text)}.ds-step:focus-visible{outline:3px solid var(--cream);outline-offset:4px}.ds-step-number{width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--border-strong);border-radius:50%;color:var(--text-dim);font:400 .86rem/1 var(--mono);font-variant-numeric:tabular-nums}.ds-step.ds-step-active .ds-step-number{border-color:var(--cream);background:var(--cream);color:var(--user-text)}.ds-step-copy{min-width:0;display:flex;flex-direction:column;gap:3px}.ds-step-copy strong{color:var(--text);font-size:.98rem}.ds-step-copy span{color:var(--text-dim);font-size:.83rem;line-height:1.48}.ds-step-arrow{width:17px;height:17px;fill:none;stroke:var(--text-faint);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;transition:transform 160ms ease-out}.ds-step.ds-step-active .ds-step-arrow{stroke:var(--cream);transform:translateX(2px)}@media(max-width:899px){.ds-step.ds-step-active{padding-inline:6px;background:transparent;box-shadow:inset 3px 0 0 var(--accent)}}"
+    },
+    {
+      "name": "Navigation",
+      "kind": "nav",
+      "description": "The compact Moch shell with an accessible mobile disclosure and a horizontal desktop nav.",
+      "html": "<div class=\"ds-nav-shell\"><span class=\"ds-nav-brand\">Moch</span><button class=\"ds-nav-toggle\" type=\"button\" aria-label=\"Open menu\" aria-expanded=\"true\" aria-controls=\"ds-nav\"><svg class=\"ds-nav-menu\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 7h16M4 12h16M4 17h16\"/></svg><svg class=\"ds-nav-close\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m6 6 12 12M18 6 6 18\"/></svg></button><nav class=\"ds-nav\" id=\"ds-nav\" data-open=\"true\" aria-label=\"Primary navigation\"><a href=\"#\">Method</a><a href=\"#\">Thinkers</a><a href=\"#\">Tools</a><a href=\"#\">Local-first</a><a href=\"#\">FAQ</a><a href=\"#\">Setup</a><a class=\"ds-nav-download\" href=\"#\">Download beta</a></nav><a class=\"ds-nav-cta\" href=\"#\">Download beta</a></div>",
+      "css": ".ds-nav-shell{position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;min-height:68px;padding:10px 0;border-bottom:1px solid var(--border-soft);font:400 16px/1.65 var(--font)}.ds-nav-brand{color:var(--text);font-size:1.2rem;font-weight:800;letter-spacing:-.04em}.ds-nav-toggle{width:46px;height:46px;display:inline-flex;align-items:center;justify-content:center;margin-left:auto;border:1px solid var(--border);border-radius:50%;background:var(--card);color:var(--text);cursor:pointer}.ds-nav-toggle svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.ds-nav-toggle .ds-nav-close,.ds-nav-toggle[aria-expanded=true] .ds-nav-menu{display:none}.ds-nav-toggle[aria-expanded=true] .ds-nav-close{display:block}.ds-nav-toggle:focus-visible,.ds-nav a:focus-visible,.ds-nav-cta:focus-visible{outline:3px solid var(--cream);outline-offset:4px}.ds-nav{position:absolute;top:calc(100% + 8px);right:0;left:0;display:none;max-height:calc(100dvh - 68px - 24px - env(safe-area-inset-top));overflow-y:auto;flex-direction:column;gap:2px;padding:12px;border:1px solid var(--border-strong);border-radius:20px;background:var(--card);box-shadow:0 24px 60px rgba(0,0,0,.48)}.ds-nav[data-open=true]{display:flex}.ds-nav a{min-width:44px;min-height:44px;display:inline-flex;align-items:center;padding:10px 12px;border-radius:10px;color:var(--text-dim);font-size:.95rem;font-weight:650;text-decoration:none}.ds-nav a:hover{background:var(--elevated);color:var(--text);text-decoration:none}.ds-nav .ds-nav-download{margin-top:6px;justify-content:center;background:var(--accent);color:var(--on-accent)}.ds-nav-cta{display:none;min-height:44px;align-items:center;justify-content:center;padding:10px 16px;border-radius:999px;background:var(--accent);color:var(--on-accent);font-size:.9rem;font-weight:750;text-decoration:none}@media(min-width:900px){.ds-nav-shell{flex-wrap:nowrap;gap:22px;min-height:74px}.ds-nav-toggle{display:none}.ds-nav,.ds-nav[data-open=true]{position:static;width:auto;max-height:none;display:flex;flex-direction:row;align-items:center;gap:2px;margin-left:auto;overflow:visible;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none}.ds-nav a{padding-inline:11px;font-size:.86rem}.ds-nav .ds-nav-download{display:none}.ds-nav-cta{display:inline-flex}}"
+    },
+    {
+      "name": "Runtime Proof",
+      "kind": "custom",
+      "description": "The countable Phone → runtime → thinker → model boundary diagram with mint on-device state.",
+      "html": "<div class=\"ds-runtime\" data-step=\"1\"><span class=\"ds-ondevice\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3 4 6v5c0 5 3 8 8 10 5-2 8-5 8-10V6l-8-3Z\"/><path d=\"m8 12 3 3 5-6\"/></svg>On-device control plane + workspace</span><div class=\"ds-runtime-track\" aria-label=\"Phone to Moch runtime to thinker to chosen model\"><div class=\"ds-runtime-node ds-runtime-ondevice\"><span class=\"ds-node-icon\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"6\" y=\"2\" width=\"12\" height=\"20\" rx=\"3\"/><path d=\"M10 5h4m-3 14h2\"/></svg></span><span><strong>Phone</strong><small>Android app</small></span></div><svg class=\"ds-flow-arrow\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12h16m0 0-6-6m6 6-6 6\"/></svg><div class=\"ds-runtime-node\"><span class=\"ds-node-icon\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"3\"/><circle cx=\"5\" cy=\"5\" r=\"2\"/><circle cx=\"19\" cy=\"5\" r=\"2\"/><circle cx=\"5\" cy=\"19\" r=\"2\"/><circle cx=\"19\" cy=\"19\" r=\"2\"/><path d=\"m7 7 3 3m4 0 3-3M7 17l3-3m4 0 3 3\"/></svg></span><span><strong>Moch runtime</strong><small>Loopback control plane</small></span></div><svg class=\"ds-flow-arrow\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12h16m0 0-6-6m6 6-6 6\"/></svg><div class=\"ds-runtime-node\"><span class=\"ds-node-icon\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5a3 3 0 0 0-5-2A4 4 0 0 0 4 9a4 4 0 0 0 1 7 3 3 0 0 0 5 2V6a2 2 0 0 1 2-1Z\"/><path d=\"M12 5a3 3 0 0 1 5-2 4 4 0 0 1 3 6 4 4 0 0 1-1 7 3 3 0 0 1-5 2V6a2 2 0 0 0-2-1Z\"/></svg></span><span><strong>Hermes / OpenCode</strong><small>Embedded / Ubuntu guest</small></span></div><div class=\"ds-model-boundary\"><span>Model boundary</span><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12h16m0 0-6-6m6 6-6 6\"/></svg><strong>Hosted · internet</strong></div><div class=\"ds-runtime-node ds-model-node\"><span class=\"ds-node-icon\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5\"/></svg></span><span><strong>Chosen model</strong><small>Hosted provider</small></span></div></div></div>",
+      "css": ".ds-runtime{font:400 16px/1.65 var(--font);color:var(--text)}.ds-ondevice{display:inline-flex;align-items:center;gap:8px;padding:7px 11px;border:1px solid rgba(74,222,128,.22);border-radius:999px;background:var(--green-tint);color:var(--green-soft);font-size:.78rem;font-weight:700}.ds-ondevice svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.ds-runtime-track{display:flex;flex-direction:column;margin-top:16px}.ds-runtime-node{min-width:0;display:grid;grid-template-columns:38px minmax(0,1fr);align-items:center;gap:11px;padding:13px;border:1px solid var(--border);border-radius:15px;background:var(--bg);transition:border-color 180ms ease-out,background-color 180ms ease-out}.ds-runtime-node.ds-runtime-ondevice{border-color:rgba(74,222,128,.42);background:rgba(74,222,128,.055)}.ds-node-icon{width:36px;height:36px;display:grid;place-items:center;border-radius:11px;background:var(--elevated);color:var(--text-dim)}.ds-runtime-node.ds-runtime-ondevice .ds-node-icon{color:var(--green-soft)}.ds-node-icon svg,.ds-flow-arrow,.ds-model-boundary svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.ds-runtime-node>span:last-child{min-width:0;display:flex;flex-direction:column;gap:2px}.ds-runtime-node strong{font-size:.91rem}.ds-runtime-node small{color:var(--text-faint);font-size:.75rem;line-height:1.4}.ds-flow-arrow{align-self:center;margin-block:4px;color:var(--text-faint);transform:rotate(90deg)}.ds-model-boundary{display:flex;flex-direction:column;gap:5px;margin-block:5px;padding-block:10px;border-top:1px dashed var(--border-strong);color:var(--text-faint);text-align:center;font-size:.72rem}.ds-model-boundary svg{width:17px;height:17px;align-self:center;transform:rotate(90deg)}.ds-model-boundary strong{color:var(--cream);font-size:.78rem}.ds-model-node{border-style:dashed}@media(max-width:899px){.ds-runtime-node{padding:12px 0;border:0;border-bottom:1px solid var(--border);border-radius:0;background:transparent}.ds-runtime-node.ds-runtime-ondevice{border-color:var(--border);background:transparent}.ds-model-node{border-bottom-style:dashed}}@media(min-width:1200px){.ds-runtime-track{flex-direction:row;align-items:stretch;gap:5px}.ds-runtime-node{flex:1 1 0;display:flex;flex-direction:column;justify-content:center;gap:8px;padding:12px 8px;text-align:center}.ds-runtime-node>span:last-child{align-items:center}.ds-runtime-node strong{font-size:.8rem}.ds-runtime-node small{font-size:.67rem}.ds-flow-arrow{flex:0 0 16px;width:16px;margin-block:0;transform:none}.ds-model-boundary{flex:0 0 108px;justify-content:center;margin-block:0;padding:8px;border-top:0;border-left:1px dashed var(--border-strong)}.ds-model-boundary svg{transform:none}}"
+    },
+    {
+      "name": "Disclosure",
+      "kind": "custom",
+      "description": "A native FAQ row with a circular plus marker and one-open-at-a-time enhancement on the landing page.",
+      "html": "<details class=\"ds-disclosure\"><summary>Which phones can run Moch?<span class=\"ds-disclosure-plus\" aria-hidden=\"true\"></span></summary><p>The current local-first experience is an Android beta APK. There is no iOS release.</p></details>",
+      "css": ".ds-disclosure{border-bottom:1px solid var(--border);font:400 16px/1.65 var(--font)}.ds-disclosure summary{min-height:64px;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:17px 3px;color:var(--text);font-weight:700;list-style:none;cursor:pointer}.ds-disclosure summary::-webkit-details-marker{display:none}.ds-disclosure summary:hover{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:5px}.ds-disclosure summary:focus-visible{outline:3px solid var(--cream);outline-offset:4px}.ds-disclosure-plus{position:relative;width:22px;height:22px;flex:0 0 auto;border:1px solid var(--border-strong);border-radius:50%}.ds-disclosure-plus:before,.ds-disclosure-plus:after{content:\"\";position:absolute;top:50%;left:50%;width:9px;height:1px;background:var(--cream);transform:translate(-50%,-50%);transition:transform 160ms ease-out}.ds-disclosure-plus:after{transform:translate(-50%,-50%) rotate(90deg)}.ds-disclosure[open] .ds-disclosure-plus:after{transform:translate(-50%,-50%) rotate(0deg)}.ds-disclosure p{max-width:68ch;padding:0 38px 20px 3px;color:var(--text-dim);font-size:.94rem}"
+    },
+    {
+      "name": "Copy Control",
+      "kind": "button",
+      "description": "A compact pill action with clipboard success and manual-selection fallback behavior supplied by site.js.",
+      "html": "<button class=\"ds-copy\" type=\"button\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"8\" y=\"8\" width=\"12\" height=\"12\" rx=\"2\"/><path d=\"M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2\"/></svg><span>Copy APK link</span></button>",
+      "css": ".ds-copy{min-height:44px;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 13px;border:1px solid var(--border-strong);border-radius:999px;background:transparent;color:var(--text-dim);font:700 .82rem/1.65 var(--font);cursor:pointer}.ds-copy:hover{border-color:var(--cream);color:var(--text)}.ds-copy:focus-visible{outline:3px solid var(--cream);outline-offset:4px}.ds-copy svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Counter Recipe",
+    "overview": "Moch feels like a short, reassuring recipe for putting an agent on a phone: a dominant introduction, three ingredients, a numbered method, visible runtime proof and a choice of thinker. This is the shipped site's signature composition inside the existing Mocheme identity, not a separate visual world. The voice is friendly, plain and concrete; real Mochi artwork and honest interface illustrations carry the personality instead of decorative tech imagery.\n\nThe material system is near-black indigo, raised indigo card stock, Mochi cream and one sprout-orange action color. System typography keeps the site dependency-free and consumer-facing. On phones, major sections open into ruled editorial flows rather than a stack of boxes; on desktop, soft cards return and the recipe becomes a two-column countertop. Motion is brief and functional, never a persistent ambient effect.\n\nThe shipped system has no emojis, novelty display face, terminal/editor costume, third-party fonts, stock photography, analytics or tracking scripts. Monospace appears only where literal data or legacy commands benefit from it.",
+    "keyCharacteristics": [
+      "A recipe sequence with persistent numbered orientation and visible on-device proof.",
+      "Mobile-open sections below 900px; soft, tonal desktop cards at 900px and above.",
+      "Sprout orange for action and restrained emphasis; mint for on-device and success states.",
+      "Cream reserved for the user's words, selected controls and high-contrast closing panels.",
+      "Real Moch logo/Mochi assets, inline stroke icons and clearly labeled illustrative UI."
+    ],
+    "rules": [
+      {
+        "name": "The Reserved Orange Rule",
+        "body": "Keep one strong orange action per region. Orange lines and washes may support emphasis, but orange is not scattered as decoration.",
+        "section": "colors"
+      },
+      {
+        "name": "The System Voice Rule",
+        "body": "System faces carry the consumer voice. Monospace is limited to build data, numbered markers and the isolated legacy command blocks; it must not turn the page into a terminal aesthetic.",
+        "section": "typography"
+      },
+      {
+        "name": "The Open-Section Rule",
+        "body": "Below 900px, remove card chrome from major content sections and let rules carry structure; do not turn the phone layout into a stack of boxed cards.",
+        "section": "layout"
+      },
+      {
+        "name": "The Flat-Surface Rule",
+        "body": "Cards are flat and tonal at rest. Reserve shadows for the floating menu, hero, primary action, phone illustration and mascot grounding.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Soft-Not-Glass Rule",
+        "body": "Use soft corners, hairline borders and tonal surfaces. Do not add hard neon glow, blur-heavy glass or sharp technical framing.",
+        "section": "shapes"
+      },
+      {
+        "name": "The Active Step Rule",
+        "body": "Use a cream number disc for the active desktop step and a 3px orange inset rule on mobile. Use mint, not orange, to mark on-device runtime activity.",
+        "section": "components"
+      }
+    ],
+    "dos": [
+      "Do keep the recipe order and make the on-device/model boundary visible wherever runtime behavior is explained.",
+      "Do use the open-section layout below 900px and restore soft cards only at the desktop breakpoints.",
+      "Do pair sprout orange with espresso ink and reserve mint for on-device/success meaning.",
+      "Do keep actions and navigation targets at least 44px and preserve the 3px/4px cream focus ring.",
+      "Do use the existing Moch assets and inline SVG icons, with provenance records for shipping rasters.",
+      "Do label illustrative interface artwork and isolate legacy relay instructions from the current beta recipe."
+    ],
+    "donts": [
+      "Don't turn the site into a terminal/code-editor aesthetic or use monospace as the main consumer voice.",
+      "Don't stack boxed cards on phones or add glass blur, hard neon glow or decorative orange fields.",
+      "Don't use white text on sprout orange; use the on-accent ink token.",
+      "Don't imply that local-first means every request is offline or that stable v1.0.0 is the current local-first build.",
+      "Don't replace Mochi with stock/generated mascot art or present legacy screenshots as current OpenCode UI.",
+      "Don't add third-party fonts, analytics, tracking requests or icon-font dependencies."
+    ]
+  }
+}
