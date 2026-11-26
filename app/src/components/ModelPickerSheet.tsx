@@ -40,13 +40,13 @@ import {
 } from '../lib/modelState'
 import { ensureSession, activeLiveId, activeStoredId, activeTitle, pushLocalMessage } from '../lib/chat'
 import {
-  ocModels, ocModelsOneShot, ocDefaultModel, ocSetModel, ocCreateSession, ocEnsureServer,
+  ocModels, ocModelsOneShot, ocDefaultModel, ocSetModel, ocEnsureServer,
   OcError, describeOcError, type OcModel,
 } from '../lib/opencodeClient'
 import { invalidateOcSessionsCache } from '../lib/ocSessionsCache'
 import {
   ocSessionFor, ocRememberSession, ocSessionDirectory, readOcDefaultPick,
-  saveOcDefaultPick, applyOcDefaultPick,
+  saveOcDefaultPick, applyOcDefaultPick, createVerifiedOcSession,
 } from '../lib/opencodeChat'
 import type { OcDefaultPick } from '../lib/ocDefaultPick'
 import { slashLabel } from '../lib/slash'
@@ -343,7 +343,7 @@ export function ModelPickerSheet({
         // BUG-149: file the minted session under the selected project (or the
         // embedded workspace) — the SAME helper the turn mint uses, so the two
         // paths can never disagree on directory.
-        const created = await ocCreateSession(sessionTitle, await ocSessionDirectory())
+        const created = await createVerifiedOcSession(sessionTitle, await ocSessionDirectory())
         if (!created?.id) throw new Error(tr('chrome.model.ocNoSession'))
         await ocRememberSession(mapKey, created.id)
         // Every newly minted OC session gets the app default first (best-effort),

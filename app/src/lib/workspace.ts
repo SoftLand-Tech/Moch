@@ -137,15 +137,20 @@ function normalizeActiveId(raw: string | null | undefined, rows: ProjectRow[]): 
 }
 
 let inflight: Promise<void> | null = null
+let activeIdGen = 0
 
 /**
  * Re-read the project tree. Never throws: offline keeps the last rows. Callers
  * fire-and-forget (`void refreshProjects()`) on drawer open / reconnect.
+ * Pass `{ force: true }` after mutations so an already-in-flight pre-mutation
+ * fetch never returns stale data.
  */
-export function refreshProjects(): Promise<void> {
-  if (inflight) return inflight
+export function refreshProjects(opts?: { force?: boolean }): Promise<void> {
+  if (inflight && !opts?.force) return inflight
+  const waitPrev = opts?.force && inflight ? inflight.catch(() => {}) : Promise.resolve()
   projectsLoadingAtom.set(true)
-  inflight = (async () => {
+  const run = waitPrev.then(async () => {
+    const genAtStart = activeIdGen
     try {
       const res = await rpc<ProjectsTreeResult>('projects.tree', {})
       const nodes = Array.isArray(res?.projects) ? res.projects : []
@@ -157,7 +162,14 @@ export function refreshProjects(): Promise<void> {
       }
       projectsAtom.set(rows)
       projectSessionIdsAtom.set(ids)
-      activeProjectIdAtom.set(normalizeActiveId(res?.active_id, rows))
+      // Do not clobber a newer local selection/create made while the RPC was in flight.
+      if (genAtStart === activeIdGen) {
+        if (res?.active_id !== undefined) {
+          activeProjectIdAtom.set(normalizeActiveId(res.active_id, rows))
+        } else {
+          activeProjectIdAtom.set(normalizeActiveId(activeProjectIdAtom.get(), rows))
+        }
+      }
       projectsErrorAtom.set(null)
     } catch (err) {
       const msg = err instanceof Error ? err.message : tr('project.error.load')
@@ -167,10 +179,11 @@ export function refreshProjects(): Promise<void> {
       if (!projectsAtom.get().length) projectsErrorAtom.set(msg)
     } finally {
       projectsLoadingAtom.set(false)
-      inflight = null
+      if (inflight === run) inflight = null
     }
-  })()
-  return inflight
+  })
+  inflight = run
+  return run
 }
 
 /**
@@ -181,11 +194,12 @@ export function refreshProjects(): Promise<void> {
 export async function setActiveProject(id: string | null): Promise<void> {
   const prev = activeProjectIdAtom.get()
   if (prev === id) return
+  const gen = ++activeIdGen
   activeProjectIdAtom.set(id)
   try {
     await rpc('projects.set_active', { id })
   } catch (err) {
-    activeProjectIdAtom.set(prev)
+    if (activeIdGen === gen) activeProjectIdAtom.set(prev)
     const msg = err instanceof Error ? err.message : tr('project.error.select')
     log('warn', 'projects', `projects.set_active failed: ${msg}`)
   }
@@ -212,7 +226,7 @@ export async function ensureActiveProjectCwd(): Promise<string | undefined> {
     )
   const cached = current()
   if (cached) return cached
-  await refreshProjects()
+  await refreshProjects({ force: true })
   return current()
 }
 
@@ -313,19 +327,38 @@ export async function createProject(name: string, folder?: string): Promise<void
   const clean = name.trim()
   if (!clean) throw new Error(tr('project.error.nameRequired'))
   const path = folder?.trim()
-  await rpc('projects.create', {
+  const res = await rpc<{ project?: { id?: string; name?: string; primary_path?: string | null; color?: string | null; icon?: string | null; folders?: Array<{ path?: string | null }> } }>('projects.create', {
     name: clean,
     ...(path ? { folders: [path] } : {}),
     use: true,
   })
-  await refreshProjects()
+  const created = res?.project
+  if (created?.id) {
+    const primaryPath = created.primary_path ?? created.folders?.[0]?.path ?? null
+    const row: ProjectRow = {
+      id: created.id,
+      name: created.name?.trim() || clean,
+      color: created.color ?? null,
+      icon: created.icon ?? null,
+      isNoProject: false,
+      sessionCount: 0,
+      primaryPath,
+    }
+    const existing = projectsAtom.get()
+    if (!existing.some((p) => p.id === row.id)) {
+      projectsAtom.set([...existing, row])
+    }
+    ++activeIdGen
+    activeProjectIdAtom.set(created.id)
+  }
+  await refreshProjects({ force: true })
 }
 
 export async function renameProject(id: string, name: string): Promise<void> {
   const clean = name.trim()
   if (!clean) throw new Error(tr('project.error.nameRequired'))
   await rpc('projects.update', { id, name: clean })
-  await refreshProjects()
+  await refreshProjects({ force: true })
 }
 
 export async function archiveProject(id: string, restore = false): Promise<void> {
@@ -333,13 +366,13 @@ export async function archiveProject(id: string, restore = false): Promise<void>
   // tree, and a dangling active id would filter every chat row away.
   if (activeProjectIdAtom.get() === id) await setActiveProject(null)
   await rpc('projects.archive', restore ? { id, restore: true } : { id })
-  await refreshProjects()
+  await refreshProjects({ force: true })
 }
 
 export async function deleteProject(id: string): Promise<void> {
   if (activeProjectIdAtom.get() === id) await setActiveProject(null)
   await rpc('projects.delete', { id })
-  await refreshProjects()
+  await refreshProjects({ force: true })
 }
 
 /**

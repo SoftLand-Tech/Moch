@@ -18,12 +18,14 @@ import {
   ocListPermissions,
   ocPrompt,
   ocRunCommand,
+  ocSessionDir,
   ocSetModel,
   ocMoveSession,
   ocStream,
   describeOcError,
   type OcEvent,
   type OcPermissionRequest,
+  type OcSession,
 } from './opencodeClient'
 import { ocDefaultPickModelRef, ocOneShotModelRef, parseOcDefaultPick, type OcDefaultPick } from './ocDefaultPick'
 import { extractOcEventSessionId, parseOcForm, type OcFormInfo } from './ocForm'
@@ -42,7 +44,7 @@ import { log } from './log'
 // createSession does for hermes chats (chat.ts is mode-agnostic here —
 // workspace's atoms are the same source the hermes create reads).
 import { ensureActiveProjectCwd } from './workspace'
-import { workspaceHostToGuestPath } from './projectScope'
+import { normalizeProjectPath, workspaceHostToGuestPath } from './projectScope'
 import { getEmbeddedGateway } from './mochiRuntime'
 import { connConfig } from './gateway'
 
@@ -197,6 +199,20 @@ export async function ocOneShotModelFor(storedId: string): Promise<string | null
 export { ocDefaultPickModelRef, ocOneShotModelRef, parseOcDefaultPick }
 export type { OcDefaultPick }
 
+const ocKnownDirs = new Map<string, string>()
+
+export function noteOcSessionDir(ocId: string, dir?: string): void {
+  const clean = normalizeProjectPath(dir)
+  if (ocId && clean) ocKnownDirs.set(ocId, clean)
+}
+
+export function rememberOcSessionDirs(rows: readonly OcSession[]): void {
+  for (const r of rows) {
+    const d = ocSessionDir(r)
+    if (r.id && d) noteOcSessionDir(r.id, d)
+  }
+}
+
 /** The selected project's folder as the OpenCode guest sees it.
  *
  * The app/project DB stores the Android host spelling for grouping. OpenCode
@@ -212,9 +228,18 @@ export async function ocSelectedProjectCwd(): Promise<string | undefined> {
     const gw = await getEmbeddedGateway()
     const workspace = gw?.workspace
     const connHost = connConfig.get()?.host ?? ''
-    if (gw?.running && workspace && connHost.startsWith('127.0.0.1')) {
+    const isLocal = connHost.startsWith('127.0.0.1') || connHost.startsWith('localhost')
+    if (gw?.running && workspace && isLocal) {
       const guest = workspaceHostToGuestPath(host, workspace)
       if (guest) return guest
+      // Android aliases /data/data/<pkg> ↔ /data/user/0/<pkg> across callers;
+      // fall back to the `.hermes/workspace/` suffix when inside the embedded guest.
+      const marker = '/.hermes/workspace/'
+      const idx = normalizeProjectPath(host).lastIndexOf(marker)
+      if (idx >= 0) {
+        const rel = normalizeProjectPath(host).slice(idx + marker.length)
+        if (rel) return `/workspace/${rel}`
+      }
     }
   } catch {
     // Remote/legacy callers keep the host path they supplied.
@@ -223,15 +248,10 @@ export async function ocSelectedProjectCwd(): Promise<string | undefined> {
 }
 
 /**
- * THE directory a new OpenCode session opens in: the selected project's HOST
+ * THE directory a new OpenCode session opens in: the selected project's GUEST
  * folder when one exists (always wins — no silent workspace fallback), else
- * the embedded gateway's workspace host path. Remote gateways keep their own
+ * the embedded gateway's guest `/workspace`. Remote gateways keep their own
  * default (undefined), exactly as before.
- *
- * Both mint sites (the turn runner and the model sheet) call this, so they can
- * never drift. The host spelling is deliberate: the guest self-binds the
- * workspace at its host path, and OpenCode echoes `directory` on session rows —
- * `projectIdForCwd` then groups the chat under the same folders the app shows.
  */
 export async function ocSessionDirectory(): Promise<string | undefined> {
   const selected = await ocSelectedProjectCwd()
@@ -239,7 +259,8 @@ export async function ocSessionDirectory(): Promise<string | undefined> {
   try {
     const gw = await getEmbeddedGateway()
     const host = connConfig.get()?.host ?? ''
-    if (!gw?.running || !gw.workspace || !host.startsWith('127.0.0.1')) return undefined
+    const isLocal = host.startsWith('127.0.0.1') || host.startsWith('localhost')
+    if (!gw?.running || !gw.workspace || !isLocal) return undefined
     // OpenCode itself runs in the guest: Personal is the guest workspace,
     // not the Android host spelling and never /root.
     return '/workspace'
@@ -248,30 +269,55 @@ export async function ocSessionDirectory(): Promise<string | undefined> {
   }
 }
 
+/**
+ * Create an OpenCode session in `directory` and verify its reported location.
+ * Both `ensureOcSession` (first prompt) and `ModelPickerSheet` (model pick on
+ * a new chat) go through this so neither can drift or skip the move repair.
+ */
+export async function createVerifiedOcSession(title: string, directory?: string): Promise<OcSession> {
+  const created = await ocCreateSession(title, directory)
+  if (!created?.id) throw new Error('OpenCode did not return a session id')
+  const want = normalizeProjectPath(directory)
+  if (want) {
+    let actual = ocSessionDir(created)
+    if (!actual) {
+      try {
+        actual = ocSessionDir(await ocGetSession(created.id))
+      } catch {
+        // Best-effort probe; fall through to repair attempt below.
+      }
+    }
+    if (!actual || normalizeProjectPath(actual) !== want) {
+      try {
+        await ocMoveSession(created.id, want)
+        log('info', 'opencode', `session ${created.id} moved ${actual ?? 'unknown'} -> ${want}`)
+        actual = want
+        noteOcSessionDir(created.id, want)
+        return {
+          ...created,
+          directory: want,
+          location: { ...created.location, directory: want },
+        }
+      } catch (e) {
+        log('warn', 'opencode', `session directory verification/move failed: ${String(e)}`)
+      }
+    }
+    noteOcSessionDir(created.id, actual ?? want)
+  } else {
+    const actual = ocSessionDir(created)
+    if (actual) noteOcSessionDir(created.id, actual)
+  }
+  return created
+}
+
 async function ensureOcSession(mapKey: string, title: string): Promise<string> {
   const existing = await ocSessionFor(mapKey)
   if (existing) return existing
   // BUG-149: the mint files the session under the selected project (or the
   // embedded workspace) so the drawer can group it (projectIdForCwd(row.directory)).
   const directory = await ocSessionDirectory()
-  const created = await ocCreateSession(title.slice(0, 80) || 'Moch chat', directory)
-  if (!created?.id) throw new Error('OpenCode did not return a session id')
+  const created = await createVerifiedOcSession(title.slice(0, 80) || 'Moch chat', directory)
   await ocRememberSession(mapKey, created.id)
-  // Some OpenCode versions accept the location carrier but still create in
-  // their server default. Verify the echoed directory and use session.move
-  // when needed; this is the difference between "we asked for /workspace/test"
-  // and "the shell is actually there".
-  if (directory) {
-    try {
-      const live = await ocGetSession(created.id)
-      if (live?.directory && live.directory !== directory) {
-        await ocMoveSession(created.id, directory)
-        log('info', 'opencode', `session ${created.id} moved ${live.directory} -> ${directory}`)
-      }
-    } catch (e) {
-      log('warn', 'opencode', `session directory verification/move failed: ${String(e)}`)
-    }
-  }
   // `All sessions` default: apply to every newly minted session, best-effort.
   await applyOcDefaultPick(created.id)
   return created.id
@@ -780,7 +826,7 @@ export async function runOpencodeTurn(opts: OcTurnOptions): Promise<void> {
     if (opts.command) {
       await ocRunCommand(ocId, opts.command.name, opts.command.text)
     } else {
-      await ocPrompt(ocId, text, await ocSessionDirectory())
+      await ocPrompt(ocId, text, ocKnownDirs.get(ocId) ?? (await ocSessionDirectory()))
     }
   } catch (e) {
     finishOnce()

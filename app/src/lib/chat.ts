@@ -9,8 +9,8 @@ import { bindLiveId, liveIdFor, sessionRows, sessionListComplete, toMs, upsertOp
 import { hookModelState, noteSessionInfo } from './modelState'
 import { markAttention, clearAttention, pushToast, chatTabFocused, pendingOpenStoredId, type AttentionKind } from './attention'
 import { clearDraft, draftFor, setDraft } from './drafts'
-import { setActiveBot } from './fleet'
-import { activeProjectIdAtom, ensureActiveProjectCwd, newChatProjectId, projectsAtom } from './workspace'
+import { activeBotAtom, setActiveBot } from './fleet'
+import { activeProjectIdAtom, ensureActiveProjectCwd, newChatProjectId, projectsAtom, refreshProjects } from './workspace'
 import { sendQueue, peekQueued, removeQueued, clearSendQueue, queueFor, enqueueSend, type QueuedSend } from './sendQueue'
 import { extractMedia, isDataUrlPath, joinedTextOf, appendRefText, stripMediaFromText, mediaSegment } from './media'
 import { processAttachments, detachImages, type PendingAttachment } from './mediaSend'
@@ -43,6 +43,8 @@ import {
   rememberOcPick,
   ocOneShotModelFor,
   ocSelectedProjectCwd,
+  ocSessionDirectory,
+  noteOcSessionDir,
   loadOcHistory,
   noteOcInteractiveChanged,
   ocInteractiveRevisionValue,
@@ -52,6 +54,7 @@ import {
 } from './opencodeChat'
 import {
   ocInterrupt,
+  ocMoveSession,
   ocPermissionReply,
   ocListForms,
   ocFormReply,
@@ -1107,12 +1110,18 @@ const CREATE_COLS = 120
  * only ever send keys listed in SessionCreateParams.
  */
 
+/** Locally materialized empty drafts (e.g. model picked before first message).
+ *  If the user switches/creates a project before sending any message, these
+ *  re-home or reset so the first prompt still opens inside the chosen project. */
+const unusedDraftStoredIds = new Set<string>()
+
 /** cwd override when the active connection is the on-phone embedded gateway. */
 async function embeddedSessionCwd(): Promise<{ cwd?: string }> {
   try {
     const gw = await getEmbeddedGateway()
     const host = connConfig.get()?.host ?? ''
-    if (!gw?.running || !gw.workspace || !host.startsWith('127.0.0.1')) return {}
+    const isLocal = host.startsWith('127.0.0.1') || host.startsWith('localhost')
+    if (!gw?.running || !gw.workspace || !isLocal) return {}
     return { cwd: gw.workspace }
   } catch {
     return {}
@@ -1197,7 +1206,10 @@ export async function createSession(
   // unconditional set here would yank the screen back on a rapid double-tap.
   // Background sessions are tracked for their transcript, but must not
   // replace what the user gets on the next cold start.
-  if (!opts?.background) void AsyncStorage.setItem(LAST_SESSION_KEY, storedId)
+  if (!opts?.background) {
+    void AsyncStorage.setItem(LAST_SESSION_KEY, storedId)
+    if (!res.messages?.length) unusedDraftStoredIds.add(storedId)
+  }
   return { sessionId: id, storedId, messages: res.messages ?? [] }
 }
 
@@ -1777,6 +1789,7 @@ async function resumeOrRecoverOc(storedId: string, preferredTitle?: string): Pro
  * session whose resume returns no messages.
  */
 export function switchToSession(storedId: string): Promise<string> {
+  unusedDraftStoredIds.delete(storedId)
   chatBanner.set(null)
   // An ordinary saved chat (drawer, notification deep-link) is the launch
   // profile's conversation, not a bot's — drop the bot view marker so the
@@ -2738,6 +2751,11 @@ export async function openOcChat(ocId: string, title?: string): Promise<void> {
   const knownStored = Object.values(sessionsById.get()).map((s) => s.storedId).filter(Boolean)
   const existingStored = await findStoredIdForOcSession(ocId, knownStored)
   if (existingStored) {
+    unusedDraftStoredIds.delete(existingStored)
+    if (chatThinkers.get(existingStored) !== 'opencode') {
+      chatThinkers.set(existingStored, 'opencode')
+      persistChatThinkers()
+    }
     const live = liveIdFor(existingStored)
     const hit = live ? sessionsById.get()[live] : undefined
     if (hit && !hit.detached) {
@@ -2793,9 +2811,15 @@ export async function openOcChat(ocId: string, title?: string): Promise<void> {
   const cur = activeSession.get()
   const curState = cur ? sessionsById.get()[cur] : undefined
   let sid: string
-  if (curState && !curState.provisional && !curState.busy && curState.messages.length === 0) {
-    // An empty current window is reused — opening a chat from the drawer
-    // shouldn't stack a throwaway 'New chat' underneath.
+  if (
+    curState &&
+    !curState.provisional &&
+    !curState.busy &&
+    curState.messages.length === 0 &&
+    thinkerForChat(curState.storedId) === 'opencode'
+  ) {
+    // An empty current OpenCode window is reused — opening a chat from the
+    // drawer shouldn't stack a throwaway 'New chat' underneath.
     sid = cur!
   } else {
     sid = await newChat()
@@ -2805,7 +2829,11 @@ export async function openOcChat(ocId: string, title?: string): Promise<void> {
   if (title) patchSession(sid, { title })
   const stored = sessionsById.get()[sid]?.storedId ?? ''
   if (!stored) return
-  stampChatThinker(stored, 'opencode')
+  unusedDraftStoredIds.delete(stored)
+  if (chatThinkers.get(stored) !== 'opencode') {
+    chatThinkers.set(stored, 'opencode')
+    persistChatThinkers()
+  }
   await ocRememberSession(stored, ocId)
   ocHydrated.delete(stored)
   setSessionLoading(stored, true)
@@ -2883,6 +2911,7 @@ export async function sendPrompt(
   // of 'failed', and nothing downstream retries it automatically.
   let submitUnconfirmed = false
   try {
+    await pendingDraftRehome
     try {
       const ps = pinned ? sessionsById.get()[pinned] : undefined
       if (ps?.provisional) {
@@ -2938,6 +2967,7 @@ export async function sendPrompt(
     // bubble onto whichever conversation is active by the time this runs.
     rowId = nid()
     const s = sessionsById.get()[sid]
+    if (s?.storedId) unusedDraftStoredIds.delete(s.storedId)
     if (s) {
       patchSession(sid, {
         messages: [
@@ -3797,6 +3827,7 @@ export function hookChatEvents() {
         })
         schedulePersist(eSid)
         maybeFlushQueue(eSid)
+        if (list.length <= 2) void refreshProjects({ force: true })
         const failed = p.status === 'error' || !!p.error
         // Re-derived from the STRIPPED text segments (fallback: raw server
         // text minus markers) so attention bodies never carry @file: noise.
@@ -4073,3 +4104,46 @@ sessionRows.subscribe((rows) => {
 })
 
 export { refreshBadge }
+
+// Keep an unused empty draft chat aligned with the user's selected/created
+// project: if they materialized a blank draft (e.g. picked a model) before
+// creating or switching projects and then start chatting without tapping
+// "+ New chat", move the empty draft into the newly active project.
+let lastObservedProjectId: string | null = activeProjectIdAtom.get()
+let pendingDraftRehome: Promise<void> = Promise.resolve()
+activeProjectIdAtom.listen((nextPid) => {
+  if (nextPid === lastObservedProjectId) return
+  lastObservedProjectId = nextPid
+  const curId = activeSession.get()
+  const cur = curId ? sessionsById.get()[curId] : undefined
+  if (!curId || !cur || cur.provisional || cur.busy || cur.messages.length > 0 || activeBotAtom.get()) return
+  const curSessionId = curId
+  const stored = cur.storedId
+  if (!stored || !unusedDraftStoredIds.has(stored)) return
+  const task = (async () => {
+    try {
+      if (thinkerForChat(stored) === 'opencode') {
+        const ocId = await ocSessionFor(stored).catch(() => null)
+        if (ocId) {
+          const targetDir = await ocSessionDirectory()
+          if (targetDir) {
+            await ocMoveSession(ocId, targetDir)
+            noteOcSessionDir(ocId, targetDir)
+            invalidateOcSessionsCache()
+          }
+        }
+      }
+      const cwd = (await ensureActiveProjectCwd()) ?? (await embeddedSessionCwd()).cwd
+      if (cwd && !isPseudoStoredId(stored)) {
+        await rpc('session.workspace.move', { session_key: stored, cwd }).catch(() => {})
+      }
+    } catch {
+      // If moving the unused draft fails, drop back to a clean provisional chat
+      // so the first prompt still creates in the active project.
+      if (activeSession.get() === curSessionId && (sessionsById.get()[curSessionId]?.messages.length ?? 0) === 0) {
+        void newChat().catch(() => {})
+      }
+    }
+  })()
+  pendingDraftRehome = task
+})
