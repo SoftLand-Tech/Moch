@@ -57,6 +57,7 @@ def _curl(
     password: str,
     body: Optional[dict] = None,
     timeout_s: int = 30,
+    headers: Optional[dict[str, str]] = None,
 ) -> dict:
     """One HTTP call to the guest server, made IN THIS PROCESS (urllib).
 
@@ -68,11 +69,14 @@ def _curl(
     url = f"http://127.0.0.1:{OC_PORT}{path}"
     payload = json.dumps(body).encode() if body is not None else None
     creds = base64.b64encode(f"{OC_USER}:{password}".encode()).decode()
+    req_headers = {"Authorization": f"Basic {creds}", "Content-Type": "application/json"}
+    if headers:
+        req_headers.update(headers)
     req = urllib.request.Request(
         url,
         data=payload,
         method=method,
-        headers={"Authorization": f"Basic {creds}", "Content-Type": "application/json"},
+        headers=req_headers,
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout_s) as res:
@@ -228,14 +232,21 @@ def install_opencode() -> dict:
 # ── chat surface ─────────────────────────────────────────────────────────────
 
 
+def _location_headers(directory: str) -> dict[str, str]:
+    # Legacy servers read ?directory=; newer servers select the request
+    # location from x-opencode-directory. Sending both is backward-compatible.
+    from urllib.parse import quote
+    return {"X-Opencode-Directory": quote(directory, safe="")}
+
+
 def create_session(password: str, title: str, directory: str = "") -> dict:
-    # BUG-149: directory rides the QUERY STRING — the same mechanism
-    # send_prompt already uses (the 2.3.0 server reads `directory` from the
-    # query params; a body key would be rejected with the unknown-key error).
     path = "/api/session"
     if directory:
         path += "?directory=" + _q(directory)
-    return _curl("POST", path, password=password, body={"title": title}, timeout_s=30)
+    return _curl(
+        "POST", path, password=password, body={"title": title}, timeout_s=30,
+        headers=_location_headers(directory) if directory else None,
+    )
 
 
 def send_prompt(password: str, session_id: str, text: str, *, directory: str = "") -> dict:
@@ -243,7 +254,10 @@ def send_prompt(password: str, session_id: str, text: str, *, directory: str = "
     path = f"/api/session/{session_id}/prompt"
     if directory:
         path += "?directory=" + _q(directory)
-    return _curl("POST", path, password=password, body=body, timeout_s=120)
+    return _curl(
+        "POST", path, password=password, body=body, timeout_s=120,
+        headers=_location_headers(directory) if directory else None,
+    )
 
 
 def interrupt(password: str, session_id: str) -> dict:

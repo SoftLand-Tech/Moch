@@ -81,7 +81,13 @@ async function base(): Promise<string> {
 
 export async function ocFetch<T = unknown>(
   path: string,
-  opts?: { method?: string; body?: unknown; timeoutMs?: number; unwrap?: boolean },
+  opts?: {
+    method?: string
+    body?: unknown
+    timeoutMs?: number
+    unwrap?: boolean
+    headers?: Record<string, string>
+  },
 ): Promise<T> {
   const auth = await authHeader()
   const ctrl = new AbortController()
@@ -90,7 +96,7 @@ export async function ocFetch<T = unknown>(
   try {
     res = await fetch(`${await base()}${path}`, {
       method: opts?.method ?? 'GET',
-      headers: { Authorization: auth, 'Content-Type': 'application/json' },
+      headers: { Authorization: auth, 'Content-Type': 'application/json', ...opts?.headers },
       body: opts?.body === undefined ? undefined : JSON.stringify(opts.body),
       signal: ctrl.signal,
     })
@@ -196,16 +202,28 @@ export const ocGetSession = (id: string) =>
 export const ocActiveSessions = () =>
   ocFetch<Record<string, { type?: string }>>('/api/session/active', { timeoutMs: 15_000 })
 
+/** Location carriers accepted across OpenCode server generations:
+ *  - legacy 2.3.x reads `?directory=...`;
+ *  - newer servers read `x-opencode-directory` (and `location[directory]`).
+ * The header is safe on older servers and avoids adding an unknown query key
+ * to newer ones. The value is a GUEST path (`/workspace/test`), never the
+ * Android host spelling.
+ */
+function locationOpts(directory?: string): {
+  headers?: Record<string, string>
+} {
+  return directory
+    ? { headers: { 'X-Opencode-Directory': encodeURIComponent(directory) } }
+    : {}
+}
+
 /**
- * Create a session. `directory` (BUG-149) files the session under a project:
- * it goes in the QUERY STRING exactly like the python twin's send_prompt
- * forwards it (`?directory=` — the 2.3.0 server reads query params, not a
- * body key; an unknown body key is rejected).
+ * Create a session in the project directory. `directory` is the guest path.
  */
 export const ocCreateSession = (title: string, directory?: string) =>
   ocFetch<OcSession>(
     directory ? `/api/session?directory=${encodeURIComponent(directory)}` : '/api/session',
-    { method: 'POST', body: { title } },
+    { method: 'POST', body: { title }, ...locationOpts(directory) },
   )
 
 export const ocHistory = async (id: string, limit = 200): Promise<OcHistoryMessage[]> => {
@@ -235,8 +253,11 @@ export const ocHistory = async (id: string, limit = 200): Promise<OcHistoryMessa
   return messages
 }
 
-export const ocPrompt = (id: string, text: string) =>
-  ocFetch<unknown>(`/api/session/${encodeURIComponent(id)}/prompt`, { method: 'POST', body: { text }, timeoutMs: 60_000 })
+export const ocPrompt = (id: string, text: string, directory?: string) =>
+  ocFetch<unknown>(
+    `/api/session/${encodeURIComponent(id)}/prompt${directory ? `?directory=${encodeURIComponent(directory)}` : ''}`,
+    { method: 'POST', body: { text }, timeoutMs: 60_000, ...locationOpts(directory) },
+  )
 
 export const ocInterrupt = (id: string) =>
   ocFetch<unknown>(`/api/session/${encodeURIComponent(id)}/interrupt`, { method: 'POST', timeoutMs: 15_000 })
