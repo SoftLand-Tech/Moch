@@ -10,7 +10,7 @@ import { hookModelState, noteSessionInfo } from './modelState'
 import { markAttention, clearAttention, pushToast, chatTabFocused, pendingOpenStoredId, type AttentionKind } from './attention'
 import { clearDraft, draftFor, setDraft } from './drafts'
 import { setActiveBot } from './fleet'
-import { ensureActiveProjectCwd, newChatProjectId } from './workspace'
+import { activeProjectIdAtom, ensureActiveProjectCwd, newChatProjectId, projectsAtom } from './workspace'
 import { sendQueue, peekQueued, removeQueued, clearSendQueue, queueFor, enqueueSend, type QueuedSend } from './sendQueue'
 import { extractMedia, isDataUrlPath, joinedTextOf, appendRefText, stripMediaFromText, mediaSegment } from './media'
 import { processAttachments, detachImages, type PendingAttachment } from './mediaSend'
@@ -1156,6 +1156,12 @@ export async function createSession(
   // Re-read projects.tree once when the selected row has no folder: the
   // embedded gateway heals phantom/stale/external project paths there.
   const projectCwd = await ensureActiveProjectCwd()
+  if (activeProjectIdAtom.get() && !projectCwd) {
+    const selected = projectsAtom.get().find((p) => p.id === activeProjectIdAtom.get())
+    chatBanner.set({
+      text: `Project ${selected?.name ?? activeProjectIdAtom.get()} has no usable workspace folder. This chat will open in the workspace; open the drawer to refresh and repair the project.`,
+    })
+  }
   const embedded = await embeddedSessionCwd()
   const res = await createSessionRpc<{ session_id?: string; stored_session_id?: string; messages?: Array<Record<string, unknown>>; info?: { model?: string; provider?: string; reasoning_effort?: string } }>(
     // A create-time title is MANUAL authority server-side: it is applied at

@@ -19,6 +19,7 @@ import {
   ocPrompt,
   ocRunCommand,
   ocSetModel,
+  ocMoveSession,
   ocStream,
   describeOcError,
   type OcEvent,
@@ -252,9 +253,25 @@ async function ensureOcSession(mapKey: string, title: string): Promise<string> {
   if (existing) return existing
   // BUG-149: the mint files the session under the selected project (or the
   // embedded workspace) so the drawer can group it (projectIdForCwd(row.directory)).
-  const created = await ocCreateSession(title.slice(0, 80) || 'Moch chat', await ocSessionDirectory())
+  const directory = await ocSessionDirectory()
+  const created = await ocCreateSession(title.slice(0, 80) || 'Moch chat', directory)
   if (!created?.id) throw new Error('OpenCode did not return a session id')
   await ocRememberSession(mapKey, created.id)
+  // Some OpenCode versions accept the location carrier but still create in
+  // their server default. Verify the echoed directory and use session.move
+  // when needed; this is the difference between "we asked for /workspace/test"
+  // and "the shell is actually there".
+  if (directory) {
+    try {
+      const live = await ocGetSession(created.id)
+      if (live?.directory && live.directory !== directory) {
+        await ocMoveSession(created.id, directory)
+        log('info', 'opencode', `session ${created.id} moved ${live.directory} -> ${directory}`)
+      }
+    } catch (e) {
+      log('warn', 'opencode', `session directory verification/move failed: ${String(e)}`)
+    }
+  }
   // `All sessions` default: apply to every newly minted session, best-effort.
   await applyOcDefaultPick(created.id)
   return created.id

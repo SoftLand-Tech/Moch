@@ -3,13 +3,13 @@
 **Your own hermes AI agent, in your pocket.**
 
 [![Release 1.0.0](https://img.shields.io/badge/release-1.0.0-F79236)](https://github.com/SoftLand-Tech/Moch/releases/latest)
-[![Dev build 1.0.53-beta.1](https://img.shields.io/badge/dev-1.0.53--beta.1-8250DF)](https://github.com/SoftLand-Tech/Moch/releases)
+[![Dev build 1.0.53-beta.2](https://img.shields.io/badge/dev-1.0.53--beta.2-8250DF)](https://github.com/SoftLand-Tech/Moch/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Platform: Android](https://img.shields.io/badge/platform-Android-3DDC84)](https://github.com/SoftLand-Tech/Moch/releases/latest)
 
 Moch is an open-source React Native (Expo 57) chat app for **your own [hermes](https://github.com/NousResearch/hermes-agent) agent** — and it can run that agent two ways: **on a machine you own** (a spare mini-PC, a homelab box, a VPS), with Moch as the window onto it from your phone, or **entirely on your phone** — hermes ships inside the APK, complete with a real Ubuntu Linux it can drive. Either way it's *your* agent: your keys, your sessions, your data. No accounts.
 
-> **Where things stand (Nov 2026):** the stable GitHub release is **v1.0.0**. Active development builds are **1.0.53-beta.1 (versionCode 56)** and are published automatically as per-commit pre-releases (`ci-<sha>`) on the [Releases page](https://github.com/SoftLand-Tech/Moch/releases). The embedded runtime and features marked **beta** below ship in those builds, not the v1.0.0 APK.
+> **Where things stand (Nov 2026):** the stable GitHub release is **v1.0.0**. Active development builds are **1.0.53-beta.2 (versionCode 57)** and are published automatically as per-commit pre-releases (`ci-<sha>`) on the [Releases page](https://github.com/SoftLand-Tech/Moch/releases). The embedded runtime and features marked **beta** below ship in those builds, not the v1.0.0 APK.
 
 <p align="center">
   <img src="docs/screenshots/03-streaming.png" width="280" alt="Moch streaming a reply live, with a collapsed Thinking block showing elapsed time and tok/s" />
