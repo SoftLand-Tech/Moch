@@ -10,8 +10,7 @@ import { hookModelState, noteSessionInfo } from './modelState'
 import { markAttention, clearAttention, pushToast, chatTabFocused, pendingOpenStoredId, type AttentionKind } from './attention'
 import { clearDraft, draftFor, setDraft } from './drafts'
 import { setActiveBot } from './fleet'
-import { activeProjectIdAtom, projectsAtom } from './workspace'
-import { pickProjectCwd } from './projectScope'
+import { ensureActiveProjectCwd } from './workspace'
 import { sendQueue, peekQueued, removeQueued, clearSendQueue, queueFor, enqueueSend, type QueuedSend } from './sendQueue'
 import { extractMedia, isDataUrlPath, joinedTextOf, appendRefText, stripMediaFromText, mediaSegment } from './media'
 import { processAttachments, detachImages, type PendingAttachment } from './mediaSend'
@@ -1154,10 +1153,9 @@ export async function createSession(
   // UI-2: a chat belongs to a project by its `cwd` (session.create has no
   // project field). The drawer's selected project wins; Personal falls
   // through to the runtime workspace below.
-  const projectCwd = pickProjectCwd(
-    projectsAtom.get().map((p) => ({ id: p.id, path: p.primaryPath, isNoProject: p.isNoProject })),
-    activeProjectIdAtom.get(),
-  )
+  // Re-read projects.tree once when the selected row has no folder: the
+  // embedded gateway heals phantom/stale/external project paths there.
+  const projectCwd = await ensureActiveProjectCwd()
   const embedded = await embeddedSessionCwd()
   const res = await createSessionRpc<{ session_id?: string; stored_session_id?: string; messages?: Array<Record<string, unknown>>; info?: { model?: string; provider?: string; reasoning_effort?: string } }>(
     // A create-time title is MANUAL authority server-side: it is applied at
@@ -2533,7 +2531,7 @@ async function runOcOneShot(sid: string, text: string): Promise<void> {
       mapKey,
       text,
       model: model ?? undefined,
-      cwd: ocSelectedProjectCwd(),
+      cwd: await ocSelectedProjectCwd(),
       isCancelled: () => cancel.current,
     })
     // Tool usage renders as finished rows (same reducers, no fake stream).

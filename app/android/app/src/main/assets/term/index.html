@@ -274,8 +274,10 @@ html, body { margin: 0; padding: 0; background: #050807; height: 100%; overflow:
     // unfocused — 'block' keeps the cursor drawn in that state instead of
     // showing nothing, and blink makes its position obvious.
     cursorBlink: true,
-    cursorStyle: 'block',
-    cursorInactiveStyle: 'block',
+    // A bright bar is easier to spot than the old block on a phone, and
+    // `inactive` keeps it visible when the RN hidden input owns IME focus.
+    cursorStyle: 'bar',
+    cursorInactiveStyle: 'bar',
     // BUG-135 OSC-8 seam: xterm's auto-registered OscLinkProvider calls
     // linkHandler.activate for explicit OSC-8 hyperlinks. The xterm default
     // (confirm() + window.open) is unhandled in the RN WebView — route to
@@ -289,7 +291,7 @@ html, body { margin: 0; padding: 0; background: #050807; height: 100%; overflow:
     theme: {
       background: '#050807',
       foreground: '#C9E3D3',
-      cursor: '#F79236',
+      cursor: '#7CF29C',
       cursorAccent: '#04100A',
       selectionBackground: 'rgba(127,199,154,0.24)',
       black: '#0B1210',
