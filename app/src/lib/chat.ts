@@ -10,7 +10,7 @@ import { hookModelState, noteSessionInfo } from './modelState'
 import { markAttention, clearAttention, pushToast, chatTabFocused, pendingOpenStoredId, type AttentionKind } from './attention'
 import { clearDraft, draftFor, setDraft } from './drafts'
 import { setActiveBot } from './fleet'
-import { ensureActiveProjectCwd } from './workspace'
+import { ensureActiveProjectCwd, newChatProjectId } from './workspace'
 import { sendQueue, peekQueued, removeQueued, clearSendQueue, queueFor, enqueueSend, type QueuedSend } from './sendQueue'
 import { extractMedia, isDataUrlPath, joinedTextOf, appendRefText, stripMediaFromText, mediaSegment } from './media'
 import { processAttachments, detachImages, type PendingAttachment } from './mediaSend'
@@ -1181,7 +1181,10 @@ export async function createSession(
   void rememberStoredId(id, storedId)
   bindLiveId(storedId, id)
   // Show it in the drawer straight away rather than on the next session.list.
-  upsertOptimisticRow(storedId, title || 'New chat')
+  upsertOptimisticRow(storedId, title || 'New chat', {
+    project_id: newChatProjectId() ?? undefined,
+    cwd: projectCwd,
+  })
   sessionsById.set({ ...sessionsById.get(), [id]: makeSession(id, storedId, title) })
   // Activation is the CALLERS' job (newChat re-keys its optimistic entry,
   // ensureSession sets explicitly after its two create tails) — an

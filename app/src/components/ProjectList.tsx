@@ -116,6 +116,281 @@ function ExpandIn({ children }: { children: React.ReactNode }) {
   )
 }
 
+export type ProjectDialogRequest =
+  | { kind: 'new'; seq: number }
+  | { kind: 'menu'; project: ProjectRow; seq: number }
+  | null
+
+export interface ProjectDialogsProps {
+  request: ProjectDialogRequest
+  onSelect: (id: string | null) => void
+  onNewProject?: () => void
+  active?: boolean
+}
+
+/**
+ * Headless sheet + dialogs host for Concept #3's Project Rail.
+ * Reuses the exact same Modal, KeyboardAvoidingView, and projectActions
+ * contract as ProjectList without rendering the vertical row list.
+ */
+export function ProjectDialogs({
+  request,
+  onSelect,
+  onNewProject,
+  active = true,
+}: ProjectDialogsProps) {
+  const s = useStyles(makeS)
+  const d = useStyles(makeDialogS)
+  const dir = useDir()
+  useStore(localeAtom)
+
+  const [sheetFor, setSheetFor] = useState<ProjectRow | null>(null)
+  const [dialog, setDialog] = useState<ProjectDialog>('none')
+  const [target, setTarget] = useState<ProjectRow | null>(null)
+  const [nameText, setNameText] = useState('')
+  const [pathText, setPathText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const closeAll = () => {
+    setSheetFor(null)
+    setDialog('none')
+    setTarget(null)
+    setError(null)
+    setBusy(false)
+  }
+
+  useEffect(() => {
+    if (!active) closeAll()
+  }, [active])
+
+  useEffect(() => {
+    if (!request) return
+    if (request.kind === 'new') {
+      setSheetFor(null)
+      setTarget(null)
+      setNameText('')
+      setPathText('')
+      setError(null)
+      setDialog('new')
+    } else {
+      setDialog('none')
+      setTarget(null)
+      setError(null)
+      setSheetFor(request.project)
+    }
+  }, [request])
+
+  const openRename = (p: ProjectRow) => {
+    setSheetFor(null)
+    setTarget(p)
+    setNameText(p.name)
+    setError(null)
+    setDialog('rename')
+  }
+
+  const openDelete = (p: ProjectRow) => {
+    setSheetFor(null)
+    setTarget(p)
+    setError(null)
+    setDialog('delete')
+  }
+
+  const runCreate = async () => {
+    if (busy) return
+    const name = nameText.trim()
+    if (!name) return
+    setBusy(true)
+    setError(null)
+    const err = await projectActions.create(name, pathText.trim() || undefined)
+    setBusy(false)
+    if (err) {
+      setError(err)
+      return
+    }
+    closeAll()
+    onNewProject?.()
+  }
+
+  const runRename = async () => {
+    if (busy || !target) return
+    const name = nameText.trim()
+    if (!name) return
+    setBusy(true)
+    setError(null)
+    const err = await projectActions.rename(target.id, name)
+    setBusy(false)
+    if (err) setError(err)
+    else closeAll()
+  }
+
+  const runArchive = async (p: ProjectRow) => {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    const err = await projectActions.archive(p.id)
+    setBusy(false)
+    if (err) setError(err)
+    else closeAll()
+  }
+
+  const runDelete = async () => {
+    if (busy || !target) return
+    setBusy(true)
+    setError(null)
+    const err = await projectActions.remove(target.id)
+    setBusy(false)
+    if (err) setError(err)
+    else closeAll()
+  }
+
+  const sheetRef = useRef<ProjectRow | null>(null)
+  if (sheetFor) sheetRef.current = sheetFor
+  const shownSheet = sheetFor ?? sheetRef.current
+
+  const overlayOpen = sheetFor != null || dialog !== 'none'
+  const anim = usePopIn(overlayOpen)
+  const scale = useMemo(
+    () => anim.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }),
+    [anim],
+  )
+
+  return (
+    <Modal
+      visible={overlayOpen}
+      transparent
+      animationType="none"
+      statusBarTranslucent
+      onRequestClose={closeAll}
+    >
+      <KeyboardAvoidingView style={s.modalRoot} behavior="padding">
+        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: C.scrim, opacity: anim }]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeAll} accessibilityLabel={tr('sidebar.cancel')} />
+        </Animated.View>
+
+        {dialog === 'none' ? (
+          shownSheet ? (
+            <Animated.View style={[s.sheet, { opacity: anim, transform: [{ scale }] }]}>
+              <Txt size={10.5} weight="700" color={C.textFaint} style={s.sheetTitle} numberOfLines={1}>
+                {shownSheet.name}
+              </Txt>
+              <SheetRow
+                icon="pencil-outline"
+                label={tr('sidebar.renameProject')}
+                onPress={() => openRename(shownSheet)}
+              />
+              <SheetRow
+                icon="check-circle-outline"
+                label={tr('sidebar.setDefault')}
+                onPress={() => {
+                  const p = shownSheet
+                  closeAll()
+                  onSelect(p.id)
+                }}
+              />
+              <SheetRow
+                icon="archive-outline"
+                label={tr('sidebar.archive')}
+                onPress={() => void runArchive(shownSheet)}
+              />
+              <SheetRow
+                icon="trash-can-outline"
+                label={tr('sidebar.delete')}
+                danger
+                onPress={() => openDelete(shownSheet)}
+              />
+              {error ? <Txt size={12} color={C.red} style={s.sheetError}>{error}</Txt> : null}
+            </Animated.View>
+          ) : null
+        ) : (
+          <Animated.View style={[d.dialogCard, { opacity: anim, transform: [{ scale }] }]}>
+            <Txt style={d.dialogTitle}>
+              {dialog === 'new'
+                ? tr('sidebar.newProject')
+                : dialog === 'rename'
+                  ? tr('sidebar.renameProject')
+                  : tr('project.delete.title')}
+            </Txt>
+
+            {dialog === 'delete' ? (
+              <Txt style={d.dialogBody}>
+                {tr('project.delete.body', { name: target?.name ?? '' })}
+              </Txt>
+            ) : (
+              <>
+                <TextInput
+                  style={[
+                    d.dialogInput,
+                    { textAlign: dir.textAlign, writingDirection: dir.writingDirection },
+                  ]}
+                  value={nameText}
+                  onChangeText={setNameText}
+                  autoFocus
+                  selectTextOnFocus
+                  maxLength={120}
+                  placeholder={tr('project.name.placeholder')}
+                  placeholderTextColor={C.textFaint}
+                  onSubmitEditing={() => void (dialog === 'new' ? runCreate() : runRename())}
+                  accessibilityLabel={tr('project.name.label')}
+                />
+                {dialog === 'new' ? (
+                  <>
+                    <TextInput
+                      style={[
+                        d.dialogInput,
+                        { textAlign: dir.textAlign, writingDirection: dir.writingDirection },
+                      ]}
+                      value={pathText}
+                      onChangeText={setPathText}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      placeholder={tr('project.folder.placeholder')}
+                      placeholderTextColor={C.textFaint}
+                      accessibilityLabel={tr('project.folder.label')}
+                    />
+                    <Txt style={d.dialogBody}>{tr('project.folder.hint')}</Txt>
+                  </>
+                ) : null}
+              </>
+            )}
+
+            {error ? <Txt style={d.dialogError}>{error}</Txt> : null}
+
+            <View style={[d.dialogButtons, { flexDirection: dir.row }]}>
+              <Pressable
+                style={[d.dialogBtn, busy && d.dialogBtnBusy]}
+                onPress={closeAll}
+                disabled={busy}
+              >
+                <Txt style={d.dialogBtnText}>{tr('sidebar.cancel')}</Txt>
+              </Pressable>
+              {dialog === 'delete' ? (
+                <Pressable
+                  style={[d.dialogBtnDanger, busy && d.dialogBtnBusy]}
+                  onPress={() => void runDelete()}
+                  disabled={busy}
+                >
+                  <Txt style={d.dialogBtnDangerText}>{tr('sidebar.delete')}</Txt>
+                </Pressable>
+              ) : (
+                <Pressable
+                  style={[d.dialogBtnPrimary, (busy || !nameText.trim()) && d.dialogBtnBusy]}
+                  onPress={() => void (dialog === 'new' ? runCreate() : runRename())}
+                  disabled={busy || !nameText.trim()}
+                >
+                  <Txt style={d.dialogBtnPrimaryText}>
+                    {dialog === 'new' ? tr('project.create') : tr('sidebar.save')}
+                  </Txt>
+                </Pressable>
+              )}
+            </View>
+          </Animated.View>
+        )}
+      </KeyboardAvoidingView>
+    </Modal>
+  )
+}
+
 export function ProjectList({
   projects,
   activeProjectId,

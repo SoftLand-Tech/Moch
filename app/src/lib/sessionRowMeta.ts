@@ -183,8 +183,20 @@ export function searchHitToRow(r: Record<string, unknown>): SessionRow | null {
  * "— msgs" until the next `session.list` poll replaces it with the server's
  * honest count — no local bump machinery, the ≤60s poll self-heals it.
  */
-export function optimisticSessionRow(storedId: string, title: string, startedAtSec: number): SessionRow {
-  return { id: storedId, title, started_at: startedAtSec, source: 'mobile' }
+export function optimisticSessionRow(
+  storedId: string,
+  title: string,
+  startedAtSec: number,
+  scope?: { project_id?: string; cwd?: string },
+): SessionRow {
+  return {
+    id: storedId,
+    title,
+    started_at: startedAtSec,
+    source: 'mobile',
+    ...(scope?.project_id ? { project_id: scope.project_id } : {}),
+    ...(scope?.cwd ? { cwd: scope.cwd } : {}),
+  }
 }
 
 /** The gateway's delete refusal for a session that is live in its process. */
