@@ -239,23 +239,26 @@ def _location_headers(directory: str) -> dict[str, str]:
     return {"X-Opencode-Directory": quote(directory, safe="")}
 
 
+def _with_directory(path: str, directory: str) -> str:
+    if not directory:
+        return path
+    value = _q(directory)
+    return path + "?directory=" + value + "&location%5Bdirectory%5D=" + value
+
+
 def create_session(password: str, title: str, directory: str = "") -> dict:
-    path = "/api/session"
-    if directory:
-        path += "?directory=" + _q(directory)
     return _curl(
-        "POST", path, password=password, body={"title": title}, timeout_s=30,
+        "POST", _with_directory("/api/session", directory), password=password,
+        body={"title": title}, timeout_s=30,
         headers=_location_headers(directory) if directory else None,
     )
 
 
 def send_prompt(password: str, session_id: str, text: str, *, directory: str = "") -> dict:
     body: dict[str, Any] = {"text": text}
-    path = f"/api/session/{session_id}/prompt"
-    if directory:
-        path += "?directory=" + _q(directory)
     return _curl(
-        "POST", path, password=password, body=body, timeout_s=120,
+        "POST", _with_directory(f"/api/session/{session_id}/prompt", directory),
+        password=password, body=body, timeout_s=120,
         headers=_location_headers(directory) if directory else None,
     )
 

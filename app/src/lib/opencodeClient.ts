@@ -204,11 +204,15 @@ export const ocActiveSessions = () =>
 
 /** Location carriers accepted across OpenCode server generations:
  *  - legacy 2.3.x reads `?directory=...`;
- *  - newer servers read `x-opencode-directory` (and `location[directory]`).
- * The header is safe on older servers and avoids adding an unknown query key
- * to newer ones. The value is a GUEST path (`/workspace/test`), never the
- * Android host spelling.
+ *  - newer servers read `x-opencode-directory` and/or `location[directory]`.
+ * The value is a GUEST path (`/workspace/test`), never the Android host path.
  */
+function locationQuery(directory?: string): string {
+  if (!directory) return ''
+  const value = encodeURIComponent(directory)
+  return `?directory=${value}&location%5Bdirectory%5D=${value}`
+}
+
 function locationOpts(directory?: string): {
   headers?: Record<string, string>
 } {
@@ -222,8 +226,16 @@ function locationOpts(directory?: string): {
  */
 export const ocCreateSession = (title: string, directory?: string) =>
   ocFetch<OcSession>(
-    directory ? `/api/session?directory=${encodeURIComponent(directory)}` : '/api/session',
+    `/api/session${locationQuery(directory)}`,
     { method: 'POST', body: { title }, ...locationOpts(directory) },
+  )
+
+/** Verify/repair a session location on servers that support session.move.
+ *  Older servers may 404 this route; callers treat that as best-effort. */
+export const ocMoveSession = (sessionId: string, directory: string) =>
+  ocFetch<unknown>(
+    `/api/session/${encodeURIComponent(sessionId)}/move${locationQuery(directory)}`,
+    { method: 'POST', body: { directory }, ...locationOpts(directory), timeoutMs: 15_000 },
   )
 
 export const ocHistory = async (id: string, limit = 200): Promise<OcHistoryMessage[]> => {
@@ -255,7 +267,7 @@ export const ocHistory = async (id: string, limit = 200): Promise<OcHistoryMessa
 
 export const ocPrompt = (id: string, text: string, directory?: string) =>
   ocFetch<unknown>(
-    `/api/session/${encodeURIComponent(id)}/prompt${directory ? `?directory=${encodeURIComponent(directory)}` : ''}`,
+    `/api/session/${encodeURIComponent(id)}/prompt${locationQuery(directory)}`,
     { method: 'POST', body: { text }, timeoutMs: 60_000, ...locationOpts(directory) },
   )
 
