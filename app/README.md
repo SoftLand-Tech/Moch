@@ -15,7 +15,7 @@ The canonical product contract is in [`PRODUCT.md`](../PRODUCT.md). For the firs
 - **Embedded Hermes is the default.** Moch starts a Hermes control plane and loopback gateway on the phone. The app includes the embedded Python runtime and vendored Hermes tree; it is not only a client for a machine elsewhere.
 - **OpenCode is optional.** Moch downloads OpenCode from [opencode.ai](https://opencode.ai) into Moch Linux on first selection, then runs it in the Ubuntu/proot guest. OpenCode is not the default thinker and Moch is not the official OpenCode app.
 - **You choose the model provider.** Connect a hosted provider or a compatible local model endpoint. Provider accounts, keys and charges are separate from Moch.
-- **Legacy linked gateways remain compatible.** The stable-era QR and WebSocket gateway flow is documented below for existing users, but it is not the standard current setup.
+- **Stable v1.0.0 keeps the legacy linked flow.** The stable-era QR and WebSocket gateway instructions are documented below for existing v1.0.0 users; current CI builds use the on-device path.
 
 ### Network truth
 
@@ -60,7 +60,7 @@ OpenCode mode keeps Chat, Projects/OpenCode sessions, Terminal, Browser and Sett
 
 No iOS release is currently offered.
 
-### Expo Go is not the release app
+### Expo Go is not the current beta app
 
 Expo Go cannot provide the native embedded-runtime bridge. It may load parts of the interface, but it is not equivalent to the current CI beta APK and must not be used to verify the current local-first runtime. Use `npx expo run:android` or a CI APK for that.
 
