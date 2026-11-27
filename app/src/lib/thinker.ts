@@ -176,6 +176,7 @@ export interface EnsureOpencodeOptions {
 type EnsureOpencodeFlight = {
   autoInstallGuest: boolean
   guestMissing: boolean
+  lastStage: { stage: OcEnsureInstallStage; pct?: number } | null
   listeners: Set<(stage: OcEnsureInstallStage, pct?: number) => void>
   promise: Promise<GuestRunResult>
 }
@@ -201,7 +202,8 @@ async function runEnsureOpencodeInstalled(
     onStage('guest')
     const boot = await linuxBootstrap('ubuntu-24.04')
     if (!boot || !boot.ok) {
-      return { ok: false, code: 1, stdout: '', stderr: boot?.steps || 'Failed to install the Linux guest.' }
+      const stepDetail = boot?.steps && boot.steps !== '[]' ? boot.steps : ''
+      return { ok: false, code: 1, stdout: '', stderr: stepDetail || 'Failed to install the Linux guest.' }
     }
     const st2 = await linuxStatus()
     if (!st2?.bootstrapped) {
@@ -226,7 +228,14 @@ export async function ensureOpencodeInstalled(opts?: EnsureOpencodeOptions): Pro
   for (;;) {
     if (ensureOpencodeFlight) {
       const flight = ensureOpencodeFlight
-      if (opts?.onStage) flight.listeners.add(opts.onStage)
+      if (opts?.onStage) {
+        flight.listeners.add(opts.onStage)
+        if (flight.lastStage) {
+          try {
+            opts.onStage(flight.lastStage.stage, flight.lastStage.pct)
+          } catch {}
+        }
+      }
       const res = await flight.promise
       if (res.ok || !wantGuest || flight.autoInstallGuest || !flight.guestMissing) {
         return res
@@ -235,18 +244,20 @@ export async function ensureOpencodeInstalled(opts?: EnsureOpencodeOptions): Pro
     }
     const listeners = new Set<(stage: OcEnsureInstallStage, pct?: number) => void>()
     if (opts?.onStage) listeners.add(opts.onStage)
+    const flight: EnsureOpencodeFlight = {
+      autoInstallGuest: wantGuest,
+      guestMissing: false,
+      lastStage: null,
+      listeners,
+      promise: null as unknown as Promise<GuestRunResult>,
+    }
     const emit = (stage: OcEnsureInstallStage, pct?: number) => {
+      flight.lastStage = { stage, pct }
       for (const fn of listeners) {
         try {
           fn(stage, pct)
         } catch {}
       }
-    }
-    const flight: EnsureOpencodeFlight = {
-      autoInstallGuest: wantGuest,
-      guestMissing: false,
-      listeners,
-      promise: null as unknown as Promise<GuestRunResult>,
     }
     const promise = (async () => {
       try {

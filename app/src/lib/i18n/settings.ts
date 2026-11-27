@@ -104,6 +104,7 @@ export const settings: Catalog = {
     'settings.thinker.downloading': 'Downloading OpenCode…',
     'settings.thinker.downloadingPct': 'Downloading OpenCode… {pct}%',
     'settings.thinker.starting': 'Starting OpenCode server…',
+    'settings.thinker.stopping': 'Stopping OpenCode…',
     'settings.thinker.installFailed': 'Could not install OpenCode.',
     'settings.thinker.serverFailed':
       'The OpenCode server could not start on this phone. You can still use OpenCode in one-shot mode — same models, answers arrive whole instead of streaming.',
@@ -254,6 +255,7 @@ export const settings: Catalog = {
     'settings.thinker.downloading': 'جارٍ تنزيل OpenCode…',
     'settings.thinker.downloadingPct': 'جارٍ تنزيل OpenCode… {pct}%',
     'settings.thinker.starting': 'جارٍ تشغيل خادم OpenCode…',
+    'settings.thinker.stopping': 'جارٍ إيقاف OpenCode…',
     'settings.thinker.installFailed': 'تعذّر تثبيت OpenCode.',
     'settings.thinker.serverFailed':
       'تعذّر تشغيل خادم OpenCode على هذا الهاتف. يمكنك مع ذلك استخدام OpenCode في الوضع لمرة واحدة — النماذج نفسها، لكن الإجابات تصل كاملة بدل أن تُبثّ.',
@@ -401,6 +403,7 @@ export const settings: Catalog = {
     'settings.thinker.downloading': '正在下载 OpenCode…',
     'settings.thinker.downloadingPct': '正在下载 OpenCode… {pct}%',
     'settings.thinker.starting': '正在启动 OpenCode 服务器…',
+    'settings.thinker.stopping': '正在停止 OpenCode…',
     'settings.thinker.installFailed': '无法安装 OpenCode。',
     'settings.thinker.serverFailed':
       'OpenCode 服务器无法在这台手机上启动。你仍可以使用单次模式的 OpenCode——模型相同，只是答案会整段返回而非流式。',
@@ -552,6 +555,7 @@ export const settings: Catalog = {
     'settings.thinker.downloading': 'Téléchargement d’OpenCode…',
     'settings.thinker.downloadingPct': 'Téléchargement d’OpenCode… {pct}%',
     'settings.thinker.starting': 'Démarrage du serveur OpenCode…',
+    'settings.thinker.stopping': 'Arrêt d’OpenCode…',
     'settings.thinker.installFailed': 'Impossible d’installer OpenCode.',
     'settings.thinker.serverFailed':
       "Le serveur OpenCode n'a pas pu démarrer sur ce téléphone. Vous pouvez tout de même utiliser OpenCode en mode unique — mêmes modèles, réponses complètes au lieu d'un flux.",

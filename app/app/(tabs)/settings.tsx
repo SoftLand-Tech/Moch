@@ -307,6 +307,7 @@ function SettingsInner() {
   const [langOpen, setLangOpen] = React.useState(false)
   const [thinkerOpen, setThinkerOpen] = React.useState(false)
   const [thinkerBusy, setThinkerBusy] = React.useState(false)
+  const [retryingServer, setRetryingServer] = React.useState(false)
   const [thinkerStageMsg, setThinkerStageMsg] = React.useState<string | null>(null)
   const [thinkerErr, setThinkerErr] = React.useState<string | null>(null)
   const [thinkerOneShotOffer, setThinkerOneShotOffer] = React.useState(false)
@@ -417,6 +418,7 @@ function SettingsInner() {
   }
 
   const openThinkerSheet = () => {
+    if (retryingServer || linux.busy) return
     if (!thinkerBusy) {
       setThinkerErr(null)
       setThinkerStageMsg(null)
@@ -430,8 +432,8 @@ function SettingsInner() {
   }
 
   const retryServerMode = () => {
-    if (thinkerBusy) return
-    setThinkerBusy(true)
+    if (retryingServer || thinkerBusy || linux.busy) return
+    setRetryingServer(true)
     void (async () => {
       try {
         const inst = await ensureOpencodeInstalled({ autoInstallGuest: true })
@@ -455,7 +457,7 @@ function SettingsInner() {
           [{ text: t('chrome.alert.ok') }],
         )
       } finally {
-        setThinkerBusy(false)
+        setRetryingServer(false)
       }
     })()
   }
@@ -467,7 +469,7 @@ function SettingsInner() {
    * server fails on-device.
    */
   const chooseThinker = (id: 'moch' | 'opencode') => {
-    if (id === thinker || thinkerBusy) return
+    if (id === thinker || thinkerBusy || retryingServer || linux.busy) return
     if (id === 'opencode') {
       setThinkerBusy(true)
       setThinkerErr(null)
@@ -517,14 +519,20 @@ function SettingsInner() {
       return
     }
     setThinkerBusy(true)
+    setThinkerErr(null)
+    setThinkerOneShotOffer(false)
+    setThinkerStageMsg(t('settings.thinker.stopping'))
     void (async () => {
       try {
-        await stopOpencodeServer()
+        await stopOpencodeServer().catch(() => {})
         await setOpencodeOneShot(false)
         await setThinker('moch')
         setThinkerOpen(false)
+      } catch (e) {
+        setThinkerErr(e instanceof Error ? e.message : String(e))
       } finally {
         setThinkerBusy(false)
+        setThinkerStageMsg(null)
       }
     })()
   }
@@ -703,13 +711,14 @@ function SettingsInner() {
                 if (linux.installed) confirmLinuxReinstall()
                 else void linux.runInstall()
               }}
-              disabled={linux.busy}
+              disabled={linux.busy || thinkerBusy || retryingServer}
               right={linux.busy ? <Spinner size="small" color={C.accent} /> : undefined}
             />
             {linux.installed ? (
               <Row
                 label={t('settings.linux.reset')}
                 danger
+                disabled={linux.busy || thinkerBusy || retryingServer}
                 onPress={confirmLinuxReset}
               />
             ) : null}
@@ -755,13 +764,16 @@ function SettingsInner() {
               <Row
                 label={t('settings.thinker.retryServer')}
                 sub={t('settings.thinker.retryServer.sub')}
-                chevron
+                chevron={!retryingServer}
+                right={retryingServer ? <Spinner size="small" color={C.accent} /> : undefined}
+                disabled={retryingServer || thinkerBusy || linux.busy}
                 onPress={retryServerMode}
               />
             ) : null}
             <Row
               label={t('settings.thinker.switch')}
               chevron
+              disabled={retryingServer || linux.busy}
               onPress={openThinkerSheet}
             />
             <Row

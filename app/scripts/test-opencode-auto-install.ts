@@ -512,6 +512,111 @@ async function main() {
     )
   }
 
+  // ── 9. Failure paths reset single-flight so subsequent retries work ─────
+  resetState({
+    bootstrapped: true,
+    rootfsExists: true,
+    tmpExists: true,
+    opencodeInstalled: false,
+    downloadShouldFail: true,
+  })
+  {
+    const failedDownload = await thinker.ensureOpencodeInstalled()
+    state.downloadShouldFail = false
+    const retriedDownload = await thinker.ensureOpencodeInstalled()
+    check(
+      'download failure surfaces error and resets single-flight for retry',
+      !failedDownload.ok &&
+        failedDownload.stderr.includes('Downloading OpenCode failed') &&
+        retriedDownload.ok &&
+        state.downloadCalls === 2,
+      `fail=${failedDownload.stderr} retry=${retriedDownload.ok} downloads=${state.downloadCalls}`,
+    )
+  }
+
+  resetState({
+    bootstrapped: false,
+    rootfsExists: false,
+    tmpExists: false,
+    opencodeInstalled: false,
+    bootstrapOk: false,
+    bootstrapSteps: '[]',
+  })
+  {
+    const failedBoot = await thinker.ensureOpencodeInstalled({ autoInstallGuest: true })
+    state.bootstrapOk = true
+    const retriedBoot = await thinker.ensureOpencodeInstalled({ autoInstallGuest: true })
+    check(
+      'bootstrap failure ignores empty "[]" steps and resets single-flight for retry',
+      !failedBoot.ok &&
+        failedBoot.stderr === 'Failed to install the Linux guest.' &&
+        retriedBoot.ok &&
+        state.bootstrapCalls === 2,
+      `err=${JSON.stringify(failedBoot.stderr)} retry=${retriedBoot.ok}`,
+    )
+  }
+
+  // ── 10. Active flight replays latest stage to late-joining onStage ──────
+  resetState({ bootstrapped: false, rootfsExists: false, tmpExists: false, opencodeInstalled: false })
+  {
+    state.bootstrapGate = new Promise((r) => {
+      state.bootstrapGateResolve = r
+    })
+    const lateStages: string[] = []
+    const p1 = thinker.ensureOpencodeInstalled({ autoInstallGuest: true })
+    await new Promise((r) => setTimeout(r, 10))
+    const p2 = thinker.ensureOpencodeInstalled({
+      autoInstallGuest: true,
+      onStage: (stage, pct) => lateStages.push(pct !== undefined ? `${stage}:${pct}` : stage),
+    })
+    state.bootstrapGateResolve?.()
+    await Promise.all([p1, p2])
+    check(
+      'joining an active flight replays its current stage immediately',
+      lateStages[0] === 'guest' && lateStages.includes('downloading'),
+      `lateStages=${JSON.stringify(lateStages)}`,
+    )
+  }
+
+  // ── 11. ocEnsureServer() fast path when already alive skips install ─────
+  resetState({ bootstrapped: true, rootfsExists: true, tmpExists: true, opencodeInstalled: false })
+  {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      if (url.endsWith('/api/info')) {
+        return new Response(JSON.stringify({ version: '2.3.0' }), { status: 200 })
+      }
+      throw new Error('unexpected fetch')
+    }) as typeof fetch
+
+    const gw = await startMockGateway({
+      'moch.opencode.ensure': async () => ({ ok: true, started: false }),
+    })
+    mockGatewayInfo = {
+      running: true,
+      ready: true,
+      port: gw.port,
+      token: 'test-token',
+      workspace: '/workspace',
+      error: '',
+    }
+    await gateway.connect({ host: gw.host, token: 'test-token', tls: false })
+    const deadline = Date.now() + 4000
+    while (!gateway.isConnected.get() && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 15))
+    }
+    const res = await ocClient.ocEnsureServer()
+    gateway.disconnect()
+    mockGatewayInfo = null
+    await gw.close()
+
+    check(
+      'ocEnsureServer() fast path skips install checks when server is already alive',
+      res.ok && state.downloadCalls === 0 && state.execCalls.length === 0 && state.termProbeCalls === 0,
+      `res=${JSON.stringify(res)} downloads=${state.downloadCalls} execs=${state.execCalls.length}`,
+    )
+  }
+
   console.log(`\nSummary: ${pass} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)
 }
