@@ -59,6 +59,8 @@ import {
 import {
   thinkerAtom,
   ocOneShotAtom,
+  ensureOpencodeInstalled,
+  startOpencodeServer,
   setThinker,
   setOpencodeOneShot,
   stopOpencodeServer,
@@ -91,13 +93,19 @@ export default function Settings() {
 function useLinuxGuest() {
   const [st, setSt] = React.useState<LinuxGuestStatus | null>(null)
   const [busy, setBusy] = React.useState(false)
-  React.useEffect(() => {
-    let alive = true
-    const tick = () => { linuxStatus().then((x) => { if (alive) setSt(x) }).catch(() => {}) }
-    tick()
-    const timer = setInterval(tick, 60_000)
-    return () => { alive = false; clearInterval(timer) }
+  const aliveRef = React.useRef(true)
+  const refresh = React.useCallback(async () => {
+    try {
+      const x = await linuxStatus()
+      if (aliveRef.current) setSt(x)
+    } catch {}
   }, [])
+  React.useEffect(() => {
+    aliveRef.current = true
+    void refresh()
+    const timer = setInterval(() => { void refresh() }, 60_000)
+    return () => { aliveRef.current = false; clearInterval(timer) }
+  }, [refresh])
   // #112 / BUG-016: bootstrap/reset are long, fallible operations. Await each
   // one, hold the busy state through completion, and surface any failure.
   const runInstall = async () => {
@@ -146,7 +154,7 @@ function useLinuxGuest() {
       setBusy(false)
     }
   }
-  return { st, busy, installed: !!st?.bootstrapped, runInstall, runReset }
+  return { st, busy, installed: !!st?.bootstrapped, runInstall, runReset, refresh }
 }
 
 /** Embedded gateway / Mochi runtime status + battery-exemption request. */
@@ -298,6 +306,10 @@ function SettingsInner() {
   const [aboutBusy, setAboutBusy] = React.useState(false)
   const [langOpen, setLangOpen] = React.useState(false)
   const [thinkerOpen, setThinkerOpen] = React.useState(false)
+  const [thinkerBusy, setThinkerBusy] = React.useState(false)
+  const [thinkerStageMsg, setThinkerStageMsg] = React.useState<string | null>(null)
+  const [thinkerErr, setThinkerErr] = React.useState<string | null>(null)
+  const [thinkerOneShotOffer, setThinkerOneShotOffer] = React.useState(false)
   const [aboutOpen, setAboutOpen] = React.useState(false)
   const [aboutForm, setAboutForm] = React.useState<AboutFields>({ name: '', work: '', extra: '' })
   const [aboutError, setAboutError] = React.useState<string | null>(null)
@@ -404,39 +416,131 @@ function SettingsInner() {
     ])
   }
 
+  const openThinkerSheet = () => {
+    if (!thinkerBusy) {
+      setThinkerErr(null)
+      setThinkerStageMsg(null)
+      setThinkerOneShotOffer(false)
+    }
+    setThinkerOpen(true)
+  }
+
+  const closeThinkerSheet = () => {
+    if (!thinkerBusy) setThinkerOpen(false)
+  }
+
   const retryServerMode = () => {
+    if (thinkerBusy) return
+    setThinkerBusy(true)
     void (async () => {
-      await setOpencodeOneShot(false)
-      showAlert(t('settings.thinker.serverMode.title'), t('settings.thinker.serverMode.body'), [
-        { text: t('chrome.alert.ok') },
-      ])
+      try {
+        const inst = await ensureOpencodeInstalled({ autoInstallGuest: true })
+        void linux.refresh()
+        if (!inst.ok) {
+          showAlert(
+            t('settings.thinker.retryServer'),
+            inst.stderr || t('settings.thinker.installFailed'),
+            [{ text: t('chrome.alert.ok') }],
+          )
+          return
+        }
+        await setOpencodeOneShot(false)
+        showAlert(t('settings.thinker.serverMode.title'), t('settings.thinker.serverMode.body'), [
+          { text: t('chrome.alert.ok') },
+        ])
+      } catch (e) {
+        showAlert(
+          t('settings.thinker.retryServer'),
+          e instanceof Error ? e.message : String(e),
+          [{ text: t('chrome.alert.ok') }],
+        )
+      } finally {
+        setThinkerBusy(false)
+      }
     })()
   }
 
   /**
-   * Thinker switch: picker sheet instead of the old two-button alert. The
-   * current thinker row is the sheet's selected (disabled) option; picking the
-   * other one runs the exact pre-existing switch sequence, then closes.
+   * Thinker switch: picker sheet instead of the old two-button alert. Picking
+   * OpenCode ensures the Linux guest and OpenCode binary are installed and
+   * starts the server before switching, offering one-shot fallback if the
+   * server fails on-device.
    */
   const chooseThinker = (id: 'moch' | 'opencode') => {
-    if (id === thinker) return
+    if (id === thinker || thinkerBusy) return
     if (id === 'opencode') {
+      setThinkerBusy(true)
+      setThinkerErr(null)
+      setThinkerOneShotOffer(false)
+      setThinkerStageMsg(t('settings.thinker.checking'))
       void (async () => {
-        await setOpencodeOneShot(false)
-        await setThinker('opencode')
-        setThinkerOpen(false)
-        showAlert(t('settings.thinker.selected.title'), t('settings.thinker.selected.body'), [
-          { text: t('chrome.alert.ok') },
-        ])
+        try {
+          const inst = await ensureOpencodeInstalled({
+            autoInstallGuest: true,
+            onStage: (stage, pct) => {
+              if (stage === 'guest') {
+                setThinkerStageMsg(t('settings.thinker.installingGuest'))
+              } else if (stage === 'downloading') {
+                setThinkerStageMsg(
+                  pct !== undefined
+                    ? t('settings.thinker.downloadingPct', { pct })
+                    : t('settings.thinker.downloading'),
+                )
+              }
+            },
+          })
+          void linux.refresh()
+          if (!inst.ok) {
+            setThinkerErr(inst.stderr || t('settings.thinker.installFailed'))
+            return
+          }
+          setThinkerStageMsg(t('settings.thinker.starting'))
+          const up = await startOpencodeServer()
+          if (!up.ok) {
+            setThinkerErr(t('settings.thinker.serverFailed'))
+            setThinkerOneShotOffer(true)
+            return
+          }
+          await setOpencodeOneShot(false)
+          await setThinker('opencode')
+          setThinkerOpen(false)
+          showAlert(t('settings.thinker.selected.title'), t('settings.thinker.selected.body'), [
+            { text: t('chrome.alert.ok') },
+          ])
+        } catch (e) {
+          setThinkerErr(e instanceof Error ? e.message : String(e))
+        } finally {
+          setThinkerBusy(false)
+          setThinkerStageMsg(null)
+        }
       })()
       return
     }
+    setThinkerBusy(true)
     void (async () => {
-      await stopOpencodeServer()
-      await setOpencodeOneShot(false)
-      await setThinker('moch')
-      setThinkerOpen(false)
+      try {
+        await stopOpencodeServer()
+        await setOpencodeOneShot(false)
+        await setThinker('moch')
+        setThinkerOpen(false)
+      } finally {
+        setThinkerBusy(false)
+      }
     })()
+  }
+
+  const continueThinkerOneShot = async () => {
+    if (thinkerBusy) return
+    setThinkerBusy(true)
+    try {
+      await setOpencodeOneShot(true)
+      await setThinker('opencode')
+      setThinkerOneShotOffer(false)
+      setThinkerErr(null)
+      setThinkerOpen(false)
+    } finally {
+      setThinkerBusy(false)
+    }
   }
 
   /** Open the editable About-me sheet, prefilled from the stored profile. */
@@ -658,7 +762,7 @@ function SettingsInner() {
             <Row
               label={t('settings.thinker.switch')}
               chevron
-              onPress={() => setThinkerOpen(true)}
+              onPress={openThinkerSheet}
             />
             <Row
               label={t('settings.thinker.providers')}
@@ -807,15 +911,15 @@ function SettingsInner() {
       </Modal>
 
       {/* Thinker picker sheet — current thinker selected & locked, the other
-          one runs the existing switch logic. */}
+          one installs/starts OpenCode or switches back to Moch. */}
       <Modal
         visible={thinkerOpen}
         transparent
         animationType="slide"
-        onRequestClose={() => setThinkerOpen(false)}
+        onRequestClose={closeThinkerSheet}
       >
         <View style={s.sheetRoot}>
-          <SheetBackdrop onPress={() => setThinkerOpen(false)} />
+          <SheetBackdrop onPress={closeThinkerSheet} />
           <SheetCard style={s.sheetCard}>
             <SheetGrabber />
             <View style={[s.sheetHead, { flexDirection: dir.row }]}>
@@ -823,7 +927,8 @@ function SettingsInner() {
                 {t('settings.thinker.switch.title')}
               </Txt>
               <HeaderButton
-                onPress={() => setThinkerOpen(false)}
+                onPress={closeThinkerSheet}
+                disabled={thinkerBusy}
                 accessibilityLabel={t('common.close')}
               >
                 <Icon name="close" size={14} color={C.textDim} />
@@ -836,19 +941,21 @@ function SettingsInner() {
               ]
             ).map((opt) => {
               const active = opt.id === thinker
+              const rowDisabled = active || thinkerBusy
               return (
                 <Pressable
                   key={opt.id}
-                  onPress={active ? undefined : () => chooseThinker(opt.id)}
-                  disabled={active}
+                  onPress={rowDisabled ? undefined : () => chooseThinker(opt.id)}
+                  disabled={rowDisabled}
                   accessibilityRole="radio"
-                  accessibilityState={{ selected: active, disabled: active }}
+                  accessibilityState={{ selected: active, disabled: rowDisabled }}
                   accessibilityLabel={opt.label}
                   style={({ pressed }) => [
                     s.langRow,
                     { flexDirection: dir.row },
                     active && s.langRowOn,
                     active && s.thinkerRowOn,
+                    !active && thinkerBusy && s.rowDisabled,
                     pressed && s.pressed,
                   ]}
                 >
@@ -863,6 +970,27 @@ function SettingsInner() {
                 </Pressable>
               )
             })}
+            {thinkerBusy ? (
+              <View style={[s.thinkerStatusRow, { flexDirection: dir.row }]}>
+                <Spinner size="small" color={C.accent} />
+                <Txt size={12.5} color={C.textDim} style={s.thinkerStatusText}>
+                  {thinkerStageMsg ?? t('settings.thinker.checking')}
+                </Txt>
+              </View>
+            ) : null}
+            {thinkerErr ? (
+              <Txt size={12} color={C.red} style={s.thinkerError}>
+                {thinkerErr}
+              </Txt>
+            ) : null}
+            {thinkerOneShotOffer && !thinkerBusy ? (
+              <PrimaryBtn
+                onPress={() => void continueThinkerOneShot()}
+                accessibilityLabel={t('settings.thinker.oneshot.a11y')}
+                label={t('settings.thinker.oneshot.cta')}
+                style={s.thinkerOneShotBtn}
+              />
+            ) : null}
           </SheetCard>
         </View>
       </Modal>
@@ -987,6 +1115,10 @@ const makeS = () => StyleSheet.create({
   },
   langRowOn: { backgroundColor: C.accentSoft },
   thinkerRowOn: { borderColor: C.accent, borderWidth: 1 },
+  thinkerStatusRow: { alignItems: 'center', gap: 8, marginTop: 12 },
+  thinkerStatusText: { flex: 1, lineHeight: 16 },
+  thinkerError: { marginTop: 10, lineHeight: 16 },
+  thinkerOneShotBtn: { marginTop: 12 },
   // About-me sheet
   aboutForm: { marginTop: 4 },
   aboutLabel: { marginTop: 10, marginBottom: 4 },
