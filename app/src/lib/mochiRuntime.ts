@@ -118,14 +118,28 @@ export interface LinuxGuestStatus {
   distro: string
 }
 
+// Serialize guest-mutating filesystem operations (bootstrap / reset) so two
+// triggers (e.g. Settings Linux row + OpenCode thinker switch) never race on
+// the same rootfs directory.
+let linuxFsTail: Promise<unknown> = Promise.resolve()
+
+function enqueueLinuxFsOp<T>(fn: () => Promise<T>): Promise<T> {
+  const next = linuxFsTail.then(fn, fn)
+  linuxFsTail = next.then(
+    () => undefined,
+    () => undefined,
+  )
+  return next
+}
+
 export function linuxReset(): Promise<boolean> {
   if (!bridge) return Promise.resolve(false)
-  return bridge.linuxReset()
+  return enqueueLinuxFsOp(() => bridge.linuxReset())
 }
 
 export function linuxBootstrap(distro: string): Promise<{ ok: boolean; steps: string } | null> {
   if (!bridge) return Promise.resolve(null)
-  return bridge.linuxBootstrap(distro)
+  return enqueueLinuxFsOp(() => bridge.linuxBootstrap(distro))
 }
 
 export interface LinuxExecResult {

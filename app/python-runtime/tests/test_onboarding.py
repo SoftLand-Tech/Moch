@@ -64,6 +64,8 @@ class OpencodeTests(unittest.TestCase):
             out = self.oc.ensure_server("pw")
         self.assertFalse(out["ok"])
         self.assertIn("not installed", out["error"])
+        self.assertIn("Settings", out["error"])
+        self.assertNotIn("Onboarding", out["error"])
 
     def test_ensure_is_idempotent_when_alive(self):
         with mock.patch.object(self.oc, "_guest_alive", return_value=True), \
@@ -81,6 +83,7 @@ class OpencodeTests(unittest.TestCase):
             out = self.oc.install_opencode()
         self.assertFalse(out["ok"])
         self.assertIn("Thinker", out["error"])
+        self.assertIn("Settings", out["error"])
         run.assert_not_called()
 
     def test_curl_uses_this_process_not_the_guest_shell(self):

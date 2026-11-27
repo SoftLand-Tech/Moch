@@ -38,7 +38,7 @@ import {
   decideOcDisconnectAction,
   ocReconnectDelayMs,
 } from './ocTurnWatchdog'
-import { guestRun } from './thinker'
+import { ensureOpencodeInstalled, guestRun } from './thinker'
 import { log } from './log'
 // BUG-149: session mints carry the active project's cwd, exactly like
 // createSession does for hermes chats (chat.ts is mode-agnostic here —
@@ -1041,6 +1041,10 @@ export async function runOneShotTurn(opts: OcOneShotOptions): Promise<OcOneShotR
   // Prompt via stdin (base64 pipe): arbitrary user text can never break the
   // shell line, and emoji survive through the correct UTF-8 encoder above.
   const cmd = `${cwdPart}echo ${utf8ToB64(opts.text)} | base64 -d | opencode run --format json${idPart}${modelPart}`
+  const inst = await ensureOpencodeInstalled()
+  if (!inst.ok) {
+    throw new Error(inst.stderr || 'OpenCode is not installed.')
+  }
   const r = await guestRun(cmd, 300_000)
   if (!r.ok) {
     if (opts.isCancelled?.()) {

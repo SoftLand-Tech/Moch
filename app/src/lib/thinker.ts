@@ -15,7 +15,7 @@
 import { atom } from 'nanostores'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { log } from './log'
-import { linuxExec } from './mochiRuntime'
+import { linuxBootstrap, linuxExec, linuxStatus } from './mochiRuntime'
 
 export type Thinker = 'moch' | 'opencode'
 
@@ -127,11 +127,11 @@ export async function installOpencode(onProgress?: (pct: number) => void): Promi
   const hermesDir = new Directory(Paths.document, '.hermes')
   const rootfs = new Directory(new Directory(hermesDir, 'linux'), 'rootfs')
   if (!rootfs.exists) {
-    return { ok: false, code: 1, stdout: '', stderr: 'The Linux guest is not installed — install it in the previous step first.' }
+    return { ok: false, code: 1, stdout: '', stderr: 'The Linux guest is not installed — install it under Settings → Runtime & agent first.' }
   }
   const tmpDir = new Directory(rootfs, 'tmp')
   if (!tmpDir.exists) {
-    return { ok: false, code: 1, stdout: '', stderr: 'The Linux guest looks broken (/tmp is missing) — reinstall it from the previous step.' }
+    return { ok: false, code: 1, stdout: '', stderr: 'The Linux guest looks broken (/tmp is missing) — reinstall it under Settings → Runtime & agent.' }
   }
   const dest = new File(tmpDir, 'opencode-arm64.tgz')
   try {
@@ -164,6 +164,114 @@ export async function installOpencode(onProgress?: (pct: number) => void): Promi
   )
   try { if (dest.exists) dest.delete() } catch {}
   return r
+}
+
+export type OcEnsureInstallStage = 'guest' | 'downloading'
+
+export interface EnsureOpencodeOptions {
+  autoInstallGuest?: boolean
+  onStage?: (stage: OcEnsureInstallStage, pct?: number) => void
+}
+
+type EnsureOpencodeFlight = {
+  autoInstallGuest: boolean
+  guestMissing: boolean
+  lastStage: { stage: OcEnsureInstallStage; pct?: number } | null
+  listeners: Set<(stage: OcEnsureInstallStage, pct?: number) => void>
+  promise: Promise<GuestRunResult>
+}
+
+let ensureOpencodeFlight: EnsureOpencodeFlight | null = null
+
+async function runEnsureOpencodeInstalled(
+  autoInstallGuest: boolean,
+  onStage: (stage: OcEnsureInstallStage, pct?: number) => void,
+  markGuestMissing: () => void,
+): Promise<GuestRunResult> {
+  const st = await linuxStatus()
+  if (!st?.bootstrapped) {
+    if (!autoInstallGuest) {
+      markGuestMissing()
+      return {
+        ok: false,
+        code: 1,
+        stdout: '',
+        stderr: 'The Linux guest is not installed — install it under Settings → Runtime & agent first.',
+      }
+    }
+    onStage('guest')
+    const boot = await linuxBootstrap('ubuntu-24.04')
+    if (!boot || !boot.ok) {
+      const stepDetail = boot?.steps && boot.steps !== '[]' ? boot.steps : ''
+      return { ok: false, code: 1, stdout: '', stderr: stepDetail || 'Failed to install the Linux guest.' }
+    }
+    const st2 = await linuxStatus()
+    if (!st2?.bootstrapped) {
+      return { ok: false, code: 1, stdout: '', stderr: 'The Linux guest did not finish installing.' }
+    }
+  }
+  if (await opencodeInstalled()) {
+    return { ok: true, code: 0, stdout: 'installed', stderr: '' }
+  }
+  onStage('downloading')
+  return await installOpencode((pct) => onStage('downloading', pct))
+}
+
+/**
+ * Ensure OpenCode (and optionally the Linux guest) is installed. Single-flighted
+ * so concurrent callers never race on /tmp/opencode-arm64.tgz; if an in-flight
+ * non-autoInstallGuest call fails only because the guest is missing, a waiting
+ * `autoInstallGuest: true` caller proceeds to bootstrap and install.
+ */
+export async function ensureOpencodeInstalled(opts?: EnsureOpencodeOptions): Promise<GuestRunResult> {
+  const wantGuest = !!opts?.autoInstallGuest
+  for (;;) {
+    if (ensureOpencodeFlight) {
+      const flight = ensureOpencodeFlight
+      if (opts?.onStage) {
+        flight.listeners.add(opts.onStage)
+        if (flight.lastStage) {
+          try {
+            opts.onStage(flight.lastStage.stage, flight.lastStage.pct)
+          } catch {}
+        }
+      }
+      const res = await flight.promise
+      if (res.ok || !wantGuest || flight.autoInstallGuest || !flight.guestMissing) {
+        return res
+      }
+      continue
+    }
+    const listeners = new Set<(stage: OcEnsureInstallStage, pct?: number) => void>()
+    if (opts?.onStage) listeners.add(opts.onStage)
+    const flight: EnsureOpencodeFlight = {
+      autoInstallGuest: wantGuest,
+      guestMissing: false,
+      lastStage: null,
+      listeners,
+      promise: null as unknown as Promise<GuestRunResult>,
+    }
+    const emit = (stage: OcEnsureInstallStage, pct?: number) => {
+      flight.lastStage = { stage, pct }
+      for (const fn of listeners) {
+        try {
+          fn(stage, pct)
+        } catch {}
+      }
+    }
+    const promise = (async () => {
+      try {
+        return await runEnsureOpencodeInstalled(wantGuest, emit, () => {
+          flight.guestMissing = true
+        })
+      } finally {
+        if (ensureOpencodeFlight === flight) ensureOpencodeFlight = null
+      }
+    })()
+    flight.promise = promise
+    ensureOpencodeFlight = flight
+    return await promise
+  }
 }
 
 /** Health probe against the guest server, done FROM THE PHONE (RN fetch): proot

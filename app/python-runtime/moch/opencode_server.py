@@ -173,7 +173,7 @@ def ensure_server(password: str, launch: bool = True) -> dict:
     # silent 30 s wait.
     which = _guest_exec("command -v opencode || true", timeout_s=15)
     if not (which.get("stdout") or "").strip():
-        return {"ok": False, "error": "OpenCode is not installed in the Linux guest — install it in Onboarding → Environment."}
+        return {"ok": False, "error": "OpenCode is not installed in the Linux guest — switch to OpenCode in Settings to install it."}
     if launch:
         # BUG-148: start the adapter + seed the oc MCP config BEFORE typing
         # the launch line — opencode reads its config at startup, so a seed
@@ -225,7 +225,7 @@ def install_opencode() -> dict:
     only to say so honestly instead of failing in the guest."""
     return {
         "ok": False,
-        "error": "Install OpenCode from the app (Onboarding → Thinker) — the download runs on the phone, not in the guest.",
+        "error": "Install OpenCode from the app (Settings or Onboarding → Thinker) — the download runs on the phone, not in the guest.",
     }
 
 
