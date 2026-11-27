@@ -16,7 +16,7 @@ import { fetch as expoFetch } from 'expo/fetch'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { opencodePassword, opencodeBasicAuth, b64ascii, OC_PORT } from './opencodeSecret'
 import { linuxTermProbe, linuxTermStart, linuxTermWrite } from './mochiRuntime'
-import { guestRun } from './thinker'
+import { ensureOpencodeInstalled, guestRun } from './thinker'
 import { rpc } from './gateway'
 import { log } from './log'
 import { ocHistoryPageQuery, nextOcHistoryCursor } from './ocHistory'
@@ -345,6 +345,10 @@ export const ocModels = () => ocFetch<OcModel[]>('/api/model', { timeoutMs: 30_0
  * `providerID/modelID` per line. Used in one-shot mode (and only there).
  */
 export async function ocModelsOneShot(): Promise<OcModel[]> {
+  const inst = await ensureOpencodeInstalled()
+  if (!inst.ok) {
+    throw new OcError(0, inst.stderr || 'OpenCode is not installed.')
+  }
   const r = await guestRun('opencode models 2>/dev/null', 60_000)
   if (!r.ok) throw new OcError(0, (r.stderr || 'Could not list OpenCode models.').trim().slice(-200))
   const out: OcModel[] = []
@@ -563,6 +567,10 @@ async function ensureServerOnce(): Promise<{ ok: boolean; error?: string }> {
     let hasPty = false
     let launchTyped = false
     if (!alive) {
+      const inst = await ensureOpencodeInstalled()
+      if (!inst.ok) {
+        return { ok: false, error: inst.stderr || 'Could not install OpenCode.' }
+      }
       const probe = await linuxTermProbe()
       hasPty = !!probe?.pty
       if (hasPty) {
